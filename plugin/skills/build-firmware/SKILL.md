@@ -28,7 +28,7 @@ honestly. One change you can stand behind beats four you guessed at.
 
 ```bash
 F=fireflymcf; M=stock/mcf.bin
-$F doctor $M                          # build name, sections, interlocks, what is safe here
+$F doctor $M                          # build name, sections, interlocks, tank broadcasts
 $F pages $M                           # each screen: --root index, --page name, header
 $F labels $M --containing "Pump"      # every record with that text, by object index
 $F pins $M                            # each G12 output: status cells and consumers
@@ -53,6 +53,17 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
   a named output (`NAMED_OUTPUT`); pass `allow_named_output` only after the owner confirms.
   The firmware also holds other numbered lists (other modules' diagnostics); an installer's
   number may come from one of those, so ask which module it is on.
+- **Every bus number comes from a tool run on the owner's file**, never from memory or the
+  RV-C spec: a tank instance, G12 channel, DGN or source address. Builds can differ. Tank
+  instances: `doctor` lists what this file's G12 broadcasts on `1FFB7` TANK_STATUS, and
+  `fireflymcf-tankpatch MCF` (report-only without a tank flag) is the tool that silences
+  them (op `suppress_tank_status`). Quote that table. Its panel name is the caption the
+  panel draws on the gauge each instance feeds, read from the file; the RV-C name is only
+  the standard's for the number. Name each tank by its panel name. Where the panel name is
+  `-` (no gauge traced), use the RV-C name and tell the owner it is the RV-C
+  specification's name, which may not match what Firefly calls that tank. Where the two
+  disagree, a panel name lists variants (`GREY / GREY1`), or the owner's floorplan draws
+  no such gauge, ask the owner before silencing it.
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.
