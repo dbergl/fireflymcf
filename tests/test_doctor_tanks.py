@@ -28,3 +28,13 @@ def test_text_names_the_tool_and_the_name_source(capsys):
     out = capsys.readouterr().out
     assert "instance 18" in out and "fireflymcf-tankpatch" in out and "RV-C" in out
     assert "panel: GREY2" in out
+
+
+def test_without_panel_names_doctor_says_the_rvc_names_are_the_specs(capsys, monkeypatch):
+    from fireflymcf import tanknames
+    assert cli.main(["doctor", STOCK]) == 0
+    assert "may not match" not in capsys.readouterr().out
+    monkeypatch.setattr(tanknames, "tank_names", lambda data: {})
+    assert cli.main(["doctor", STOCK]) == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "RV-C specification's name and may not match what Firefly calls that tank" in out

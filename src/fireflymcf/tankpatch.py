@@ -174,8 +174,11 @@ def _inventory(report, data: bytes) -> str:
     lines += ["", "  The instance numbers are read from this file's G12 rules. The panel name is the",
               "  caption the panel draws on the gauge that instance feeds, read from this file",
               "  (`-`: no gauge traced). The RV-C name is the standard's for the number. Where they",
-              "  disagree, or the panel name is missing, check the panel before silencing a tank.",
-              "  Some gauges draw only under some floorplans or options."]
+              "  disagree, check the panel before silencing a tank. Some gauges draw only under",
+              "  some floorplans or options."]
+    if any(b.instance not in panel for b in report.broadcasts):
+        lines += ["  Where the panel name is `-`, the RV-C name is the RV-C specification's name and may",
+                  "  not match what Firefly calls that tank."]
     return "\n".join(lines)
 
 
