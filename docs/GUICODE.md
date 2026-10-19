@@ -6384,6 +6384,187 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 83 — every way the panel transmits: two paths into one LCD queue, the binding fields proven, and most touch actions run on release — `proven-from-code` (the transmit path, the dispatcher, the enumeration), captions `inferred-from-data`, 2026-10-19
+
+**Question.** Finding 82 mapped what the panel receives. What does it send, which control or
+code sends each message, and what does the panel call it? Read from the file, nothing fixed per
+build.
+
+**The method, as code** (`src/fireflymcf/sendmap.py`; `busmap.send_map`; the SEND section of
+`fireflymcf bus-map MCF [--dgn X] [--json]`).
+
+### 1. The transmit path, from the LCD's instructions — `proven-from-code`
+
+Every frame the panel originates goes through one function, the LCD's 64-entry transmit ring
+`FUN_0021825C`. Two paths feed it:
+
+| path | the instructions (LCD base `0x210000`, identical addresses in all three builds) |
+|---|---|
+| a binding entry, from the gesture sender `FUN_0021B8B4` | `ldr r1,[r4]` @`0x0021B9AA`, `bfi r2,r1,#8,#0x12` @`0x0021B9B4`: the entry's first u32, low 18 bits, is the DGN at id bit 8. `movs r3,#6` / `bfi r2,r3,#2,#3` @`0x0021B9B2`/`0x0021B9C0`: priority 6. `ldrb r1,[r4,#2]` / `ubfx r1,r1,#3,#1` / `bfi r2,r1,#5,#1` @`0x0021B9BE`-`0x0021B9C8`: entry `+2` bit 3 is id bit 29. `adds r1,r4,#4` / `bl 0x0021B890`: `FUN_0021B890` copies `src[3,2,1,0,7,6,5,4]` to the frame's data (`0x0021B890`-`0x0021B8AE`). `strb fp,[r2,#-0xc]!` @`0x0021B9D4` (`fp` = 0 since `0x0021B8FC`): id byte 0 = 0. `bl 0x0021825C` @`0x0021B9DE` |
+| GuiCode, through the host API table | the LCD builds the table on its stack and calls `GuiCode_entry0` (header `+0x0C`) with it: `ldr r3,=0x0021825D` / `str r3,[sp,#0x2c]` @`0x0021C198` (table at `sp+0x24`, so word `+0x08`), `ldr r3,[r5,#0xc]` / `blx r3` @`0x0021C1AE`. `GuiCode_entry0` stores word `+0x08` in the sender slot (13.6 `ldr r2,[r4,#8]` / `str r2,[r3]` @`0x00247A9E`/`0x00247AA2`, slot `0x2003986C`; 14.7 `0x20039558`; 11.23 `0x20039294`), and every send is `ldr rN,=slot ; ldr rN,[rN] ; blx rN` with `r0` -> a 12-byte `<u32 id><8 data>` |
+
+In the ring: DGN = id bits 8-25 (`ubfx r1,r2,#8,#0x12` @`0x00218298`), priority = id bits 26-28
+(`ubfx r1,r1,#2,#3` @`0x002182B2`), and the source address is the byte at `0x20000018` unless id
+bit 29 is set or `[0x2000036C+0x6A8]` is non-zero (`lsls r3,r3,#0x1a` / `bpl` @`0x00218282`),
+when it is the frame's own byte 0. `0x20000018` holding the panel's claimed address is
+inference; `0x9F` on every capture is `observed-on-hardware`.
+
+**What this settles.** `MCF-FORMAT.md` §5.3 carried a binding's DGN low word and its payload as
+`inferred-from-data`; both are now `proven-from-code`, and the 3,2,1,0,7,6,5,4 order
+`newbutton.binding_payload` uses is the LCD's own copy. One new field: entry `+2` bit 3 sends the
+frame **from SA `0x00`** (the sender zeroes byte 0 and the bit makes the ring keep it). It is set
+on two live entries per build, `0x0EF42` `10 FF FF 00 ..` (13.6 bindings 435 and 598, groups 127
+and 185). Two smaller facts from the same code: input level 2 (phases 5-8) sends the slice after
+the group's own, `count2` entries (`0x0021B934`-`0x0021B940`), and `count2` is 0 in every corpus
+group, so level 2 sends nothing; a group with byte 3 bit 7 also sends the binding table's first
+`[0x20006E5C+0xC]` entries (`0x0021B90C`-`0x0021B92C`), and that count (tag `0x20`'s `b2`) is 0 in
+every build. `sendmap.lcd_sender` locates the copy by its bytes and the ring as the call after it;
+it finds six more callers of the ring (`FUN_0021A114`, `FUN_0021A540`, `FUN_0021CE28`, and
+`FUN_0021E9E0`, the USB port's command parser): the LCD firmware's own transmits, not decoded.
+
+### 2. Binding groups — who selects each
+
+A touch region (wt-12) whose id is below the group count is a group (CONTROL-BEHAVIOR §1): every
+wt-12 record in table 1's own record lists is read (`sendmap.touch_regions`), so a group no
+record names is named by nothing the user can touch. Each group gets a class:
+
+| class | 13.6 groups | meaning |
+|---|---|---|
+| `reached` | 101 | a touch region names it, on an object reachable from a screen (`sendmap.screen_tree`: `guidata.reachable_objects` from object 0 and from every `layout.screen_object_map` object -- 14.7's object 0 reaches nothing, so object 0 alone was not enough) |
+| `unattached` | 65 | named only by objects the screen tree does not reach |
+| `dead` | 62 | named by no touch region in the file |
+| `stub` | 5 | every entry is `ff ff` |
+
+`dead` is a defensible negative in the file: the touch region is the only object-to-group
+reference (`newbutton._object_referenced_groups`), and GuiCode's `setVariant` (`0x20039908`)
+picks a variant, it sends nothing. It is also held to the bus: of the 211 payloads only
+unattached or dead groups carry, **none** appears from the panel in any 13.6 capture, except
+`0EA42 EB FE 00 00 ..`, which a GuiCode parser also builds (§3). `unattached` is weaker by
+construction: an object GuiCode shows some other way is not in the screen tree.
+
+Each control's caption is record order (`inferred-from-data`): the caption item nearest before
+the touch region in its control's records (a label, or the one label of a wt-5 container's child:
+13.6 object 31's `Low Volts` is child 285 of the container just before touch region `0x81`),
+else the nearest after it (the AGS pill: box, touch, `AGS`), else the nearest label before it in
+the object. 93 of the 101 reached groups get one. The masters show why variants matter: groups
+1/2 (Light Master) and 216/217 (Exterior Master) carry channel 35 in one variant each, and
+GuiCode picks it by floorplan -- `ldr r3,=0x2003A77A` / `cmp r3,#9` / `cmpne r3,#1`
+(`0x0024B352`-`0x0024B35C`): RT or WT get interior without 35 and exterior with it (the
+Security Light); every other floorplan, WD among them, the reverse (`setVariant` @`0x0024E834`-
+`0x0024E84C`). The WD copies are exactly `answer_key.INTERIOR_MASTER` / `EXTERIOR_MASTER`.
+
+### 3. GuiCode sends, and the dispatcher's second search
+
+`sendmap.guicode_sends` takes every `blx` whose target was loaded from `[rM,#d]` with `rM`
+resolvable (`_indirect_calls`) and keeps those through the slot: **701** on 13.6, 733 on 14.7,
+378 on 11.23. *The guarantee:* the slot's address sits in one pool word, its 222 literal loads on
+13.6 each lead to a dereference and a `blx` (the install at `0x00247AA0` aside), no `movw`
+materialises its low half, and one `blx` in the section has a target this walk cannot resolve
+(`0x00257BB6`, loaded from a computed table entry `r1 + r4*8`; 11.23 has two, 14.7 one). The frame
+is a `.rodata` template copied by `ldm`/`stm` (554 sites; the template gives every byte) or
+built on the stack (`bfi rX,rD,#8,#0x12` gives the DGN; a byte loaded from a cell is shown as
+`[0x2003..]`). `Frame.exact` says every byte came from straight-line code.
+
+**The touch dispatcher has two searches.** `touch_dispatch` walks the binary search after the
+id-change gate (`0x0024ACB2`-`0x0024ACBC`) and carries the interval each path implies, because the
+compiler ends a one-value range without a final compare (`cmp r2,#0x844` / `beq` / `bhi` at
+`0x0024BA72`-`0x0024BA7C`; an earlier `bls` fixed `id > 0x842`, so the fall-through at
+`0x0024BA80` is id `0x843`'s handler, Heat Pump). The search finds **22** handlers -- and the one
+for id `0xFF` (finger lifted) clears the two hold deadlines and starts a **second search on `r2`**,
+the id latched on the previous pass (`ldrh r2,[r2,#0xe]` @`0x0024ACB8`; the path to the handler
+writes only `r1` and `r3`), first node `movw r3,#0x846` / `cmp r2,r3` / `beq.w 0x24CB4E`
+@`0x0024B024`. **108** ids are dispatched there, at finger lift: every OPTIONS row, the nav rail,
+the floorplan picks, 13.6's `Tank Heater` (`0x851`, a GuiCode action, not a group). No search
+path is left unattributed. This corrects CONTROL-BEHAVIOR §1, which put every class-2 handler on
+touch-down and said a release-edge handler "keyed on the latched previous id" did not exist.
+
+A send is `touch` when a control-flow walk from a handler (both arms of every branch, stopping
+at returns, at the search and at the id re-latch tail) reaches it -- 526 on 13.6; `touch-test`
+when it sits after a compare of the current id (`[r4,#0x208]`) in a linear look-back, the hold
+consumers (9; `inferred-from-code`); `config-set` inside the helper (the `0x1EE00` frame, 1); and
+`other` (165: 134 in `FUN_00242B70`, which sends what RV-C names SOLAR_CONTROLLER_(CONFIGURATION_)
+COMMAND among others -- a solar set-up, by those names, inference -- 19 per-tick in
+`FUN_00247BF8`, 12 in four small functions). The 33 calls of the config-set helper are listed
+apart with their offset's OPTIONS row: 17 from touch handlers (Heat Pump `0x0A` from id `0x843`),
+11 from the receive side's compare block (`0x00249E4E`-`0x00249EC6`, Finding 82 §3).
+
+### 4. Names
+
+A binding's or frame's payload is named by what it addresses: a `DC_DIMMER_COMMAND_2` instance by
+its OUTPUTS-page names and control captions (phase 1, `proven-from-code` / `inferred-from-data`);
+a `0x1FED9` selector by the OPTIONS row whose handlers write it (`config.option_selector`) and by
+the receive map's name for that selector's `0x15FCE` entry (`echo`). The control that sends it is
+named by its caption. The RV-C name is kept apart (`sendmap.spec_name`), from the same Wandertech
+transcription as the receive side, extended by the command DGNs.
+
+### 5. The coverage, 13.6
+
+| DGN | RV-C name | bindings | reached | unattached | dead | named | GuiCode sites | from touch | the panel's names (examples) |
+|---|---|---|---|---|---|---|---|---|---|
+| `1FED9` | GENERIC_INDICATOR_COMMAND | 224 | 129 | 26 | 69 | 157 | 432 | 411 | OPTIONS rows (`Bath Fan` writes `0xE9` on release of `0x844`), `Low Volts` (group 129, `0x2F`), `Quiet Time Start` |
+| `1FEDB` | DC_DIMMER_COMMAND_2 | 337 | 159 | 75 | 103 | 260 | 100 | 99 | `Water Pump` (group 44 -> pin 44), `ON` in `Light Master`, `Tank Heater` (`0x851` -> pins 5-8) |
+| `1FEF9` | THERMOSTAT_COMMAND_1 | 100 | 24 | 61 | 15 | 7 | 12 | 12 | climate tiles |
+| `1FBDA` | - | 24 | 24 | 0 | 0 | 16 | 5 | 3 | `Start`/`Stop` (groups 13/14), `FRONT`...`Right`, Service Mode `ENABLE` |
+| `1FFEE` | LEVELING_CONTROL_COMMAND | 22 | 22 | 0 | 0 | 14 | 0 | 0 | |
+| `1EE00` | - | 0 | | | | | 5 | 0 | config offsets (33 helper calls) |
+| six solar DGNs | SOLAR_..._COMMAND (three of them) | 0 | | | | | 112 | 0 | (`FUN_00242B70`) |
+| `0EAxx` | J1939 Request | 4 | 0 | 0 | 4 | 0 | 21 | 0 | |
+| 14 more | | 30 | 4 | 8 | 18 | 2 | 4 | 1 | |
+| unresolved DGN | | | | | | | 10 | 0 | (`FUN_00242B70`) |
+| **total** | | **741** | **362** | **170** | **209** | **454** | **701** | **526** | |
+
+11.23: 732 bindings (230 groups: 116 reached, 39 unattached, 72 dead), 378 GuiCode sites (196
+touch), 101 dispatcher ids (12 press, 89 release). 14.7: 743 bindings (234 groups: 57 reached, 53
+unattached, 120 dead), 733 sites (502 touch), 140 ids (24, 116). `bus-map` prints the receive and
+send maps for any build in about 10 s; `doctor --bus` prints the totals (about 5 s more than
+`doctor`).
+
+### 6. Checked against the bus and the answer key
+
+- **Every frame the panel sent, in every 13.6 capture, is in the map:** 240 of 260 distinct
+  `(DGN, payload)` from SA `0x9F` match a binding's payload or a GuiCode frame. The 20 others are
+  19 the LCD firmware sends itself -- `1FECA` DM_RV, `1FFFD` DC_SOURCE_STATUS_1 (instance `0x81`,
+  every 10 s), `0EEFF` address claim, `0ECFF`/`0EBFF` transport protocol -- and one frame of the
+  PC.13 remap build (`19FEDB9F#26FFC805..`, a control repointed to channel 38).
+- `answer_key.OPTIONS`: each row's release handler writes its selector, under its own caption.
+  `OPTION_CHANNEL_BINDING`: Cargo (`0x856`) and Bath Light (`0x857`) each turn the other channel
+  off first (PC.33). `CHANNELS` 5-8: the Tank Heater handler's four pins.
+- The receive side's option join (Finding 82 §3) and the send side name the same selectors with
+  the same rows, on 13.6 and 14.7.
+- Every entry's phases, variant and repeat flag equal `gestures.describe_group` of the same bytes.
+
+### 7. Corrections
+
+- **`MCF-FORMAT.md` §5.3**: binding DGN and payload order `proven-from-code`; `+2` bit 3 added.
+- **`CONTROL-BEHAVIOR.md` §1**: class-2 handlers run on press for 22 ids and on release for the
+  rest; the release-edge handler it said nothing implements is the stock dispatcher's second half.
+- **`DGN-MAP.md` §2**: rewritten from the map (it listed bindings only, `1FBDA` as "G12
+  output/keypad" and `1FFEE` as undecoded).
+- `CLAUDE.md`'s evidence rule no longer lists a binding's DGN and payload fields as inferred.
+
+### 8. Predictions for the coach
+
+1. Hold an OPTIONS row (say Bath Fan) for three seconds: `19FED99F#FF96E90F..D1EA` appears when
+   the finger lifts, not when it lands. The same for a nav icon's page change. A probe-tank
+   threshold `+`/`-` (`0x906`-`0x90B`) sends on touch-down.
+2. Nothing on any 13.6 page sends `0x0EF42`; on 11.23, tapping ELECTRICAL's `Inverter/Charger`
+   (group 185) sends `18EF4200#10FFFF0000000000` -- from source address **0x00** -- with
+   `18EA429F#EBFE00..`/`#CAFE01..` and five instance-1 configuration commands.
+3. `19FFFD9F#81FF39..` (every 10 s), DM_RV and the address claim are unchanged by any GuiData or
+   GuiCode edit: they are the LCD's.
+4. On a WD coach the Light Master switches 35 and the Exterior Master does not; select RT or WT
+   and it is the other way round.
+
+**Left.** The LCD's own six transmit sites are located, not decoded. 147 GuiCode frames are not
+`exact` (a byte from a cell, or a value from a branch the back-walk does not follow); 10 have no
+DGN. `unattached` objects may be drawn by a route the screen tree does not model. The captions of
+unattached controls are often a neighbour's; read them as context.
+
+Tests: `tests/test_sendmap.py` -- the 13.6 coverage, the dispatcher and the named examples
+pinned; the captures, the answer key, the gestures decode, the receive join and the LCD
+instructions as oracles; four stubs (no dispatcher, no touch regions, no sender slot, no release
+search) that each break a pin.
+
 ## Finding 82 — every receive-filter entry, traced: 128 of 13.6's 298 reach a painted cell, 132 are written and never read, and the slot-array base never escapes — `proven-from-code` (the trace and the negatives), captions `inferred-from-data`, 2026-10-19
 
 **Question.** Findings 80 and 81 named two families from the file: tank instances and G12 outputs.
