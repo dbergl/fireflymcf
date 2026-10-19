@@ -1,0 +1,12 @@
+{
+  "name": "fireflymcf",
+  "owner": { "name": "Dan Berglund" },
+  "description": "Tools for reading, rendering and safely modifying Firefly MCF RV-panel firmware",
+  "plugins": [
+    {
+      "name": "fireflymcf",
+      "source": "./plugin",
+      "description": "Build custom Firefly MCF firmware for Spyder RV panels from an owner's description"
+    }
+  ]
+}

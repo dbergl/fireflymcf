@@ -1,0 +1,156 @@
+:root {
+  --navy: #15183a; --panel: #272862; --blue: #414ea3; --red: #be1e2d;
+  --ink: #e8eaf6; --muted: #9aa0c8; --line: #2f3570;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--navy); color: var(--ink);
+       font: 14px/1.45 system-ui, sans-serif; }
+.shell { display: flex; flex-direction: column; height: 100vh; }
+.topbar { display: flex; gap: 12px; align-items: baseline; padding: 10px 14px;
+          background: var(--red); }
+.panes { display: grid; grid-template-columns: 260px 1fr 320px; flex: 1; min-height: 0; }
+.pane { overflow: auto; padding: 12px; }
+.changes, .inspector { background: var(--panel); }
+.canvas { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.muted { color: var(--muted); }
+button { background: var(--blue); color: var(--ink); border: 1px solid var(--line);
+         border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+input, select { background: var(--navy); color: var(--ink);
+                border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px; }
+
+.changelist ol { list-style: decimal; padding-left: 22px; margin: 8px 0; }
+.op { border: 1px solid var(--line); border-radius: 4px; padding: 6px;
+      margin-bottom: 6px; background: var(--navy); }
+.op.failed { border-color: var(--red); }
+.op-head { display: flex; gap: 6px; align-items: center; }
+.op-head code { flex: 1; font-size: 12px; }
+.op-error { margin-top: 6px; font-size: 12px; color: #ffb4bb; }
+.op-error button { margin: 4px 4px 0 0; font-size: 11px; padding: 2px 6px; }
+.note { width: 100%; margin-top: 6px; font-size: 12px; }
+.changelist-actions { display: flex; gap: 8px; margin-top: 10px; }
+
+.toast { position: fixed; bottom: 14px; right: 14px; background: var(--red);
+         padding: 10px 14px; border-radius: 4px; max-width: 420px; }
+
+.pagebar { display: flex; gap: 6px; flex-wrap: wrap; }
+.pagebar .on { background: var(--red); }
+/* flex: none is load-bearing. `.canvas` is a flex column, so the default
+   flex-shrink:1 squeezed the stage when the knob drawer got tall -- while its
+   position:absolute img kept drawing at its full 800x480 and painted straight over
+   the drawer's controls. */
+.stage { position: relative; flex: none; }
+.stage img, .stage svg { position: absolute; inset: 0; }
+.stage svg rect { fill: transparent; stroke: transparent; stroke-width: 1; }
+.stage svg rect:hover { stroke: var(--muted); }
+.stage svg rect.selected { stroke: #00aeef; stroke-width: 2; }
+.stage svg rect.draggable { cursor: grab; }
+.stage svg.dragging, .stage svg.dragging rect { cursor: grabbing; }
+/* The drag's live feedback: the origin stays as a dashed outline, the ghost tracks
+   the pointer, and the readout shows the raw coordinates the op will write. */
+.stage svg rect.drag-origin { stroke: var(--muted); stroke-dasharray: 4 3; }
+.stage svg .ghost rect { stroke: #00aeef; stroke-width: 2; stroke-dasharray: 6 3;
+                         fill: rgba(0, 174, 239, 0.12); }
+.drag-readout { position: absolute; left: 8px; bottom: 8px; z-index: 2;
+                background: rgba(0, 0, 0, 0.75); color: #fff; padding: 3px 8px;
+                border-radius: 4px; font-size: 12px; font-variant-numeric: tabular-nums;
+                pointer-events: none; }
+.knobs { align-self: stretch; }
+.knobs label { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+
+.coach-config { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.coach-config > label { font-size: 12px; color: var(--muted); }
+.coach-config fieldset { border: 1px solid var(--line); border-radius: 4px;
+                         padding: 6px 10px 10px; margin: 0; }
+.coach-config legend { font-size: 11px; color: var(--muted); padding: 0 4px; }
+.coach-config fieldset label { display: inline-flex; gap: 6px; align-items: center;
+                               margin: 4px 14px 0 0; font-size: 13px; }
+.coach-config input[type=checkbox], .coach-config input[type=radio] { margin: 0; }
+/* The one helper-text rule: small, muted, sits under the control it explains.
+   Was briefly duplicated as `.fieldhelp`, which split the colour into a separate
+   `.muted` class its callers had to remember to pair. */
+.hint { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+.escape-hatch { margin-top: 8px; }
+.escape-hatch summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+
+.import-live { border: 1px solid var(--line); border-radius: 4px; padding: 6px 10px; }
+.import-live summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.import-live textarea { width: 100%; font: 11px/1.3 ui-monospace, monospace;
+                        background: var(--navy); color: var(--ink);
+                        border: 1px solid var(--line); border-radius: 4px; }
+.import-live label { display: block; font-size: 12px; color: var(--muted);
+                     margin-top: 6px; }
+.import-live input[type=file] { display: block; margin: 6px 0; font-size: 12px; }
+.import-live button { margin: 6px 6px 0 0; }
+.import-live table { width: 100%; border-collapse: collapse; margin-top: 8px;
+                     font-size: 12px; }
+.import-live th { text-align: left; color: var(--muted); font-weight: normal;
+                  border-bottom: 1px solid var(--line); }
+.import-live td { border-bottom: 1px solid var(--line); padding: 3px 6px 3px 0;
+                  vertical-align: top; }
+
+.inspector-body section { border-top: 1px solid var(--line); padding: 8px 0; }
+.inspector-body label { display: block; font-size: 12px; color: var(--muted);
+                        margin-bottom: 4px; }
+.inspector-body label.inline { display: flex; gap: 6px; align-items: center;
+                               color: var(--ink); margin: 6px 0; }
+.inspector-body input, .inspector-body select { width: 100%; }
+.inspector-body button { margin-top: 6px; }
+.specimen { display: block; margin-top: 6px; max-width: 100%;
+            image-rendering: pixelated; background: var(--navy); }
+.warn { background: #3a1c22; border-left: 3px solid var(--red); padding: 6px 8px;
+        font-size: 12px; margin: 6px 0; }
+.danger { background: var(--red); }
+
+.card { position: fixed; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+        background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+        padding: 16px; width: 340px; box-shadow: 0 8px 40px #0008; }
+.card label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+.card input, .card select { width: 100%; }
+.card-actions { display: flex; gap: 8px; margin-top: 14px; }
+
+.card.wide { width: 460px; max-height: 80vh; overflow: auto; }
+.manifest { font-size: 12px; padding-left: 18px; margin: 6px 0; }
+.result { border-top: 1px solid var(--line); margin-top: 10px; padding-top: 10px; }
+.mono { font-family: ui-monospace, monospace; font-size: 11px; word-break: break-all; }
+.buildname { display: flex; gap: 6px; align-items: center; margin-left: auto; }
+.buildname input { width: 260px; font-size: 12px; }
+.catalog-entry { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 8px; }
+.opfield { margin-top: 10px; }
+.opfield label { display: block; font-size: 12px; color: var(--muted); }
+.opfield input[type="text"], .opfield input:not([type]), .opfield select { width: 100%; }
+
+/* Geometry editing. Four narrow fields in a row read as one control's dimensions;
+   stacked full-width inputs (the default for .inspector-body input) read as four
+   unrelated settings and push everything below them off the pane. */
+.fieldrow { display: flex; gap: 6px; align-items: flex-end; }
+.fieldrow label, .geomfield { display: flex; flex-direction: column; gap: 2px;
+  font-size: 11px; color: var(--muted); flex: 1; min-width: 0; }
+.fieldrow input, .geomfield input { width: 100%; font-size: 12px; padding: 2px 4px; }
+.inspector-body .geomrow { display: flex; gap: 6px; align-items: flex-end;
+  flex-wrap: wrap; margin-top: 8px; }
+.inspector-body .geomrow > .muted { flex-basis: 100%; font-size: 11px; }
+.inspector-body .geomrow button, .inspector-body .fieldrow + button { margin-top: 0; }
+.inspector-body h4 { margin: 0 0 6px; font-size: 12px; font-weight: 600; }
+/* The per-record rows are the exception once "Control size" exists: keep them, but
+   quieter than the whole-control control above them. */
+.inspector-body .geometry { opacity: 0.85; }
+
+/* An imported glyph, previewed as coverage before it becomes an op. */
+.glyph-preview { font: 9px/0.85 ui-monospace, monospace; white-space: pre;
+  overflow-x: auto; background: #10131f; border: 1px solid var(--line);
+  padding: 6px; margin: 8px 0; color: var(--fg); }
+
+/* The canvas is not interactive until its overlay matches its pixels. Silence there
+   is the trap: a click that does nothing, followed by typing into an inspector that
+   still holds the previous selection. */
+.stage.busy { cursor: progress; }
+.stage.busy svg { pointer-events: none; }
+.stage-busy { position: absolute; top: 6px; right: 6px; z-index: 2;
+  background: rgba(21, 24, 58, 0.85); border: 1px solid var(--line);
+  color: var(--muted); font-size: 11px; padding: 2px 6px; border-radius: 3px; }
+
+/* A control the file describes but no page places: listed, so the question does not
+   just move elsewhere, but plainly not a setting that does anything here. */
+.knobs fieldset.unplaced legend, .knobs fieldset.unplaced label { opacity: 0.55; }
