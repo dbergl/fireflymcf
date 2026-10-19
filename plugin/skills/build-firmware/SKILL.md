@@ -59,9 +59,11 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
   `fireflymcf-tankpatch MCF` (report-only without a tank flag) is the tool that silences
   them (op `suppress_tank_status`). Quote that table. Its panel name is the caption the
   panel draws on the gauge each instance feeds, read from the file; the RV-C name is only
-  the standard's for the number. Name each tank by its panel name. Where the two
-  disagree, a panel name is `-` or lists variants (`GREY / GREY1`), or the owner's
-  floorplan draws no such gauge, ask the owner before silencing it.
+  the standard's for the number. Name each tank by its panel name. Where the panel name is
+  `-` (no gauge traced), use the RV-C name and tell the owner it is the RV-C
+  specification's name, which may not match what Firefly calls that tank. Where the two
+  disagree, a panel name lists variants (`GREY / GREY1`), or the owner's floorplan draws
+  no such gauge, ask the owner before silencing it.
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.

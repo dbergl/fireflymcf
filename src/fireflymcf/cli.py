@@ -535,6 +535,9 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
               f"RV-C: {t['rvc_name']:<18} {state}")
         a("  Numbers and panel names (the caption on the gauge each instance feeds) are read from")
         a("  this file; `-` means no gauge was traced. The RV-C name is the standard's for the number.")
+        if any(not t["panel_name"] for t in info["tank_broadcasts"]):
+            a("  Where the panel name is `-`, the RV-C name is the RV-C specification's name and may")
+            a("  not match what Firefly calls that tank.")
         a("  Silence one with `fireflymcf-tankpatch` (report-only without a tank flag).")
     a("")
     a("What you can do on this build (all build-general, all gated):")

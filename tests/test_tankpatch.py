@@ -315,3 +315,14 @@ def test_the_report_names_each_tank_from_the_panels_own_gauge(capsys):
             if l.strip().startswith("instance ") and l.split()[1].isdigit()}
     for inst, name in {"0": "FRESH", "2": "GREY", "3": "LP", "18": "GREY2"}.items():
         assert f" {name} " in rows[inst], rows[inst]
+
+
+def test_without_panel_names_it_says_the_rvc_names_are_the_specs(capsys, monkeypatch):
+    """No gauge traced: the RV-C name stands in, and the report says it is the spec's name."""
+    from fireflymcf import tanknames
+    assert run(STOCK) == 0
+    assert "may not match" not in capsys.readouterr().out    # every name traced: no warning
+    monkeypatch.setattr(tanknames, "tank_names", lambda data: {})
+    assert run(STOCK) == 0
+    out = " ".join(capsys.readouterr().out.split())
+    assert "RV-C specification's name and may not match what Firefly calls that tank" in out
