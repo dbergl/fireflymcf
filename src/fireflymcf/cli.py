@@ -10,6 +10,7 @@
             [--remap LABEL=CHANNEL [--allow-capability-change]]
             [--move TEXT=X,Y [--site HEX]]
     python3 -m fireflymcf.cli options <mcf.bin> [--json]
+    python3 -m fireflymcf.cli bus-map <mcf.bin> [--json] [--dgn X]... [--detail]
     python3 -m fireflymcf.cli render <mcf.bin> <out.png> [--page NAME | --root N]
             [--config FILE] [--slot SLOT=VALUE]... [--match-off HEX]
 
@@ -1102,6 +1103,82 @@ def _cmd_pins(args: argparse.Namespace) -> int:
     return 0
 
 
+def _parse_dgn(text: str) -> int:
+    """`1FFB7`, `0x1FFB7` or `1FFB7h` -> 0x1FFB7 (DGNs are written in hex)."""
+    t = text.strip().lower().removesuffix("h")
+    return int(t, 16)
+
+
+def _cmd_bus_map(args: argparse.Namespace) -> int:
+    """The bus map's receive side: every receive-filter entry, what the panel does with it and
+    what the panel calls it (`busmap.py`). A send side will join it (phase 3)."""
+    from . import busmap
+    data = Path(args.image).read_bytes()
+    dgns = frozenset(_parse_dgn(d) for d in args.dgn) if args.dgn else None
+    entries = busmap.receive_map(data, dgns)
+    if args.json:
+        cov = busmap.coverage(entries)
+        print(json.dumps({
+            "receive": [busmap.as_json(e) for e in entries],
+            "coverage": {"%05X" % d: dict(c) for d, c in sorted(cov.items())},
+        }, indent=2))
+        return 0
+    cols = ("entries", "named", "drawn", "drawn-unnamed", "config", "logic-only", "write-only",
+            "untraced", "inert")
+    cov = busmap.coverage(entries)
+    print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
+    print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
+    total = {c: 0 for c in cols}
+    for dgn, c in sorted(cov.items(), key=lambda kv: (-kv[1]["entries"], kv[0])):
+        print("%05X  %s  %s" % (dgn, " ".join("%7d" % c[k] for k in cols),
+                                busmap.spec_name(dgn) or "-"))
+        for k in cols:
+            total[k] += c[k]
+    print("%-6s %s" % ("total", " ".join("%7d" % total[k] for k in cols)))
+    print()
+    print("%4s %-5s %-6s %-10s %-34s %s" % ("var", "DGN", "filter", "class", "panel name (source)",
+                                           "evidence"))
+    for e in entries:
+        filt = "-" if e.filter_value is None else (
+            "%#04x" % e.filter_value if e.filter_byte == 0 and e.filter_mask == 0xFF
+            else "b%d&%#04x=%#04x" % (e.filter_byte, e.filter_mask, e.filter_value))
+        name = "-" if not e.names else "%s (%s)" % (e.name, e.names[0].source)
+        print("%4d %05X %-6s %-10s %-34s %s" % (e.var, e.dgn, filt, e.cls, name, e.evidence))
+        if args.dgn or args.detail:
+            if e.frame_parsers:
+                print("%16sframe parser(s) compare this DGN: %s"
+                      % ("", ", ".join("%#x" % f for f in e.frame_parsers)))
+            groups: dict = {}
+            for x in e.effects:
+                key = (x.hop, x.via[:1], busmap._sink_text(x))
+                groups.setdefault(key, []).append(x)
+            for (hop, via, what), xs in groups.items():
+                sites = sorted({x.sink.at for x in xs})
+                flows = "/".join(sorted({x.sink.flow for x in xs}))
+                checks = sorted({x.selector_check for x in xs if x.selector_check})
+                print("%16s%s%s @%s (%s)%s" % (
+                    "", "via cell %#x -> " % via[0] if hop else "", what,
+                    ",".join("%#x" % a for a in sites), flows,
+                    "; " + "; ".join(checks) if checks else ""))
+                widgets = list({(w.obj, w.record): w for x in xs for w in x.widgets}.values())
+                shown = widgets if args.dgn else widgets[:6]
+                for w in shown:
+                    print("%20sobject %d record %#x wt-%d %s: %s%s%s" % (
+                        "", w.obj, w.record, w.wtype, w.role,
+                        repr(w.caption) + " (" + w.rule + ")" if w.caption else
+                        "no caption" + (" [in %r]" % w.title if w.title else ""),
+                        " unit %r" % w.unit if w.unit else "",
+                        " candidates %s" % list(w.candidates) if w.candidates else ""))
+                if len(widgets) > len(shown):
+                    print("%20s... %d more widgets (--dgn lists all)" % ("", len(widgets) - len(shown)))
+    print()
+    print("panel name: the firmware's own word (outputs-page / option: proven-from-code; captions: "
+          "inferred-from-data). The specification name is the RV-C/J1939 standard's and may not "
+          "match what Firefly calls the message. --dgn X (repeatable) or --detail lists every "
+          "sink and widget.")
+    return 0
+
+
 # Every name `gestures.GroupBehaviour.kind_for_variant` can return. Listed here rather than
 # imported so `--help` works without reading an image; `test_gestures` pins that the classifier
 # never returns anything outside this set.
@@ -1524,6 +1601,17 @@ def main(argv: list[str] | None = None) -> int:
                         "options that show it, and the captions of the controls joined to it")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.set_defaults(func=_cmd_pins)
+
+    p = sub.add_parser("bus-map",
+                       help="every RV-C message the panel receives: what it does with it and "
+                            "what the panel calls it (see busmap.py)")
+    p.add_argument("image")
+    p.add_argument("--dgn", action="append", default=[],
+                   help="only this DGN, in hex (e.g. 1FFB7); repeatable; lists every sink")
+    p.add_argument("--detail", action="store_true",
+                   help="under each entry, list every sink and widget")
+    p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
+    p.set_defaults(func=_cmd_bus_map)
 
     p = sub.add_parser("gestures",
                        help="report how each control responds to tap, hold and release")

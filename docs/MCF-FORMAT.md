@@ -959,6 +959,17 @@ the panel *uses* that DGN. 14.7 has 24, adding `1FFFB`, `1FFFC`, `1FFFD`, `1FEA5
 Modes 3, 6 and 7 have **zero** entries across all three builds — the arms exist in code and
 are never exercised by the corpus.
 
+#### Which entries the panel uses — `proven-from-code`, 2026-10-19
+
+An entry that writes its slot is not thereby *used*: GuiCode must read the slot. It can only do so
+through the base the LCD hands `GuiCode_entry1` (`GUICODE.md` Finding 33), and
+`slottrace.state_reach` follows that base to every load made through it, with no escape on any
+corpus build. So each entry is classed from the code (`fireflymcf bus-map`, `GUICODE.md`
+Finding 82): on 13.6, 128 of the 298 entries reach a cell a widget paints, 11 reach the config-set
+helper, 13 reach logic only, **132 are written and never read**, and 14 are mode 0. A write-only
+entry is the DM_RV pattern of Finding 77 generalised: injecting its DGN changes the slot and
+nothing else, unless a raw-frame parser reads the DGN itself (`busmap` lists those per DGN).
+
 #### The filter never sees the source address or the priority — `proven-from-code`, 2026-08-23
 
 The match is one `ubfx` pair, and it takes bits 8–25 of the CAN id:

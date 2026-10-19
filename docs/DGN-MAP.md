@@ -19,19 +19,22 @@ index ≤ 255 → `0x20007FC8 + idx*2`; index > 255 → `0x20008000 + idx*2`
 register" mechanism; the ~83 distinct-DGN cap only bites a *new* DGN (a new selector on an
 already-listed DGN like `0x15FCE` is free).
 
-The heavily-used subscriptions (full list via the regen command below):
+The heavily-used subscriptions. **Every entry, with what the panel does with it and what it calls
+it, is `fireflymcf bus-map MCF`** (`busmap.py`, `GUICODE.md` Finding 82); this table is a summary
+of its 13.6 output. Of the 298 entries, 128 reach a painted cell, 11 reach the config-set helper,
+13 reach logic only, 132 are **written and never read** and 14 are inert.
 
-| DGN | entries | what it carries |
+| DGN | entries | what it carries (RV-C name; the panel's own words in quotes) |
 |---|---|---|
-| `0x1FEDA` | 75 | `DC_DIMMER_STATUS_3` — per-output live state (this is what the follower watches for the light) |
-| `0x15FCE` | 53 | `DGN_CONFIG` — the G12's config broadcast, one **selector** per entry (options, AES params, floorplan…) |
-| `0x1FBDA` | 27 | G12 output / keypad status |
-| `0x1FFE2` | 15 | DC source status |
-| `0x1FFFD` | 11 | (undecoded) |
-| `0x1FFBF` | 10 | (undecoded) |
+| `0x1FEDA` | 75 | `DC_DIMMER_STATUS_3` — per-output live state (this is what the follower watches for the light); 45 painted, 30 write-only |
+| `0x15FCE` | 53 | `DGN_CONFIG` — the G12's config broadcast, one **selector** per entry (options, AES params, floorplan…); the eight OPTIONS selectors reach the config-set helper (Finding 82 §3) |
+| `0x1FBDA` | 27 | **G12/G9 input status**, instance `0xA0 + pin` — the input rows `'1 - SHORE SENSE (12V)'` … (corrected 2026-10-19: this row said "G12 output / keypad status") |
+| `0x1FFE2` | 15 | `THERMOSTAT_STATUS_1`; instance 0 painted on the climate clusters, instances 1-6 write-only (corrected 2026-10-19: this row said "DC source status") |
+| `0x1FFFD` | 11 | `DC_SOURCE_STATUS_1`: instance 1 is `'DC Current'` / `'I/C Amps'` and the `'House'` gauge; `0x83`-`0x87` write-only |
+| `0x1FFBF` | 10 | `AC_LOAD_STATUS`: all ten write-only |
 | `0x1EBFF` | 8 | **TP.DT — transport-protocol data transfer, 2026-09-03** (`BUS-BASELINE.md` PC.52). Announced by `18ECFFxx` BAM, carries `PRODUCT_IDENTIFICATION` (`1FEEB`) strings: `Wakespeed Offshore*WS500*…` from `0x80`, `Spyder Controls*G12 Panel…` from `0x9C`, `Spyder Controls*7in Lite LCD 1v6r…` from `0x9F`, `Firefly*Standalone Module*…` from `0xFD` |
-| `0x1FACE` | 7 | (undecoded) |
-| `0x1FFAD` | 6 | (undecoded) |
+| `0x1FACE` | 7 | (no RV-C name) the `'Mira PIN:'` / `'Eclipse PIN:'` and `'Mira ID:'` digits of the pairing page |
+| `0x1FFAD` | 6 | `ATS_AC_STATUS_1`: `'LINE 1'` / `'LINE 2'` volts, amps, hertz |
 | `0x1FFB7`,`0x1FECA` | 5 each | `0x1FECA` = `DM_RV` diagnostics. **Its five filter vars (162-164, 235, 277) are write-only**; DM_RV is consumed from the raw frame by three source-address-keyed parsers (alternator `0x80`, adopted inverter, adopted solar controller) — `GUICODE.md` Finding 77 |
 | … 55 more DGNs at 1–4 entries each | | (`0x1FF9C`,`0x1BFC1`,`0x1FFD7`,`0x1FEE8`, the `0x1FE8x` family, `0x1FDFx`, `0x1FEC7-9`, `0x1FFCx`, `0x1FFDx`, `0x1AADC/AAFD` prop, `0x1EF00` prop A, `0x1FACF`, …) |
 
@@ -107,8 +110,10 @@ Decoded by `g12rules` / `cli g12-rules`. Highlights:
 
 ## Regenerate
 
-- **Panel receives:** `guidata.variable_table(data)` → group by `.dgn_low`; per-entry mode is
-  `raw[2] >> 4` (0 = inert), instance filter is `raw[4]`/`raw[5]`, extracted field `raw[3] & 7`.
+- **Panel receives:** `fireflymcf bus-map MCF [--dgn X] [--json]` (`busmap.receive_map`): every
+  entry with its trace, class and the panel's name. Raw: `guidata.variable_table(data)` → group by
+  `.dgn_low`; per-entry mode is `raw[2] >> 4` (0 = inert), instance filter is `raw[4]`/`raw[5]`,
+  extracted field `raw[3] & 7`.
 - **Panel sends:** `guidata.binding_table(data)` → `raw[0] | raw[1]<<8` is the DGN low word.
 - **G12 sends:** `g12rules.all_rules(data)` → `.dgn`; or `cli g12-rules <mcf>` for the decoded
   command/selector detail, `cli g12-inputs` for the input-pin rules.
