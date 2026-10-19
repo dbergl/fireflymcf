@@ -1159,23 +1159,30 @@ class SplitHoldRegion(Op):
 
 
 def _check_named_output(data, channel: int, allow: bool) -> None:
-    """Refuse a button on an output the panel's G12 OUTPUTS list names for a load
-    (`outputs.output_names`), unless the recipe acknowledges it. The channel-collision
-    check cannot see this: a load driven by G12 rules (13.6's "12 - A/C Fan Low") has no
-    panel binding to collide with."""
+    """Refuse a button on an output the panel's G12 OUTPUTS page names for a load under ANY
+    floorplan or option (`outputs.named_outputs`), unless the recipe acknowledges it. The
+    channel-collision check cannot see this: a load driven by G12 rules (13.6's
+    "12 - A/C Fan Low") has no panel binding to collide with.
+
+    Every condition counts, not the owner's: floorplan and option state lives in the G12's NVM
+    and is not build input (`recipe.Project`'s coach-config note), so a recipe cannot know which
+    names its coach shows, and a coach can be reconfigured after the flash. 13.6's output 05 is
+    blank on most floorplans and "Tank Heat Fresh" on WA/WD/WT; it is refused everywhere."""
     if allow:
         return
     from . import outputs
     try:
-        name = outputs.output_names(data).get(channel, "")
+        named = outputs.named_outputs(data).get(channel, [])
     except ValueError:          # no outputs list on this build: nothing to compare with
         return
-    if name:
+    if named:
+        shown = "; ".join("%r (%s)" % (n.name, n.when) if n.name is not None
+                          else "a name GuiCode sets at run time (%s)" % n.when for n in named)
         raise RecipeError(
             "NAMED_OUTPUT",
-            "output %d is named %r on this build's G12 OUTPUTS list; a button on it switches "
+            "output %d is named on this build's G12 OUTPUTS list: %s. A button on it switches "
             "that load. Confirm the owner's load is on output %d, then pass "
-            "allow_named_output=True" % (channel, name, channel),
+            "allow_named_output=True" % (channel, shown, channel),
             offers=["acknowledge_named_output"])
 
 
@@ -1206,9 +1213,11 @@ class AddButton(Op):
              names `channel` for a load and the owner's load is on it anyway
 
     Error codes:
-      NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load (13.6's 12 is
-                     "A/C Fan Low"); offers=["acknowledge_named_output"] — retry with
-                     allow_named_output=True once the owner has confirmed the output
+      NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
+                     floorplan or option (13.6's 12 is "A/C Fan Low" always, 05 is
+                     "Tank Heat Fresh" on WA/WD/WT); offers=["acknowledge_named_output"]
+                     — retry with allow_named_output=True once the owner has confirmed
+                     the output
       BIND_REFUSED — statusbind.bind_pin refused (unwatched pin, no bridge block,
                      or the pin is already commanded by a LOCATED control — a
                      narrower check than build_home_button's own, see statusbind.py)
@@ -1483,8 +1492,8 @@ class WireButton(Op):
              names `channel` for a load and the owner's load is on it anyway
 
     Error codes:
-      NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load;
-                     offers=["acknowledge_named_output"] — retry with
+      NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
+                     floorplan or option; offers=["acknowledge_named_output"] — retry with
                      allow_named_output=True once the owner has confirmed it
       BAD_REF — target names an earlier op id that produced no object (from
                 resolve_target)
