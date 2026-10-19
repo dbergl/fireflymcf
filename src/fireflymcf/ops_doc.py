@@ -106,8 +106,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Pixels travel in the project as hex rows.",
         "Flashed (the Starlink logo, the timer mark).", "`GUICODE.md` Findings 44, 46"),
     "set_gesture": ("same-size",
-        "Convert a control's single toggle group to hold-to-toggle.",
-        "Flashed 2026-08-19 (pins 28 and 29).", "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
+        "Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or "
+        "every copy of a variant-selected two-state group (Low Volts, group 129).",
+        "Flashed 2026-08-19 (pins 28 and 29) for a single toggle. The multi-binding path is "
+        "UNVERIFIED (the op reports itself unverified when it takes it).",
+        "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
     "pin_filter_instance": ("same-size",
         "Narrow a receive-filter entry from any device to one RV-C instance (one byte).",
         "Flashed (v17 onward). Motivated by PC.46.", "`BUS-BASELINE.md` PC.46"),

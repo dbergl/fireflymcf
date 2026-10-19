@@ -730,6 +730,30 @@ def test_set_gesture_hold_to_toggle(stock, stock_hash):
                  gestures.PHASE_RELEASE_HELD):
         assert not beh.on(dead)
 
+def test_set_gesture_single_binding_stays_verified(stock, stock_hash):
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="g", type="set_gesture",
+                                  params={"target": 0, "group": 18,
+                                          "kind": "hold_to_toggle"}))
+    assert r.ok, r.errors
+    assert r.unverified == []
+    assert "UNVERIFIED" not in r.manifest[0]
+
+def test_set_gesture_low_volts_converts_every_copy_and_is_unverified(stock, stock_hash):
+    """Group 129 (Low Volts): every live copy fires on the hold, and the op says unverified."""
+    from fireflymcf import gestures
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="g", type="set_gesture",
+                                  params={"target": 0, "group": 129,
+                                          "kind": "hold_to_toggle", "seconds": 3}))
+    assert r.ok, r.errors
+    assert r.unverified == ["g"]
+    line = r.manifest[0]
+    assert "HARDWARE-UNVERIFIED" in line and "external variant setter" in line
+    beh = gestures.describe_group(r.data, 129)
+    assert beh.kinds == {0: "hold-only", 1: "hold-only"} and beh.hold_ms == 3000
+    assert all(e.phases == gestures.PHASE_HELD for e in beh.emissions)
+
 def test_set_gesture_latch_on_nonlatch_is_error(stock, stock_hash):
     # The awning group is momentary; asking for latch must refuse, not half-edit.
     # `all_groups` already returns decoded GroupBehaviour objects (not indices), so the

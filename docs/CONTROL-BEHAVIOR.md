@@ -666,10 +666,22 @@ with a live repeat rate is **a real output toggling once a second for as long as
 on the button**. Zeroing the rate makes that unreachable, and costs nothing — entering the held
 phase sets the next-send time directly (`0x0021BB64`), so the first send is unaffected.
 
-`make_hold_to_toggle` refuses rather than guesses when its premises fail: the group must hold
-exactly one live binding (in a multi-entry group a **runtime variant counter** picks which copy
-fires, so editing "the" binding may edit one that never runs), it must be a `DC_DIMMER_COMMAND_2`
-command 5, and it must not already repeat.
+`make_hold_to_toggle` refuses rather than guesses when its premises fail. A single-entry group's
+binding must be a `DC_DIMMER_COMMAND_2` command 5 and must not already repeat.
+
+**A multi-entry group is converted only when every live copy can take the same edit**, because
+a **runtime variant counter** picks which copy fires and an edit to some copies leaves the others
+on the old gesture. Five premises, each refused separately (`gestures._make_multi_hold_to_toggle`):
+no copy repeats; every copy sends one DGN to one target (command, selector, instance); the
+variants agree on one release toggle (`latch` or `tap-only`); the variants pick the direction
+(two variants whose position-paired copies differ only in the variant nibble and, for `0x1FED9`,
+the state byte, with 0 and 1 in at least one pair; or every copy a command-5 toggle); and the
+group does not cycle its variant on release (byte 1 `0x80`), so the external setter alone (§5)
+picks the copy. Then `PHASE_HELD` goes on **every** live copy, the hold threshold and the held
+repeat once on the group. On 13.6 groups 82, 88 and 129 pass (each a `0x1FED9` selector write
+of 0/1 plus its read-back); group 129 is Low Volts, whose variant GuiCode sets from selector
+`0x2F` (`0x0024A176`). **This path has not run on a coach**; the op reports itself unverified
+when it takes it.
 
 **Confirmed on the coach, 2026-08-19** (owner, build `Custom v20`): a 3-second hold turns pin 29
 on, another turns it off, a tap does nothing, and holding past the threshold does not re-toggle.
