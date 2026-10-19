@@ -6384,6 +6384,189 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 82 — every receive-filter entry, traced: 128 of 13.6's 298 reach a painted cell, 132 are written and never read, and the slot-array base never escapes — `proven-from-code` (the trace and the negatives), captions `inferred-from-data`, 2026-10-19
+
+**Question.** Findings 80 and 81 named two families from the file: tank instances and G12 outputs.
+For every other RV-C message the panel receives, what does the panel do with it, and what does it
+call it? Nothing may be fixed per build; another firmware may differ.
+
+**The method, as code** (`src/fireflymcf/slottrace.py`, `src/fireflymcf/busmap.py`;
+`fireflymcf bus-map MCF [--dgn X] [--json]`):
+
+```
+receive-filter entry var (GuiData +0x2A70, §5.4a): DGN, mode, field, filter
+  |  slot = register.status_slot_addr(var)             index split: var>255 is +0x38
+  v
+slottrace.state_reach: the base from GuiCode_entry1 (header word +0x10) to every load through it
+  |  slot_reads: a load at slot_disp(var) through a register holding the base
+  v  Tracer: data AND control flow to every store and call the value decides
+sinks: SRAM cells / GuiCodeState fields / the config-set helper / other calls
+  |  cell -> +0x44BC8 index -> a table-1 record naming it as value_slot or mode-6/7 colour
+  v  (a cell no record names: one more hop, through another block's read of it)
+widgets -> caption by record order (control, row, gauge, readout, parent)
+```
+
+### 1. Where the base goes — `proven-from-code`, and why the negatives hold
+
+The LCD hands the slot-array base to `GuiCode_entry1` in `r0` (Finding 33). `state_reach` starts
+there — the entry is read from the header vector word at GuiCode `+0x10` (13.6 `0x0024EE29`), not
+assumed — and sweeps each function with the set of registers holding `base + offset`: a `mov` or
+`add #imm` copies it, a stack spill is followed (13.6 `0x242B76 str r0,[sp,#4]` inside
+`FUN_00242B70`, reloaded later), a `bl F` with the base in `r0`-`r3` queues `F` with it there. Any
+other use is an *escape*. On 13.6 the base reaches ten functions — `0x242174`, `0x242B70`,
+`0x247BF8`, `0x24EE28`, `0x24F00C`, `0x24F104`, `0x24F820`, `0x250984`, `0x250CF0` (base in `r1`),
+`0x259100` — and **escapes nowhere, on all three builds** (`test_the_base_never_escapes`). Every
+load through it outside `FUN_00247BF8` and `FUN_00250984` is at `+0x200`–`+0x219`, the state
+fields past the low slot array, exactly as Finding 77 item 3 read from the decompilation.
+
+So "no load at `slot_disp(var)`" is a guaranteed negative: the slot is **write-only**
+(`unread_guarantee`). This generalises Finding 77's byte scan, which could not tell the slot
+array from another struct with a field at the same offset and could not see a narrow load at all
+(alone, it left 54 of 13.6's unread entries undecided; this analysis decides every one). Finding 77's residual — a base kept in a
+spill and reloaded — is now followed rather than excluded by argument. What remains outside it:
+the raw-frame parsers `GuiCode_entry4` drives (Findings 75, 77), which read frames, not slots.
+`busmap` reports, per DGN, the GuiCode functions whose literal pool holds the DGN as
+`DGN << 8` (the form `canid & 0x03FFFF00` is compared against): 13.6's solar DGNs all sit in
+`FUN_00240D20`, `1FFFD`/`1FEA3`/`1FEC8`/`1FEC9`/`1FFFC` in `0x24FCE8` (Finding 77's alternator
+parser), `1FFD4` in `0x24F104`.
+
+### 2. The tracer — data and control flow
+
+`tanknames._trace_from` follows data flow only. Most blocks decide on the value instead
+(`cmp r2,#1 ; beq.w` choosing a colour master, var 80 at `0x248D96`), so the tracer also follows
+control flow: a compare of a carrying register taints the flags; a decided branch explores both
+successors to their join; every register either arm writes is carrying at the join and every
+store either arm makes is a `control` sink. The join is the first instruction of the fall-through
+path the taken path also reaches, moved forward while a branch in either arm skips over it to a
+later point of that path — 13.6 var 207's `ble 0x24A86E` (`0x24A81C`) leaves the inner arm for
+the end of the whole block, the 12-18 V decode fence (`decodeguards.py`). An arm that runs 160
+instructions without rejoining is a runaway and its sinks are dropped. A store the trace made is
+remembered: var 42 (`15FCE` selector `0x2F`, Low Volts arming) stores its bool to `0x20039A79`
+and re-reads it two instructions later to pick cell 45's colour (`0x2003A814`) — the block
+DGN-MAP describes.
+
+**Checked against Ghidra.** `data/slot_bridge_136.txt`, extracted by a Ghidra script with no code
+in common, lists 46 clean colour/bool blocks. The tracer reproduces 45 of them cell for cell. The
+46th is the dump's error: it gives var 124 the cell `0x20039E24`, whose store at `0x24A7E0` writes
+`r2 >> 1` (`mov r3,r2` at `0x24A7D4`), and `r2` was set before var 124's load at `0x24A7BC` and
+not written between. The dump also gives var 138 two stores (`0x24853C`, `0x248542`) that are
+var 3's (`cmp r2,#0x4e` on var 3's percentage, `0x248532`) — the LP tank's level decides them —
+and gives var 206 var 207's Float store. `test_ghidra_bridge_dump_reproduced` pins all of it.
+
+### 3. What it reaches, and the names
+
+A sink cell is joined to widgets through the `+0x44BC8` cell table (§5.4b) and table 1's record
+lists. The caption rules are record order, `inferred-from-data`, in this priority:
+
+| rule | caption |
+|---|---|
+| `control` | the labels of the control whose box's mode-7 fill is the cell (`outputs._segments`) |
+| `row` | a `"NN - NAME"` label immediately before the record (the G12 input rows) |
+| `gauge` | the labelled record before a wt-5 container whose `value_slot` is the cell (`tanknames`, unchanged) |
+| `readout` | the one label (wt-0/11, two or more characters) between the previous value record, less its unit, and a wt-8/13 readout; two or more is ambiguous and names nothing (13.6 object 922 has `'Inverter/Charger Status'` and `'DC Voltage'` before one readout) |
+| `parent` | the `readout` rule at the wt-5 record that contains the object |
+
+Two families keep the names earlier findings gave them: `DC_DIMMER_STATUS_3` entries take the
+OUTPUTS-page names and control captions of Finding 81 for their pin, and a `15FCE` entry that
+reaches the config-set helper takes the OPTIONS row of that offset's register.
+
+**The config join, from the receive side, agrees with the send side everywhere.** Each OPTIONS
+selector's slot is compared, in one block (13.6 `0x249BF6`–`0x249CE6`), with the panel's own
+register, and on a difference a far arm calls the config-set helper with the config offset as an
+immediate: `uxtb r2,r2 ; movs r1,#0xd ; mov r0,r4 ; bl 0x259100` at `0x249E60` for selector `0xE9`.
+So the filter entry's selector and the offset are joined by one instruction. `config.option_selector`
+joins them from the OPTIONS tap handlers (Finding 23's rules), a separate code path. They agree on
+every selector both reach: eight on 13.6, ten on 14.7 (including `0xD7`/`0xD8`, which no OPTIONS
+row names). 11.23 has no such compare block (no entry reaches its helper). This settles 14.7's `0xE4` = Starlink Power
+(cfg `0x1B`) and `0xE7` = Lithionics Batteries (cfg `0x14`), until now `inferred-from-code` from
+one route only (`config.option_selector` docstring).
+
+### 4. The coverage, 13.6
+
+| DGN | RV-C name | entries | named | drawn | drawn, unnamed | config | logic-only | write-only | inert | the panel's names (examples) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `1FEDA` | DC_DIMMER_STATUS_3 | 75 | 41 | 45 | 7 | 0 | 0 | 30 | 0 | OUTPUTS-page names, Finding 81 |
+| `15FCE` | - | 53 | 27 | 24 | 6 | 11 | 4 | 14 | 0 | the eight OPTIONS rows, floorplan; `Low Volts`, `HVAC Load`, `Start at`, `Stop at`, `Min Run Time`, `Gen Start Retries`, `Between Retries`, `Max Chrge Rate`, `Absorb Hours` |
+| `1FBDA` | - | 27 | 11 | 11 | 0 | 0 | 1 | 15 | 0 | the input rows, `'1 - SHORE SENSE (12V)'` ... `'10 - IGNITION (12V)'`; `Engine` |
+| `1FFE2` | THERMOSTAT_STATUS_1 | 15 | 0 | 3 | 3 | 0 | 0 | 12 | 0 | (climate cluster, no caption) |
+| `1FFFD` | DC_SOURCE_STATUS_1 | 11 | 3 | 4 | 1 | 0 | 2 | 5 | 0 | `DC Current / I/C Amps`, `House` |
+| `1FFBF` | AC_LOAD_STATUS | 10 | 0 | 0 | 0 | 0 | 0 | 10 | 0 | |
+| `0EBFF` | (J1939 TP.DT) | 8 | 0 | 0 | 0 | 0 | 0 | 6 | 2 | |
+| `1FACE` | - | 7 | 2 | 6 | 4 | 0 | 1 | 0 | 0 | `Mira PIN:` / `Eclipse PIN:` digits, `Mira ID:` |
+| `1FFAD` | ATS_AC_STATUS_1 | 6 | 2 | 6 | 4 | 0 | 0 | 0 | 0 | `LINE 1`, `LINE 2` (V, A, Hz) |
+| `1FECA` | DM_RV | 5 | 0 | 0 | 0 | 0 | 0 | 4 | 1 | (Finding 77) |
+| `1FFB7` | TANK_STATUS | 5 | 5 | 5 | 0 | 0 | 0 | 0 | 0 | Finding 80 |
+| `0BFC1` | - | 4 | 4 | 4 | 0 | 0 | 0 | 0 | 0 | `ADC Raw Value:` / `Maximum:` (tank diagnostics) |
+| `1FF9C` | THERMOSTAT_AMBIENT_STATUS | 4 | 1 | 1 | 0 | 0 | 0 | 3 | 0 | `FRONT` (instance 0) |
+| `1FFD7` | INVERTER_AC_STATUS_1 | 3 | 2 | 2 | 0 | 0 | 0 | 0 | 1 | `AC Out Volts`, `AC Out Freq.` |
+| `1FFCA` | CHARGER_AC_STATUS_1 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | `AC Input Volts`, `AC Input Freq.` |
+| `1FFDC` | GENERATOR_STATUS_1 | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | `Gen Hrs` |
+| `1AAFD` | - | 2 | 2 | 2 | 0 | 0 | 0 | 0 | 0 | `House`, `Chassis` (battery gauges) |
+| `1FECC`, `1FF96`, `1FFD2`, `1FF89` | charger/inverter configuration | 7 | 6 | 6 | 0 | 0 | 0 | 1 | 0 | `Absorb`, `Float`, `CHARGE RATE`, `Shore Brkr Size`, `Low Batt. Cutout`, `VAC Dropout` |
+| `1FED8` | GENERIC_CONFIGURATION_STATUS | 2 | 0 | 2 | 2 | 0 | 0 | 0 | 0 | (G9 / G12 #2 `FIRMWARE:` rows, ambiguous) |
+| `1FFED` | LEVELING_CONTROL_STATUS | 2 | 0 | 1 | 1 | 0 | 0 | 1 | 0 | §5 |
+| 43 more DGNs | | 48 | 1 | 2 | 1 | 0 | 5 | 31 | 10 | |
+| **total** | | **298** | **111** | **128** | **29** | **11** | **13** | **132** | **14** | |
+
+11.23: 291 entries, 124 drawn, 120 write-only, 2 untraced (var 169: a pool word holds its slot
+address but no traced read of it reaches a sink; var 213: read, its trace reaches no sink).
+14.7: 310 entries, 115 drawn, 11 config, 146 write-only, 0 untraced. `fireflymcf bus-map` prints
+the table for any build in about 9 s (most of it Finding 81's string-block emulation).
+
+**Write-only, by family (13.6).** 30 `DC_DIMMER_STATUS_3` instances (24, 40, 43, 60-71, 90-104:
+the panel watches them and nothing reads the slot); `THERMOSTAT_STATUS_1` instances 1-6 and
+`THERMOSTAT_AMBIENT_STATUS` 1-3 (only zone 0 is read); all ten `AC_LOAD_STATUS`; the fourteen
+solar DGNs (frame-parsed by `FUN_00240D20`); four DM_RV; `DC_SOURCE_STATUS_1` instances
+`0x83`-`0x87`; fourteen `15FCE` selectors; fifteen `1FBDA` instances; `1FFED` var 234, `1FFEC`
+var 236 and `1FFEE` var 240. Each carries its evidence line.
+
+### 5. Where the panel's use and the RV-C name part
+
+- **`1FFED` LEVELING_CONTROL_STATUS, var 232** (payload byte 0, open filter): read at `0x24A86E`
+  (`ldrsh.w r1,[r4,#0x1d0]`), stored as a byte to `0x20039F28` (cell index 397), and compared
+  `== 1` at `0x24AAA2` to pick cell 375's colour. Index 397 is the value slot of the three type-6
+  switches in object 882 (`'Max of 2 A/Cs on gen power'`), which choose among the climate clusters
+  872-874, 876-877 and 879-880; index 375 is a fill in clusters 872-875. **No screen-29 widget is
+  reached** — the LEVELING-PAGE negative (`BUS-BASELINE.md` PC.57) stands — and the only widgets
+  reached are on the climate page. The other two levelling entries (234, 236) and `1FFEE` (240)
+  are write-only.
+- **`1FBDA`** is not "G12 output / keypad status" (DGN-MAP's old row): instances `0xA1`-`0xAA` are
+  the G12/G9 input rows (`row` rule, matching `g12rules.input_status`, Finding 54), with every
+  floorplan's label for each input.
+- **`1FFE2`** is not "DC source status" (DGN-MAP's old row): it is RV-C's THERMOSTAT_STATUS_1, and
+  the panel paints instance 0 on the climate clusters (a `°` readout, the mode tiles, and
+  `setVariant` — the function pointer at `0x20039908`, DGN-MAP — on groups `0x8C`-`0x92`).
+- **`1FACE`** (no RV-C name; Firefly's): instances `0xF0`/`0xF1` carry the `Mira PIN:` /
+  `Eclipse PIN:` and `Mira ID:` digits of the pairing page.
+
+### 6. Corrections
+
+- **`DGN-MAP.md` §1**'s table: `1FBDA`, `1FFE2`, `1FFFD`, `1FFBF`, `1FACE`, `1FFAD` rows corrected
+  (above); its regenerate line now names `fireflymcf bus-map`.
+- **`LEVELING-PAGE.md` §2** said "the page subscribes" to vars 232/234/236/240. Three of the four
+  slots are read by nothing, and var 232 drives the climate page (§5 above).
+- **The "46 bridge blocks"** of `CLAUDE.md`'s constraint and `slotsource`'s docstring are the
+  clean colour/bool blocks of the Ghidra dump. 128 of 13.6's 298 entries reach a painted cell by
+  some fixed block; the constraint's substance — only a fixed block, or an authored routine, can
+  carry a received value to a cell — stands.
+- **Finding 77**'s residual (a base kept elsewhere and reloaded) is narrowed: stack spills are
+  followed, and nothing else holds the base.
+
+### 7. Predictions for the coach
+
+1. A frame on `1FFED` from any node, payload byte 0 = 1, changes the CLIMATE page (object 882's
+   switches on index 397 select a different cluster; cell 375's tile colour changes) and nothing
+   on screen 29. Byte 0 = 0 restores it. *Watch the climate page, not the levelling page.*
+2. `THERMOSTAT_STATUS_1` (`1FFE2`) or `THERMOSTAT_AMBIENT_STATUS` (`1FF9C`) frames for instances
+   1-6 / 1-3 change nothing on any page; instance 0 changes the climate cluster.
+3. `AC_LOAD_STATUS` (`1FFBF`) on any of its ten instances changes nothing on any page.
+4. `1FACE` instance `0xF0` frames change the `Mira PIN:` digits on the pairing page.
+
+Tests: `tests/test_busmap.py` — the 13.6 coverage and names pinned; the Ghidra dump, the tank
+names on all three builds, the OUTPUTS-page names, the selector join on 13.6 and 14.7 and the G12
+input labels as oracles; the base's reach with its positive controls; and three stubs (no reads,
+no control flow, an escape) that each break a pin.
+
 ## Finding 81 — every name the G12 OUTPUTS page can show, with the floorplans and options that show it — `proven-from-code`, captions `inferred-from-data`, 2026-10-19
 
 **Question.** `outputs.output_names` read the G12 OUTPUTS rows from the page object's own records

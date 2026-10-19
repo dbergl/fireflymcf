@@ -664,12 +664,24 @@ def option_off_channel(data: bytes, selector: int) -> int | None:
     return off_channels_by_selector(data).get(selector)
 
 
-@lru_cache(maxsize=4)
-def _selector_sites(data: bytes) -> Dict[int, Tuple[SelectorSite, ...]]:
+@memo.content_cached(maxsize=4, copy=None)
+def _stream(data: bytes) -> Tuple[bytes, int, list]:
+    """`(code, base, _sweep(code, base))` for an MCF, swept once."""
     section = theme.guicode_section(data)
     base = theme.guicode_base(section)
     code = data[section.offset:section.offset + section.length]
-    stream = _sweep(code, base)
+    return code, base, _sweep(code, base)
+
+
+def config_set_helper(data: bytes) -> int | None:
+    """The config-set helper's entry address (`_find_config_set`): 13.6 `0x00259100`, 14.7
+    `0x0025B9B0`, 11.23 `0x00256E20`; None when the build has no such site."""
+    return _find_config_set(_stream(bytes(data))[2])
+
+
+@lru_cache(maxsize=4)
+def _selector_sites(data: bytes) -> Dict[int, Tuple[SelectorSite, ...]]:
+    code, base, stream = _stream(data)
     sites: Dict[int, list] = {}
     helper = _find_config_set(stream)
     if helper is not None:
