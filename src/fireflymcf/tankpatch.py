@@ -150,19 +150,32 @@ def _wanted(args) -> list:
     return sorted(dict.fromkeys(picked))
 
 
-def _inventory(report) -> str:
+def _panel_names(data: bytes) -> dict:
+    """`{instance: caption}` from the panel's own gauges (`tanknames`); empty if not traced."""
+    from fireflymcf import tanknames
+    try:
+        return {i: n for i, (n, _src) in tanknames.tank_names(data).items() if n}
+    except tanknames.TankNameError:
+        return {}
+
+
+def _inventory(report, data: bytes) -> str:
+    panel = _panel_names(data)
     lines = ["What this image broadcasts on 1FFB7 TANK_STATUS:", "",
-             f"  {'instance':<12} {'RV-C name':<18} {'flag':<15} state"]
+             f"  {'instance':<12} {'panel name':<14} {'RV-C name':<18} {'flag':<15} state"]
     for b in report.broadcasts:
         flag = next((f"--{n}" for n, i in TANK_FLAGS.items() if i == b.instance),
                     f"--instance {b.instance}")
         state = ("SILENT -- nothing switches this rule on" if b.activate_at is None else
                  "broadcasting once a second, behind a config gate the G12 re-checks"
                  if b.guarded else "broadcasting once a second")
-        lines.append(f"  instance {b.instance:<3} {b.tank:<18} {flag:<15} {state}")
-    lines += ["", "  The instance numbers are read from this file's G12 rules. The names are the RV-C",
-              "  standard's for each number, not the firmware's own label: check them against the",
-              "  panel before silencing a tank."]
+        lines.append(f"  instance {b.instance:<3} {panel.get(b.instance, '-'):<14} "
+                     f"{b.tank:<18} {flag:<15} {state}")
+    lines += ["", "  The instance numbers are read from this file's G12 rules. The panel name is the",
+              "  caption the panel draws on the gauge that instance feeds, read from this file",
+              "  (`-`: no gauge traced). The RV-C name is the standard's for the number. Where they",
+              "  disagree, or the panel name is missing, check the panel before silencing a tank.",
+              "  Some gauges draw only under some floorplans or options."]
     return "\n".join(lines)
 
 
@@ -234,7 +247,7 @@ def main(argv=None) -> int:
             report = tankbroadcast.audit(data)
         except tankbroadcast.TankBroadcastError as e:
             raise Refused(str(e))
-        print(_inventory(report))
+        print(_inventory(report, data))
         print()
         print(report.report())
         print()

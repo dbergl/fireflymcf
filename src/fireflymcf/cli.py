@@ -471,9 +471,17 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
     # The G12's 1FFB7 TANK_STATUS broadcasts, read from its rule table (`tankbroadcast`): the
     # instance numbers are this file's; the names are the RV-C standard's for each number.
+    # `panel_name` is the caption on the gauge the panel feeds from that instance (`tanknames`,
+    # traced through the receive filter and GuiCode), or None where no gauge is traced.
     def _tanks():
-        from . import tankbroadcast
+        from . import tankbroadcast, tanknames
+        try:
+            panel = tanknames.tank_names(data)
+        except tanknames.TankNameError:
+            panel = {}
         return [{"instance": b.instance, "rvc_name": b.tank,
+                 "panel_name": panel.get(b.instance, (None, None))[0],
+                 "panel_name_source": panel.get(b.instance, (None, None))[1],
                  "broadcasting": b.activate_at is not None, "config_gated": b.guarded}
                 for b in tankbroadcast.tank_broadcasts(data)]
     info["tank_broadcasts"] = _try(_tanks, [])
@@ -523,8 +531,10 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         for t in info["tank_broadcasts"]:
             state = ("silent" if not t["broadcasting"] else
                      "broadcasting, behind a config gate" if t["config_gated"] else "broadcasting")
-            a(f"  instance {t['instance']:<3}  RV-C name: {t['rvc_name']:<18} {state}")
-        a("  The numbers are this file's; the names are the RV-C standard's, not the firmware's.")
+            a(f"  instance {t['instance']:<3}  panel: {t['panel_name'] or '-':<14} "
+              f"RV-C: {t['rvc_name']:<18} {state}")
+        a("  Numbers and panel names (the caption on the gauge each instance feeds) are read from")
+        a("  this file; `-` means no gauge was traced. The RV-C name is the standard's for the number.")
         a("  Silence one with `fireflymcf-tankpatch` (report-only without a tank flag).")
     a("")
     a("What you can do on this build (all build-general, all gated):")

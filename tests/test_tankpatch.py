@@ -306,3 +306,12 @@ def test_the_report_says_the_names_are_rvc_not_the_firmwares(capsys):
     assert run(STOCK) == 0
     out = capsys.readouterr().out
     assert "RV-C name" in out and "read from this file" in out
+
+
+def test_the_report_names_each_tank_from_the_panels_own_gauge(capsys):
+    """`tanknames`: the caption the panel draws on the gauge each instance feeds."""
+    assert run(STOCK) == 0
+    rows = {l.split()[1]: l for l in capsys.readouterr().out.splitlines()
+            if l.strip().startswith("instance ") and l.split()[1].isdigit()}
+    for inst, name in {"0": "FRESH", "2": "GREY", "3": "LP", "18": "GREY2"}.items():
+        assert f" {name} " in rows[inst], rows[inst]
