@@ -42,3 +42,18 @@ def test_a_capture_without_config_frames_is_refused(tmp_path, capsys):
     assert cli.main(["coach-config", STOCK, "-o", str(tmp_path / "c.json"),
                      "--capture", str(log)]) == 2
     assert "no configuration frames" in capsys.readouterr().err
+
+
+def test_every_option_it_accepts_renders(tmp_path):
+    """Each name coach-config accepts resolves in `slot_values`, as `render --config` does.
+    13.6 stores the cargo light as 'Cargo / Bath Light\\n    (CH. 25)'; coach-config names
+    it by its first line, so render must accept that spelling too."""
+    data = Path(STOCK).read_bytes()
+    names = sorted({o.split("\n")[0].strip() for o in
+                    (b.name for b in options.option_bindings(data))})
+    assert "Cargo / Bath Light" in names
+    for i, name in enumerate(names):
+        out = tmp_path / f"coach{i}.json"
+        assert cli.main(["coach-config", STOCK, "-o", str(out), "--floorplan", "WD",
+                         "--option", name]) == 0
+        options.slot_values(data, options.CoachConfig.from_json(out))

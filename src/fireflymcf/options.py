@@ -457,14 +457,20 @@ def _option_slot_by_name(bindings: list[OptionBinding]) -> dict[str, int]:
     invariant while building its lookup dict for Task 2's tests). Hardened here
     anyway per the global constraint that a name collision must raise loudly, not
     resolve to an arbitrary one of the colliding slots.
+
+    Each name is also keyed by `livecfg.canonical_option` (its first line), the spelling
+    `coach-config` writes: 13.6 stores `'Cargo / Bath Light\\n    (CH. 25)'`, and a
+    `coach.json` naming `'Cargo / Bath Light'` must render without a hand edit.
     """
+    from .livecfg import canonical_option
     out: dict[str, int] = {}
     for b in bindings:
-        if b.name in out and out[b.name] != b.value_slot:
-            raise ValueError(
-                f"option name {b.name!r} is bound to two different slots: "
-                f"{out[b.name]} and {b.value_slot}")
-        out[b.name] = b.value_slot
+        for name in {b.name, canonical_option(b.name)}:
+            if name in out and out[name] != b.value_slot:
+                raise ValueError(
+                    f"option name {name!r} is bound to two different slots: "
+                    f"{out[name]} and {b.value_slot}")
+            out[name] = b.value_slot
     return out
 
 
