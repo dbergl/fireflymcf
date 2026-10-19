@@ -205,9 +205,10 @@ twice been read as contradicting it and was wrong both times.
   controls from `newbutton.hold_safe_groups`; a compile gate refuses reusing a GuiCode-driven group.
 - The DGN registration cap is **83** and fails silently; 13.6 registers 66. `retarget_filter` refuses
   to cross it.
-- A received value is painted only if one of **46** fixed GuiCode bridge blocks copies its slot to a
-  cell. A new DGN can re-source an indicator; only an authored routine (`add_register_readout`) can add
-  a readout.
+- A received value is painted only if fixed GuiCode copies its slot to a cell a widget draws: on 13.6,
+  128 of 298 receive entries reach one (`fireflymcf bus-map`, GUICODE Finding 82; the "46" were only the
+  simple colour/bool blocks). A new DGN can re-source an indicator; only an authored routine
+  (`add_register_readout`) can add a readout.
 - A same-size rename cannot add a character. An icon is a character; a missing glyph draws the
   fallback.
 - **A control is three records**: draw, touch region, box. Move them together.
