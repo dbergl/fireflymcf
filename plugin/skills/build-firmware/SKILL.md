@@ -32,7 +32,7 @@ $F doctor $M                          # build name, sections, interlocks, tank b
 $F pages $M                           # each screen: --root index, --page name, header
 $F labels $M --containing "Pump"      # every record with that text, by object index
 $F pins $M                            # each G12 output: status cells and consumers
-$F bus-map $M                         # every message received and sent, and the panel's name
+$F bus-map $M --name "Pump"           # what a control sends and shows; no --name: summary
 $F patch $M /dev/null --list-colors   # the only colours a recolour can use
 $F ops                                # every change the engine can make; `$F ops NAME` for params
 $F render $M work/home.png --page home --config coach.json --placements work/home.json
@@ -57,8 +57,8 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
 - **Every bus number comes from a tool run on the owner's file**, never from memory or the
   RV-C spec: a tank instance, G12 channel, DGN or source address. Builds can differ. For any
   question about a message the panel receives or sends (what it does with it, which control
-  sends it, what the panel calls it), run `$F bus-map $M` (`--dgn X` for one DGN, `--json`
-  for all of it) and quote it; its RV-C name is the specification's, not Firefly's. Tank
+  sends it, what the panel calls it), run `$F bus-map $M` (a summary; `--name "water pump"`
+  for what the panel calls that, `--dgn X` for one DGN, `--json` for all of it) and quote it; its RV-C name is the specification's, not Firefly's. Tank
   instances: `doctor` lists what this file's G12 broadcasts on `1FFB7` TANK_STATUS, and
   `fireflymcf-tankpatch MCF` (report-only without a tank flag) is the tool that silences
   them (op `suppress_tank_status`). Quote that table. Its panel name is the caption the

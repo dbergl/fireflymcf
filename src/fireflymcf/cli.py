@@ -1171,19 +1171,33 @@ def _cmd_bus_map(args: argparse.Namespace) -> int:
     cols = ("entries", "named", "drawn", "drawn-unnamed", "config", "logic-only", "write-only",
             "untraced", "inert")
     cov = busmap.coverage(entries)
-    print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
-    print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
-    total = {c: 0 for c in cols}
-    for dgn, c in sorted(cov.items(), key=lambda kv: (-kv[1]["entries"], kv[0])):
-        print("%05X  %s  %s" % (dgn, " ".join("%7d" % c[k] for k in cols),
-                                busmap.spec_name(dgn) or "-"))
-        for k in cols:
-            total[k] += c[k]
-    print("%-6s %s" % ("total", " ".join("%7d" % total[k] for k in cols)))
-    print()
+    if not args.name:
+        print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
+        print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
+        total = {c: 0 for c in cols}
+        for dgn, c in sorted(cov.items(), key=lambda kv: (-kv[1]["entries"], kv[0])):
+            print("%05X  %s  %s" % (dgn, " ".join("%7d" % c[k] for k in cols),
+                                    busmap.spec_name(dgn) or "-"))
+            for k in cols:
+                total[k] += c[k]
+        print("%-6s %s" % ("total", " ".join("%7d" % total[k] for k in cols)))
+        print()
+    rows = bool(args.all or args.dgn or args.detail or args.name)
+    if not rows:
+        _print_send_map(sends, detail=False, rows=False)
+        print()
+        print("This is the summary. --name TEXT lists what the panel calls TEXT (e.g. --name "
+              "'water pump'), received and sent; --dgn X one DGN in full; --all every entry; "
+              "--json all of it.")
+        return 0
+    wanted = (lambda texts: _name_match(args.name, texts)) if args.name else (lambda texts: True)
+    if args.name:
+        print("RECEIVE -- what the panel calls %r" % args.name)
     print("%4s %-5s %-6s %-10s %-34s %s" % ("var", "DGN", "filter", "class", "panel name (source)",
                                            "evidence"))
     for e in entries:
+        if not wanted([n.text for n in e.names]):
+            continue
         filt = "-" if e.filter_value is None else (
             "%#04x" % e.filter_value if e.filter_byte == 0 and e.filter_mask == 0xFF
             else "b%d&%#04x=%#04x" % (e.filter_byte, e.filter_mask, e.filter_value))
@@ -1222,8 +1236,16 @@ def _cmd_bus_map(args: argparse.Namespace) -> int:
           "match what Firefly calls the message. --dgn X (repeatable) or --detail lists every "
           "sink and widget.")
     print()
-    _print_send_map(sends, detail=bool(args.dgn or args.detail))
+    _print_send_map(sends, detail=bool(args.dgn or args.detail), name=args.name)
     return 0
+
+
+def _name_match(name: str | None, texts) -> bool:
+    """Whether `name` (case and spacing ignored) occurs in any of `texts`; no name matches all."""
+    if not name:
+        return True
+    key = " ".join(name.lower().split())
+    return any(key in " ".join(str(t).lower().split()) for t in texts if t)
 
 
 def _ctl_text(controls, limit: int = 3) -> str:
@@ -1242,41 +1264,49 @@ def _ctl_text(controls, limit: int = 3) -> str:
     return "; ".join(items) + (" +%d more" % more if more > 0 else "") if items else "-"
 
 
-def _print_send_map(m, detail: bool) -> None:
+def _print_send_map(m, detail: bool, rows: bool = True, name: str | None = None) -> None:
     from . import sendmap
     cov = sendmap.coverage(m)
-    cols = ("bindings", "reached", "unattached", "dead", "named", "guicode", "touch",
-            "touch-test", "config-set", "other", "guicode-named")
-    nb = sum(1 for g in m.groups for e in g.entries if not e.stub)
-    print("SEND -- %d bindings in %d groups, %d GuiCode send sites, %d config-set calls"
-          % (nb, len(m.groups), len(m.guicode), len(m.config_calls)))
-    if m.lcd is not None:
-        sender_fn = dict(m.lcd.callers).get(m.lcd.binding_send)
-        others = [a for a, f in m.lcd.callers if f != sender_fn]
-        print("  every frame goes through the LCD transmit ring %#x: bindings from %#x (payload "
-              "copy %#x), GuiCode through its sender slot %s (API-table word %s); %d other LCD "
-              "call sites are the LCD firmware's own transmits, not decoded here (%s)"
-              % (m.lcd.transmit, m.lcd.binding_send, m.lcd.payload_copy,
-                 "%#x" % m.slot if m.slot else "?",
-                 ", ".join("%#x" % p for p in m.lcd.pointers) or "?", len(others),
-                 ", ".join("%#x" % a for a in others)))
-    short = {"bindings": "bind", "reached": "reach", "unattached": "unatt", "dead": "dead",
-             "named": "named", "guicode": "gcode", "touch": "touch", "touch-test": "test",
-             "config-set": "cfgset", "other": "other", "guicode-named": "gnamed"}
-    print("%-6s %s  %s" % ("DGN", " ".join("%6s" % short[c] for c in cols), "specification name"))
-    total = {c: 0 for c in cols}
-    for dgn, c in sorted(cov.items(), key=lambda kv: (-(kv[1]["bindings"] + kv[1]["guicode"]),
-                                                      kv[0])):
-        print("%-6s %s  %s" % ("%05X" % dgn if dgn >= 0 else "?", " ".join("%6d" % c[k] for k in cols),
-                               sendmap.spec_name(dgn if dgn >= 0 else None) or "-"))
-        for k in cols:
-            total[k] += c[k]
-    print("%-6s %s" % ("total", " ".join("%6d" % total[k] for k in cols)))
+    if name:
+        print("SEND -- what the panel calls %r" % name)
+    else:
+        cols = ("bindings", "reached", "unattached", "dead", "named", "guicode", "touch",
+                "touch-test", "config-set", "other", "guicode-named")
+        nb = sum(1 for g in m.groups for e in g.entries if not e.stub)
+        print("SEND -- %d bindings in %d groups, %d GuiCode send sites, %d config-set calls"
+              % (nb, len(m.groups), len(m.guicode), len(m.config_calls)))
+        if m.lcd is not None:
+            sender_fn = dict(m.lcd.callers).get(m.lcd.binding_send)
+            others = [a for a, f in m.lcd.callers if f != sender_fn]
+            print("  every frame goes through the LCD transmit ring %#x: bindings from %#x (payload "
+                  "copy %#x), GuiCode through its sender slot %s (API-table word %s); %d other LCD "
+                  "call sites are the LCD firmware's own transmits, not decoded here (%s)"
+                  % (m.lcd.transmit, m.lcd.binding_send, m.lcd.payload_copy,
+                     "%#x" % m.slot if m.slot else "?",
+                     ", ".join("%#x" % p for p in m.lcd.pointers) or "?", len(others),
+                     ", ".join("%#x" % a for a in others)))
+        short = {"bindings": "bind", "reached": "reach", "unattached": "unatt", "dead": "dead",
+                 "named": "named", "guicode": "gcode", "touch": "touch", "touch-test": "test",
+                 "config-set": "cfgset", "other": "other", "guicode-named": "gnamed"}
+        print("%-6s %s  %s" % ("DGN", " ".join("%6s" % short[c] for c in cols), "specification name"))
+        total = {c: 0 for c in cols}
+        for dgn, c in sorted(cov.items(), key=lambda kv: (-(kv[1]["bindings"] + kv[1]["guicode"]),
+                                                          kv[0])):
+            print("%-6s %s  %s" % ("%05X" % dgn if dgn >= 0 else "?", " ".join("%6d" % c[k] for k in cols),
+                                   sendmap.spec_name(dgn if dgn >= 0 else None) or "-"))
+            for k in cols:
+                total[k] += c[k]
+        print("%-6s %s" % ("total", " ".join("%6d" % total[k] for k in cols)))
+    if not rows:
+        return
     print()
     print("Binding groups -- a touch region whose id is the group number sends the group's "
           "entries (LCD FUN_0021B8B4)")
     print("%4s %-10s %-50s %s" % ("grp", "class", "control (pages)", "what it sends"))
     for g in m.groups:
+        if not _name_match(name, [t for c in g.controls for t in (c.caption, c.title)]
+                           + [n.text for e in g.entries for n in e.names]):
+            continue
         live = [e for e in g.entries if not e.stub]
         what = Counter()
         for e in live:
@@ -1300,6 +1330,9 @@ def _print_send_map(m, detail: bool) -> None:
     print("GuiCode sends -- `blx` through the sender slot, by what drives them")
     rows: dict = {}
     for s in m.guicode:
+        if not _name_match(name, [t for c in s.controls for t in (c.caption, c.title)]
+                           + [n.text for n in s.names]):
+            continue
         key = (s.context, s.touch_ids if s.context in ("touch", "touch-test") else s.function)
         rows.setdefault(key, []).append(s)
     for (ctx, who), ss in rows.items():
@@ -1331,6 +1364,8 @@ def _print_send_map(m, detail: bool) -> None:
         print("Config-set calls -- each sends 1EE00 <offset lo> <hi> <value> when the buffer byte "
               "changes")
         for c in m.config_calls:
+            if not _name_match(name, [c.option]):
+                continue
             who = ", ".join("%#x %s" % ie for ie in c.touch_ids) if c.touch_ids else \
                 "function %#x" % c.function
             print("  @%#x offset %-5s value %-4s %-28s %s %s" % (
@@ -1778,6 +1813,10 @@ def main(argv: list[str] | None = None) -> int:
                    help="only this DGN, in hex (e.g. 1FFB7); repeatable; lists every sink")
     p.add_argument("--detail", action="store_true",
                    help="under each entry, list every sink and widget")
+    p.add_argument("--name", metavar="TEXT",
+                   help="only what the panel calls TEXT (case-insensitive), received and sent")
+    p.add_argument("--all", action="store_true",
+                   help="list every entry and send (the default prints the summary tables)")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.set_defaults(func=_cmd_bus_map)
 
