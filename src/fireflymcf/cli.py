@@ -469,6 +469,15 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                               "couplings": [{"with_option": k, "handlers": v}
                                             for k, v in sorted(by_option.items())]}
 
+    # The G12's 1FFB7 TANK_STATUS broadcasts, read from its rule table (`tankbroadcast`): the
+    # instance numbers are this file's; the names are the RV-C standard's for each number.
+    def _tanks():
+        from . import tankbroadcast
+        return [{"instance": b.instance, "rvc_name": b.tank,
+                 "broadcasting": b.activate_at is not None, "config_gated": b.guarded}
+                for b in tankbroadcast.tank_broadcasts(data)]
+    info["tank_broadcasts"] = _try(_tanks, [])
+
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
@@ -504,6 +513,19 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             "reported only (removal not validated for this build)"
         for c in info["interlocks"]["couplings"]:
             a(f"  generator/AES mode ↔ {c['with_option']}  ({c['handlers']} handler(s); {verb})")
+    a("")
+    a("Tank broadcasts (1FFB7 TANK_STATUS instances this file's G12 sends):")
+    if info["tank_broadcasts"] == UNAVAILABLE:
+        a(f"  {NEEDS}")
+    elif not info["tank_broadcasts"]:
+        a("  none found on this build")
+    else:
+        for t in info["tank_broadcasts"]:
+            state = ("silent" if not t["broadcasting"] else
+                     "broadcasting, behind a config gate" if t["config_gated"] else "broadcasting")
+            a(f"  instance {t['instance']:<3}  RV-C name: {t['rvc_name']:<18} {state}")
+        a("  The numbers are this file's; the names are the RV-C standard's, not the firmware's.")
+        a("  Silence one with `fireflymcf-tankpatch` (report-only without a tank flag).")
     a("")
     a("What you can do on this build (all build-general, all gated):")
     a("  • Same-size edits — rename / move / recolour a label, swap a logo — pass the full")

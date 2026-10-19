@@ -298,3 +298,11 @@ def test_extraction_works_on_every_build_in_the_corpus(tmp_path):
         assert run(source, "--extract-g12", out) == 0
         assert out.read_bytes() == g12(source.read_bytes())
         assert len(out.read_bytes()) > 0
+
+
+def test_the_report_says_the_names_are_rvc_not_the_firmwares(capsys):
+    """The instance numbers are read from the G12's rules; the names beside them are the RV-C
+    standard's table. An agent must not take them for the firmware's own label."""
+    assert run(STOCK) == 0
+    out = capsys.readouterr().out
+    assert "RV-C name" in out and "read from this file" in out
