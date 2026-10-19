@@ -63,6 +63,7 @@ every section first, and the identify() result after it, clearly labelled.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import re
 import sys
@@ -487,6 +488,30 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                 for b in tankbroadcast.tank_broadcasts(data)]
     info["tank_broadcasts"] = _try(_tanks, [])
 
+    # The bus map's totals, by class (`busmap.receive_map`, `busmap.send_map`), with `--bus`: they
+    # need the GuiCode traces (~5 s, more than the rest of this report), so they are opt-in.
+    # Counted without the OUTPUTS-page names, most of a full map's cost; `bus-map` has every
+    # message with the panel's names.
+    def _bus():
+        from . import busmap, sendmap
+        recv = busmap.receive_map(data, None, False)
+        sm = busmap.send_map(data, None, False)
+        live = [(g, e) for g in sm.groups for e in g.entries if not e.stub]
+        return {
+            "receive": {"entries": len(recv), "dgns": len({e.dgn for e in recv}),
+                        **{c: sum(1 for e in recv if e.cls == c) for c in busmap.CLASSES}},
+            "send": {"bindings": len(live), "groups": len(sm.groups),
+                     "dgns": len({e.dgn for _g, e in live} | {s.dgn for s in sm.guicode
+                                                              if s.dgn is not None}),
+                     **{c: sum(1 for g, _e in live if g.cls == c)
+                        for c in sendmap.GROUP_CLASSES if c != "stub"},
+                     "guicode_sites": len(sm.guicode),
+                     **{"guicode_" + c: sum(1 for x in sm.guicode if x.context == c)
+                        for c in sendmap.CONTEXTS},
+                     "config_set_calls": len(sm.config_calls)},
+        }
+    info["bus"] = _try(_bus, None) if getattr(args, "bus", False) else "not requested"
+
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
@@ -540,6 +565,24 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             a("  Where the panel name is `-`, the RV-C name is the RV-C specification's name and may")
             a("  not match what Firefly calls that tank.")
         a("  Silence one with `fireflymcf-tankpatch` (report-only without a tank flag).")
+    a("")
+    a("Bus map (`bus-map` lists every message with what the panel calls it):")
+    bus = info["bus"]
+    if bus == "not requested":
+        a("  run `doctor --bus` for the receive and send totals (about 5 s more)")
+    elif bus == UNAVAILABLE:
+        a(f"  {NEEDS}")
+    elif not bus:
+        a("  could not be read on this build")
+    else:
+        r, t = bus["receive"], bus["send"]
+        a(f"  receives: {r['entries']} filter entries on {r['dgns']} DGNs -- {r['drawn']} reach a "
+          f"painted cell, {r['config']} the config, {r['logic-only']} logic only, "
+          f"{r['write-only']} written and never read, {r['untraced']} untraced, {r['inert']} inert")
+        a(f"  sends:    {t['bindings']} bindings in {t['groups']} groups -- {t['reached']} on a "
+          f"control a page draws, {t['unattached']} only on undrawn objects, {t['dead']} on no "
+          f"control; {t['guicode_sites']} GuiCode send sites ({t['guicode_touch']} from touch "
+          f"handlers, {t['guicode_other']} per-tick or other); {t['config_set_calls']} config-set calls")
     a("")
     a("What you can do on this build (all build-general, all gated):")
     a("  • Same-size edits — rename / move / recolour a label, swap a logo — pass the full")
@@ -1110,35 +1153,51 @@ def _parse_dgn(text: str) -> int:
 
 
 def _cmd_bus_map(args: argparse.Namespace) -> int:
-    """The bus map's receive side: every receive-filter entry, what the panel does with it and
-    what the panel calls it (`busmap.py`). A send side will join it (phase 3)."""
-    from . import busmap
+    """The bus map: every receive-filter entry, what the panel does with it and what the panel
+    calls it (`busmap.receive_map`), then every way the panel transmits (`busmap.send_map`)."""
+    from . import busmap, sendmap
     data = Path(args.image).read_bytes()
     dgns = frozenset(_parse_dgn(d) for d in args.dgn) if args.dgn else None
     entries = busmap.receive_map(data, dgns)
+    sends = busmap.send_map(data, dgns)
     if args.json:
         cov = busmap.coverage(entries)
         print(json.dumps({
             "receive": [busmap.as_json(e) for e in entries],
             "coverage": {"%05X" % d: dict(c) for d, c in sorted(cov.items())},
+            "send": sendmap.as_json(sends),
         }, indent=2))
         return 0
     cols = ("entries", "named", "drawn", "drawn-unnamed", "config", "logic-only", "write-only",
             "untraced", "inert")
     cov = busmap.coverage(entries)
-    print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
-    print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
-    total = {c: 0 for c in cols}
-    for dgn, c in sorted(cov.items(), key=lambda kv: (-kv[1]["entries"], kv[0])):
-        print("%05X  %s  %s" % (dgn, " ".join("%7d" % c[k] for k in cols),
-                                busmap.spec_name(dgn) or "-"))
-        for k in cols:
-            total[k] += c[k]
-    print("%-6s %s" % ("total", " ".join("%7d" % total[k] for k in cols)))
-    print()
+    if not args.name:
+        print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
+        print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
+        total = {c: 0 for c in cols}
+        for dgn, c in sorted(cov.items(), key=lambda kv: (-kv[1]["entries"], kv[0])):
+            print("%05X  %s  %s" % (dgn, " ".join("%7d" % c[k] for k in cols),
+                                    busmap.spec_name(dgn) or "-"))
+            for k in cols:
+                total[k] += c[k]
+        print("%-6s %s" % ("total", " ".join("%7d" % total[k] for k in cols)))
+        print()
+    rows = bool(args.all or args.dgn or args.detail or args.name)
+    if not rows:
+        _print_send_map(sends, detail=False, rows=False)
+        print()
+        print("This is the summary. --name TEXT lists what the panel calls TEXT (e.g. --name "
+              "'water pump'), received and sent; --dgn X one DGN in full; --all every entry; "
+              "--json all of it.")
+        return 0
+    wanted = (lambda texts: _name_match(args.name, texts)) if args.name else (lambda texts: True)
+    if args.name:
+        print("RECEIVE -- what the panel calls %r" % args.name)
     print("%4s %-5s %-6s %-10s %-34s %s" % ("var", "DGN", "filter", "class", "panel name (source)",
                                            "evidence"))
     for e in entries:
+        if not wanted([n.text for n in e.names]):
+            continue
         filt = "-" if e.filter_value is None else (
             "%#04x" % e.filter_value if e.filter_byte == 0 and e.filter_mask == 0xFF
             else "b%d&%#04x=%#04x" % (e.filter_byte, e.filter_mask, e.filter_value))
@@ -1176,7 +1235,148 @@ def _cmd_bus_map(args: argparse.Namespace) -> int:
           "inferred-from-data). The specification name is the RV-C/J1939 standard's and may not "
           "match what Firefly calls the message. --dgn X (repeatable) or --detail lists every "
           "sink and widget.")
+    print()
+    _print_send_map(sends, detail=bool(args.dgn or args.detail), name=args.name)
     return 0
+
+
+def _name_match(name: str | None, texts) -> bool:
+    """Whether `name` (case and spacing ignored) occurs in any of `texts`; no name matches all."""
+    if not name:
+        return True
+    key = " ".join(name.lower().split())
+    return any(key in " ".join(str(t).lower().split()) for t in texts if t)
+
+
+def _ctl_text(controls, limit: int = 3) -> str:
+    """`'Water Pump' (HOME)` for the attached controls first; a title in brackets when the
+    control itself carries no caption."""
+    seen: dict = {}
+    for c in sorted(controls, key=lambda c: (not c.attached, not c.pages, c.obj)):
+        key = c.caption or ("[in %r]" % c.title if c.title else "object %d" % c.obj)
+        if c.caption and c.title and c.title != c.caption and c.rule == "control":
+            key = "%s [in %r]" % (c.caption, c.title)
+        seen.setdefault(key, set()).update(c.pages if c.attached else ("unattached",))
+    items = ["%s%s" % (k if k.startswith(("[", "object")) else repr(k),
+                       " (%s)" % ", ".join(sorted(v)) if v else "")
+             for k, v in list(seen.items())[:limit]]
+    more = len(seen) - limit
+    return "; ".join(items) + (" +%d more" % more if more > 0 else "") if items else "-"
+
+
+def _print_send_map(m, detail: bool, rows: bool = True, name: str | None = None) -> None:
+    from . import sendmap
+    cov = sendmap.coverage(m)
+    if name:
+        print("SEND -- what the panel calls %r" % name)
+    else:
+        cols = ("bindings", "reached", "unattached", "dead", "named", "guicode", "touch",
+                "touch-test", "config-set", "other", "guicode-named")
+        nb = sum(1 for g in m.groups for e in g.entries if not e.stub)
+        print("SEND -- %d bindings in %d groups, %d GuiCode send sites, %d config-set calls"
+              % (nb, len(m.groups), len(m.guicode), len(m.config_calls)))
+        if m.lcd is not None:
+            sender_fn = dict(m.lcd.callers).get(m.lcd.binding_send)
+            others = [a for a, f in m.lcd.callers if f != sender_fn]
+            print("  every frame goes through the LCD transmit ring %#x: bindings from %#x (payload "
+                  "copy %#x), GuiCode through its sender slot %s (API-table word %s); %d other LCD "
+                  "call sites are the LCD firmware's own transmits, not decoded here (%s)"
+                  % (m.lcd.transmit, m.lcd.binding_send, m.lcd.payload_copy,
+                     "%#x" % m.slot if m.slot else "?",
+                     ", ".join("%#x" % p for p in m.lcd.pointers) or "?", len(others),
+                     ", ".join("%#x" % a for a in others)))
+        short = {"bindings": "bind", "reached": "reach", "unattached": "unatt", "dead": "dead",
+                 "named": "named", "guicode": "gcode", "touch": "touch", "touch-test": "test",
+                 "config-set": "cfgset", "other": "other", "guicode-named": "gnamed"}
+        print("%-6s %s  %s" % ("DGN", " ".join("%6s" % short[c] for c in cols), "specification name"))
+        total = {c: 0 for c in cols}
+        for dgn, c in sorted(cov.items(), key=lambda kv: (-(kv[1]["bindings"] + kv[1]["guicode"]),
+                                                          kv[0])):
+            print("%-6s %s  %s" % ("%05X" % dgn if dgn >= 0 else "?", " ".join("%6d" % c[k] for k in cols),
+                                   sendmap.spec_name(dgn if dgn >= 0 else None) or "-"))
+            for k in cols:
+                total[k] += c[k]
+        print("%-6s %s" % ("total", " ".join("%6d" % total[k] for k in cols)))
+    if not rows:
+        return
+    print()
+    print("Binding groups -- a touch region whose id is the group number sends the group's "
+          "entries (LCD FUN_0021B8B4)")
+    print("%4s %-10s %-50s %s" % ("grp", "class", "control (pages)", "what it sends"))
+    for g in m.groups:
+        if not _name_match(name, [t for c in g.controls for t in (c.caption, c.title)]
+                           + [n.text for e in g.entries for n in e.names]):
+            continue
+        live = [e for e in g.entries if not e.stub]
+        what = Counter()
+        for e in live:
+            what["%05X %s" % (e.dgn, e.describe().split(" level")[0] if e.dgn == 0x1FEDB
+                               else e.describe())] += 1
+        summary = "; ".join(("%s x%d" % (k, n)) if n > 1 else k for k, n in what.items())
+        flag = " [GuiCode sets the variant]" if g.guicode_variant else ""
+        print("%4d %-10s %-50s %s%s" % (g.group, g.cls, _ctl_text(g.controls)[:50],
+                                        summary[:160] if not detail else "", flag))
+        if detail:
+            for e in g.entries:
+                if e.stub:
+                    print("%20sbinding %d: ff ff stub" % ("", e.index))
+                    continue
+                names = ", ".join("%r (%s)" % (n.text, n.source) for n in e.names[:4])
+                print("%20sbinding %d v%d %s%s %05X %s%s%s" % (
+                    "", e.index, e.variant, "+".join(e.phases) or "-",
+                    " repeat" if e.repeats else "", e.dgn, e.describe(),
+                    " from SA 0x00" if e.source_zero else "", " -- " + names if names else ""))
+    print()
+    print("GuiCode sends -- `blx` through the sender slot, by what drives them")
+    rows: dict = {}
+    for s in m.guicode:
+        if not _name_match(name, [t for c in s.controls for t in (c.caption, c.title)]
+                           + [n.text for n in s.names]):
+            continue
+        key = (s.context, s.touch_ids if s.context in ("touch", "touch-test") else s.function)
+        rows.setdefault(key, []).append(s)
+    for (ctx, who), ss in rows.items():
+        if ctx in ("touch", "touch-test"):
+            head = ", ".join("%#x %s" % ie for ie in who)
+        else:
+            head = "function %#x" % who
+        ctl = _ctl_text(ss[0].controls)
+        frames = Counter()
+        for s in ss:
+            f = s.frame
+            d = "%05X" % f.dgn if f.dgn is not None else f.dgn_expr
+            frames["%s %s" % (d, f.reading())] += 1
+        print("  %-10s %-26s %s" % (ctx, head[:26], ctl if ctl != "-" else ""))
+        if detail:
+            for s in ss:
+                f = s.frame
+                names = ", ".join("%r (%s)" % (n.text, n.source) for n in s.names
+                                  if n.source != "control")
+                print("%16s@%#x %s %s%s%s" % ("", s.at, "%05X" % f.dgn if f.dgn is not None
+                                              else f.dgn_expr, f.reading(),
+                                              " (template %#x)" % f.template if f.template else "",
+                                              " -- " + names if names else ""))
+        else:
+            print("%16s%s" % ("", "; ".join(("%s x%d" % (k, n)) if n > 1 else k
+                                             for k, n in frames.items())[:180]))
+    if m.config_calls:
+        print()
+        print("Config-set calls -- each sends 1EE00 <offset lo> <hi> <value> when the buffer byte "
+              "changes")
+        for c in m.config_calls:
+            if not _name_match(name, [c.option]):
+                continue
+            who = ", ".join("%#x %s" % ie for ie in c.touch_ids) if c.touch_ids else \
+                "function %#x" % c.function
+            print("  @%#x offset %-5s value %-4s %-28s %s %s" % (
+                c.at, "%#x" % c.offset if c.offset is not None else "?",
+                c.value if c.value is not None else "?", repr(c.option) if c.option else "-",
+                c.context, who))
+    print()
+    print("class: reached = a touch region on the screen tree names the group; unattached = only "
+          "objects the screen tree does not reach do; dead = no touch region names it. Captions "
+          "are record order (inferred-from-data); outputs-page and option names are "
+          "proven-from-code. --dgn X or --detail lists every entry and send.")
 
 
 # Every name `gestures.GroupBehaviour.kind_for_variant` can return. Listed here rather than
@@ -1524,6 +1724,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="one report of what this firmware contains and what you can safely change")
     p.add_argument("image")
     p.add_argument("--json", action="store_true")
+    p.add_argument("--bus", action="store_true",
+                   help="also count every received and sent message by class (the bus map's "
+                        "totals; about 5 s more; `bus-map` lists them)")
     p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser("pages",
@@ -1603,13 +1806,17 @@ def main(argv: list[str] | None = None) -> int:
     p.set_defaults(func=_cmd_pins)
 
     p = sub.add_parser("bus-map",
-                       help="every RV-C message the panel receives: what it does with it and "
-                            "what the panel calls it (see busmap.py)")
+                       help="every RV-C message the panel receives and sends: what it does with "
+                            "it and what the panel calls it (see busmap.py, sendmap.py)")
     p.add_argument("image")
     p.add_argument("--dgn", action="append", default=[],
                    help="only this DGN, in hex (e.g. 1FFB7); repeatable; lists every sink")
     p.add_argument("--detail", action="store_true",
                    help="under each entry, list every sink and widget")
+    p.add_argument("--name", metavar="TEXT",
+                   help="only what the panel calls TEXT (case-insensitive), received and sent")
+    p.add_argument("--all", action="store_true",
+                   help="list every entry and send (the default prints the summary tables)")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.set_defaults(func=_cmd_bus_map)
 

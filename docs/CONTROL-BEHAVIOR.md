@@ -82,7 +82,23 @@ object index is checkable by rendering it.
 `gestures.is_group_id(data, id)` answers which class an id is; `gestures.touch_ids(data, obj)`
 lists the ids a screen object registers.
 
-### When a class-2 handler fires: the ID-CHANGE EDGE, i.e. on PRESS — `proven-from-code`
+### When a class-2 handler fires: the ID-CHANGE EDGE — on PRESS for 22 ids, on RELEASE for the rest — `proven-from-code`
+
+> **CORRECTED 2026-10-19 (`GUICODE.md` Finding 83).** This section said every class-2 handler
+> runs on touch-down. Only the **22** ids of the first search do (13.6: `0xFF`, `0x7E8`, `0x80C`,
+> `0x838`, `0x906`-`0x90C`, `0xB5F`-`0xB63`, `0xBC3`, `0xBD0`, `0xFA0`, `0xFA1`, `0x1795`,
+> `0x1C90`). The `0xFF` handler -- finger lifted -- clears the two deadlines and then runs a
+> **second binary search on `r2`, the id latched on the previous pass**, which still holds the id
+> that was under the finger: `movw r3,#0x846` / `cmp r2,r3` / `beq.w 0x24CB4E` at `0x0024B024`.
+> `r2` is loaded at `0x0024ACB8` (`ldrh r2,[r2,#0xe]`) and the search path to the `0xFF`
+> handler writes only `r1`/`r3`. **108** ids are dispatched there, on release: every OPTIONS
+> row, the nav rail, the floorplan picks, `Tank Heater` (`0x851`), `0x838`'s tap. So "a
+> release-edge handler keyed on the latched previous id, which nothing implements" (below) is
+> wrong: the stock dispatcher is mostly that. It also explains the `cmp r3,#0x11` guard on
+> `0x838`'s tap at `0x0024C8B0` (§7): the tap runs at lift, after a completed hold has already
+> written screen 17. `sendmap.touch_dispatch` walks both searches; the table below holds for the
+> 22 press ids. *Prediction:* an OPTIONS row's `1FED9` write leaves the bus when the finger
+> lifts, not when it lands -- hold the row for three seconds and the frame comes at the lift.
 
 Added 2026-08-23. §1 said which ids reach the GuiCode action dispatcher but never said *when* it
 runs, and the answer constrains what a class-2 control can be made to do.
@@ -123,8 +139,9 @@ e.g. tap to toggle a load, hold to open a page: the load would switch every time
 the page. Nor does swapping them help. If the tap navigates, the navigation changes what sits
 under the finger, the id changes, and the hold consumer's "id still matches" test fails — a
 navigating tap **cancels its own hold**. Giving one region a side-effecting tap *and* a hold needs
-new GuiCode (a release-edge handler keyed on the latched previous id, which nothing implements),
-not a data edit. The buildable alternative is the tank-cluster pattern: put the hold on a
+new GuiCode, not a data edit (the release-edge dispatch this sentence said nothing implements
+exists -- see the correction above -- but a hold consumer on a release id still sees the tap
+after the hold, so the composition is a GuiCode change either way). The buildable alternative is the tank-cluster pattern: put the hold on a
 **separate, non-overlapping** region beside the control.
 
 ### How a widget's id reaches the hit test — `proven-from-code`

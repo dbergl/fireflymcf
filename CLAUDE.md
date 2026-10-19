@@ -71,7 +71,8 @@ python3 -m venv .venv && .venv/bin/pip install -e '.[full,test]'
 scripts/link-research.sh [RESEARCH_REPO]           # link the research data (default ../firefly-firmware)
 python3 -m pytest tests/ -q -n auto                # the suite (see docs/TESTING.md); first run fills the compile cache
 (cd ../firefly-firmware && .venv/bin/python -m pytest tests -q -n auto)   # after an engine change: the reference builds, byte for byte
-fireflymcf doctor MCF                              # what a build is and which edits are safe on it
+fireflymcf doctor MCF [--bus]                      # what a build is and which edits are safe on it
+fireflymcf bus-map MCF [--dgn X] [--json]          # every message received and sent, and what the panel calls it
 fireflymcf validate MCF-PROJECT.ffproj.json        # pre-flash PASS/FAIL gate (writes nothing)
 fireflymcf pages MCF                               # every screen with its --root index
 fireflymcf labels MCF --containing TEXT            # label records with their object index
@@ -100,7 +101,8 @@ twice been read as contradicting it and was wrong both times.
   (`FUN_00252CB0`), layout engine (`FUN_00257BFC`), renderer (`FUN_00256C54`) and the LCD's header,
   directory and variable-table reads (`FUN_0021BE50`/`FUN_0021C760`) are located, so GuiData
   structure can be proven, and the group table is (LCD `FUN_0021B420`). Still `inferred-from-data`:
-  the binding table's DGN-low and payload fields (its `+2`/`+3` are proven), the floorplan table,
+  what a binding's payload bytes mean per DGN (its DGN, `+2`/`+3` and payload order are proven,
+  `GUICODE.md` Finding 83), the floorplan table,
   OPTIONS-row semantics, and undecoded fields.
 - **Answer from the code first; use the coach to validate.** Derive the mechanism, state its
   prediction, then spend coach time confirming it. Check `docs/BUS-BASELINE.md` before asking for
@@ -231,6 +233,10 @@ twice been read as contradicting it and was wrong both times.
   be silenced when a routine feeds a stock cell.
 - Option interlocks are enforced by the panel on selection only, and differ per build: none on
   11.23, mode ↔ Progressive Inverter on 13.6, mode ↔ Lithionics on 14.7. `uncouple` refuses 14.7.
+- **Most class-2 touch actions run on release.** GuiCode's dispatcher handles 22 ids on press;
+  its `0xFF` (finger lifted) handler dispatches 108 more (13.6) on the latched previous id: the
+  OPTIONS rows, the nav rail, the floorplan picks (`sendmap.touch_dispatch`, GUICODE Finding 83).
+  `fireflymcf bus-map` lists every message the panel sends and what sends it.
 - Tools pinned to 13.6 addresses assert the expected bytes and refuse on another build.
 
 ## Working here

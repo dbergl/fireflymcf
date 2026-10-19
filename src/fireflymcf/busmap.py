@@ -519,17 +519,18 @@ def _classify(mode: int, reads: tuple, effects: list, var: int, data: bytes) -> 
 
 
 @memo.content_cached(copy=None)
-def receive_map(data: bytes, dgns: frozenset | None = None) -> tuple:
+def receive_map(data: bytes, dgns: frozenset | None = None, pin_names: bool = True) -> tuple:
     """A `ReceiveEntry` per receive-filter entry, in var order; only those matching `dgns` (a
     frozenset of 18-bit DGNs) when given. The OUTPUTS-page names are read only when a
-    `DC_DIMMER_STATUS_3` entry is included (`outputs.output_name_variants` runs GuiCode's string
-    block under every input and is most of the cost)."""
+    `DC_DIMMER_STATUS_3` entry is included and `pin_names` is set (`outputs.output_name_variants`
+    runs GuiCode's string block under every input and is most of the cost; `doctor` counts
+    classes without it)."""
     from . import config
     table = [v for v in guidata.variable_table(data)
              if dgns is None or entry_dgn(v.raw) in dgns]
     out_names: dict = {}
     captions: dict = {}
-    if any(entry_dgn(v.raw) == DGN_DC_DIMMER_STATUS_3 for v in table):
+    if pin_names and any(entry_dgn(v.raw) == DGN_DC_DIMMER_STATUS_3 for v in table):
         try:
             out_names = outputs.output_name_variants(data)
         except ValueError:
@@ -639,3 +640,10 @@ def as_json(e: ReceiveEntry) -> dict:
                     for x in e.effects],
         "frame_parsers": ["%#x" % f for f in e.frame_parsers],
     }
+
+
+def send_map(data: bytes, dgns: frozenset | None = None, names: bool = True):
+    """The send side: every way the panel transmits, with what the panel calls each message
+    (`sendmap.py`, `GUICODE.md` Finding 83)."""
+    from . import sendmap
+    return sendmap.send_map(data, dgns, names)

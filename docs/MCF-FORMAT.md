@@ -50,8 +50,9 @@ they parse most of GuiData's *structure*:
   field order in §6 is a transcription of that decoder, validated by a boundary oracle on
   every object in all three builds.
 
-What stays `inferred-from-data` is narrower and specific: the **group and binding tables**
-(§5.2, §5.3), the **floorplan table** (§7), the OPTIONS-row screen semantics (§6.1), and the
+What stays `inferred-from-data` is narrower and specific: the **group and binding tables'**
+remaining fields (§5.2, §5.3; a binding's DGN and payload positions are `proven-from-code` since
+`GUICODE.md` Finding 83), the **floorplan table** (§7), the OPTIONS-row screen semantics (§6.1), and the
 *meaning* of individual undecoded fields everywhere. Read each label; do not assume a
 section-wide default in either direction.
 
@@ -829,12 +830,13 @@ though it sits at binding entry 397 in 13.6, 402 in 11.23 and 394 in 14.7.
 
 | offset | width | meaning | confidence |
 |---|---|---|---|
-| `+0x00` | u16 | low 16 bits of the RV-C DGN (`0xFEDB` = `DC_DIMMER_COMMAND_2`, `0xFED9` = `GENERIC_INDICATOR_COMMAND`, …) | `inferred-from-data` |
+| `+0x00` | u16 | low 16 bits of the RV-C DGN (`0xFEDB` = `DC_DIMMER_COMMAND_2`, `0xFED9` = `GENERIC_INDICATOR_COMMAND`, …): the sender inserts the entry's first u32's low 18 bits at CAN-id bit 8 (`ldr r1,[r4]` @`0x0021B9AA`, `bfi r2,r1,#8,#0x12` @`0x0021B9B4`; `GUICODE.md` Finding 83) | `proven-from-code` (2026-10-19; was `inferred-from-data`) |
 | `+0x02` bits 0-1 | — | DGN bits 16-17 (the DGN is 18 bits; `db fe 01` = `0x1FEDB`) | `proven-from-code` |
 | `+0x02` bit 2 | flag | **this frame is re-sent on the repeat ticks**, not only on the first tick of its phase (`lsls r1,r2,#0x1d` / `bpl` @`0x0021B950`) | `proven-from-code` |
 | `+0x02` bits 4-7 | u4 | **variant** — matched against a *runtime* counter (`cmp sl,r2,lsr #4` @`0x0021B946`), which is why no file byte selects it. **ANSWERED 2026-08-19**; this row used to read "What selects a variant is not known" | `proven-from-code` |
 | `+0x03` | u8 | **gesture-phase mask**: `1` press, `2` short-tap release, `4` while held, `8` release after a hold. **ANSWERED 2026-08-19**; this row used to read "varies within a group" | `proven-from-code` |
-| `+0x04 .. +0x0B` | 8 B | the eight CAN data bytes, in the order 3,2,1,0,7,6,5,4 (two little-endian u32s) | `inferred-from-data` — see below |
+| `+0x02` bit 3 | flag | **sets CAN-id bit 29** (`ubfx r1,r1,#3,#1` / `bfi r2,r1,#5,#1` @`0x0021B9C4`/`0x0021B9C8`), which makes the transmit ring `FUN_0021825C` take the source address from the frame's own byte 0 instead of the panel's (`lsls r3,r3,#0x1a` / `bpl` @`0x00218282`) -- and the binding sender zeroes byte 0 (`strb fp,[r2,#-0xc]!` @`0x0021B9D4`). So such an entry goes out from SA `0x00`. Set on two live entries per build, `0x0EF42` `10 FF FF 00 ..`: 13.6 bindings 435/598 in groups 127/185, which no 13.6 touch region names; 11.23's group 185 is ELECTRICAL's `Inverter/Charger` | `proven-from-code` (2026-10-19) |
+| `+0x04 .. +0x0B` | 8 B | the eight CAN data bytes, in the order 3,2,1,0,7,6,5,4 (two little-endian u32s): `FUN_0021B890` copies `src[3,2,1,0,7,6,5,4]` to `dst[0..7]` (`0x0021B890`-`0x0021B8AE`), called with `src` = entry `+4` (`adds r1,r4,#4` @`0x0021B9CC`) | `proven-from-code` (2026-10-19; was `inferred-from-data`); the value of each byte is the DGN's business |
 
 Consequence, and the form the reader actually uses: for `0xFEDB` entries the byte at
 `+0x07` is CAN data byte 0, the RV-C **instance** — i.e. the G12 channel and the PDF pin.
@@ -854,8 +856,10 @@ on the coach exactly:
 | `d9 fe 05 0e 0f 16 96 ff ff d3 ff ff` | `ff 96 16 0f ff ff d3 ff` | PC.2's read-back request, byte for byte |
 | `d9 fe 01 01 ff 01 94 ff ff e5 ff 1c` | `ff 94 01 ff 1c ff e5 ff` | PC.7's *unexplained* group-`0x94` frame, byte for byte |
 
-The frame *values* are `observed-on-hardware`; the claim that these byte positions are the
-payload is `inferred-from-data`.
+The frame *values* are `observed-on-hardware`; that these byte positions are the payload, in
+this order, is now `proven-from-code` (`GUICODE.md` Finding 83: the payload copy `FUN_0021B890`
+and the id assembly in `FUN_0021B8B4`). Priority is not in the entry: the sender writes 6
+(`movs r3,#6` / `bfi r2,r3,#2,#3` @`0x0021B9B2`/`0x0021B9C0`).
 
 ### 5.4 Variable table (`+0x2A70`)
 
