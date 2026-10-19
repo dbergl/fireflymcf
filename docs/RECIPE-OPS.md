@@ -47,7 +47,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02 (v12). | yes |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
-| [`set_gesture`](#set_gesture) | same-size | Convert a control's single toggle group to hold-to-toggle. | Flashed 2026-08-19 (pins 28 and 29). | yes |
+| [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle. The multi-binding path is UNVERIFIED (the op reports itself unverified when it takes it). | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
 | [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04 (v17). | yes |
 | [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
@@ -340,9 +340,9 @@ Error codes:
 
 ### set_gesture
 
-Convert a control's single toggle group to hold-to-toggle.
+Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129).
 
-- **Hardware status:** Flashed 2026-08-19 (pins 28 and 29).
+- **Hardware status:** Flashed 2026-08-19 (pins 28 and 29) for a single toggle. The multi-binding path is UNVERIFIED (the op reports itself unverified when it takes it).
 - **Proof:** `gestures.py`, `CONTROL-BEHAVIOR.md`
 - **Implementation:** `recipe_ops.SetGesture`
 
@@ -358,7 +358,7 @@ Error codes:
 - `BAD_PARAMS` — kind is not one of "latch"/"hold_to_toggle"
 - `NOT_SUPPORTED` — kind="latch" was requested on a group whose current `.kind` is not already "latch"; v1 has no latch-conversion primitive. offers=["disable_gesture_op"] — the fix is to remove/disable whichever earlier op made the group non-latch, not to fit a new edit here.
 - `NO_SUCH_GROUP` — the group could not be resolved at all: `group` (or the group `target` resolves to via `newbutton.object_group`) is out of range (`gestures.describe_group` raises a bare `IndexError`), or `target` names an object with no `IMAGE_OPCODE` record to read a group off of (`newbutton.object_group` raises a bare `ValueError`). Both are mapped here rather than left to crash `compile_project` unstructured; a `RecipeError` raised underneath (e.g. `resolve_target`'s own `BAD_REF`, which subclasses `ValueError`) is never remapped — it is re-raised as-is.
-- `GESTURE_REFUSED` — `gestures.make_hold_to_toggle` raised `GestureEditError`: the group does not hold exactly one live binding, that binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle, it already carries the repeat bit, or `seconds` does not fit the hold-threshold nibble.
+- `GESTURE_REFUSED` — `gestures.make_hold_to_toggle` raised `GestureEditError`: a single-entry group's binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle or carries the repeat bit; a multi-binding group fails one of the five premises (no repeat bit, one DGN/selector target, variants agreeing on a release toggle, variants that write 0 and 1 or all command-5 toggles, no variant cycling on release); the group has no live binding; or `seconds` does not fit the hold-threshold nibble.
 
 ### set_icon
 

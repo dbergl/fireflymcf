@@ -2522,9 +2522,13 @@ class InstallGlyph(Op):
 @op("set_gesture")
 class SetGesture(Op):
     """Change one control group's interaction model. v1 supports exactly one
-    direction: converting a single-entry command-5 toggle group to hold-to-toggle
-    (`gestures.make_hold_to_toggle`, hardware-confirmed 2026-08-19 on the pin-29
-    Starlink button). Converting the other way (`kind: "latch"`) is not implemented
+    direction: converting a toggle group to hold-to-toggle
+    (`gestures.make_hold_to_toggle`). A single-entry command-5 toggle is
+    hardware-confirmed (2026-08-19, the pin-29 Starlink button). A variant-selected
+    multi-binding group (13.6's group 129, Low Volts: a selector write that the
+    group's external variant setter points at 0 or 1, plus its read-back) gets the
+    same edit on every live copy; that path is HARDWARE-UNVERIFIED, and this op
+    reports itself unverified when it takes it. Converting the other way (`kind: "latch"`) is not implemented
     for anything that is not already a latch -- it verifies and no-ops on a latch,
     and refuses everything else rather than half-editing it.
 
@@ -2560,10 +2564,14 @@ class SetGesture(Op):
                      `resolve_target`'s own `BAD_REF`, which subclasses
                      `ValueError`) is never remapped — it is re-raised as-is.
       GESTURE_REFUSED — `gestures.make_hold_to_toggle` raised `GestureEditError`:
-                        the group does not hold exactly one live binding, that
-                        binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle, it
-                        already carries the repeat bit, or `seconds` does not fit
-                        the hold-threshold nibble.
+                        a single-entry group's binding is not a
+                        `DC_DIMMER_COMMAND_2` command-5 toggle or carries the repeat
+                        bit; a multi-binding group fails one of the five premises
+                        (no repeat bit, one DGN/selector target, variants agreeing on
+                        a release toggle, variants that write 0 and 1 or all
+                        command-5 toggles, no variant cycling on release); the group
+                        has no live binding; or `seconds` does not fit the
+                        hold-threshold nibble.
 
     `gestures.make_hold_to_toggle` returns an unsealed image -- `gestures.py` never
     imports `patch` and performs no reseal of its own (checked, not assumed: grep
@@ -2623,7 +2631,7 @@ class SetGesture(Op):
             raise RecipeError("GESTURE_REFUSED", str(err))
         ctx.edits.extend(e)
         data, _ = patch.reseal(data)
-        ctx.handles[self.spec.id] = {"gid": gid}
+        ctx.handles[self.spec.id] = {"gid": gid, "multi": len(beh.emissions) > 1}
         return data
 
     def verify(self, data, ctx):
@@ -2639,8 +2647,20 @@ class SetGesture(Op):
         for dead in (gestures.PHASE_PRESS, gestures.PHASE_TAP,
                      gestures.PHASE_RELEASE_HELD):
             assert not beh.on(dead), "a tap must not switch the load"
-        return "gesture: group %d hold-to-toggle (%d s each way)" % (
-            gid, self.seconds)
+        multi = ctx.handles[self.spec.id].get("multi", False)
+        # Set here, not in apply: verify runs for every op, a cache-resumed compile included.
+        self.hardware_verified = not multi
+        if not multi:
+            return "gesture: group %d hold-to-toggle (%d s each way)" % (
+                gid, self.seconds)
+        assert set(beh.kinds.values()) == {"hold-only"}, beh.kinds
+        assert len(held) == len(beh.emissions), "every live copy must fire on the hold"
+        return ("gesture: group %d hold-to-toggle (%d s each way) on all %d live bindings "
+                "of variants %s; direction is chosen by the group's external variant "
+                "setter; HARDWARE-UNVERIFIED (coach test: tap does nothing; %d s hold arms; "
+                "%d s hold disarms; colour follows; fires once per hold)"
+                % (gid, self.seconds, len(beh.emissions),
+                   "/".join(str(v) for v in beh.variants), self.seconds, self.seconds))
 
 
 @op("pin_filter_instance")

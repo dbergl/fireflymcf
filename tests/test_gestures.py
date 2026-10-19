@@ -420,6 +420,116 @@ def test_hold_to_toggle_refuses_a_binding_that_repeats(mcf_136):
         gestures.make_hold_to_toggle(mutated, 18)
 
 
+def _poke(data, off, value):
+    return data[:off] + bytes([value]) + data[off + 1:]
+
+
+def _binding_off(data, index, byte):
+    gs, _ = guidata.guidata_extent(data)
+    return gs + guidata.binding_table(data)[index].offset + byte
+
+
+def _low_volts_bindings(data):
+    g = guidata.group_table(data)[_LOW_VOLTS_GROUP]
+    return list(range(g.start, g.start + g.count))
+
+
+def test_low_volts_hold_to_toggle_edits_every_live_copy_and_nothing_else(mcf_136):
+    """Group 129: one hold byte, one repeat byte, and the phase mask of all four bindings.
+
+    Editing only some copies is the anti-goal: the variant counter picks which copy runs, so a
+    copy left on tap-release would arm by tap in one direction and by hold in the other.
+    """
+    out, edits = gestures.make_hold_to_toggle(mcf_136, _LOW_VOLTS_GROUP, seconds=3)
+    assert len(out) == len(mcf_136)
+    diff = [i for i, (a, b) in enumerate(zip(out, mcf_136)) if a != b]
+    assert len(diff) == len(edits) == 6
+    assert sorted(e.file_offset for e in edits) == diff
+
+    gs, _ = guidata.guidata_extent(mcf_136)
+    group_off = gs + guidata.group_table(mcf_136)[_LOW_VOLTS_GROUP].offset
+    phase_offs = {_binding_off(mcf_136, i, 3) for i in _low_volts_bindings(mcf_136)}
+    assert set(diff) == {group_off, group_off + 2} | phase_offs
+
+    after = gestures.describe_group(out, _LOW_VOLTS_GROUP)
+    assert after.hold_ms == 3000 and after.repeat_held_ms == 0
+    assert after.kinds == {0: "hold-only", 1: "hold-only"}
+    assert len(after.emissions) == 4
+    assert all(e.phases == gestures.PHASE_HELD and not e.repeats for e in after.emissions)
+    assert not after.cycles_variant
+    # the variant wrap nibble survives the hold edit
+    assert out[group_off] & 0x0F == mcf_136[group_off] & 0x0F
+
+
+def test_the_single_binding_path_is_unchanged(mcf_136):
+    """Group 18 still takes exactly the three-byte path the coach verified on pins 28/29."""
+    out, edits = gestures.make_hold_to_toggle(mcf_136, 18, seconds=3)
+    want, _ = gestures.set_hold_seconds(mcf_136, 18, 3)
+    want, _ = gestures.set_phases(want, guidata.group_table(mcf_136)[18].start,
+                                  gestures.PHASE_HELD)
+    want, _ = gestures.set_repeat_index(want, 18, "held", 0)
+    assert out == want and [e.structure for e in edits] == [
+        "group-hold", "binding-phases", "group-repeat"]
+
+
+def test_multi_binding_refuses_a_copy_that_repeats(mcf_136):
+    b = _low_volts_bindings(mcf_136)[2]
+    off = _binding_off(mcf_136, b, 2)
+    mutated = _poke(mcf_136, off, mcf_136[off] | gestures.BINDING_REPEATS)
+    with pytest.raises(gestures.GestureEditError, match="repeat bit"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_two_targets_in_one_group(mcf_136):
+    b = _low_volts_bindings(mcf_136)[3]
+    mutated = _poke(mcf_136, _binding_off(mcf_136, b, 5), 0x2E)      # another selector
+    with pytest.raises(gestures.GestureEditError, match="one target"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_variants_with_different_gestures(mcf_136):
+    mutated = mcf_136
+    for b in _low_volts_bindings(mcf_136)[1::2]:                     # variant 1's copies
+        mutated = _poke(mutated, _binding_off(mcf_136, b, 3), gestures.PHASE_TAP)
+    assert gestures.describe_group(mutated, _LOW_VOLTS_GROUP).kinds == {
+        0: "latch", 1: "tap-only"}
+    with pytest.raises(gestures.GestureEditError, match="variants"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_a_gesture_that_is_not_a_release_toggle(mcf_136):
+    mutated = mcf_136
+    for b in _low_volts_bindings(mcf_136):
+        mutated = _poke(mutated, _binding_off(mcf_136, b, 3), gestures.PHASE_PRESS)
+    with pytest.raises(gestures.GestureEditError, match="press-only"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_variants_that_do_not_write_zero_and_one(mcf_136):
+    set_v1 = _low_volts_bindings(mcf_136)[1]
+    assert mcf_136[_binding_off(mcf_136, set_v1, 11)] == 1
+    mutated = _poke(mcf_136, _binding_off(mcf_136, set_v1, 11), 0)   # both copies write 0
+    with pytest.raises(gestures.GestureEditError, match="two-state"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_paired_copies_that_differ_elsewhere(mcf_136):
+    read_v1 = _low_volts_bindings(mcf_136)[3]
+    off = _binding_off(mcf_136, read_v1, 9)
+    mutated = _poke(mcf_136, off, 0xD1)                              # read-back -> set
+    with pytest.raises(gestures.GestureEditError, match="differ"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
+def test_multi_binding_refuses_a_group_that_cycles_its_variant(mcf_136):
+    gs, _ = guidata.guidata_extent(mcf_136)
+    off = gs + guidata.group_table(mcf_136)[_LOW_VOLTS_GROUP].offset + 1
+    mutated = _poke(mcf_136, off, 0x00)
+    assert gestures.describe_group(mutated, _LOW_VOLTS_GROUP).cycles_variant
+    with pytest.raises(gestures.GestureEditError, match="cycles"):
+        gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
+
+
 def test_the_hold_threshold_must_fit_the_nibble(mcf_136):
     with pytest.raises(gestures.GestureEditError, match="nibble"):
         gestures.set_hold_seconds(mcf_136, 18, 16)
