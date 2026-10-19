@@ -57,9 +57,11 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
   RV-C spec: a tank instance, G12 channel, DGN or source address. Builds can differ. Tank
   instances: `doctor` lists what this file's G12 broadcasts on `1FFB7` TANK_STATUS, and
   `fireflymcf-tankpatch MCF` (report-only without a tank flag) is the tool that silences
-  them (op `suppress_tank_status`). Quote that table. Its names are the RV-C standard's,
-  not the firmware's, so confirm each tank with the owner against the panel before
-  silencing it.
+  them (op `suppress_tank_status`). Quote that table. Its panel name is the caption the
+  panel draws on the gauge each instance feeds, read from the file; the RV-C name is only
+  the standard's for the number. Name each tank by its panel name. Where the two
+  disagree, a panel name is `-` or lists variants (`GREY / GREY1`), or the owner's
+  floorplan draws no such gauge, ask the owner before silencing it.
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.

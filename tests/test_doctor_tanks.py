@@ -17,10 +17,14 @@ def test_json_lists_each_broadcast_from_the_file(capsys):
                                               tankbroadcast.tank_broadcasts(data)]
     assert {t["instance"] for t in tanks} == {0, 1, 2, 3, 18}
     assert all(t["broadcasting"] for t in tanks)
-    assert next(t for t in tanks if t["instance"] == 3)["rvc_name"] == "lpg"
+    lpg = next(t for t in tanks if t["instance"] == 3)
+    assert lpg["rvc_name"] == "lpg" and lpg["panel_name"] == "LP"
+    assert "0x2484aa" in lpg["panel_name_source"]
+    assert next(t for t in tanks if t["instance"] == 18)["panel_name"] == "GREY2"
 
 
 def test_text_names_the_tool_and_the_name_source(capsys):
     assert cli.main(["doctor", STOCK]) == 0
     out = capsys.readouterr().out
     assert "instance 18" in out and "fireflymcf-tankpatch" in out and "RV-C" in out
+    assert "panel: GREY2" in out
