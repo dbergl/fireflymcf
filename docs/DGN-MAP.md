@@ -76,23 +76,45 @@ for edges and drive a channel with gate conditions (see its design note (not pub
   its design note (not published), §3.3 and
   its design note (not published).
 
-## 2. Panel TRANSMITS — the GuiData binding table
+## 2. Panel TRANSMITS — bindings, GuiCode, and the LCD's own
 
-**20 distinct DGNs, 746 bindings.** A control's binding emits one of these when touched.
+**Every way the panel transmits, with what the panel calls each message, is `fireflymcf bus-map
+MCF`'s SEND section** (`sendmap.py`, `GUICODE.md` Finding 83); this is a summary of its 13.6
+output. Three paths, one queue: every frame goes through the LCD's 64-entry transmit ring
+`FUN_0021825C`.
 
-| DGN | bindings | what it is |
-|---|---|---|
-| `0x1FEDB` | 337 | `DC_DIMMER_COMMAND_2` — command a G12 output/channel (on/off/toggle/level) |
-| `0x1FED9` | 224 | config write — set a **selector** on the G12 (options, AES params); this is what an OPTIONS tap sends |
-| `0x1FEF9` | 100 | (channel command family) |
-| `0x1FBDA` | 24 | G12 output/keypad |
-| `0x1FFEE` | 22 | (undecoded) |
-| `0x1EA42` | 4 | RV-C request (`0xEA00`) to a specific address |
-| … 14 more at 1–6 bindings | | `0x1FF95/87/97`,`0x1FFC4/D0`,`0x1FEBE`,`0x1FACF/CD`,`0x1FFBE/BC/C5/D3`,`0x1FFFE/FF` |
+- **Binding groups** (GuiData `+0x778`, 741 live entries in 233 groups). A touch region whose id
+  is below the group count selects group `id`; the LCD's sender `FUN_0021B8B4` sends the entries
+  whose variant and gesture phase match. The entry's DGN and its payload order are
+  `proven-from-code` (Finding 83, `MCF-FORMAT.md` §5.3). 101 groups are reached from a page,
+  65 only from objects no page draws, 62 from no touch region at all, 5 are `ff ff` stubs.
+- **GuiCode** (701 `blx` sites through the sender slot `0x2003986C`, the host API table's
+  `+0x08` word): 554 copy a 12-byte `.rodata` template, the rest build the frame on the stack.
+  526 are reached from a touch-dispatcher handler (22 on press, 108 ids on release), 9 sit after
+  a touch-id compare (hold consumers), 1 is the config-set helper's `0x1EE00`, 165 are per-tick
+  or parser code: 134 in `FUN_00242B70`, which sends what RV-C names
+  SOLAR_CONTROLLER_(CONFIGURATION_)COMMAND and SOLAR_EQUALIZATION_CONFIGURATION_COMMAND among
+  others (a solar-controller set-up, by those names: inference), 10 of them with a DGN the
+  back-walk does not resolve.
+- **The LCD firmware's own** (6 call sites of `FUN_0021825C` outside the binding sender
+  `FUN_0021B8B4`, in `FUN_0021A114`, `FUN_0021A540`, `FUN_0021CE28` and the USB port's command
+  parser `FUN_0021E9E0`; not decoded). Every panel frame in the 13.6 captures that neither of the first two explains is one
+  of `1FECA` DM_RV, `1FFFD` DC_SOURCE_STATUS_1 (instance `0x81`, every 10 s), `0EEFF` address
+  claim, `0ECFF`/`0EBFF` transport protocol.
 
-Plus, from **GuiCode** (not bindings): the config-set helper `FUN_00259100` broadcasts **`0x1EE00`**
-(config **offset** write) alongside the `0x1FED9` selector write on an OPTIONS tap (PC.34). The
-panel never transmits `0x15FCE` — that DGN is the G12's to broadcast.
+| DGN | bindings | reached / unattached / dead | GuiCode sites | what the panel calls it (examples) |
+|---|---|---|---|---|
+| `0x1FEDB` | 337 | 159 / 75 / 103 | 100 | DC_DIMMER_COMMAND_2 to a G12 pin: the OUTPUTS-page name (`'Water Pump'`, group 44), the control (`'ON'` in `'Light Master'`, group 1; `'Tank Heater'`, GuiCode id `0x851`) |
+| `0x1FED9` | 224 | 129 / 26 / 69 | 432 | config write, `FF 96 <sel> 0F <lo> <hi> D1/D2/D3`: the OPTIONS row (`'Bath Fan'` writes `0xE9` on release of id `0x844`), `'Low Volts'` (group 129, `0x2F`) |
+| `0x1FEF9` | 100 | 24 / 61 / 15 | 12 | RV-C THERMOSTAT_COMMAND_1 (climate tiles) |
+| `0x1FBDA` | 24 | 24 / 0 / 0 | 5 | (Firefly's) the AES `'Start'`/`'Stop'` keys (groups 13/14), `'FRONT'`/`'REAR'`/`'LEFT'`/`'Right'` (groups 221-228); Service Mode `'ENABLE'`/`'DISABLE'` (GuiCode) |
+| `0x1FFEE` | 22 | 22 / 0 / 0 | 0 | RV-C LEVELING_CONTROL_COMMAND |
+| `0x1EE00` | 0 | | 5 | the config-set helper's `<offset> <value>` write (Finding 23); 33 call sites, 17 from touch handlers, 11 from the receive side's compare block |
+| `0x1FEB0`/`1FEB1`/`1FEAD`/`1FDF9`/`1FDFB`/`1FDFD` | 0 | | 112 | built in place by `FUN_00242B70`, no control |
+| `0x0EAxx` requests | 4 (`0EA42`, dead) | 0 / 0 / 4 | 21 | J1939 Request: `0EAFF` (6 after a hold-consumer's touch-id compare), `0EA8D`, and 11 to `0EA00 + [cell]`, a destination held in SRAM (`FUN_00242B70`, `FUN_0024F104`) |
+| 14 more | 30 | 4 / 8 / 18 | 4 | `1FFBE`, `1FFD3`, `1FFFE`, `1FFBC`, `1FF87`, `1FF95`, `1FFC4/C5`, `1FFD0`, `1FEBE`, `1FACD/CE/CF`, `0EF42` |
+
+The panel never transmits `0x15FCE` — that DGN is the G12's to broadcast.
 
 ## 3. G12 TRANSMITS — the rule tables (`0x20`/`0x30`/`0x61`/`0x62`)
 
@@ -114,7 +136,9 @@ Decoded by `g12rules` / `cli g12-rules`. Highlights:
   entry with its trace, class and the panel's name. Raw: `guidata.variable_table(data)` → group by
   `.dgn_low`; per-entry mode is `raw[2] >> 4` (0 = inert), instance filter is `raw[4]`/`raw[5]`,
   extracted field `raw[3] & 7`.
-- **Panel sends:** `guidata.binding_table(data)` → `raw[0] | raw[1]<<8` is the DGN low word.
+- **Panel sends:** `fireflymcf bus-map MCF` (`busmap.send_map`): every binding group with its
+  controls and class, every GuiCode send with what drives it. Raw: `guidata.binding_table(data)`
+  → the first u32's low 18 bits are the DGN, `newbutton.binding_payload(raw)` the wire bytes.
 - **G12 sends:** `g12rules.all_rules(data)` → `.dgn`; or `cli g12-rules <mcf>` for the decoded
   command/selector detail, `cli g12-inputs` for the input-pin rules.
 
