@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fireflymcf"
+version = "0.1.0"
+description = "Read, render, and safely edit Firefly Integrations MCF firmware for Jayco/Spyder RV panels"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Dan Berglund" }]
+keywords = ["firefly", "spyder", "jayco", "rv-c", "mcf", "firmware", "reverse-engineering"]
+
+# The base install has NO compiled dependencies, so the common same-size / in-place edits work
+# on a bare Python: extract, regions, identify, coverage, labels, image-export, swap-image,
+# glyph-export, g12-rules, gestures, and `patch --rename` / `--move`.
+dependencies = []
+
+[project.optional-dependencies]
+# Everything else -- `render`, `pages`, `doctor`, `options`, `pins`, and `patch --recolor` / `--remap` --
+# reads the disassembly or builds pixel arrays, and needs these. `pip install fireflymcf[full]`
+# enables every command; this is the recommended install.
+full = ["numpy>=1.21", "capstone>=5.0", "Pillow>=9.0"]
+
+# The test suite. `unicorn` runs authored GuiCode routines (levelfeed, bitcombine) on an emulated
+# Cortex-M in tests/emu.py; it is required, not optional -- routine tests fail without it.
+test = ["pytest>=7", "pytest-xdist>=3", "unicorn>=2.1", "fastapi", "httpx", "jsonschema>=4.18"]
+
+# Firefly Studio, the browser editor (`python3 -m studio` from a checkout; not packaged).
+studio = ["fastapi", "uvicorn"]
+
+[project.scripts]
+fireflymcf = "fireflymcf.cli:main"
+fireflymcf-tankpatch = "fireflymcf.tankpatch:main"
+fireflymcf-g12flash = "fireflymcf.g12flash:main"
+
+[project.urls]
+Homepage = "https://github.com/dbergl/fireflymcf"
+Documentation = "https://github.com/dbergl/fireflymcf"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fireflymcf = ["py.typed", "data/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

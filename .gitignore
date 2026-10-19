@@ -1,0 +1,43 @@
+# Firmware is never committed here. Owners bring their own mcf.bin and cli.bin;
+# Firefly's images, and builds derived from them, are not ours to distribute.
+*.bin
+*.bin.json
+*.mcf
+*.pdf
+captures/
+*.candump
+*.log
+!tests/fixtures/*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+build/
+dist/
+.pytest_cache/
+
+# Editors and OS
+.DS_Store
+*~
+.vscode/
+.idea/
+
+# Research data, symlinked in by scripts/link-research.sh; never committed.
+/firefly-11.23
+/firefly-13.6
+/firefly-14.7 (Terrain)
+/captures
+/builds
+/configs
+/tests/answer_key.py
+
+# Studio: web build output and local projects
+studio/web/node_modules/
+studio/web/dist/
+studio/web/tsconfig.tsbuildinfo
+studio/web/test-results/
+studio/web/playwright-report/
+/projects/
+.e2e-projects/
