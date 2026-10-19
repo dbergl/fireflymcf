@@ -97,6 +97,14 @@ Slot addresses follow the index-split rule (`idx <= 255` → `0x20007FC8 + idx*2
 the panel subscribes to the **command** DGN it also sends, i.e. it watches for another node
 commanding levelling.
 
+> **Corrected 2026-10-19 (`GUICODE.md` Finding 82).** "The page subscribes" overstates it. The
+> filter writes all four slots, but GuiCode reads only var 232's, and not for this page: vars 234,
+> 236 and 240 are **write-only** (no load through the slot-array base reaches them, and the base
+> never escapes the analysis), and var 232's value is stored to cell index 397 — the value slot of
+> object 882's three switches (`'Max of 2 A/Cs on gen power'`), which choose among the climate
+> clusters — and compared `== 1` at `0x24AAA2` to colour cell 375. No screen-29 widget is reached
+> from any of them, which is the code-side reason for PC.57's "nothing moved".
+
 ### Spec coverage — what the YAML still needs
 
 Every levelling DGN this page touches is **named** in `rvc-spec.yml` but carries **no parameter
