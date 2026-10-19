@@ -469,6 +469,23 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
                               "couplings": [{"with_option": k, "handlers": v}
                                             for k, v in sorted(by_option.items())]}
 
+    # The G12's 1FFB7 TANK_STATUS broadcasts, read from its rule table (`tankbroadcast`): the
+    # instance numbers are this file's; the names are the RV-C standard's for each number.
+    # `panel_name` is the caption on the gauge the panel feeds from that instance (`tanknames`,
+    # traced through the receive filter and GuiCode), or None where no gauge is traced.
+    def _tanks():
+        from . import tankbroadcast, tanknames
+        try:
+            panel = tanknames.tank_names(data)
+        except tanknames.TankNameError:
+            panel = {}
+        return [{"instance": b.instance, "rvc_name": b.tank,
+                 "panel_name": panel.get(b.instance, (None, None))[0],
+                 "panel_name_source": panel.get(b.instance, (None, None))[1],
+                 "broadcasting": b.activate_at is not None, "config_gated": b.guarded}
+                for b in tankbroadcast.tank_broadcasts(data)]
+    info["tank_broadcasts"] = _try(_tanks, [])
+
     if args.json:
         print(json.dumps(info, indent=2))
         return 0
@@ -504,6 +521,24 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
             "reported only (removal not validated for this build)"
         for c in info["interlocks"]["couplings"]:
             a(f"  generator/AES mode ↔ {c['with_option']}  ({c['handlers']} handler(s); {verb})")
+    a("")
+    a("Tank broadcasts (1FFB7 TANK_STATUS instances this file's G12 sends):")
+    if info["tank_broadcasts"] == UNAVAILABLE:
+        a(f"  {NEEDS}")
+    elif not info["tank_broadcasts"]:
+        a("  none found on this build")
+    else:
+        for t in info["tank_broadcasts"]:
+            state = ("silent" if not t["broadcasting"] else
+                     "broadcasting, behind a config gate" if t["config_gated"] else "broadcasting")
+            a(f"  instance {t['instance']:<3}  panel: {t['panel_name'] or '-':<14} "
+              f"RV-C: {t['rvc_name']:<18} {state}")
+        a("  Numbers and panel names (the caption on the gauge each instance feeds) are read from")
+        a("  this file; `-` means no gauge was traced. The RV-C name is the standard's for the number.")
+        if any(not t["panel_name"] for t in info["tank_broadcasts"]):
+            a("  Where the panel name is `-`, the RV-C name is the RV-C specification's name and may")
+            a("  not match what Firefly calls that tank.")
+        a("  Silence one with `fireflymcf-tankpatch` (report-only without a tank flag).")
     a("")
     a("What you can do on this build (all build-general, all gated):")
     a("  • Same-size edits — rename / move / recolour a label, swap a logo — pass the full")

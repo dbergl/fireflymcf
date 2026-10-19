@@ -6381,6 +6381,107 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 80 — each `1FFB7` TANK_STATUS instance's name comes from the gauge it paints, not from the RV-C table — `proven-from-code` to the gauge, caption `inferred-from-data`, 2026-10-19
+
+**The question.** `tankbroadcast.INSTANCE_NAMES` and `fireflymcf-tankpatch`'s flags name the tanks
+from RV-C's table (0 fresh, 1 black, 2 grey, 3 LPG, 18 second grey). The standard says nothing
+about what a panel draws for an instance, and a build is free to use others. Can the firmware
+itself name each instance?
+
+**It can, through the panel's receive path.** `src/fireflymcf/tanknames.py` follows each
+`1FFB7` receive-filter entry to the gauge it paints. 13.6 addresses below; every joint is found
+per build.
+
+| joint | 13.6, instance 0 | level |
+|---|---|---|
+| receive filter entry (GuiData `+0x2A70`), byte 4 = instance | var 0 = `b7 ff 29 01 00 …` | `proven-from-code` (LCD `FUN_0021C760`, §5.4a) |
+| decoder region where r4 = GuiCodeState: `push` / `mov r4,r0` (`0x247BFC`) / `ldr.w r3,[r4,#0x214]` (`0x247C18`), r4 not written again until the `pop` at `0x24EDB0` | `FUN_00247BF8` | `proven-from-code` (Findings 19, 33) |
+| slot read and decode: `ldrsh.w r2,[r4]` `0x24838A`, then `uxtb`/`ubfx`/`mla`/`sdiv`, i.e. `pct = min(100, (100·level + res/2) / res)` | `strb` `0x2483B0` → `0x200399E0` | `proven-from-code` |
+| second read of the same slot gives the 73-px "empty from top" offset `73 − 73·pct/100` (`0x51EB851F` divide by 100, `rsb #0x49`) | `strb` `0x2483EC` → `0x2003A6D5` | `proven-from-code` |
+| cell table (`+0x44BC8`): index 255 → `0x200399E0`, 254 → `0x2003A6D5` | | `proven-from-code` (Finding 17) |
+| HOME cluster record list: wt-11 `'FRESH'`, then wt-5 container `value_slot=255`, `child_index=721` (the gauge, whose wt-8 `%` also names 255) | objects 911-921, PROBE rows 1018/1019 | records decoded; **caption pairing `inferred-from-data`** |
+
+The formula matches PC.62: 34/56 read 61 % and 13/100 read 13 %.
+
+**The caption step is an inference, and its support.** No instruction joins a caption to a gauge.
+The layout engine draws records in order, and every tank cluster on every corpus build is "caption
+label, then its gauge container". The geometry agrees: on 13.6 WD with Black Tank on, the layout
+replay places each caption box (`'FRESH'` 477-532 × 56-76) so it ends on the row where its well
+starts (721: 482-527 × 76-161), on the same centre line. All four tanks do the same
+(`tests/test_tanknames.py::test_caption_sits_on_its_gauge_well`). The PROBE TANK DIAGNOSTICS rows
+repeat the pairing independently: 13.6 objects 1016-1022 are `'BLACK'`/`'FRESH'`/`'GREY'`/`'GREY2'`,
+each followed by the same container, then that tank's `ADC Raw Value`.
+
+**Results.** All three builds agree with RV-C's table. Only the caption text differs from RV-C's
+wording.
+
+| instance | var | 13.6 | 11.23 | 14.7 | 13.6 GuiCode read → cell (index) |
+|---|---|---|---|---|---|
+| 0 | 0 | FRESH | FRESH | FRESH | `0x24838A` → `0x200399E0` (255) |
+| 1 | 1 | BLACK | BLACK | BLACK | `0x24844C` → `0x200399CD` (253) |
+| 2 | 2 | GREY | GREY, **GREY1** in cluster 872 | GREY | `0x2483EE` → `0x2003A8A8` (257) |
+| 3 | 3 | LP | LP | LP | `0x2484AA` → `0x20039E79` (243), percent only |
+| 18 | 138 | GREY2 | GREY2 | GREY2 | `0x2484D2` → `0x2003A13B` (259) |
+
+11.23 and 14.7 reads: 11.23 `0x247BD0`/`0x247CC4`/`0x247C4C`/`0x247D3C`/`0x247D64`; 14.7
+`0x2483FA`/`0x2484BC`/`0x24845E`/`0x24851A`/`0x248542`. On 11.23 the decode is an if/else diamond:
+the 0xFF no-data sentinel arm branches forward to the shared `strb`. The tracer follows a forward
+`b`, and that is the only thing it needed added for 11.23.
+
+**Gating: which configuration shows each name** (HOME, walked per floorplan):
+
+- **13.6:** FRESH and GREY on RT-RY. GREY2 on RA, RD, WA, WD. LP on RT, RA, RD, CB, RY. BLACK
+  only with the Black Tank option (slot 112 = 1; type-6 switch, base 801 → arm 802). The reference
+  coach (WD) draws FRESH, GREY and GREY2, plus BLACK with the option, and **no LP gauge**, though
+  the G12 broadcasts instance 3. 4NJ/3NG/3NK/3NJ draw no tanks.
+- **14.7:** the same shape on its own floorplans. GREY2 on RA and WA; LP on RT, RA, CB, RY, RE;
+  BLACK on every floorplan when slot 103 = 1 (type-6 switch, base 737 → arm 738).
+- **11.23:** HOME's tank switch reads **slot 8**, not the floorplan slot 7. Values 0-5 select
+  clusters 870-875, and 0 also needs slot 36 = 1. The writer of slot 8 was not traced. `GREY1`
+  appears only in cluster 872 (slot 8 = 2), the one that also draws GREY2.
+
+`tank_names` returns every variant, most-used first (`'GREY / GREY1'`), rather than choosing.
+
+**Negatives, scoped.**
+
+- **G12 OUTPUTS** (the owner's lead) names the tank-heater pins 5-8 (`05 Tank Heat Fresh` …
+  `08 Tank Heat Grey 2`, Finding 35's floorplan whitelists). That is pin → name, not instance →
+  name. In table `0x61`/`0x62` the level cells `B5`-`B8` are referenced only by the four `1FFB7`
+  records. `C2` is referenced by `#93` and by the `1AAB7` record. So the rule tables carry no
+  heater-pin ↔ instance join. The cells are written by the G12 application, which this project has
+  not dumped (`G12-CODE.md`, config table: "app-written").
+- **The G12 side gives instance → level cell, not a name:** `B5` → 0, `B6` → 2, `B7` → 1,
+  `B8` → 18, `C2` → 3.
+
+**What this does not claim.** The receive path names what the *panel draws* for an instance. It
+does not say what the G12 measures: the G12 broadcasts instance 3 on WD, and WD has no LP gauge.
+A trace that found no captioned gauge returns `None` and never falls back to RV-C's word
+(`test_a_decoder_of_another_shape_names_nothing`).
+
+**Coach check (prediction).** PC.62 already confirms instance 0 → FRESH: `19FFB7AF#002238…` read
+61 % on FRESH while GREY, GREY2 and BLACK read `--%`. The rest, on the running image, with the G12
+silent on that instance (otherwise frames alternate, PC.46), injecting `19FFB7AF#<inst>2238FFFFFFFFFF`:
+
+| inject | HOME on WD should show |
+|---|---|
+| `02…` | **GREY** 61 %, every other gauge unchanged |
+| `12…` | **GREY2** 61 % |
+| `01…` | nothing on HOME with Black Tank off. **BLACK** 61 % with it on |
+| `03…` | **no HOME change** (WD draws no LP gauge) |
+
+The PROBE TANK DIAGNOSTICS row of the same name should show the same percent, since it is the same
+container and cell.
+
+Wiring, left for the session that owns `tankpatch.py`/`doctor`: `tankpatch`'s report can label
+each rule by `tanknames.tank_names(data)[b.instance][0]` and fall back to
+`tankbroadcast.INSTANCE_NAMES` only when that is `None`. The `--fresh/--grey/...` flags could
+resolve through the same table.
+
+Tests: `tests/test_tanknames.py` (9). They pin all three builds and the 13.6 chain addresses, and
+check the caption geometry. They also show the answer does not depend on RV-C's table (emptied) or
+on any instance constant: renumbering var 0's filter to instance 7 moves FRESH to 7. A broken
+`mov r4,r0` names nothing. Stubbing the trace or the caption scan makes the pinned table fail.
+
 ## Finding 79 — the header's ⚠ triangle is always drawn and always tappable; slot 234 only picks its colour — `proven-from-code` plus `observed-on-hardware` (v47), 2026-10-06
 
 **The question (owner, 2026-10-06).** On the coach, tapping about ½ in left of the clock opens
