@@ -538,7 +538,7 @@ Add a boxed HOME button wired to a G12 pin: status cell bound, command group all
 
 Error codes:
 
-- `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load (13.6's 12 is "A/C Fan Low"); offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed the output
+- `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load under some floorplan or option (13.6's 12 is "A/C Fan Low" always, 05 is "Tank Heat Fresh" on WA/WD/WT); offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed the output
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control — a narrower check than build_home_button's own, see statusbind.py)
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
@@ -818,7 +818,7 @@ Wire a button shell to a G12 pin: status cell, indicator, and its own toggle gro
 
 Error codes:
 
-- `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load; offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed it
+- `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load under some floorplan or option; offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed it
 - `BAD_REF` — target names an earlier op id that produced no object (from resolve_target)
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control)
 - `COMMANDED_CHANNEL` — retarget_command refused because the channel is already commanded by an existing binding; offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed those bindings belong to unreachable controls
