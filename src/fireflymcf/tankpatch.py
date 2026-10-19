@@ -151,7 +151,8 @@ def _wanted(args) -> list:
 
 
 def _inventory(report) -> str:
-    lines = ["What this image broadcasts on 1FFB7 TANK_STATUS:", ""]
+    lines = ["What this image broadcasts on 1FFB7 TANK_STATUS:", "",
+             f"  {'instance':<12} {'RV-C name':<18} {'flag':<15} state"]
     for b in report.broadcasts:
         flag = next((f"--{n}" for n, i in TANK_FLAGS.items() if i == b.instance),
                     f"--instance {b.instance}")
@@ -159,6 +160,9 @@ def _inventory(report) -> str:
                  "broadcasting once a second, behind a config gate the G12 re-checks"
                  if b.guarded else "broadcasting once a second")
         lines.append(f"  instance {b.instance:<3} {b.tank:<18} {flag:<15} {state}")
+    lines += ["", "  The instance numbers are read from this file's G12 rules. The names are the RV-C",
+              "  standard's for each number, not the firmware's own label: check them against the",
+              "  panel before silencing a tank."]
     return "\n".join(lines)
 
 
