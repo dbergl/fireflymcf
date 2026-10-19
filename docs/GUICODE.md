@@ -2936,6 +2936,9 @@ idx202/206 now resolve in both and the voltage-state branch is the more specific
 
 ## Finding 35 — the G12-OUTPUTS dynamic row names are gated by hardcoded per-floorplan whitelists, and no floorplan populates all four tank heaters (open defect)
 
+*2026-10-19: Finding 81 runs this whole block (all 14 dynamic rows, not only these four) under every
+floorplan and option, and reproduces this table.*
+
 **Status: open TODO.** Diagnosed 2026-08-18 from the owner's coach (floorplan **WD**, all four
 tank warmers physically fitted): the `G12 OUTPUTS` diagnostics rows **05** and **08** show
 `Tank Heat Fresh` / `Tank Heat Grey 2`, while **06** and **07** stay blank. Not a config
@@ -6380,6 +6383,138 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 (a redefinition ends a pointer's lifetime; a parameter survives a call only through a copy), the
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
+
+## Finding 81 — every name the G12 OUTPUTS page can show, with the floorplans and options that show it — `proven-from-code`, captions `inferred-from-data`, 2026-10-19
+
+**Question.** `outputs.output_names` read the G12 OUTPUTS rows from the page object's own records
+and called them "static ... the same on every floorplan". The owner reported names that appear
+only with an option enabled or on some floorplans. Where do those names live?
+
+**Three mechanisms, all now read** (`outputs.output_name_variants`):
+
+| kind | where the name is | builds | condition from |
+|---|---|---|---|
+| static | the row label itself, page object's own list (13.6 obj 35 `'12 - A/C Fan Low'`) | all | none |
+| dynamic | a type-9 string cell drawn by the wtype-13 record after the bare `'NN - '` label (§6.1); GuiCode copies the name in | 13.6 (14 rows), 14.7 (13) | the GuiCode block's own compares |
+| switched | the row label sits in the arms of a type-6 switch (11.23 obj 675 r7/r8 → objects 811-821 on slot 7, the floorplan slot) | 11.23 | `FUN_00256C54`'s arm scan (`layout.Screen._switch_child`), inverted |
+
+**The dynamic block.** 13.6 `FUN_00247BF8`, `0x2494B2`–`0x249794`, one straight-line block, no
+calls. It reads the floorplan register `[0x2003A77A]` (`ldrb r5,[r3]` @`0x2494B4`) and seven OPTIONS
+registers, and for each of the 14 cells either copies a name out of the string table at
+`0x259278` (`ldm r6!,{r0-r3}` / `str r0,[r7]` …, e.g. `Tank Heat Fresh` @`0x2494FE`–`0x249506`) or
+stores one `0` byte (`strb r2,[r3]`, e.g. @`0x2494C2`). Finding 35 transcribed four of these gates by
+hand; this finding runs all fourteen. Gates read, 13.6:
+
+| register | gate | cells it decides |
+|---|---|---|
+| `0x2003A77A` | floorplan (cfg `0x00`) | 05, 06, 07, 08, 24, 25, 35 |
+| `0x2003A296` | Heat Pump @`0x249570` | 10 |
+| `0x2003A38C` | AGS / AES / AES Single Output @`0x24957E`: `==3` → 18, `==1`/`==2` → 19 and 20 (`0x259260+0x84/+0x90` vs `+0x9C/+0xA8`) | 18, 19, 20 |
+| `0x20039CF8` | Cargo / Bath Light @`0x2495B0` | 25 |
+| `0x20039EBD` | Bath Light @`0x2496C4` | 26 |
+| `0x20039E70` | Bunk Accent @`0x2496D2` | 34 |
+| `0x20039B49` | Bath Fan @`0x2496E0` | 40 |
+| `0x2003A4B4` | Black Tank @`0x249528` | 07 |
+
+**How it is read, not transcribed** (`cellwriters`). The write sites of the cells come from
+`slotsource` (32 on 13.6, 29 on 14.7). The block starts at the nearest branch target before the lowest site
+from which the code runs without reading a register or flag it did not set (`0x2494B2`, the target
+of `b` @`0x2494F8`), and ends at the first unconditional branch after the highest site
+(`b 0x249774` @`0x249794`, which closes `Security Lt`'s store run). A concrete Thumb-2
+interpreter over capstone's decode (IT predicates from capstone) runs it under every combination
+of the SRAM bytes it reads: 15 floorplan values × 4 generator modes × 2⁶ = 3,840 runs on 13.6. It
+refuses a call, an instruction outside its set, a read outside GuiCode/SRAM, an unset register, or
+a write site that no combination reached. A per-cell input is kept only if changing it changes
+that cell's text, and the satisfying assignments are merged into the conditions below.
+
+**Why it is trusted.** Four checks, none a fit (`tests/test_outputs.py`):
+1. The coach: stock WD names 05 and 08 and leaves 06 and 07 blank (PC.18b).
+2. `tankgates.gates`, Finding 35's separate interpreter, agrees on every floorplan with Black Tank
+   on and off; and the `tankgates.widen` image reads back as its patch says (06 exactly RT, RA, RD,
+   WA, WD, WT), the build that put all four rows on the coach.
+3. Unicorn runs the same block from the same start to the same exit on 40 random input
+   combinations per build (13.6, 14.7) and every cell matches.
+4. The G12 pin sheet (`answer_key.CHANNELS`): every pin it names has a page name, and pin 25
+   (`CARGO LTS / BATH LTS`) and pin 35 (`SECURITY LT / LIVRM OHC / BENCH SEAT OHC`) carry
+   exactly two and three page names.
+
+**13.6, every name** (`#0` is floorplan value 0, which no floorplan-name arm names):
+
+| pin | name | shown when |
+|---|---|---|
+| 03 / 04 | Awning EXT / Awning RET | always |
+| 05 | Tank Heat Fresh | floorplan WA, WD, WT |
+| 06 | Tank Heat Grey | floorplan RT, SY, TB, CB, WT, RY |
+| 07 | Tank Heat Black | floorplan RT, WT and Black Tank on |
+| 08 | Tank Heat Grey 2 | floorplan RA, RD, WA, WD |
+| 09 | A/C Cool | always |
+| 10 | A/C Heat Pump | Heat Pump on |
+| 11 / 12 | A/C Fan High / A/C Fan Low | always |
+| 18 | AES Start/Stop | AES Single Output |
+| 19 | AES Start · Gen Start | AES · AGS |
+| 20 | AES Stop · Gen Stop | AES · AGS |
+| 21 / 22 / 23 | Awning Lt / Kitchen OHC Lts / Step Lt | always |
+| 24 | Bed Lts | any floorplan but RT, WT |
+| 25 | Bath Lts · Cargo Lts | Cargo / Bath Light on, and any floorplan but SY, TB · SY, TB |
+| 26 | Bath Lts | Bath Light on |
+| 32 | Main Ceiling Lts | always |
+| 34 | Bunk Accent Lts | Bunk Accent on |
+| 35 | Bench OHC Lts · Living Rm Lts · Security Lt | SY, TB, CB, RY · RA, RD, WA, WD · #0, RT, WT, 4NJ, 3NG, 3NK, 3NJ |
+| 40 | Bath Fan | Bath Fan on |
+| 43 / 44 | A/C Cool / Water Pump | always |
+| 01, 02, 13-17, 27-31, 33, 36-39, 41, 42 | (blank) | never named |
+
+**14.7** runs the same block shape (`0x249964`–`0x249BDE`, 1,280 runs, floorplan register
+`0x2003A2A7`) with its own whitelists (05 WA, WT; 06 any but #0, RA, WA; 07 RT, WT + Black Tank;
+08 RA, WA), adds **17 Starlink Power** (Starlink Power on) and **25 Cargo Lts** (Cargo Light on), names
+35 `Living Rm OHC Lts` on RA, WA, and has no row 26 or 40 names. Its row 08 is both: the static
+label `'08 - Tank Heat Grey 2'` *and* a dynamic cell that writes `Tank Heat Grey 2` on RA, WA, so
+those two floorplans would draw the name twice (inferred from the records; no 14.7 coach to look at).
+
+**11.23** has no dynamic rows. Its tank, A/C, generator, bed and living-room rows are switch arms
+on slot 7 (05 `TANK HEATER FRESH` on WT, WA, WD, CB; 06 `TANK HEATER GREY` on Ship Mode, RT, WT,
+`TANK HEATER GR 1` on RA, WA, WD, RD; 08 `TANK HEATER GR 2` on RA, WA, WD, RD, `TANK HEATER GREY`
+on CB; 35 `SECURITY LT RR` · `LIVING ROOM OHC` · `BENCH OHC LTS`), and 10 / 40 sit behind switches on
+slots 248 and 247, which no OPTIONS row binds; they are the config bytes `0x0A` and `0x0E`
+(`config.config_offsets`), reported raw.
+
+**Corrections.** `outputs.py`'s "the same on every floorplan" is wrong for 14 of 13.6's rows, 13 of
+14.7's and every switched row of 11.23. `MCF-FORMAT.md` §6.1's "nothing in the MCF maps a pin to a
+table entry — that join arrives over the bus" and "a dynamic row's text is runtime state" are wrong
+too: the pin → name join is the store's literal cell address, and the selector is the floorplan and
+OPTIONS registers. What arrives over the bus is only those registers' values (the config payload,
+Finding 19), so the name is runtime only in the sense that the floorplan is.
+
+**Control captions** (`outputs.control_captions`), the second name source, kept apart. A control is
+cut out of an object's own record list at every record carrying its own mode-7 fill. It is joined
+to a pin by `status` (the box's fill index is the cell the pin's GuiCode status block colours,
+`statusbind.pin_bindings`) or `command` (a touch region whose binding group commands only that pin).
+Both joins are read from bytes; that the label inside the cut is the control's caption is the record
+order (box, caption, touch region), so captions are `inferred-from-data`. Each carries the
+floorplan/option switch arms on the containers above it; switches on screen slots (13.6 slots 1 and
+2) are dropped and listed, which can only widen a caption's condition. A second, independent check on
+the dynamic block: 13.6's per-floorplan LIGHTS cards (objects 940-949, arms of a slot-5 switch)
+caption pin 35 `Security Light` on RT, WT, `Living Rm OHC / Exterior` on RA, RD, WA, WD and three
+`Bench …` spellings on SY, TB, CB, RY, the same split the GuiCode block makes. Captions are many and
+noisy where a box's colour is shared: pin 7's `Entry Awning` on the awning cards (objects 848-859)
+shares the colour cell of `Black Tank Heater`, so a `status` join says "this box shows pin 7's
+state", not "this control is pin 7's load".
+
+**What changed in tools.** `fireflymcf pins` gains an OUTPUTS-page name column (`+` marks a
+conditional name), `--names` lists every name with its condition and every caption, and `--json`
+carries `outputs_page_names` and `captions` with their conditions and sources. `add_button` /
+`wire_button`'s `NAMED_OUTPUT` refusal now counts a pin as named if any floorplan or option names it
+(13.6's 05, 06, 07, 08, 10, 18-20, 24-26, 34, 35, 40 are newly refused). The recipe cannot narrow it
+to the owner's floorplan: floorplan and options live in the G12's NVM, not in the build. A dynamic
+row whose block cannot be run counts as named.
+
+**Coach prediction** (the reference coach's running build carries `tank_heater_names`; WD with AES Single
+Output, Bunk Accent, Cargo / Bath Light, Black Tank and Bath Fan on, Heat Pump and Bath Light off,
+`build/coach-wd.json`). NETWORK DIAGNOSTICS → G12 OUTPUTS should read: 05 Tank Heat Fresh, 06 Tank Heat
+Grey, 07 Tank Heat Black, 08 Tank Heat Grey 2, **18 AES Start/Stop, 19 and 20 blank, 10 blank, 24 Bed
+Lts, 25 Bath Lts, 26 blank, 28 Overflow Valve, 29 Starlink, 34 Bunk Accent Lts, 35 Living Rm Lts, 40
+Bath Fan**, and the static rows. Two option flips each move one row: Bath Light on names 26 `Bath
+Lts`; Heat Pump on names 10 `A/C Heat Pump`. A mismatch on any row is a defect in this reading.
 
 ## Finding 80 — each `1FFB7` TANK_STATUS instance's name comes from the gauge it paints, not from the RV-C table — `proven-from-code` to the gauge, caption `inferred-from-data`, 2026-10-19
 

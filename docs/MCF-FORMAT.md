@@ -1552,7 +1552,10 @@ Two claims above were wrong:
   switch (slot 5): heated tanks occupy 05–08 and are *not* a floorplan option, yet those rows
   are dynamic. The name is chosen by the **G12's received config broadcast** — what is
   physically wired — per `GUICODE.md` Finding 19, which found every such register written once
-  from a received CAN payload. "Option-dependent" was too narrow.
+  from a received CAN payload. "Option-dependent" was too narrow. *(2026-10-19, Finding 81: the
+  registers are the floorplan register and the OPTIONS registers — the tank rows are gated on the
+  floorplan register, row 07 also on Black Tank — so "option-dependent" was too narrow only in
+  leaving out the floorplan. Both arrive in that config payload.)*
 
 A dynamic row is a `'NN - '` prefix label followed by **two** widgets, not one:
 
@@ -1573,11 +1576,18 @@ The name table itself is a run of NUL-terminated strings in **GuiCode** at file 
 (vaddr `0x259278`): `'Tank Heat Fresh'`, `'Tank Heat Grey'`, `'Tank Heat Black'`,
 `'Tank Heat Grey 2'`, `'A/C Heat Pump'`, `'AES Start/Stop'`, `'Gen Start'`, `'Bath Fan'`,
 `'Bunk Accent Lts'`, `'Security Lt (GND)'`, … The **G12 section carries no output names**
-(checked), so nothing in the MCF maps a pin to a table entry — that join arrives over the bus.
+(checked).
 
-**Consequence for rendering.** A dynamic row's text is runtime state, in the same class as
-tank levels and temperatures: byte-derived rendering can show the row and its geometry but
-not its name. This is a *defensible* blank, not a decode gap.
+**Corrected 2026-10-19 (`GUICODE.md` Finding 81).** Two statements that stood here were wrong.
+"Nothing in the MCF maps a pin to a table entry — that join arrives over the bus": the join is in
+GuiCode. One straight-line block of `FUN_00247BF8` (13.6 `0x2494B2`–`0x249794`) copies each name
+into its row's cell by literal address, gated on the floorplan register and the OPTIONS registers;
+what arrives over the bus is only those registers' values (the config payload, Finding 19). And
+"a dynamic row's text is runtime state … a defensible blank": it is runtime only as the floorplan
+is, and `outputs.output_name_variants` reads every name with the floorplans and options that show
+it by running that block (`cellwriters`). 11.23 has no dynamic rows; it puts its conditional row
+labels in the arms of a type-6 switch on the floorplan slot instead (objects 811-821), read the
+same way through the switch scan.
 
 This settles the `(CH. 25)` question. At `0x09A07C` the length byte is `0x22` = 34 and the
 34 bytes that follow are `"   Cargo / Bath Light\n    (CH. 25)"` — **one string, one

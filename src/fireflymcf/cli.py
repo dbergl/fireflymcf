@@ -1027,10 +1027,15 @@ def _cmd_pins(args: argparse.Namespace) -> int:
       * `-`       -- no GuiCode block decodes this pin's status; only a filter retarget
                      (`set_filter_instance`, which costs another pin its watcher) can help.
     """
-    from . import statusbind, theme
+    from . import outputs, statusbind, theme
     data = Path(args.image).read_bytes()
     bindings = statusbind.pin_bindings(data)
     rest = theme.resting_defaults(data)
+    try:
+        page_names = outputs.output_name_variants(data)
+    except ValueError:                  # no G12 OUTPUTS page on this build
+        page_names = {}
+    captions = outputs.control_captions(data)
     pins = sorted(p for p in bindings
                   if statusbind.PIN_MIN <= p <= statusbind.PIN_MAX
                   and (args.all or not bindings[p].commanded))
@@ -1052,6 +1057,19 @@ def _cmd_pins(args: argparse.Namespace) -> int:
                                              if b.colour_index is not None else None)),
             "on_rgb": on.rgb if on else None,
             "consumers": b.colour_consumers,
+            # What the panel itself calls the pin: the G12 OUTPUTS page row (every variant,
+            # with the floorplans/options that show it) and, separately, the captions of the
+            # controls joined to the pin (inferred-from-data; `outputs` module docstring).
+            "outputs_page_names": [
+                {"name": n.name, "kind": n.kind, "when": n.when,
+                 "conditions": outputs.as_json(n.condition), "source": n.source}
+                for n in page_names.get(p, [])],
+            "captions": [
+                {"text": c.text, "via": list(c.via), "when": c.when,
+                 "conditions": outputs.as_json(c.condition),
+                 "objects": [o for o, _off in c.objects],
+                 "other_gates": list(c.other_gates), "source": c.source}
+                for c in captions.get(p, [])],
         })
 
     if args.json:
@@ -1060,14 +1078,25 @@ def _cmd_pins(args: argparse.Namespace) -> int:
         return 0
 
     print(f"{'pin':>4} {'var':>4} {'use':>7} {'bool':>5} {'off colour':>15} "
-          f"{'on colour':>14}  consumers")
+          f"{'on colour':>14}  {'OUTPUTS-page name':<34} consumers")
     for r in rows:
         use = "-" if r["use"] is None else str(r["use"])
         flag = " *" if r["commanded"] else ""
+        names = " / ".join((n["name"] if n["name"] is not None else "(run time)")
+                           + ("" if n["when"] == "always" else "+")
+                           for n in r["outputs_page_names"]) or "-"
         print(f"{r['pin']:>4} {r['var']:>4} {use:>7} {str(r['bool_index']):>5} "
-              f"{str(r['off_rgb']):>15} {str(r['on_rgb']):>14}  "
+              f"{str(r['off_rgb']):>15} {str(r['on_rgb']):>14}  {names:<34} "
               f"{', '.join(map(str, r['consumers'])) or '-'}{flag}")
+        if args.names:
+            for n in r["outputs_page_names"]:
+                print(f"{'':>10}OUTPUTS  {n['name']!r}: {n['when']}")
+            for c in r["captions"]:
+                print(f"{'':>10}caption  {c['text']!r} ({'+'.join(c['via'])}, objects "
+                      f"{', '.join(map(str, c['objects']))}): {c['when']}")
     print(f"\nspare +0x44BC8 indices: {statusbind.spare_cell_indices(data)}")
+    print("OUTPUTS-page name: the G12 OUTPUTS row's names; + = shown only under some floorplan "
+          "or option (--names lists the conditions and the control captions)")
     if args.all:
         print("* = already commanded by a located control")
     return 0
@@ -1490,6 +1519,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("image")
     p.add_argument("--all", action="store_true",
                    help="include pins an existing control already commands")
+    p.add_argument("--names", action="store_true",
+                   help="under each pin, list every OUTPUTS-page name with the floorplans and "
+                        "options that show it, and the captions of the controls joined to it")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.set_defaults(func=_cmd_pins)
 
