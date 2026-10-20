@@ -680,8 +680,9 @@ group does not cycle its variant on release (byte 1 `0x80`), so the external set
 picks the copy. Then `PHASE_HELD` goes on **every** live copy, the hold threshold and the held
 repeat once on the group. On 13.6 groups 82, 88 and 129 pass (each a `0x1FED9` selector write
 of 0/1 plus its read-back); group 129 is Low Volts, whose variant GuiCode sets from selector
-`0x2F` (`0x0024A176`). **This path has not run on a coach**; the op reports itself unverified
-when it takes it.
+`0x2F` (`0x0024A176`). **Confirmed on the coach, 2026-10-19** (owner): group 129 with a 3 s
+hold, pressed from the compact AES ELECTRICAL page, works. AGS mode and groups 82/88 have not
+run.
 
 **Confirmed on the coach, 2026-08-19** (owner, build `Custom v20`): a 3-second hold turns pin 29
 on, another turns it off, a tap does nothing, and holding past the threshold does not re-toggle.

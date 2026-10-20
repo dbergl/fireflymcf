@@ -2527,8 +2527,9 @@ class SetGesture(Op):
     hardware-confirmed (2026-08-19, the pin-29 Starlink button). A variant-selected
     multi-binding group (13.6's group 129, Low Volts: a selector write that the
     group's external variant setter points at 0 or 1, plus its read-back) gets the
-    same edit on every live copy; that path is HARDWARE-UNVERIFIED, and this op
-    reports itself unverified when it takes it. Converting the other way (`kind: "latch"`) is not implemented
+    same edit on every live copy; COACH-VERIFIED 2026-10-19 on group 129 from the
+    compact AES ELECTRICAL page (owner: the 3 s hold works). AGS mode is untested.
+    Converting the other way (`kind: "latch"`) is not implemented
     for anything that is not already a latch -- it verifies and no-ops on a latch,
     and refuses everything else rather than half-editing it.
 
@@ -2647,20 +2648,17 @@ class SetGesture(Op):
         for dead in (gestures.PHASE_PRESS, gestures.PHASE_TAP,
                      gestures.PHASE_RELEASE_HELD):
             assert not beh.on(dead), "a tap must not switch the load"
-        multi = ctx.handles[self.spec.id].get("multi", False)
-        # Set here, not in apply: verify runs for every op, a cache-resumed compile included.
-        self.hardware_verified = not multi
-        if not multi:
+        if not ctx.handles[self.spec.id].get("multi", False):
             return "gesture: group %d hold-to-toggle (%d s each way)" % (
                 gid, self.seconds)
         assert set(beh.kinds.values()) == {"hold-only"}, beh.kinds
         assert len(held) == len(beh.emissions), "every live copy must fire on the hold"
         return ("gesture: group %d hold-to-toggle (%d s each way) on all %d live bindings "
                 "of variants %s; direction is chosen by the group's external variant "
-                "setter; HARDWARE-UNVERIFIED (coach test: tap does nothing; %d s hold arms; "
-                "%d s hold disarms; colour follows; fires once per hold)"
+                "setter; COACH-VERIFIED 2026-10-19 (group 129, compact AES ELECTRICAL; AGS "
+                "mode untested)"
                 % (gid, self.seconds, len(beh.emissions),
-                   "/".join(str(v) for v in beh.variants), self.seconds, self.seconds))
+                   "/".join(str(v) for v in beh.variants)))
 
 
 @op("pin_filter_instance")

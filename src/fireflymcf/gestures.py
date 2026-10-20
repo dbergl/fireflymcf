@@ -387,8 +387,8 @@ def make_hold_to_toggle(data: bytes, group: int, seconds: int = 3):
     A multi-entry group is the real trap: which copy fires is chosen by a runtime variant
     counter, so editing "the" entry may edit one that never runs (section 5 of
     `docs/CONTROL-BEHAVIOR.md`). Such a group goes to `_make_multi_hold_to_toggle`, which edits
-    every live copy alike and only when its five premises hold; that path is unverified on a
-    coach.
+    every live copy alike and only when its five premises hold; coach-verified 2026-10-19 on
+    group 129 (Low Volts) in AES mode.
 
     **No precedent.** No group in any corpus build sends a DC_DIMMER command on the held
     phase, and no hold-only group drives a load at all -- every shipped hold-to-confirm
@@ -452,7 +452,8 @@ def _make_multi_hold_to_toggle(data: bytes, group: int, live: list, seconds: int
          On 13.6 that is GuiCode's Low Volts block at 0x0024A176.
 
     Then one hold threshold, the held repeat rate zeroed, and `PHASE_HELD` on every copy.
-    Unverified on a coach: the single-entry path is the one hardware has run.
+    Coach-verified 2026-10-19 on group 129 from the compact AES ELECTRICAL page (owner: the
+    3 s hold works); AGS mode, and groups 82/88, have not run.
     """
     bindings = guidata.binding_table(data)
     beh = describe_group(data, group)

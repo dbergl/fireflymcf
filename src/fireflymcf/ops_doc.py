@@ -108,8 +108,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "set_gesture": ("same-size",
         "Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or "
         "every copy of a variant-selected two-state group (Low Volts, group 129).",
-        "Flashed 2026-08-19 (pins 28 and 29) for a single toggle. The multi-binding path is "
-        "UNVERIFIED (the op reports itself unverified when it takes it).",
+        "Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts "
+        "(group 129) on the compact AES ELECTRICAL page. AGS mode untested.",
         "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
     "pin_filter_instance": ("same-size",
         "Narrow a receive-filter entry from any device to one RV-C instance (one byte).",
