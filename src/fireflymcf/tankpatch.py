@@ -54,7 +54,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from fireflymcf import container, patch, tankbroadcast
+from fireflymcf import console, container, patch, tankbroadcast
 
 # `--flag` -> RV-C TANK_STATUS instance. The names are RV-C's, not Firefly's.
 TANK_FLAGS = {
@@ -239,6 +239,7 @@ def _verify(before: bytes, after: bytes, instances, renamed: bool) -> None:
 
 
 def main(argv=None) -> int:
+    console.utf8()
     args = _parser().parse_args(argv)
     try:
         try:
