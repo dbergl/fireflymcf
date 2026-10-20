@@ -35,50 +35,50 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | op | class | purpose | hardware status | verified |
 |---|---|---|---|---|
 | [`assert_layout`](#assert_layout) | same-size | Check, at its place in the recipe, that chosen records (by walk key, object and record, or label) sit at given absolute boxes, or that nothing on a page moved since an earlier snapshot. Changes no bytes. | Check-only: changes no bytes, so there is nothing to run on a coach. | yes |
-| [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14 (v26): the coach bath light (ch25) no longer follows Light Master. | yes |
-| [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07 (v22), mode `selector`. PC.62. Other modes unverified. | yes |
-| [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed (the reference build). | yes |
-| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. | Flashed (reference build v1 onward). | yes |
-| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (v17 onward). Motivated by PC.46. | yes |
-| [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05 (v18). PC.60. | yes |
+| [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14: the coach bath light (ch25) no longer follows Light Master. | yes |
+| [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes |
+| [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes |
+| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. | Flashed. | yes |
+| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. | yes |
+| [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
 | [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. | Flashed. | yes |
-| [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16, v9). The default indicator retarget is UNVERIFIED. | yes |
+| [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
 | [`remove_control`](#remove_control) | same-size | Park a control off the 480 px canvas by rewriting its attach records' y. Bindings stay. | UNVERIFIED. Never flashed. | **no** |
-| [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed (reference build v7 onward). PC.21 shows the G12 does not re-impose it. | yes |
+| [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
-| [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02 (v12). | yes |
+| [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
-| [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04 (v17). | yes |
+| [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04. | yes |
 | [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
 | [`add_aes_batt_heat`](#add_aes_batt_heat) | structural | Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`). | Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged. | yes |
-| [`add_aes_batt_heat_status`](#add_aes_batt_heat_status) | structural | Show live BMS status on the "Batt Heat" button: blue/cyan body for the battery heater off/on, plus a red glyph for the battery's internal heater contactor (status DGN `0x18FF7070`), received on two APPENDED subscriptions folded per tick into one private display cell that drives one four-arm switch. | Flashed 2026-09-22 (v32): injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (receive half proven on v31). | yes |
-| [`add_aes_bms_button_status`](#add_aes_bms_button_status) | structural | Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch. | Flashed 2026-10-15 (v49, Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked. | **no** |
-| [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05 on v46: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
-| [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (v34a, glyph verified); style `outline` flashed in v47 and verified 2026-10-10. | yes |
+| [`add_aes_batt_heat_status`](#add_aes_batt_heat_status) | structural | Show live BMS status on the "Batt Heat" button: blue/cyan body for the battery heater off/on, plus a red glyph for the battery's internal heater contactor (status DGN `0x18FF7070`), received on two APPENDED subscriptions folded per tick into one private display cell that drives one four-arm switch. | Flashed 2026-09-22: injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (the receive half was proven in an earlier build). | yes |
+| [`add_aes_bms_button_status`](#add_aes_bms_button_status) | structural | Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch. | Flashed 2026-10-15 (Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked. | **no** |
+| [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
+| [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
-| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15 (v49, v50): the readouts are live on the coach. | yes |
-| [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06 (v21). PC.61. | yes |
+| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. | yes |
+| [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
-| [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27 (v35): live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since v37. Zero Level is unverified. | **no** |
+| [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
-| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15 (v48; its three draw defects fixed in v49, flashed the same day). | yes |
-| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
+| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
+| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
-| [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22 (reference build v7/v8). | yes |
+| [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
 | [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
 | [`add_aes_low_volts_trigger`](#add_aes_low_volts_trigger) | guicode | Add a live, recolouring Low Volts arm indicator to the compact AES frame. | Flashed 2026-09-01. | yes |
 | [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes |
-| [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04 (v17) and 2026-09-06 (v21, `allow_disable`). | yes |
-| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). | Flashed 2026-09-04 (v17, tier-2 cell) and 2026-09-05 (v18, `cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance. | yes |
-| [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | VERIFIED. v25 flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes |
+| [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes |
+| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance. | yes |
+| [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes |
 | [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes |
 | [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. | yes |
-| [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07 (v22). PC.62. | yes |
+| [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes |
 | [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes |
 
 ## Same-size edits
@@ -115,8 +115,8 @@ Error codes:
 
 Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0.
 
-- **Hardware status:** Flashed 2026-09-14 (v26): the coach bath light (ch25) no longer follows Light Master.
-- **Proof:** `mastergroup.py`, `CONTROL-BEHAVIOR.md` §3; the reference coach's build log (not published) "Experimental v26"
+- **Hardware status:** Flashed 2026-09-14: the coach bath light (ch25) no longer follows Light Master.
+- **Proof:** `mastergroup.py`, `CONTROL-BEHAVIOR.md` §3
 - **Implementation:** `recipe_ops.DropFromMaster`
 
 | parameter | type | required | default | meaning |
@@ -133,7 +133,7 @@ Error codes:
 
 Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte.
 
-- **Hardware status:** Flashed 2026-09-07 (v22), mode `selector`. PC.62. Other modes unverified.
+- **Hardware status:** Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified.
 - **Proof:** `GUICODE.md` Finding 68, `BUS-BASELINE.md` PC.62
 - **Implementation:** `recipe_ops.FixVariantGate`
 
@@ -151,8 +151,8 @@ Error codes:
 
 Move where a page attaches a child object (its wtype-5 attach record).
 
-- **Hardware status:** Flashed (the reference build).
-- **Proof:** the reference coach's build log (not published)
+- **Hardware status:** Flashed.
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.MoveAttach`
 
 | parameter | type | required | default | meaning |
@@ -173,8 +173,8 @@ Error codes:
 
 Set one record's geometry fields (x, y, width, height) inside an object.
 
-- **Hardware status:** Flashed (reference build v1 onward).
-- **Proof:** the reference coach's build log (not published)
+- **Hardware status:** Flashed.
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.MoveElement`
 
 | parameter | type | required | default | meaning |
@@ -196,7 +196,7 @@ Error codes:
 
 Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 
-- **Hardware status:** Flashed (v17 onward). Motivated by PC.46.
+- **Hardware status:** Flashed (2026-09-04 onward). Motivated by PC.46.
 - **Proof:** `BUS-BASELINE.md` PC.46
 - **Implementation:** `recipe_ops.PinFilterInstance`
 
@@ -215,7 +215,7 @@ Error codes:
 
 Pin a type-6 switch to one arm regardless of its value slot (three u16s).
 
-- **Hardware status:** Flashed 2026-09-05 (v18). PC.60.
+- **Hardware status:** Flashed 2026-09-05. PC.60.
 - **Proof:** `switchpin.py`, `BUS-BASELINE.md` PC.60
 - **Implementation:** `recipe_ops.PinSwitchArm`
 
@@ -253,7 +253,7 @@ Error codes:
 
 Make a labelled control command a different G12 output channel.
 
-- **Hardware status:** Flashed with `move_display_list` (PC.13-16, v9). The default indicator retarget is UNVERIFIED.
+- **Hardware status:** Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED.
 - **Proof:** `BUS-BASELINE.md` PC.13-PC.16; `CompileResult.unverified`
 - **Implementation:** `recipe_ops.RemapChannel`
 
@@ -294,7 +294,7 @@ Error codes:
 
 Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23.
 
-- **Hardware status:** Flashed (reference build v7 onward). PC.21 shows the G12 does not re-impose it.
+- **Hardware status:** Flashed. PC.21 shows the G12 does not re-impose it.
 - **Proof:** `GUICODE.md` Finding 50, `docs/SETTLED-FINDINGS.md`
 - **Implementation:** `recipe_ops.RemoveOptionInterlocks`
 
@@ -334,8 +334,8 @@ Error codes:
 
 Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit).
 
-- **Hardware status:** Flashed 2026-09-02 (v12).
-- **Proof:** the reference coach's build log (not published) "Experimental v12"
+- **Hardware status:** Flashed 2026-09-02.
+- **Proof:** `aescompact.py`
 - **Implementation:** `recipe_ops.RetargetInverterGear`
 
 | parameter | type | required | default | meaning |
@@ -394,7 +394,7 @@ Error codes:
 Repoint an icon record's font slot and/or character; optionally blank the caption.
 
 - **Hardware status:** Flashed (the Starlink button).
-- **Proof:** the reference coach's build log (not published)
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.SetIcon`
 
 | parameter | type | required | default | meaning |
@@ -415,8 +415,8 @@ Error codes:
 
 Reveal the nav rail's authored sixth icon and route it to a screen.
 
-- **Hardware status:** Flashed 2026-09-04 (v17).
-- **Proof:** `navicon.py`, the reference coach's build log (not published) "Experimental v15"
+- **Hardware status:** Flashed 2026-09-04.
+- **Proof:** `navicon.py`
 - **Implementation:** `recipe_ops.ShowNavSlidesIcon`
 
 | parameter | type | required | default | meaning |
@@ -446,7 +446,7 @@ Records are inserted or replaced and every shifted pointer is repaired by `reloc
 Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`).
 
 - **Hardware status:** Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged.
-- **Proof:** its design note (not published)
+- **Proof:** `aescompact.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddAesBattHeat`
 
 | parameter | type | required | default | meaning |
@@ -469,8 +469,8 @@ Error codes:
 
 Show live BMS status on the "Batt Heat" button: blue/cyan body for the battery heater off/on, plus a red glyph for the battery's internal heater contactor (status DGN `0x18FF7070`), received on two APPENDED subscriptions folded per tick into one private display cell that drives one four-arm switch.
 
-- **Hardware status:** Flashed 2026-09-22 (v32): injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (receive half proven on v31).
-- **Proof:** its design note (not published)
+- **Hardware status:** Flashed 2026-09-22: injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (the receive half was proven in an earlier build).
+- **Proof:** `aescompact.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddAesBattHeatStatus`
 
 | parameter | type | required | default | meaning |
@@ -490,8 +490,8 @@ Error codes:
 
 Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch.
 
-- **Hardware status:** Flashed 2026-10-15 (v49, Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked.
-- **Proof:** its design note (not published)
+- **Hardware status:** Flashed 2026-10-15 (Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked.
+- **Proof:** `aescompact.py`
 - **Implementation:** `recipe_ops.AddAesBmsButtonStatus`
 
 | parameter | type | required | default | meaning |
@@ -512,7 +512,7 @@ Error codes:
 
 Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing.
 
-- **Hardware status:** Coach-verified 2026-10-05 on v46: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots.
+- **Hardware status:** Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots.
 - **Proof:** `src/fireflymcf/altreboot.py`; the hold nibble and held-only phase mask were proven in the hold-to-toggle trial (`docs/CONTROL-BEHAVIOR.md` §8)
 - **Implementation:** `recipe_ops.AddAltReboot`
 
@@ -531,7 +531,7 @@ Error codes:
 
 Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms.
 
-- **Hardware status:** Flashed 2026-09-26 (v34a, glyph verified); style `outline` flashed in v47 and verified 2026-10-10.
+- **Hardware status:** Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10.
 - **Proof:** `src/fireflymcf/battglyph.py`
 - **Implementation:** `recipe_ops.AddBattHeatBatteryGlyph`
 
@@ -577,8 +577,8 @@ Error codes:
 
 Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles.
 
-- **Hardware status:** Flashed 2026-10-15 (v49, v50): the readouts are live on the coach.
-- **Proof:** the reference coach's build log (not published) "v49 and v50 on the coach"; its design note (not published)
+- **Hardware status:** Flashed 2026-10-15: the readouts are live on the coach.
+- **Proof:** `cardreadouts.py`, `readout.py`
 - **Implementation:** `recipe_ops.AddCardReadouts`
 
 | parameter | type | required | default | meaning |
@@ -600,8 +600,8 @@ Error codes:
 
 Put a state-gated one-character mark in a corner of an existing button.
 
-- **Hardware status:** Flashed 2026-09-06 (v21). PC.61.
-- **Proof:** `cornermark.py`, the reference coach's build log (not published) "Experimental v21"
+- **Hardware status:** Flashed 2026-09-06. PC.61.
+- **Proof:** `cornermark.py`, `BUS-BASELINE.md` PC.61
 - **Implementation:** `recipe_ops.AddCornerMark`
 
 | parameter | type | required | default | meaning |
@@ -629,7 +629,7 @@ Error codes:
 Clone a donor control into a bare button shell on a page, sized w x h, unwired.
 
 - **Hardware status:** Flashed (the Starlink button). Must be followed by `wire_button`.
-- **Proof:** the reference coach's build log (not published) "The Starlink button"
+- **Proof:** `newbutton.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddGlyphButton`
 
 | parameter | type | required | default | meaning |
@@ -652,8 +652,8 @@ Error codes:
 
 Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph.
 
-- **Hardware status:** Flashed 2026-09-27 (v35): live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since v37. Zero Level is unverified.
-- **Proof:** `src/fireflymcf/levelpage.py`, `levelfeed.py`, its design note (not published)
+- **Hardware status:** Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified.
+- **Proof:** `src/fireflymcf/levelpage.py`, `levelfeed.py`, `docs/LEVELING-PAGE.md`
 - **Implementation:** `recipe_ops.AddLevelPage`
 
 | parameter | type | required | default | meaning |
@@ -692,7 +692,7 @@ Error codes:
 Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge.
 
 - **Hardware status:** Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge.
-- **Proof:** the reference coach's build log (not published) "The compact AES Electrical page"
+- **Proof:** `aescompact.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddLowVoltsControl`
 
 | parameter | type | required | default | meaning |
@@ -721,8 +721,8 @@ Error codes:
 
 Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster.
 
-- **Hardware status:** Flashed 2026-10-15 (v48; its three draw defects fixed in v49, flashed the same day).
-- **Proof:** the reference coach's build log (not published) "v48's three coach defects"; its design note (not published)
+- **Hardware status:** Flashed 2026-10-15; its three draw defects were fixed and verified the same day.
+- **Proof:** `cardlayout.py`
 - **Implementation:** `recipe_ops.AesCardLayout`
 
 No parameters.
@@ -736,7 +736,7 @@ Error codes:
 
 Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20.
 
-- **Hardware status:** Flashed 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7.
+- **Hardware status:** Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7.
 - **Proof:** `src/fireflymcf/appendfilter.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AppendFilter`
 
@@ -844,7 +844,7 @@ Error codes:
 
 Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen.
 
-- **Hardware status:** Flashed. PC.22 (reference build v7/v8).
+- **Hardware status:** Flashed. PC.22.
 - **Proof:** `CONTROL-BEHAVIOR.md` §9, `docs/SETTLED-FINDINGS.md`
 - **Implementation:** `recipe_ops.SplitHoldRegion`
 
@@ -871,7 +871,7 @@ Error codes:
 Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page.
 
 - **Hardware status:** Flashed 2026-09-01.
-- **Proof:** the reference coach's build log (not published) "The compact AES Electrical page"
+- **Proof:** `aescompact.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.SwapAesElectrical`
 
 | parameter | type | required | default | meaning |
@@ -892,7 +892,7 @@ Error codes:
 Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group.
 
 - **Hardware status:** Flashed (the Starlink button).
-- **Proof:** the reference coach's build log (not published) "The Starlink button"
+- **Proof:** `newbutton.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.WireButton`
 
 | parameter | type | required | default | meaning |
@@ -920,7 +920,7 @@ A routine is appended to the GuiCode section and chained onto the per-tick hook.
 Add a live, recolouring Low Volts arm indicator to the compact AES frame.
 
 - **Hardware status:** Flashed 2026-09-01.
-- **Proof:** the reference coach's build log (not published) "The compact AES Electrical page"
+- **Proof:** `aescompact.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddAesLowVoltsTrigger`
 
 | parameter | type | required | default | meaning |
@@ -966,8 +966,8 @@ Error codes:
 
 The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame.
 
-- **Hardware status:** Flashed 2026-09-04 (v17) and 2026-09-06 (v21, `allow_disable`).
-- **Proof:** the reference coach's build log (not published) "Experimental v17", "Experimental v21"; PC.59, PC.61
+- **Hardware status:** Flashed 2026-09-04, and 2026-09-06 with `allow_disable`.
+- **Proof:** `pumpauto.py`, `BUS-BASELINE.md` PC.59, PC.61
 - **Implementation:** `recipe_ops.AddPumpAutoOff`
 
 | parameter | type | required | default | meaning |
@@ -989,8 +989,8 @@ Error codes:
 
 Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`).
 
-- **Hardware status:** Flashed 2026-09-04 (v17, tier-2 cell) and 2026-09-05 (v18, `cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance.
-- **Proof:** the reference coach's build log (not published) "Experimental v17", "Experimental v18"; PC.59, PC.60
+- **Hardware status:** Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance.
+- **Proof:** `readout.py`, `BUS-BASELINE.md` PC.59, PC.60
 - **Implementation:** `recipe_ops.AddRegisterReadout`
 
 | parameter | type | required | default | meaning |
@@ -1014,8 +1014,8 @@ Show any register as a live number on any page, or feed an existing readout's ce
 
 Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green.
 
-- **Hardware status:** VERIFIED. v25 flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page.
-- **Proof:** the reference coach's build log (not published) (v25); its design note (not published)
+- **Hardware status:** Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page.
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddVoltageBattery`
 
 | parameter | type | required | default | meaning |
@@ -1046,7 +1046,7 @@ Error codes:
 Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row.
 
 - **Hardware status:** Flashed 2026-08-31 (the light to pump follower).
-- **Proof:** the reference coach's build log (not published) "The gated light→pump follower"
+- **Proof:** `followchannel.py`, `BUS-BASELINE.md` PC.45
 - **Implementation:** `recipe_ops.FollowChannel`
 
 | parameter | type | required | default | meaning |
@@ -1072,7 +1072,7 @@ Error codes:
 Watch any register for an edge and drive a channel, gated by register conditions.
 
 - **Hardware status:** Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register.
-- **Proof:** its design note (not published)
+- **Proof:** `followchannel.py`
 - **Implementation:** `recipe_ops.FollowRegister`
 
 | parameter | type | required | default | meaning |
@@ -1090,7 +1090,7 @@ Confined to the G12 section, which the bootloader flashes on its own.
 
 Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program).
 
-- **Hardware status:** Flashed 2026-09-07 (v22). PC.62.
+- **Hardware status:** Flashed 2026-09-07. PC.62.
 - **Proof:** `docs/TANK-PATCHER.md`, `BUS-BASELINE.md` PC.62
 - **Implementation:** `recipe_ops.SuppressTankStatus`
 
@@ -1111,7 +1111,7 @@ Name something in the stock image for later ops to reference. The image is uncha
 Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only.
 
 - **Hardware status:** Tooling-verified; image unchanged.
-- **Proof:** its design note (not published)
+- **Proof:** `register.py`
 - **Implementation:** `recipe_ops.ResolveRegister`
 
 | parameter | type | required | default | meaning |
