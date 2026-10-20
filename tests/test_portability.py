@@ -63,9 +63,11 @@ def test_scan_catches_an_unencoded_open():
 
 def test_console_survives_a_cp1252_pipe(monkeypatch):
     from fireflymcf import console
-    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    # newline="\n": a Windows text stream otherwise writes "\r\n", which is not under test.
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", newline="\n")
     monkeypatch.setattr(sys, "stdout", out)
-    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252"))
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(io.BytesIO(), encoding="cp1252",
+                                                        newline="\n"))
     console.utf8()
     print("report — a ↔ b • …")
     sys.stdout.flush()
