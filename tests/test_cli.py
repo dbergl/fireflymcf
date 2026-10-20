@@ -346,22 +346,3 @@ def test_every_subcommand_prints_help():
             cli_mod.main([cmd, "--help"])
         assert e.value.code == 0, cmd
         assert "usage: fireflymcf %s" % cmd in out.getvalue(), cmd
-
-
-def test_cli_validate_passes_v26():
-    """`validate` is the one-command pre-flash gate: it must PASS (exit 0) on the recipe that
-    is actually running on the coach, with the stock auto-located by base_sha256."""
-    from tests.conftest import REPO_ROOT
-    r = _run("validate", "builds/experiment-v26-coach48v.ffproj.json", cwd=REPO_ROOT)
-    assert r.returncode == 0, r.stderr
-    assert "PASS" in r.stdout
-
-
-def test_cli_validate_fails_on_wrong_stock():
-    """Pointed at a stock image the project was not built against, compilation must fail its
-    base-hash gate and `validate` must report FAIL and exit 1."""
-    from tests.conftest import REPO_ROOT
-    r = _run("validate", "builds/experiment-v26-coach48v.ffproj.json",
-             "firefly-11.23/mcf.bin", cwd=REPO_ROOT)
-    assert r.returncode == 1
-    assert "FAIL" in (r.stdout + r.stderr)

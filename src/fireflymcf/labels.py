@@ -11,7 +11,8 @@ is padded with TRAILING spaces up to the next boundary — invisible on these le
 labels. Offsets are re-derived from `data` on every call, so growths compose. The result
 is returned UNSEALED; the caller reseals (callers batch several growths per reseal).
 
-Extracted from builds/from_stock.py (hardware-confirmed path: BUS-BASELINE PC.18).
+Extracted from the original from-stock build script (hardware-confirmed path: BUS-BASELINE
+PC.18).
 """
 from fireflymcf import guidata, records, relocate
 

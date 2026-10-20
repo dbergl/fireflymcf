@@ -23,7 +23,7 @@ from fireflymcf import (aescompact, followchannel, guidata, records, recipe, reg
 
 STOCK = "firefly-13.6/mcf.bin"
 
-# The two AES ops in isolation. Was `builds/aes-compact.ffproj.json`; inlined here (and in
+# The two AES ops in isolation. Was the `aes-compact` recipe; inlined here (and in
 # test_aes_electrical_build.py) when that fixture file was removed, so this test still exercises
 # `swap_aes_electrical` + `add_aes_low_volts_trigger` as a standalone 2-op build against stock.
 AES_COMPACT_RECIPE = json.dumps({

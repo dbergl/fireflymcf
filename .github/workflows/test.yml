@@ -1,7 +1,7 @@
 name: test
 
 # The public half of the suite on every platform an owner might run the plugin on. The corpus,
-# captures and recipes are private (scripts/link-research.sh), so the modules that need them
+# captures and configurations are private (scripts/link-research.sh), so the modules that need them
 # are not collected here; tests/test_portability.py and the CLI smoke step carry the
 # platform-specific checks.
 

@@ -396,8 +396,8 @@ Verbatim, as part of the documentation cleanup. Dated statements below describe 
 
    **The trade is real and is now shipping.** The whitelist has no spare slot, so **SY loses Grey
    and WT loses Black**. Invisible on a WD coach, but baked into every build derived from
-   `builds/from_stock.py` (step 1) and into the recipe engine's `tank_heater_names` op — so it is
-   in reference build v1, confirmed on the coach 2026-08-20 (PC.19). Personal-build only:
+   the reference coach's build script and into the recipe engine's `tank_heater_names` op — so it
+   is in the reference coach's builds, confirmed on the coach 2026-08-20 (PC.19). Personal-build only:
    do not hand these images to another floorplan's owner without saying so.
 
 

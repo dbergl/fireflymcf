@@ -590,7 +590,7 @@ offsets into a foreign image. `holdregion` (hold-region split) and `tankgates.wi
 expected stock bytes at every site before writing (`got != old` raises); `interlocks.uncouple` gates
 on `addresses_apply` — a content-check, not a version string — so it is a clean no-op on 11.23 and
 raises `BuildNotSupported` on 14.7 before any byte is written. `interlocks.ALL_MODE_ARMS` looked like
-dead code in a single-file scan but is load-bearing in `builds/from_stock.py` and
+dead code in a single-file scan but is load-bearing in the reference coach's build script and
 `tests/test_interlocks.py` (the neighbour-clobber proof) — an argument-from-absence caught by grepping
 the whole repo, not one file. The only remaining build-specific surface is **preview-only**:
 `options.derived_slots` resolves its inputs by option name (build-general) but writes the HOME

@@ -195,7 +195,7 @@ class CompileResult:
 def capabilities(img: bytes) -> set:
     """Every (channel, wire command) pair the image's group/binding tables can send.
 
-    Lifted from builds/from_stock.py's capability gate (added 2026-08-19 after a
+    Lifted from the original build script's capability gate (added 2026-08-19 after a
     repurposed group silently ate the awning: v11 lost (3,1), v18 lost that plus
     channel 86 — both flashed before anyone noticed)."""
     gt, bt = guidata.group_table(img), guidata.binding_table(img)

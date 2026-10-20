@@ -8,7 +8,7 @@
 //
 // The rule for turning a picture into coverage is ALPHA, not luminance (a glyph is
 // painted in the widget's own ink, so the artwork's colours never survive). It is the
-// same rule `builds/from_stock.py` uses on the rasterised SVG, so the same artwork
+// same rule the original build script used on the rasterised SVG, so the same artwork
 // yields the same pixels here as in the build script -- verified: the Starlink SVG
 // rendered to 96x54 imports to the exact rows of the glyph flashed to the coach.
 import { useState } from "react";

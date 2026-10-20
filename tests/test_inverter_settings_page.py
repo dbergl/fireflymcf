@@ -134,18 +134,3 @@ def test_pinning_the_filter_admits_the_inverter_and_rejects_the_alternator(data:
     assert len(out) == len(data)                       # same-size, as every filter edit is
     assert sum(1 for e in edits if e.structure != "checksum") == 1   # ... and exactly one byte
 
-
-def test_the_experiment_build_ships_the_pin() -> None:
-    """The shipped recipe must carry it, not just the primitive."""
-    import json
-    from pathlib import Path
-    from fireflymcf import guidata, recipe, statusbind
-
-    repo = Path(__file__).resolve().parent.parent
-    stock = (repo / "firefly-13.6" / "mcf.bin").read_bytes()
-    project = recipe.Project.from_json((repo / "builds" / "golden-v22-anchor.ffproj.json").read_text())
-    result = recipe.compile_project(project, stock)
-    assert result.ok, result.errors
-    entry = guidata.variable_table(result.data)[BATTERY_TYPE_VAR]
-    assert entry.raw[statusbind.FILTER_INSTANCE_FIELD] == INVERTER_INSTANCE, \
-        "the experiment build no longer pins `Battery Type` to the inverter's instance"
