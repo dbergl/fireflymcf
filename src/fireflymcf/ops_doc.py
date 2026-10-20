@@ -122,6 +122,19 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Delete chosen records from one object (shrinking it), so a control is gone from the "
         "page, its touch region included. Bindings stay.",
         "Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.", "`relocate.replace_object_records`"),
+    "move_control": ("structural",
+        "Move a control (its draw, touch and box records) from one object to another: remove "
+        "it, put back what the removal moved on the source page, paste it at an absolute "
+        "position (a new object under a clone of the destination's first attach), and assert "
+        "nothing else moved on either page.",
+        "UNVERIFIED. Built from coach-proven halves (`remove_records`, `insert_object`); the "
+        "absolute re-encoding and the compensation have not run on a coach.",
+        "`pagewalk.py`, `absrecord.py`, `CONTROL-BEHAVIOR.md` §10"),
+    "assert_layout": ("same-size",
+        "Check, at its place in the recipe, that chosen records (by walk key, object and record, "
+        "or label) sit at given absolute boxes, or that nothing on a page moved since an earlier "
+        "snapshot. Changes no bytes.",
+        "Check-only: changes no bytes, so there is nothing to run on a coach.", "`pagewalk.py`"),
     "drop_from_master": ("same-size",
         "Remove one channel from a master control (its ON+OFF group pair), so the master no "
         "longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0.",

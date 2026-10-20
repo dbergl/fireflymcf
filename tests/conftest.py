@@ -328,6 +328,43 @@ def compile_with_handles():
     return run
 
 
+def _lv_build(drop: tuple) -> bytes:
+    """`tests/lvbuilds.py`'s image of the v52 Low Volts recipe with the ops `drop` names
+    removed, shared across workers through `_disk_memo`; skipped when the research builds are
+    not linked in."""
+    from tests import lvbuilds
+
+    if not lvbuilds.available():
+        pytest.skip("builds/ or firefly-13.6/mcf.bin not linked in")
+
+    def produce():
+        res = lvbuilds.compile_with(lvbuilds.LOW_VOLTS_MOVE, drop=drop)
+        if not res.ok:
+            raise _Failed(res)
+        return res.data
+
+    value = _disk_memo("lvbuild", [lvbuilds.STOCK_136.read_bytes(),
+                                   lvbuilds.LOW_VOLTS_MOVE.read_bytes(), "\0".join(drop)],
+                       produce)
+    assert isinstance(value, bytes), value.errors
+    return value
+
+
+@pytest.fixture(scope="session")
+def lv_hold() -> bytes:
+    """`builds/mcf-13.6-low-volts-move.ffproj.json` without its last three ops: the 3 s Low
+    Volts hold, with Low Volts still on the compact ELECTRICAL card."""
+    from tests import lvbuilds
+    return _lv_build(lvbuilds.HOLD_DROP)
+
+
+@pytest.fixture(scope="session")
+def lv_move() -> bytes:
+    """`builds/mcf-13.6-low-volts-move.ffproj.json` as is: Low Volts moved to the AES settings
+    page."""
+    return _lv_build(())
+
+
 @pytest.fixture(scope="session")
 def shared_memo():
     """`f(kind, parts, produce)`: `produce()` cached across tests and xdist workers under

@@ -12,6 +12,7 @@ in the project, and `compile_project` always recompiles the whole project from s
 cannot recur here."""
 from __future__ import annotations
 
+import dataclasses
 import struct
 
 from fireflymcf import (aescompact, celltables, cli, container, followchannel, gestures,
@@ -22,6 +23,7 @@ from fireflymcf import (aescompact, celltables, cli, container, followchannel, g
                               pumpauto, readout, records, recipe, register, relocate, render,
                               sramreach, status_map, statusbind, tankgates, theme, thumb,
                               voltagebattery)
+from fireflymcf import absrecord
 from fireflymcf import altreboot
 from fireflymcf import appendfilter
 from fireflymcf import battglyph
@@ -31,6 +33,7 @@ from fireflymcf import cardreadouts
 from fireflymcf import cornermark
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
+from fireflymcf import pagewalk
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
 from fireflymcf import variantgates
@@ -2661,6 +2664,83 @@ class SetGesture(Op):
                    "/".join(str(v) for v in beh.variants)))
 
 
+def _touch_id(data, rec):
+    """A wtype-12 record's trailing touch id (R50, `gestures.touch_ids`), else None."""
+    return (data[rec.end - 2] | (data[rec.end - 1] << 8)) if rec.wtype == 12 else None
+
+
+def _check_record_entries(entries, op_id):
+    """Refuse a `records` list (`remove_records`' entry form) that is empty, or whose entries
+    lack a selector or assert nothing about the record they name."""
+    if not entries:
+        raise RecipeError("BAD_PARAMS", "records is empty", op_id=op_id)
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("selector"), dict):
+            raise RecipeError("BAD_PARAMS", "each record entry needs a selector dict",
+                              op_id=op_id)
+        if (entry["selector"].get("label") is None and "child" not in entry
+                and "touch_id" not in entry):
+            raise RecipeError(
+                "BAD_PARAMS", "entry %r asserts nothing about the record it removes; give "
+                "a selector label, child or touch_id" % (entry,), op_id=op_id)
+
+
+def _select_entries(data, obj, entries, op_id):
+    """The records of `obj` that `entries` name, in entry order, each identity-checked
+    (`child`, `touch_id`); BAD_PARAMS if two entries name one record."""
+    gs, tab = _gs_tab(data)
+    doomed = []
+    for entry in entries:
+        rec = _select_record(data, gs, tab, obj, entry["selector"], op_id)
+        if "child" in entry and rec.child_index != entry["child"]:
+            raise RecipeError("EXPECT_MISMATCH", "object %d record %r has child %r, "
+                              "expected %r" % (obj, entry["selector"], rec.child_index,
+                                               entry["child"]))
+        if "touch_id" in entry:
+            tid = _touch_id(data, rec)
+            if tid != entry["touch_id"]:
+                raise RecipeError("EXPECT_MISMATCH", "object %d record %r has touch id "
+                                  "%r, expected %r" % (obj, entry["selector"], tid,
+                                                       entry["touch_id"]))
+        if rec.offset in (r.offset for r in doomed):
+            raise RecipeError("BAD_PARAMS", "two entries name the record at %#x"
+                              % rec.offset)
+        doomed.append(rec)
+    return doomed
+
+
+def _remove_records(data, ctx, obj, entries, op_id):
+    """`remove_records`' removal: drop the records `entries` name from `obj` and swap the
+    shrunk stream in with `relocate.replace_object_records`, refusing POINTER_INSIDE for a
+    GuiCode or LCD literal between the first removed record and the object's end. Returns the
+    new image and the removed records (as decoded from `data`, entry order)."""
+    gs, tab = _gs_tab(data)
+    recs = records.object_records(data, gs + tab[obj])
+    doomed = _select_entries(data, obj, entries, op_id)
+    kept = [r for r in recs if r.offset not in {d.offset for d in doomed}]
+    if not kept:
+        raise RecipeError("BAD_PARAMS", "removing every record would leave object %d "
+                          "empty" % obj)
+
+    moved_from = min(d.offset for d in doomed) - gs
+    obj_end = recs[-1].end - gs
+    for section in ("GuiCode", "LCD"):
+        for pos, rel in theme.section_guidata_pointers(data, section):
+            if moved_from <= rel < obj_end:
+                raise RecipeError(
+                    "POINTER_INSIDE", "%s literal @ %#x points at GuiData+%#x, inside "
+                    "object %d after its first removed record; the shrink would move what "
+                    "it names" % (section, pos, rel, obj))
+
+    body = bytes([len(kept)]) + b"".join(data[r.offset:r.end] for r in kept)
+    try:
+        out, edits = relocate.replace_object_records(data, obj, body)
+    except relocate.RelocationError as err:
+        raise RecipeError("RELOCATE_REFUSED", str(err))
+    ctx.edits.extend(edits)
+    return out, doomed
+
+
 @op("remove_records")
 class RemoveRecords(Op):
     """Delete chosen records from one object, shrinking it, so a control is gone from the
@@ -2684,7 +2764,8 @@ class RemoveRecords(Op):
     previous drawn record left (`layout.py`), and a removed wtype-5 attach takes its own offset
     and its child's frame with it. On the compact AES card, removing the Low Volts attach (+29 y)
     lifted the "AES" gear button 29 px until a `move_element` gave the gear the offset back. This
-    op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved.
+    op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved,
+    or use `move_control`, which removes through the same `_remove_records` and compensates.
 
     Bindings and groups are untouched: a removed touch region stops this object reaching its
     group, and the group still runs from any other object that registers the same id. So
@@ -2728,65 +2809,15 @@ class RemoveRecords(Op):
     def validate(self):
         self.target = self._param("target")
         self.records = self._param("records", kind=list)
-        if not self.records:
-            raise RecipeError("BAD_PARAMS", "records is empty", op_id=self.spec.id)
-        for entry in self.records:
-            if not isinstance(entry, dict) or not isinstance(entry.get("selector"), dict):
-                raise RecipeError("BAD_PARAMS", "each record entry needs a selector dict",
-                                  op_id=self.spec.id)
-            if (entry["selector"].get("label") is None and "child" not in entry
-                    and "touch_id" not in entry):
-                raise RecipeError(
-                    "BAD_PARAMS", "entry %r asserts nothing about the record it removes; give "
-                    "a selector label, child or touch_id" % (entry,), op_id=self.spec.id)
+        _check_record_entries(self.records, self.spec.id)
 
     def apply(self, data, ctx):
         obj = resolve_target(ctx, self.target)
-        gs, tab = _gs_tab(data)
-        recs = records.object_records(data, gs + tab[obj])
-        doomed = []
-        for entry in self.records:
-            rec = _select_record(data, gs, tab, obj, entry["selector"], self.spec.id)
-            if "child" in entry and rec.child_index != entry["child"]:
-                raise RecipeError("EXPECT_MISMATCH", "object %d record %r has child %r, "
-                                  "expected %r" % (obj, entry["selector"], rec.child_index,
-                                                   entry["child"]))
-            if "touch_id" in entry:
-                tid = (data[rec.end - 2] | (data[rec.end - 1] << 8)) if rec.wtype == 12 else None
-                if tid != entry["touch_id"]:
-                    raise RecipeError("EXPECT_MISMATCH", "object %d record %r has touch id "
-                                      "%r, expected %r" % (obj, entry["selector"], tid,
-                                                           entry["touch_id"]))
-            if rec.offset in (r.offset for r in doomed):
-                raise RecipeError("BAD_PARAMS", "two entries name the record at %#x"
-                                  % rec.offset)
-            doomed.append(rec)
-        kept = [r for r in recs if r.offset not in {d.offset for d in doomed}]
-        if not kept:
-            raise RecipeError("BAD_PARAMS", "removing every record would leave object %d "
-                              "empty" % obj)
-
-        moved_from = min(d.offset for d in doomed) - gs
-        obj_end = recs[-1].end - gs
-        for section in ("GuiCode", "LCD"):
-            for pos, rel in theme.section_guidata_pointers(data, section):
-                if moved_from <= rel < obj_end:
-                    raise RecipeError(
-                        "POINTER_INSIDE", "%s literal @ %#x points at GuiData+%#x, inside "
-                        "object %d after its first removed record; the shrink would move what "
-                        "it names" % (section, pos, rel, obj))
-
-        body = bytes([len(kept)]) + b"".join(data[r.offset:r.end] for r in kept)
-        try:
-            out, edits = relocate.replace_object_records(data, obj, body)
-        except relocate.RelocationError as err:
-            raise RecipeError("RELOCATE_REFUSED", str(err))
-        ctx.edits.extend(edits)
+        out, doomed = _remove_records(data, ctx, obj, self.records, self.spec.id)
+        gs, tab = _gs_tab(out)
         ctx.handles[self.spec.id] = {
-            "obj": obj, "count": len(kept),
-            "gone": [(d.wtype, d.child_index,
-                      (data[d.end - 2] | (data[d.end - 1] << 8)) if d.wtype == 12 else None)
-                     for d in doomed]}
+            "obj": obj, "count": len(records.object_records(out, gs + tab[obj])),
+            "gone": [(d.wtype, d.child_index, _touch_id(data, d)) for d in doomed]}
         return out
 
     def verify(self, data, ctx):
@@ -2807,6 +2838,943 @@ class RemoveRecords(Op):
             ", ".join("wtype %d%s" % (w, " touch %d" % t if t is not None else
                                       " child %d" % c if c is not None else "")
                       for w, c, t in h["gone"]), h["count"])
+
+
+_LAYOUT_FIELDS = ("x", "y", "w", "h")
+_LAYOUT_FORMS = ("expect", "snapshot", "unchanged_since")
+
+
+def _int_keys(value, name, op_id):
+    """A `{value: int}` param with JSON string keys ("12", "0x1F") as ints."""
+    if value is None or value == {}:
+        return None     # an empty dict walks exactly as no dict, so the two compare equal
+    if not isinstance(value, dict):
+        raise RecipeError("BAD_PARAMS", "%s must be a dict, got %r" % (name, value),
+                          op_id=op_id)
+    out = {}
+    for k, v in value.items():
+        try:
+            key = k if isinstance(k, int) else int(k, 0)
+        except (TypeError, ValueError):
+            raise RecipeError("BAD_PARAMS", "%s key %r is not an integer" % (name, k),
+                              op_id=op_id)
+        if not isinstance(v, int):
+            raise RecipeError("BAD_PARAMS", "%s[%r] must be an integer, got %r"
+                              % (name, k, v), op_id=op_id)
+        out[key] = v
+    return out
+
+
+def _check_select(sel, op_id):
+    """Refuse a `select` that is neither `{key}` nor `{label, wtype?, nth?}`."""
+    if not isinstance(sel, dict):
+        raise RecipeError("BAD_PARAMS", "select must be a dict, got %r" % (sel,), op_id=op_id)
+    if set(sel) == {"key"}:
+        key = sel["key"]
+        if not (isinstance(key, list) and key
+                and all(isinstance(s, list) and len(s) == 2
+                        and all(isinstance(v, int) for v in s) for s in key)):
+            raise RecipeError("BAD_PARAMS", "select key must be [[obj, i], ...], got %r"
+                              % (key,), op_id=op_id)
+        return
+    if set(sel) == {"object", "record"} and all(
+            isinstance(sel[k], int) and not isinstance(sel[k], bool) for k in sel):
+        return
+    if ("label" in sel and isinstance(sel["label"], str)
+            and set(sel) <= {"label", "wtype", "nth"}
+            and isinstance(sel.get("wtype", 0), int) and isinstance(sel.get("nth", 0), int)):
+        return
+    raise RecipeError("BAD_PARAMS", "select must be {key: [[obj, i], ...]}, {object, record} or "
+                      "{label, wtype?, nth?}, got %r" % (sel,), op_id=op_id)
+
+
+def _tupled(v):
+    return tuple(_tupled(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+
+def _walk_to_json(walk):
+    return [{f.name: getattr(r, f.name) for f in dataclasses.fields(r)} for r in walk]
+
+
+def _walk_from_json(rows):
+    """`_walk_to_json`'s rows back as `WalkRec`s, tuples restored (a JSON round trip of the
+    handles turns them into lists, and `diff` matches keys by equality)."""
+    return [pagewalk.WalkRec(**{k: _tupled(v) if isinstance(v, list) else v
+                                for k, v in row.items()}) for row in rows]
+
+
+def _fmt_rec(r):
+    return "%s wtype %d %r (%d,%d,%d,%d)" % ("/".join("%d:%d" % s for s in r.key), r.wtype,
+                                            r.label, *r.box)
+
+
+def _expect_delta(r, entry):
+    """A `moved` Delta from the box `entry`'s x/y/w/h give (fields it omits taken from `r`) to
+    `r`'s placed box, or None if they are equal."""
+    x0, y0, x1, y1 = r.box
+    ex0, ey0 = entry.get("x", x0), entry.get("y", y0)
+    ebox = (ex0, ey0, ex0 + entry.get("w", x1 - x0), ey0 + entry.get("h", y1 - y0))
+    if ebox == r.box:
+        return None
+    return pagewalk.Delta(r.key, r.wtype, r.label, "moved", dataclasses.replace(r, box=ebox), r,
+                          x0 - ex0, y0 - ey0)
+
+
+def _resolve_select(walk, sel, root):
+    """The one record of `walk` that `sel` names: by key; by `{object, record}`, the record
+    index within its own object; or by stripped label (with optional wtype) and `nth` among the
+    matches in walk order. NO_MATCH if none; AMBIGUOUS if a label without `nth` matches more
+    than one, or an `{object, record}` is drawn under more than one key (a shared child)."""
+    if "key" in sel:
+        key = _tupled(sel["key"])
+        hits = [r for r in walk if r.key == key]
+        if not hits:
+            raise RecipeError("NO_MATCH", "root %d draws no record at key %s"
+                              % (root, "/".join("%d:%d" % s for s in key)))
+        return hits[0]
+    if "object" in sel:
+        hits = [r for r in walk if r.obj == sel["object"] and r.index == sel["record"]]
+        if not hits:
+            raise RecipeError("NO_MATCH", "root %d does not draw object %d record %d"
+                              % (root, sel["object"], sel["record"]))
+        if len(hits) > 1:
+            raise RecipeError("AMBIGUOUS", "root %d draws object %d record %d under %d keys "
+                              "(a shared child); give a key:\n%s"
+                              % (root, sel["object"], sel["record"], len(hits),
+                                 "\n".join(_fmt_rec(r) for r in hits)))
+        return hits[0]
+    hits = [r for r in walk if (r.label or "").strip() == sel["label"].strip()
+            and ("wtype" not in sel or r.wtype == sel["wtype"])]
+    if "nth" in sel:
+        if sel["nth"] >= len(hits):
+            raise RecipeError("NO_MATCH", "root %d has %d record(s) matching %r, wanted nth=%d"
+                              % (root, len(hits), sel, sel["nth"]))
+        return hits[sel["nth"]]
+    if not hits:
+        raise RecipeError("NO_MATCH", "root %d draws no record matching %r" % (root, sel))
+    if len(hits) > 1:
+        raise RecipeError("AMBIGUOUS", "root %d has %d records matching %r; give nth or a key:\n%s"
+                          % (root, len(hits), sel, "\n".join(_fmt_rec(r) for r in hits)))
+    return hits[0]
+
+
+@op("assert_layout")
+class AssertLayout(Op):
+    """Check, at its position in the recipe, where records sit on a page, or that nothing on a
+    page moved since an earlier snapshot. It changes no bytes.
+
+    The page is measured by `pagewalk.walk_records` (the layout engine `FUN_00257BFC` replayed,
+    containers included) and every record is named by its walk key, the chain of
+    `(object, record index)` steps from the root, so a measurement survives an earlier object
+    growing or shrinking. Boxes are ABSOLUTE screen pixels, as `layout.Placed` carries them, never
+    the card-relative values a record's own geometry fields hold.
+
+    The check runs in `apply` and refuses there, so it sees the image as the ops before it left
+    it; `verify` only reports. A page that draws differently per switch value is checked for the
+    one `switch_values` set given; a page that must hold under several needs one op per set.
+
+    Params:
+      root: object index | {'ref': op_id} -- the page root to walk (resolved via
+            `resolve_target`).
+      switch_values, slot_values: optional {int: int} -- passed to the walk; JSON string keys
+            ("12", "0x1F") are read as integers, and {} is the same as absent.
+      exactly one of:
+        expect: list of {select, x?, y?, w?, h?} -- each given field must equal the selected
+                record's placed box (x = x0, y = y0, w = x1 - x0, h = y1 - y0); each entry
+                gives at least one.
+        snapshot: true -- record the walk in this op's handle and check nothing.
+        unchanged_since: op_id -- an earlier `snapshot` of the same root and values. Every
+                record of the snapshot must still be drawn at the same box with the same
+                inherited state (font, align, colours, `value_slot`), and no record may
+                appear, except those `except` names.
+      except: optional list of select, with `unchanged_since` only -- records left out of the
+              comparison; each is resolved against the current walk, else the snapshot's.
+
+      select: {key: [[obj, i], ...]} names a record by walk key; {object, record} by its index
+              within its own object (AMBIGUOUS if a shared child draws it under several
+              keys); {label, wtype?, nth?} by its stripped label (and wtype), `nth` counting
+              the matches in walk order.
+
+    Error codes:
+      BAD_PARAMS -- no form or more than one, a malformed select or expect entry, `except`
+                    without `unchanged_since`, or `unchanged_since` naming no earlier snapshot,
+                    or one of another root or other switch/slot values.
+      NO_MATCH -- a select names no record of the walk.
+      AMBIGUOUS -- a label select without `nth` names more than one record, or an
+                   {object, record} select a record drawn under several keys (each is listed).
+      LAYOUT_MISMATCH -- an `expect` field differs from the placed box (`pagewalk.describe`
+                         lines: expected box -> actual box and the delta).
+      LAYOUT_MOVED -- `unchanged_since` found records moved, restyled, gone or appeared
+                      (`pagewalk.describe` lines).
+
+    `hardware_verified = True`: it changes no bytes, so there is nothing to run on a coach.
+    `recipe.capabilities` is unchanged and no delta is declared.
+    """
+    hardware_verified = True
+
+    PARAMS = {
+        "properties": {
+            "root": {"type": ["integer", "object"],
+                     "description": "page root object index or {\"ref\": op_id}"},
+            "switch_values": {"type": "object",
+                              "description": "optional {switch child base: value} for the walk"},
+            "slot_values": {"type": "object",
+                            "description": "optional {slot: value} for the walk"},
+            "expect": {"type": "array",
+                       "description": "records and their absolute box: {select, x?, y?, w?, h?}"},
+            "snapshot": {"type": "boolean",
+                         "description": "true: record the walk for a later unchanged_since"},
+            "unchanged_since": {"type": "string",
+                                "description": "id of an earlier snapshot of the same root"},
+            "except": {"type": "array",
+                       "description": "selects left out of the unchanged_since comparison"},
+        },
+        "required": ["root"],
+    }
+
+    def validate(self):
+        oid = self.spec.id
+        self.root = self._param("root")
+        if not isinstance(self.root, (int, dict)) or isinstance(self.root, bool):
+            raise RecipeError("BAD_PARAMS", "root must be an object index or {'ref': op_id}",
+                              op_id=oid)
+        self.switch_values = _int_keys(self._param("switch_values", None), "switch_values", oid)
+        self.slot_values = _int_keys(self._param("slot_values", None), "slot_values", oid)
+        forms = [f for f in _LAYOUT_FORMS if f in self.spec.params]
+        if len(forms) != 1:
+            raise RecipeError("BAD_PARAMS", "assert_layout takes exactly one of expect, "
+                              "snapshot, unchanged_since; got %s" % (forms or "none"),
+                              op_id=oid)
+        self.form = forms[0]
+        if "except" in self.spec.params and self.form != "unchanged_since":
+            raise RecipeError("BAD_PARAMS", "except goes with unchanged_since only", op_id=oid)
+        if self.form == "snapshot" and self._param("snapshot") is not True:
+            raise RecipeError("BAD_PARAMS", "snapshot must be true", op_id=oid)
+        if self.form == "unchanged_since":
+            self._param("unchanged_since", kind=str)
+            for sel in self._param("except", [], kind=list):
+                _check_select(sel, oid)
+        if self.form == "expect":
+            entries = self._param("expect", kind=list)
+            if not entries:
+                raise RecipeError("BAD_PARAMS", "expect is empty", op_id=oid)
+            for entry in entries:
+                if not isinstance(entry, dict) or "select" not in entry:
+                    raise RecipeError("BAD_PARAMS", "each expect entry needs a select",
+                                      op_id=oid)
+                _check_select(entry["select"], oid)
+                extra = set(entry) - {"select", *_LAYOUT_FIELDS}
+                fields = [f for f in _LAYOUT_FIELDS if f in entry]
+                if extra or not fields or not all(
+                        isinstance(entry[f], int) and not isinstance(entry[f], bool)
+                        for f in fields):
+                    raise RecipeError("BAD_PARAMS", "expect entry %r needs integer x/y/w/h "
+                                      "(at least one) and nothing else" % (entry,), op_id=oid)
+
+    def _walk(self, data, root):
+        return pagewalk.walk_records(data, root, switch_values=self.switch_values,
+                                     slot_values=self.slot_values)
+
+    def apply(self, data, ctx):
+        root = resolve_target(ctx, self.root)
+        walk = self._walk(data, root)
+        handle = {"assert_layout": self.form, "root": root,
+                  "switch_values": self.switch_values, "slot_values": self.slot_values}
+        if self.form == "snapshot":
+            handle["walk"] = _walk_to_json(walk)
+        elif self.form == "expect":
+            self._check_expect(walk, root)
+            handle["count"] = len(self.spec.params["expect"])
+        else:
+            handle["since"] = self._check_unchanged(walk, root, ctx)
+        ctx.handles[self.spec.id] = handle
+        return data
+
+    def _check_expect(self, walk, root):
+        deltas = []
+        for entry in self.spec.params["expect"]:
+            delta = _expect_delta(_resolve_select(walk, entry["select"], root), entry)
+            if delta is not None:
+                deltas.append(delta)
+        if deltas:
+            raise RecipeError("LAYOUT_MISMATCH", "root %d: %d record(s) not where expected "
+                              "(expected -> actual):\n%s"
+                              % (root, len(deltas), pagewalk.describe(deltas)))
+
+    def _check_unchanged(self, walk, root, ctx):
+        since = self.spec.params["unchanged_since"]
+        snap = ctx.handles.get(since)
+        if not isinstance(snap, dict) or snap.get("assert_layout") != "snapshot":
+            raise RecipeError("BAD_PARAMS", "unchanged_since %r names no earlier assert_layout "
+                              "snapshot" % since)
+        if snap["root"] != root:
+            raise RecipeError("BAD_PARAMS", "snapshot %r is of root %d, this check is of root %d"
+                              % (since, snap["root"], root))
+        for name in ("switch_values", "slot_values"):
+            theirs = _int_keys(snap[name], name, self.spec.id)
+            if theirs != getattr(self, name):
+                raise RecipeError("BAD_PARAMS", "snapshot %r walked with %s %r, this check "
+                                  "with %r" % (since, name, theirs, getattr(self, name)))
+        before = _walk_from_json(snap["walk"])
+        ignore = set()
+        for sel in self._param("except", []):
+            try:
+                ignore.add(_resolve_select(walk, sel, root).key)
+            except RecipeError as e:
+                if e.code != "NO_MATCH":
+                    raise
+                ignore.add(_resolve_select(before, sel, root).key)
+        deltas = pagewalk.diff(before, walk, ignore=frozenset(ignore))
+        if deltas:
+            raise RecipeError("LAYOUT_MOVED", "root %d changed since %r: %d record(s):\n%s"
+                              % (root, since, len(deltas), pagewalk.describe(deltas)))
+        return since
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        if h["assert_layout"] == "snapshot":
+            return "assert_layout: snapshot of root %d, %d record(s)" % (h["root"],
+                                                                         len(h["walk"]))
+        if h["assert_layout"] == "expect":
+            return "assert_layout: root %d, %d record(s) where expected" % (h["root"],
+                                                                           h["count"])
+        return "assert_layout: root %d unchanged since %r" % (h["root"], h["since"])
+
+
+_CANVAS_W, _CANVAS_H = 800, 480
+# Container types the walk recurses into (`FUN_00256C54` dispatches 5/6/0x2E to `FUN_00258330`,
+# GUICODE Finding 15). They draw nothing: their walked box is their pen.
+_CONTAINERS = (5, 6, 0x2E)
+
+
+def _moved_step(key, obj, removed):
+    """The position in walk key `key` of its step through a record of `obj` in `removed`, or
+    None if the key passes through none."""
+    for n, (o, i) in enumerate(key):
+        if o == obj and i in removed:
+            return n
+    return None
+
+
+def _fmt_walk_key(key):
+    return "/".join("%d:%d" % s for s in key)
+
+
+def _compensation_target(walk_deltas, frm):
+    """The edit compensation makes next, from each walk's `pagewalk.diff` deltas: the record of
+    `frm` that places each walk's FIRST moved record (the record itself when it is in `frm`,
+    else the nearest step through `frm` on its key: the attach in `frm` it hangs below), as
+    `(after-index in frm, dx, dy)`. None when no walk has a moved record.
+
+    Every walk with a moved record must name the same record and the same (dx, dy), or
+    ARM_DISAGREES: one geometry edit cannot restore two different shifts. A first moved record
+    with no step through `frm` (a record after `frm`'s attach that the removal's leftover
+    frame reached) is CANNOT_COMPENSATE: compensation edits `frm` only, never a shared child
+    or a parent."""
+    firsts = []
+    for deltas in walk_deltas:
+        d = next((d for d in deltas if d.kind == "moved"), None)
+        if d is None:
+            continue
+        steps = [i for o, i in d.after.key if o == frm]
+        if not steps:
+            raise RecipeError("CANNOT_COMPENSATE", "the removal moved a record no record of "
+                              "object %d places:\n%s" % (frm, pagewalk.describe([d])))
+        firsts.append(((steps[-1], d.dx, d.dy), d))
+    if not firsts:
+        return None
+    if len({t for t, _ in firsts}) > 1:
+        raise RecipeError("ARM_DISAGREES", "the walks disagree on what the removal moved, so one "
+                          "edit cannot put it back:\n%s"
+                          % pagewalk.describe([d for _, d in firsts]))
+    return firsts[0][0]
+
+
+def _register_dependency(walk, frm, removed):
+    """A register the moved records write that something reads after the move would break:
+    `(writer, reader, coordinate)`, or None. The walk keeps `regx`/`regy` across records
+    (`layout.Screen.walk`: coordinate i reads `in_regs[i]`, then writes `out_regs[i]`, x
+    registers on even i, y on odd). A moved record's write is lost to a SURVIVING reader; a
+    re-encoded record's write is also lost to a byte-shared child below it, since
+    `absrecord.absolute` drops every register field. A later writer of the same register ends
+    the dependency."""
+    last = {}
+    for r in walk:
+        step = _moved_step(r.key, frm, removed)
+        top = step is not None and step == len(r.key) - 1
+        for i in range(6):
+            reg = r.in_regs[i] if len(r.in_regs) > i else 0
+            if reg:
+                w = last.get((i % 2, reg))
+                if w is not None and (step is None or (w[1] and not top)):
+                    return w[0], r, i
+            reg = r.out_regs[i] if len(r.out_regs) > i else 0
+            if reg:
+                last[(i % 2, reg)] = (r, top) if step is not None else None
+    return None
+
+
+def _effective_slot(by_key, r):
+    """`r`'s value slot: its own, else the nearest wrapping wtype-5 attach's on its key. The
+    child of a wtype-5 attach carrying `value_slot` repaints from that cell
+    (`OBJECT-HIERARCHY.md` 1a and §3, `inferred-from-data`: the AGS Low Volts attach, object
+    315 record 8, and its child 285); the walk itself models only the record's own field."""
+    if r.value_slot is not None:
+        return r.value_slot
+    for n in range(len(r.key) - 1, 0, -1):
+        up = by_key.get(r.key[:n])
+        if up is not None and up.wtype == 5 and up.value_slot is not None:
+            return up.value_slot
+    return None
+
+
+def _inherited_slot(by_key, r):
+    """`(slot, attach)` when `r` has no value slot of its own and the nearest wrapping wtype-5
+    attach on its key that carries one is `attach`; else None (`_effective_slot`'s rule)."""
+    if r.value_slot is not None:
+        return None
+    for n in range(len(r.key) - 1, 0, -1):
+        up = by_key.get(r.key[:n])
+        if up is not None and up.wtype == 5 and up.value_slot is not None:
+            return up.value_slot, up
+    return None
+
+
+def _overlaps(a, b):
+    """Two boxes share a pixel. Inclusive edges: the hit test returns the id of a region
+    containing the point (CONTROL-BEHAVIOR §1, `0x00258BB2`-`0x00258C26`); whether its edges
+    are inclusive is not read from the code, so a shared edge counts as overlap (inference,
+    the conservative reading)."""
+    ax0, ax1 = sorted((a[0], a[2]))
+    ay0, ay1 = sorted((a[1], a[3]))
+    bx0, bx1 = sorted((b[0], b[2]))
+    by0, by1 = sorted((b[1], b[3]))
+    return ax0 <= bx1 and bx0 <= ax1 and ay0 <= by1 and by0 <= ay1
+
+
+@op("move_control")
+class MoveControl(Op):
+    """Move a control (its draw, touch and box records) from one object to another, put back
+    anything on the source page the removal moved, and assert nothing else moved on either page.
+
+    It is `remove_records` on `from`, a compensation pass, and an `insert.insert_object` paste
+    on `to`, measured throughout by `pagewalk` (the layout engine `FUN_00257BFC` replayed,
+    containers included, every record keyed by its `(object, record)` path from the root):
+
+    1. **Measure.** Walk every page root that reaches each object (`pagewalk.reaching_roots`,
+       or the one `source_root`/`dest_root` given), once per switch-arm set
+       (`pagewalk.switch_arm_sets` of that root: the base, then each type-6 switch's arms one at
+       a time; or only the `switch_values`/`slot_values` given). The control is the chosen
+       records of `from` and everything the walk draws below them (a byte-shared child of an
+       attach moves with it and is never cloned), as the first source root's base walk places
+       it.
+    2. **Pre-check**, before any edit: NO_ROOT, UNSUPPORTED_RECORD (`absrecord.SUPPORTED`),
+       REGISTER_DEPENDENCY (`_register_dependency`), TOUCH_OVERLAP (a translated wtype-12 box
+       meets one of the destination's), OFF_CANVAS (a translated drawn box leaves 800x480). The
+       pasted records are re-encoded here too, so a record `absrecord.absolute` cannot carry
+       refuses before anything changes.
+    3. **Remove** with `_remove_records` (`remove_records`' identity checks, POINTER_INSIDE and
+       relocation).
+    4. **Compensate** the source: re-walk, take each walk's first moved record and the record of
+       `from` that places it (`_compensation_target`), and subtract the shift from that record's
+       x/y geometry fields (a same-size write, as `move_element` does). Repeat until nothing
+       moved. A record that lays out from the frame the previous drawn record left
+       (`layout._update_frame`) comes back with the record before it, so on the compact AES card
+       one edit, the gear's y +29, restores the whole gear group. A surviving record whose
+       inherited font, align, colours or `value_slot` changed is STATE_CHANGED and is not
+       compensated (fixing its geometry would leave it styled wrong).
+    5. **Paste.** One new object (`insert.insert_object`, a wtype-5 attach appended to `to`)
+       holds the chosen records re-encoded by `absrecord.absolute`: x, y absolute at `at` plus
+       the record's offset from the control's bounding box (its drawn records' top-left), w, h
+       pen-relative, register reads and writes dropped. `absolute`'s (x, y) is the PEN: a
+       path-1 record (`layout._align_path1`) under align 2/3 and a labelled wtype 0 under align
+       2/3 have their box shifted from the pen (`layout._placed_label_box`), so the pen is the
+       target box's left edge with that shift inverted. The first record carrying an R38 font
+       field gets the walked font explicit (UNSUPPORTED_RECORD if the walk never resolved one);
+       the first align-writing record (`layout._writes_align`) gets the walked align explicit
+       when it is non-zero (the decoder skips storing a 0 align, `FUN_00252CB0` 0x2531fe, so
+       a 0 cannot be made explicit). A record's own value slot is kept; one with none of its own
+       that inherits one from a wrapping wtype-5 attach (`_inherited_slot`, `inferred-from-data`)
+       is refused UNSUPPORTED_RECORD, since that attach does not move. Colour fields are copied;
+       a mode-0/5 field still inherits at the destination. The attach on `to` is not authored:
+       it is `insert.insert_object`'s byte clone of `to`'s first wtype-5 record
+       (`insert._container_template`), at that template's own geometry and register reads. It
+       draws nothing and the control's records are absolute, so its pen does not matter; one
+       carrying a value slot is refused UNSUPPORTED_RECORD (the control would inherit it).
+    6. **Measure after and assert.** Re-walk every (root, arm) pair of both sides. Every record
+       that was there must be unchanged (the source through the removal's index remap); the only
+       new records are the attach on `to` and, under it, the control, each at its source box
+       translated to `at`, with the same font, align, colours and effective `value_slot`. A
+       state difference is STATE_CHANGED (the pasted record would be styled wrong); any other
+       difference is LAYOUT_MOVED, with `pagewalk.describe` lines.
+
+    Touch ids map to groups globally (`FUN_00256B84` copies the id into the hit-region table
+    whatever page hosts it), so the moved touch region runs the same group from the new page: no
+    group, binding or DGN changes, and `capability_delta` is `(set(), set())`.
+
+    Params:
+      from: object index | {'ref': op_id} -- the object holding the control.
+      to: object index | {'ref': op_id} -- the object the control moves to; not `from`.
+      records: list of {selector, child?, touch_id?} -- `remove_records`' entry form, resolved
+               against `from` before any edit, each entry with an identity assertion.
+      at: {x, y} -- the absolute top-left of the control's drawn records on the destination.
+      source_root, dest_root: optional int -- measure only this page root (it must reach the
+               object); default every root that reaches it.
+      switch_values, slot_values: optional {int: int} -- measure only this value set instead
+               of every arm set; JSON string keys are read as integers.
+
+    Error codes:
+      BAD_PARAMS -- a malformed param, `from == to`, an object out of range, an entry with no
+                    identity assertion or two entries naming one record, or a removal that
+                    would leave `from` empty.
+      NO_SUCH_RECORD -- a selector matched nothing (from `_select_record`).
+      EXPECT_MISMATCH -- a record's child_index or touch id is not what the entry asserts.
+      POINTER_INSIDE -- a GuiCode or LCD literal points into the part of `from` that would move.
+      RELOCATE_REFUSED -- `relocate.replace_object_records` refused.
+      NO_ROOT -- no page root reaches `from` or `to`, a given root does not, or the first source
+                 root's walk does not draw the chosen records.
+      TOUCH_OVERLAP -- a moved touch region, translated to `at`, meets a destination one.
+      OFF_CANVAS -- a moved drawn record, translated to `at`, leaves the 800x480 canvas.
+      UNSUPPORTED_RECORD -- a chosen record's wtype is not re-encodable, its font is
+                            unresolved, it inherits a value slot from an attach that stays,
+                            the attach `insert_object` would clone onto `to` carries a value
+                            slot, or `absrecord.absolute` cannot carry a field it needs.
+      REGISTER_DEPENDENCY -- a moved record writes a register a record that stays reads.
+      CANNOT_COMPENSATE -- the removal moved a record with no x/y field to put the shift back
+                           in, one no record of `from` places, or one whose size changed; or the
+                           passes did not converge.
+      STATE_CHANGED -- the removal changed a surviving record's inherited font, align, colours
+                       or `value_slot`, or a pasted record's differs from its source.
+      ARM_DISAGREES -- the walks disagree on the record the removal moved first, or its shift.
+      LAYOUT_MOVED -- after the paste, a record other than the moved control moved, appeared or
+                      went, or a pasted record is not at its translated box.
+      INSERT_REFUSED -- `insert.insert_object` refused (no wtype-5 template on `to`, or a gate).
+
+    `hardware_verified = False`: the remove and paste halves reuse coach-proven mechanisms
+    (`remove_records`, `insert.insert_object` as `add_low_volts_control` uses it), but the
+    generic absolute re-encoding and the automatic compensation have not run on a coach.
+    Registers `ctx.handles[op_id]`; `{'ref': op_id}` resolves to the new object.
+    """
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "from": {"type": ["integer", "object"],
+                     "description": "object index or {\"ref\": op_id} holding the control"},
+            "to": {"type": ["integer", "object"],
+                   "description": "destination object index or {\"ref\": op_id}"},
+            "records": {"type": "array",
+                        "description": "the control's records: {selector, child?, touch_id?}"},
+            "at": {"type": "object",
+                   "description": "{x, y}: absolute top-left of the moved control"},
+            "source_root": {"type": "integer",
+                            "description": "optional: measure only this source page root"},
+            "dest_root": {"type": "integer",
+                          "description": "optional: measure only this destination page root"},
+            "switch_values": {"type": "object",
+                              "description": "optional {switch child base: value}: measure only "
+                                             "this set"},
+            "slot_values": {"type": "object",
+                            "description": "optional {slot: value}: measure only this set"},
+        },
+        "required": ["from", "to", "records", "at"],
+    }
+
+    def validate(self):
+        oid = self.spec.id
+        self.frm = self._param("from")
+        self.to = self._param("to")
+        for name, v in (("from", self.frm), ("to", self.to)):
+            if not isinstance(v, (int, dict)) or isinstance(v, bool):
+                raise RecipeError("BAD_PARAMS", "%s must be an object index or {'ref': op_id}"
+                                  % name, op_id=oid)
+        if isinstance(self.frm, int) and self.frm == self.to:
+            raise RecipeError("BAD_PARAMS", "from and to are both object %d" % self.frm,
+                              op_id=oid)
+        self.records = self._param("records", kind=list)
+        _check_record_entries(self.records, oid)
+        self.at = self._param("at", kind=dict)
+        if set(self.at) != {"x", "y"} or not all(
+                isinstance(self.at[k], int) and not isinstance(self.at[k], bool)
+                for k in ("x", "y")):
+            raise RecipeError("BAD_PARAMS", "at must be {x: int, y: int}, got %r" % (self.at,),
+                              op_id=oid)
+        self.source_root = self._param("source_root", None)
+        self.dest_root = self._param("dest_root", None)
+        for name, v in (("source_root", self.source_root), ("dest_root", self.dest_root)):
+            if v is not None and (not isinstance(v, int) or isinstance(v, bool)):
+                raise RecipeError("BAD_PARAMS", "%s must be an integer" % name, op_id=oid)
+        self.switch_values = _int_keys(self._param("switch_values", None), "switch_values", oid)
+        self.slot_values = _int_keys(self._param("slot_values", None), "slot_values", oid)
+
+    # -- measuring -------------------------------------------------------------------------
+
+    def _roots(self, data, obj, given, side):
+        reaching = pagewalk.reaching_roots(data, obj)
+        if given is not None:
+            if given not in reaching:
+                raise RecipeError("NO_ROOT", "%s root %d does not reach object %d (roots that "
+                                  "do: %s)" % (side, given, obj, reaching or "none"))
+            return [given]
+        if not reaching:
+            raise RecipeError("NO_ROOT", "no page root reaches %s object %d" % (side, obj))
+        return reaching
+
+    def _pairs(self, data, roots):
+        """(root, switch_values, slot_values) for every walk of `roots` measured."""
+        if self.switch_values is not None or self.slot_values is not None:
+            return [(r, self.switch_values, self.slot_values) for r in roots]
+        return [(r, arm, None) for r in roots for arm in pagewalk.switch_arm_sets(data, [r])]
+
+    @staticmethod
+    def _walk(data, pair):
+        root, sv, slv = pair
+        return pagewalk.walk_records(data, root, switch_values=sv, slot_values=slv)
+
+    @staticmethod
+    def _pair_id(pair):
+        root, sv, slv = pair
+        return (root, tuple(sorted((sv or {}).items())), tuple(sorted((slv or {}).items())))
+
+    @staticmethod
+    def _subtree(walk, frm, removed):
+        """The control as `walk` draws it at the first occurrence of `frm`: `{rel: WalkRec}`,
+        `rel` being `(record index in frm,) + the key steps below it`. None if not drawn."""
+        prefix = next((r.key[:-1] for r in walk if r.obj == frm and r.index in removed), None)
+        if prefix is None:
+            return None
+        n = len(prefix)
+        return {(r.key[n][1],) + r.key[n + 1:]: r for r in walk
+                if r.key[:n] == prefix and len(r.key) > n and r.key[n][0] == frm
+                and r.key[n][1] in removed}
+
+    def _pen_x(self, data, rec, placed, x0):
+        """The pen x that places `placed`'s box left edge at `x0` (`layout._placed_label_box`
+        inverted): a path-1 type under align 3 has its box at `pen - w`, under align 2 at
+        `pen - w // 2`; a labelled non-path-1 record under align 2/3 at
+        `metrics.aligned_x0(pen, text width, align)`; anything else at the pen."""
+        align = placed.align
+        if align not in (2, 3):
+            return x0
+        if layout._align_path1(rec.wtype):
+            w = placed.box[2] - placed.box[0]
+            return x0 + w if align == 3 else x0 + w // 2
+        if rec.label is not None and placed.font is not None:
+            width = metrics.text_width(data, placed.font, rec.label)
+            if width is not None:
+                return x0 + width - 1 if align == 3 else x0 + width // 2
+        return x0
+
+    def _paste_bytes(self, data, recs, moved_idx, ref, by_key, offset):
+        """The new object: a count byte and each chosen record re-encoded absolute. `by_key`
+        is the whole source walk `ref` was taken from, for `_effective_slot`."""
+        ox, oy = offset
+        font_done = align_done = False
+        parts = []
+        for i in moved_idx:
+            rec, placed = recs[i], ref[(i,)]
+            explicit_font = not font_done and rec.font_off is not None
+            if explicit_font:
+                font_done = True
+                if placed.font is None:
+                    raise RecipeError("UNSUPPORTED_RECORD", "record %d (wtype %d) carries "
+                                      "the control's first font field, but the source walk "
+                                      "never resolved a font for it" % (i, rec.wtype))
+            reset_align = False
+            if not align_done and layout._writes_align(rec.wtype):
+                align_done = True
+                reset_align = placed.align != 0
+            inherited = _inherited_slot(by_key, placed)
+            if inherited is not None and absrecord.carries_value_slot(rec.wtype):
+                # the slot belongs on the wrapping attach, which does not move; writing it into
+                # the record would be a field the source never had, and the inheritance itself
+                # is inferred-from-data (OBJECT-HIERARCHY 1a), so refuse rather than guess
+                raise RecipeError("UNSUPPORTED_RECORD", "record %d:%d inherits value_slot %d "
+                                  "from attach %d:%d; moving an inherited slot is not modelled"
+                                  % (placed.obj, i, inherited[0], inherited[1].obj,
+                                     inherited[1].index))
+            try:
+                parts.append(absrecord.absolute(
+                    data, rec, placed, self._pen_x(data, rec, placed, placed.box[0] + ox),
+                    placed.box[1] + oy, explicit_font, reset_align, None))
+            except ValueError as e:              # absrecord.Unsupported is a ValueError
+                raise RecipeError("UNSUPPORTED_RECORD", "record %d (wtype %d): %s"
+                                  % (i, rec.wtype, e))
+        payload = bytes([len(parts)]) + b"".join(parts)
+        return payload + b"\x00" * (-len(payload) % 4)      # object offsets are 4-aligned
+
+    # -- apply -----------------------------------------------------------------------------
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        frm, to = resolve_target(ctx, self.frm), resolve_target(ctx, self.to)
+        gs, tab = _gs_tab(data)
+        if frm == to:
+            raise RecipeError("BAD_PARAMS", "from and to are both object %d" % frm)
+        for name, o in (("from", frm), ("to", to)):
+            if not 0 <= o < len(tab):
+                raise RecipeError("BAD_PARAMS", "%s object %d is out of range" % (name, o))
+        doomed = _select_entries(data, frm, self.records, oid)
+        recs = records.object_records(data, gs + tab[frm])
+        index_of = {r.offset: i for i, r in enumerate(recs)}
+        moved_idx = sorted(index_of[d.offset] for d in doomed)
+        removed = set(moved_idx)
+        if len(removed) == len(recs):
+            raise RecipeError("BAD_PARAMS", "removing every record would leave object %d "
+                              "empty" % frm)
+
+        # 1. measure before
+        src_pairs = self._pairs(data, self._roots(data, frm, self.source_root, "source"))
+        dst_roots = self._roots(data, to, self.dest_root, "destination")
+        dst_pairs = self._pairs(data, dst_roots)
+        before = {}
+        for p in src_pairs:
+            before.setdefault(self._pair_id(p), self._walk(data, p))
+        ref_walk = before[self._pair_id(src_pairs[0])]
+        ref = self._subtree(ref_walk, frm, removed)
+        if ref is None or {rel[0] for rel in ref if len(rel) == 1} != removed:
+            raise RecipeError("NO_ROOT", "root %d's walk does not draw object %d records %s"
+                              % (src_pairs[0][0], frm, moved_idx))
+        # a type-6 switch inside the control is walked arm by arm on the destination too
+        # (`switch_values` keys on the switch's child base)
+        inner = {pagewalk._record(data, r.obj, r.index).child_index
+                 for r in ref.values() if r.wtype == 6}
+        if self.switch_values is None and self.slot_values is None:
+            dst_pairs += [(root, arm, None) for root in dst_roots
+                          for _, arm, _ in src_pairs if arm and set(arm) & inner]
+        for p in dst_pairs:
+            before.setdefault(self._pair_id(p), self._walk(data, p))
+
+        # 2. pre-checks
+        for i in moved_idx:
+            if recs[i].wtype not in absrecord.SUPPORTED:
+                raise RecipeError("UNSUPPORTED_RECORD", "object %d record %d is wtype %d; "
+                                  "move_control re-encodes wtypes %s"
+                                  % (frm, i, recs[i].wtype, sorted(absrecord.SUPPORTED)))
+        # the paste attach is insert_object's byte clone of `to`'s first wtype-5 record
+        # (`insert._container_template`); a value slot on it would be inherited by the pasted
+        # records (OBJECT-HIERARCHY 1a), a cell the source never gave them
+        to_recs = records.object_records(data, gs + tab[to])
+        try:
+            _, template = insert._container_template(data, to_recs, False)
+        except insert.InsertError:
+            template = None                       # insert_object refuses it: INSERT_REFUSED
+        if template is not None and template.value_slot is not None:
+            raise RecipeError("UNSUPPORTED_RECORD", "the attach insert_object would clone onto "
+                              "object %d (its record %d) carries value_slot %d, which the "
+                              "pasted control would inherit"
+                              % (to, to_recs.index(template), template.value_slot))
+        for pid, walk in before.items():
+            dep = _register_dependency(walk, frm, removed)
+            if dep is not None:
+                w, r, i = dep
+                raise RecipeError("REGISTER_DEPENDENCY", "root %d: %s (wtype %d, moved) writes "
+                                  "%s register %d, which %s (wtype %d) reads after it; the move "
+                                  "would leave it unset" % (pid[0], _fmt_walk_key(w.key), w.wtype,
+                                                            "xy"[i % 2], r.in_regs[i],
+                                                            _fmt_walk_key(r.key), r.wtype))
+        drawn = [r for r in ref.values() if r.wtype not in _CONTAINERS] or list(ref.values())
+        ox = self.at["x"] - min(r.box[0] for r in drawn)
+        oy = self.at["y"] - min(r.box[1] for r in drawn)
+
+        def shifted(box):
+            return (box[0] + ox, box[1] + oy, box[2] + ox, box[3] + oy)
+
+        for r in drawn:
+            b = shifted(r.box)
+            if min(b[0], b[2]) < 0 or max(b[0], b[2]) > _CANVAS_W \
+                    or min(b[1], b[3]) < 0 or max(b[1], b[3]) > _CANVAS_H:
+                raise RecipeError("OFF_CANVAS", "%s (wtype %d %r) would sit at (%d,%d,%d,%d), "
+                                  "outside the %dx%d canvas" % (_fmt_walk_key(r.key), r.wtype,
+                                                                r.label, *b, _CANVAS_W,
+                                                                _CANVAS_H))
+        touches = [shifted(r.box) for r in ref.values() if r.wtype == 12]
+        for p in dst_pairs:
+            for t in before[self._pair_id(p)]:
+                if t.wtype != 12 or _moved_step(t.key, frm, removed) is not None:
+                    continue
+                hit = next((b for b in touches if _overlaps(b, t.box)), None)
+                if hit is not None:
+                    raise RecipeError("TOUCH_OVERLAP", "the moved touch region at (%d,%d,%d,%d) "
+                                      "meets root %d's %s at (%d,%d,%d,%d)"
+                                      % (*hit, p[0], _fmt_walk_key(t.key), *t.box))
+        payload = self._paste_bytes(data, recs, moved_idx, ref, {r.key: r for r in ref_walk},
+                                    (ox, oy))
+
+        # 3. remove
+        cur, _ = _remove_records(data, ctx, frm, self.records, oid)
+        remaps = {pid: {r.key: pagewalk.remap_after_removal(r.key, frm, removed) for r in walk}
+                  for pid, walk in before.items()}
+
+        # 4. compensate the source
+        cur, edits = self._compensate(cur, ctx, frm, src_pairs, before, remaps,
+                                      len(recs) - len(removed))
+
+        # 5. paste
+        gs, tab = _gs_tab(cur)
+        n_to = len(records.object_records(cur, gs + tab[to]))   # the attach lands at the end
+        new_index = len(tab)                                     # the appended object
+        try:
+            cur, ins_edits = insert.insert_object(cur, payload, to)
+        except (insert.InsertError, relocate.RelocationError) as e:
+            raise RecipeError("INSERT_REFUSED", str(e))
+        ctx.edits.extend(ins_edits)
+        cur, _ = patch.reseal(cur)
+        assert len(_gs_tab(cur)[1]) == new_index + 1
+
+        # 6. measure after and assert
+        self._assert_after(data, cur, frm, removed, moved_idx, src_pairs, dst_pairs, before,
+                           remaps, ref, (ox, oy), (to, n_to), new_index)
+
+        ctx.handles[oid] = {
+            "from": frm, "to": to, "object": new_index,
+            "touch_ids": [_touch_id(data, recs[i]) for i in moved_idx if recs[i].wtype == 12],
+            "at": [self.at["x"], self.at["y"]], "moved": len(moved_idx),
+            "compensated": edits}
+        return cur
+
+    def _compensate(self, data, ctx, frm, src_pairs, before, remaps, surviving):
+        """Step 4: restore every surviving source record's box, one geometry edit per pass.
+        Returns the image and the number of geometry fields written."""
+        written = 0
+        for _ in range(surviving + 1):
+            walk_deltas = []
+            for p in src_pairs:
+                pid = self._pair_id(p)
+                deltas = pagewalk.diff(before[pid], self._walk(data, p), remaps[pid])
+                states = [d for d in deltas if d.kind == "state"]
+                if states:
+                    raise RecipeError("STATE_CHANGED", "root %d: the removal changed what %d "
+                                      "surviving record(s) inherit (font, align, colours or "
+                                      "value_slot); move_control does not restyle them:\n%s"
+                                      % (p[0], len(states), pagewalk.describe(states)))
+                other = [d for d in deltas if d.kind in ("gone", "appeared")]
+                if other:
+                    raise RecipeError("LAYOUT_MOVED", "root %d: the removal changed which "
+                                      "records the page draws:\n%s"
+                                      % (p[0], pagewalk.describe(other)))
+                walk_deltas.append(deltas)
+            target = _compensation_target(walk_deltas, frm)
+            if target is None:
+                return data, written
+            index, dx, dy = target
+            if dx == 0 and dy == 0:
+                raise RecipeError("CANNOT_COMPENSATE", "object %d record %d changed size, not "
+                                  "position; an x/y edit cannot restore it" % (frm, index))
+            gs, tab = _gs_tab(data)
+            rec = records.object_records(data, gs + tab[frm])[index]
+            buf = bytearray(data)
+            for gi, d in ((0, dx), (1, dy)):
+                if not d:
+                    continue
+                off = records.geom_offset(data, rec, gi)
+                if off is None:
+                    raise RecipeError("CANNOT_COMPENSATE", "object %d record %d (wtype %d) moved "
+                                      "by (%d,%d) and has no %s field to put it back in"
+                                      % (frm, index, rec.wtype, dx, dy, "xy"[gi]))
+                old = struct.unpack_from("<H", data, off)[0]
+                _put16(buf, off, (old - d) & 0xFFFF, ctx,
+                       "move_control compensate obj %d rec %d %s -= %d" % (frm, index,
+                                                                            "xy"[gi], d))
+                written += 1
+            data, _ = patch.reseal(bytes(buf))
+        raise RecipeError("CANNOT_COMPENSATE", "object %d: the source still moves after %d "
+                          "compensation pass(es)" % (frm, surviving + 1))
+
+    def _assert_after(self, data, out, frm, removed, moved_idx, src_pairs, dst_pairs, before,
+                      remaps, ref, offset, attach_step, new_index):
+        """Step 6 (see the class docstring)."""
+        ox, oy = offset
+        refs = {}
+
+        def reference(pair):
+            # the control as the SOURCE draws it under this pair's switch values (its first
+            # root), falling back to the base walk when that arm does not draw it
+            pid = self._pair_id((src_pairs[0][0], pair[1], pair[2]))
+            if pid not in refs:
+                walk = before.get(pid) or self._walk(data, (src_pairs[0][0], pair[1], pair[2]))
+                refs[pid] = (self._subtree(walk, frm, removed) or ref,
+                             {r.key: r for r in walk})
+            return refs[pid]
+
+        dst_ids = {self._pair_id(p) for p in dst_pairs}
+        seen = set()
+        for p in src_pairs + dst_pairs:
+            pid = self._pair_id(p)
+            if pid in seen:
+                continue
+            seen.add(pid)
+            after = self._walk(out, p)
+            by_key = {r.key: r for r in after}
+            deltas = pagewalk.diff(before[pid], after, remaps[pid])
+            bad = [d for d in deltas if not (d.kind == "appeared" and attach_step in d.key)]
+            if bad:
+                raise RecipeError("LAYOUT_MOVED", "root %d: %d record(s) other than the moved "
+                                  "control changed:\n%s" % (p[0], len(bad),
+                                                            pagewalk.describe(bad)))
+            exp, exp_keys = reference(p)
+            pasted = {}
+            for d in deltas:
+                a = d.after
+                n = a.key.index(attach_step)
+                if len(a.key) == n + 1:
+                    continue                                  # the attach insert_object adds
+                o, j = a.key[n + 1]
+                if o != new_index or j >= len(moved_idx):
+                    raise RecipeError("LAYOUT_MOVED", "root %d: unexpected record %s"
+                                      % (p[0], _fmt_walk_key(a.key)))
+                pasted.setdefault(a.key[:n], {})[(moved_idx[j],) + a.key[n + 2:]] = a
+            if not pasted:
+                if pid in dst_ids:
+                    raise RecipeError("LAYOUT_MOVED", "root %d does not draw the pasted "
+                                      "control" % p[0])
+                continue                                      # a source root only
+            moved, restyled = [], []
+            for got in pasted.values():
+                for rel in sorted(set(exp) | set(got)):
+                    e, a = exp.get(rel), got.get(rel)
+                    if e is None or a is None or e.wtype != a.wtype:
+                        moved.append(pagewalk.Delta((a or e).key, (a or e).wtype,
+                                                    (a or e).label,
+                                                    "gone" if a is None else "appeared", e, a))
+                        continue
+                    want = (e.box[0] + ox, e.box[1] + oy, e.box[2] + ox, e.box[3] + oy)
+                    es = dataclasses.replace(e, value_slot=_effective_slot(exp_keys, e))
+                    as_ = dataclasses.replace(a, value_slot=_effective_slot(by_key, a))
+                    if pagewalk._state(es) != pagewalk._state(as_):
+                        restyled.append(pagewalk.Delta(a.key, a.wtype, a.label, "state", es,
+                                                       as_))
+                    if a.box != want:
+                        moved.append(pagewalk.Delta(a.key, a.wtype, a.label, "moved",
+                                                    dataclasses.replace(e, box=want), a,
+                                                    a.box[0] - want[0], a.box[1] - want[1]))
+            if restyled:
+                raise RecipeError("STATE_CHANGED", "root %d: %d pasted record(s) are not "
+                                  "styled as on the source (source -> pasted):\n%s"
+                                  % (p[0], len(restyled), pagewalk.describe(restyled + moved)))
+            if moved:
+                raise RecipeError("LAYOUT_MOVED", "root %d: %d pasted record(s) are not at "
+                                  "their translated box (expected -> actual):\n%s"
+                                  % (p[0], len(moved), pagewalk.describe(moved)))
+
+    def capability_delta(self, ctx):
+        # touch ids map to groups globally (FUN_00256B84): no group, binding or DGN changes
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        src_ids = gestures.touch_ids(data, h["from"], tab)
+        new_ids = gestures.touch_ids(data, h["object"], tab)
+        for tid in h["touch_ids"]:
+            assert tid not in src_ids, "touch id %d still on object %d" % (tid, h["from"])
+            assert tid in new_ids, "touch id %d not on object %d" % (tid, h["object"])
+        assert any(r.wtype == 5 and r.child_index == h["object"]
+                   for r in records.object_records(data, gs + tab[h["to"]])), \
+            "object %d does not attach object %d" % (h["to"], h["object"])
+        return ("move_control: %d record(s) from object %d to object %d at (%d, %d); source "
+                "compensated by %d edit(s); UNVERIFIED on a coach"
+                % (h["moved"], h["from"], h["to"], h["at"][0], h["at"][1], h["compensated"]))
 
 
 @op("pin_filter_instance")

@@ -579,7 +579,20 @@ class Screen:
         return c[0], c[2]
 
     def walk(self, obj_index: int, state: _State | None = None, depth: int = 0,
-             switch_values: dict | None = None, slot_values: dict | None = None) -> list[Placed]:
+             switch_values: dict | None = None, slot_values: dict | None = None,
+             trace: list | None = None, path: tuple = ()) -> list[Placed]:
+        """Replay `FUN_00257BFC` over `obj_index` and its children; returns `self.placed`.
+
+        `trace`, when given, receives one entry per record walked, containers (wtype 5/6/0x2e)
+        included and listed before their children: `(key, obj_index, record_index, rec, box,
+        font, align, colors)`. `key` is `path + ((obj_index, record_index),)`, the chain from
+        the walk's root to the record, with `record_index` the record's position in
+        `records.object_records`; `box` is `(x0, y0, x1, y1)` after the align block (as
+        `Placed` carries it); `font`/`align` are the persistent `state.font`/`state.align` after
+        the record; `colors` its effective colours (`_apply_colors`). The entry is appended
+        after the box and state are computed and before any recursion; it reads the walk and
+        never changes it (`pagewalk` builds on it).
+        """
         if state is None:
             state = _State()
             self.placed = []
@@ -593,7 +606,7 @@ class Screen:
         except (IndexError, ValueError):
             return self.placed
 
-        for rec in recs:
+        for rec_index, rec in enumerate(recs):
             c = [0] * 6
             for i in range(6):
                 pen = _s16(rec.geom[i])
@@ -637,6 +650,10 @@ class Screen:
             # record's own drawn box + its frame for later mode-2/3 references, not the flow.
             ax0, ax1 = self._placed_label_box(state, rec, c)
             c[0], c[2] = ax0, ax1
+            key = path + ((obj_index, rec_index),)
+            if trace is not None:
+                trace.append((key, obj_index, rec_index, rec, (c[0], c[1], c[2], c[3]),
+                              state.font, state.align, tuple(eff_colors)))
 
             if (rec.wtype in (5, 6, 0x2e)
                     and rec.child_index is not None and rec.child_index < len(self.table)):
@@ -667,7 +684,8 @@ class Screen:
                     # boxes (e.g. ELECTRICAL Start/Stop rendered red instead of their own colour).
                     saved_fill = dict(state.fill_slots)
                     saved_transp = dict(state.fill_transparent)
-                    self.walk(child, state, depth + 1, switch_values, slot_values)
+                    self.walk(child, state, depth + 1, switch_values, slot_values,
+                              trace, key)
                     state.fill_slots = saved_fill
                     state.fill_transparent = saved_transp
             else:
