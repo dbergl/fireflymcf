@@ -46,6 +46,7 @@ the proof behind each one.
 | Move **where a page attaches** a child object | [`move_attach`](RECIPE-OPS.md#move_attach) | New x and/or y for the attach point. | Proven · in v26 |
 | Resize a button or label | [`move_element`](RECIPE-OPS.md#move_element) | Set width and/or height. (Growing a label's *text* past its field is `rename_label` with `allow_grow`, above.) | Proven · in v26 |
 | Remove a control from the screen | [`remove_control`](RECIPE-OPS.md#remove_control) | Parks the control off the visible 480 px canvas (its bindings stay). Choose the park-y (default 900). | **Unverified** |
+| Delete a control from a card, touch area included (e.g. to move it to another page) | [`remove_records`](RECIPE-OPS.md#remove_records) | Deletes the chosen records from one object, which shrinks it. Choose the records, each with an identity check (its child or touch id). A later control in the same card can move, because it was placed relative to the removed one; check the render and correct it with `move_element`. | Proven · 2026-10-19 |
 | Take one light out of a master switch (so "Light Master" no longer turns it on or off) | [`drop_from_master`](RECIPE-OPS.md#drop_from_master) | Give the master's screen title (e.g. "Light Master") and the G12 channel to drop. It leaves both the ON and OFF buttons, so the master neither turns it on nor off; the light's own button still works. Fails loudly if that channel is not in that master. | Proven · in v26 |
 
 ## Colour, font and artwork
@@ -132,7 +133,7 @@ the reference coach's layout.
 | Light a second BMS button (e.g. Ignore Alarms) from one bit of the BMS status | [`add_aes_bms_button_status`](RECIPE-OPS.md#add_aes_bms_button_status) | The button op, the heater status op, and the bit mask inside its byte-2 field (2 = alarm mask active). | Built · v49 (2026-10-15), not flashed |
 | Lay the AES ELECTRICAL page out as four cards (Batteries, Inverter, Auto Engine Start, Water Pump) | [`aes_card_layout`](RECIPE-OPS.md#aes_card_layout) | No choices: HOME's card colour and radius, controls at their stock sizes, the AES gear beside Low Volts, "Triggers:" dropped. Build the heater with `add_aes_batt_heat` `x 84, y 156, w 328, h 54` (any `text`) and `add_aes_batt_heat_status` `button: {ref}` first; refuses any other shape. | Built · v48 (2026-10-15), not flashed |
 | Send the Inverter capsule's gear icon to the INVERTER / CHARGER SETTINGS screen | [`retarget_inverter_gear`](RECIPE-OPS.md#retarget_inverter_gear) | Choose the destination screen id (default 14). | Proven · in v26 |
-| *(Older)* Copy the AGS Low Volts arm onto the AES view | [`add_low_volts_control`](RECIPE-OPS.md#add_low_volts_control) | **Superseded** by [`add_aes_low_volts_trigger`](RECIPE-OPS.md#add_aes_low_volts_trigger); listed for completeness. | Superseded |
+| Put a Low Volts button (with a "Triggers:" title) on another AES page | [`add_low_volts_control`](RECIPE-OPS.md#add_low_volts_control) | Choose the page object and the title and button position. It recolours and toggles only alongside [`add_aes_low_volts_trigger`](RECIPE-OPS.md#add_aes_low_volts_trigger). | Proven · 2026-10-19 (AES settings page) |
 
 ## Tank sender / G12 (advanced)
 

@@ -106,8 +106,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Pixels travel in the project as hex rows.",
         "Flashed (the Starlink logo, the timer mark).", "`GUICODE.md` Findings 44, 46"),
     "set_gesture": ("same-size",
-        "Convert a control's single toggle group to hold-to-toggle.",
-        "Flashed 2026-08-19 (pins 28 and 29).", "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
+        "Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or "
+        "every copy of a variant-selected two-state group (Low Volts, group 129).",
+        "Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts "
+        "(group 129) on the compact AES ELECTRICAL page. AGS mode untested.",
+        "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
     "pin_filter_instance": ("same-size",
         "Narrow a receive-filter entry from any device to one RV-C instance (one byte).",
         "Flashed (v17 onward). Motivated by PC.46.", "`BUS-BASELINE.md` PC.46"),
@@ -115,15 +118,20 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Park a control off the 480 px canvas by rewriting its attach records' y. Bindings "
         "stay.",
         "UNVERIFIED. Never flashed.", "`CompileResult.unverified`"),
+    "remove_records": ("structural",
+        "Delete chosen records from one object (shrinking it), so a control is gone from the "
+        "page, its touch region included. Bindings stay.",
+        "Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.", "`relocate.replace_object_records`"),
     "drop_from_master": ("same-size",
         "Remove one channel from a master control (its ON+OFF group pair), so the master no "
         "longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0.",
         "Flashed 2026-09-14 (v26): the coach bath light (ch25) no longer follows Light Master.",
         "`mastergroup.py`, `CONTROL-BEHAVIOR.md` §3; the reference coach's build log (not published) \"Experimental v26\""),
     "add_low_volts_control": ("structural",
-        "Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). "
-        "Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe.",
-        "Superseded.", "the reference coach's build log (not published) \"The compact AES Electrical page\""),
+        "Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. "
+        "Recolour and direction come from `add_aes_low_volts_trigger`'s bridge.",
+        "Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and "
+        "recolours with that bridge.", "the reference coach's build log (not published) \"The compact AES Electrical page\""),
     "follow_channel": ("guicode",
         "Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a "
         "repurposed OPTIONS row.",

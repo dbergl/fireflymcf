@@ -730,6 +730,30 @@ def test_set_gesture_hold_to_toggle(stock, stock_hash):
                  gestures.PHASE_RELEASE_HELD):
         assert not beh.on(dead)
 
+def test_set_gesture_single_binding_stays_verified(stock, stock_hash):
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="g", type="set_gesture",
+                                  params={"target": 0, "group": 18,
+                                          "kind": "hold_to_toggle"}))
+    assert r.ok, r.errors
+    assert r.unverified == []
+    assert "UNVERIFIED" not in r.manifest[0]
+
+def test_set_gesture_low_volts_converts_every_copy(stock, stock_hash):
+    """Group 129 (Low Volts): every live copy fires on the hold (coach-verified 2026-10-19)."""
+    from fireflymcf import gestures
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="g", type="set_gesture",
+                                  params={"target": 0, "group": 129,
+                                          "kind": "hold_to_toggle", "seconds": 3}))
+    assert r.ok, r.errors
+    assert r.unverified == []
+    line = r.manifest[0]
+    assert "COACH-VERIFIED" in line and "external variant setter" in line
+    beh = gestures.describe_group(r.data, 129)
+    assert beh.kinds == {0: "hold-only", 1: "hold-only"} and beh.hold_ms == 3000
+    assert all(e.phases == gestures.PHASE_HELD for e in beh.emissions)
+
 def test_set_gesture_latch_on_nonlatch_is_error(stock, stock_hash):
     # The awning group is momentary; asking for latch must refuse, not half-edit.
     # `all_groups` already returns decoded GroupBehaviour objects (not indices), so the
@@ -2125,3 +2149,66 @@ def test_no_op_reads_two_params_into_one_attribute():
             seen.setdefault(t.attr, set()).add(v.args[0].value)
         bad += [(name, attr, sorted(ps)) for attr, ps in seen.items() if len(ps) > 1]
     assert not bad, bad
+
+
+_LV = [{"selector": {"wtype": 5, "nth": 1}, "child": 285},
+       {"selector": {"wtype": 12, "nth": 1}, "touch_id": 129}]
+
+
+def test_remove_records_deletes_the_low_volts_face_and_touch(stock, stock_hash):
+    """Object 315 (AGS Triggers) loses its Low Volts attach and touch region; the rest stays."""
+    from fireflymcf import gestures
+    gs, tab = guidata.guidata_extent(stock)[0], guidata.object_tables(stock)[1]
+    before = records.object_records(stock, gs + tab[315])
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="rm", type="remove_records",
+                                  params={"target": 315, "records": _LV}))
+    assert r.ok, r.errors
+    assert r.unverified == []
+    assert len(r.data) < len(stock)
+    gs2, tab2 = guidata.guidata_extent(r.data)[0], guidata.object_tables(r.data)[1]
+    after = records.object_records(r.data, gs2 + tab2[315])
+    want = [stock[x.offset:x.end] for x in before
+            if not ((x.wtype == 5 and x.child_index == 285)
+                    or (x.wtype == 12 and stock[x.end - 2] == 129))]
+    assert [r.data[x.offset:x.end] for x in after] == want
+    assert 129 not in gestures.touch_ids(r.data, 315)
+    assert 129 in gestures.touch_ids(r.data, 795)        # the group still has its other owner
+    # every other object's records are byte-identical
+    for i in (31, 285, 795, 829, len(tab) - 1):
+        a = records.object_records(stock, gs + tab[i])
+        b = records.object_records(r.data, gs2 + tab2[i])
+        assert [stock[x.offset:x.end] for x in a] == [r.data[x.offset:x.end] for x in b]
+
+
+@pytest.mark.parametrize("records_param, code", [
+    ([], "BAD_PARAMS"),
+    ([{"selector": {"wtype": 5, "nth": 1}}], "BAD_PARAMS"),
+    ([{"selector": {"wtype": 5, "nth": 1}, "child": 286}], "EXPECT_MISMATCH"),
+    ([{"selector": {"wtype": 12, "nth": 1}, "touch_id": 128}], "EXPECT_MISMATCH"),
+    ([{"selector": {"wtype": 12, "nth": 1}, "touch_id": 129},
+      {"selector": {"wtype": 12, "nth": 1}, "touch_id": 129}], "BAD_PARAMS"),
+    ([{"selector": {"wtype": 9, "nth": 0}, "child": 1}], "NO_SUCH_RECORD"),
+])
+def test_remove_records_refusals(stock, stock_hash, records_param, code):
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="rm", type="remove_records",
+                                  params={"target": 315, "records": records_param}))
+    assert not r.ok and r.errors[0]["code"] == code
+
+
+def test_remove_records_refuses_a_pointer_into_the_moving_part(stock, stock_hash, monkeypatch):
+    """The relocator's documented shrink hole: a literal naming a record that would move."""
+    from fireflymcf import theme
+    gs, tab = guidata.guidata_extent(stock)[0], guidata.object_tables(stock)[1]
+    last = records.object_records(stock, gs + tab[315])[-1]
+    real = theme.section_guidata_pointers
+
+    def fake(data, marker):
+        out = list(real(data, marker))
+        return out + [(0, last.offset - gs)] if marker == "GuiCode" else out
+    monkeypatch.setattr(theme, "section_guidata_pointers", fake)
+    r = compile_ops(stock, stock_hash,
+                    recipe.OpSpec(id="rm", type="remove_records",
+                                  params={"target": 315, "records": _LV}))
+    assert not r.ok and r.errors[0]["code"] == "POINTER_INSIDE"

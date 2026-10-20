@@ -366,7 +366,7 @@ def set_repeat_index(data: bytes, group: int, phase: str, index: int):
 
 
 def make_hold_to_toggle(data: bytes, group: int, seconds: int = 3):
-    """Turn a single-entry toggle group into "hold N seconds to switch, either way".
+    """Turn a toggle group into "hold N seconds to switch, either way".
 
     Two same-size byte edits: the group's hold threshold, and the binding's phase mask ->
     `PHASE_HELD` alone, so a short tap does nothing and the toggle fires once when the
@@ -382,11 +382,13 @@ def make_hold_to_toggle(data: bytes, group: int, seconds: int = 3):
     for as long as a finger rests on it. Zeroing the rate makes that unreachable. The first send
     is unaffected -- entering the held phase sets the next-send time directly (0x0021BB64).
 
-    **The premises, each checked because getting one wrong is silent.** The group must hold
-    exactly ONE live entry, it must be a `DC_DIMMER_COMMAND_2` command 5 (toggle), and that
-    entry must not carry the repeat bit. A multi-entry group is the real trap: which copy
-    fires is chosen by a runtime variant counter, so editing "the" entry may edit one that
-    never runs (section 5 of `docs/CONTROL-BEHAVIOR.md`).
+    **The premises, each checked because getting one wrong is silent.** A single-entry group's
+    entry must be a `DC_DIMMER_COMMAND_2` command 5 (toggle) and must not carry the repeat bit.
+    A multi-entry group is the real trap: which copy fires is chosen by a runtime variant
+    counter, so editing "the" entry may edit one that never runs (section 5 of
+    `docs/CONTROL-BEHAVIOR.md`). Such a group goes to `_make_multi_hold_to_toggle`, which edits
+    every live copy alike and only when its five premises hold; coach-verified 2026-10-19 on
+    group 129 (Low Volts) in AES mode.
 
     **No precedent.** No group in any corpus build sends a DC_DIMMER command on the held
     phase, and no hold-only group drives a load at all -- every shipped hold-to-confirm
@@ -397,9 +399,11 @@ def make_hold_to_toggle(data: bytes, group: int, seconds: int = 3):
     bindings = guidata.binding_table(data)
     live = [i for i in range(entry.start, min(entry.start + entry.count, len(bindings)))
             if bindings[i].raw[:2] != b"\xff\xff"]
-    if len(live) != 1:
+    if len(live) > 1:
+        return _make_multi_hold_to_toggle(data, group, live, seconds)
+    if not live:
         raise GestureEditError(
-            f"group {group} has {len(live)} live bindings; hold-to-toggle needs exactly one "
+            f"group {group} has 0 live bindings; hold-to-toggle needs exactly one "
             f"(a multi-entry group's live copy is picked by a runtime variant counter)")
     b = bindings[live[0]]
     if b.dgn_low != guidata.DGN_DC_DIMMER_COMMAND_2:
@@ -418,3 +422,112 @@ def make_hold_to_toggle(data: bytes, group: int, seconds: int = 3):
     data, e2 = set_phases(data, live[0], PHASE_HELD)
     data, e3 = set_repeat_index(data, group, "held", 0)
     return data, e1 + e2 + e3
+
+
+# 0x1FED9 GENERIC_INDICATOR_COMMAND, the Firefly selector write/read (`sendmap.describe_payload`).
+# Its payload byte 4, the low byte of the value a selector write sets, is binding byte 11.
+DGN_GENERIC_INDICATOR_COMMAND_LOW = 0xFED9
+_STATE_BYTE = 11
+_RELEASE_TOGGLES = ("latch", "tap-only")
+
+
+def _make_multi_hold_to_toggle(data: bytes, group: int, live: list, seconds: int):
+    """`make_hold_to_toggle` for a group whose copies are picked by its variant counter.
+
+    Safe only because **every** live copy gets the same edit, so whichever copy the counter
+    selects fires on the hold. Five premises, each refused with its own message:
+
+      1. no copy carries the repeat bit (a hold would fire on every repeat tick);
+      2. every copy sends one DGN to one target (binding bytes 0-2 bar the variant nibble and
+         the repeat bit, and bytes 4-7: the command, selector and instance);
+      3. every variant implements the same gesture, and it is a release toggle (`latch` or
+         `tap-only`), never a momentary, ramp or tap-or-hold control;
+      4. the variants pick the direction: either every copy is a DC_DIMMER_COMMAND_2 toggle
+         (command 5), or there are exactly two variants whose copies, paired by position, are
+         byte-identical bar the variant nibble and (for 0x1FED9) the state byte, with the
+         state bytes 0 and 1 in at least one pair. Group 129, Low Volts, pairs a selector
+         0x2F write (`D1`, 0 / 1) with its read-back request (`D3`, identical in both);
+      5. the group does not cycle its variant on release (byte 1 `0x80`), so the direction is
+         chosen by the group's external variant setter alone (`docs/CONTROL-BEHAVIOR.md` §5).
+         On 13.6 that is GuiCode's Low Volts block at 0x0024A176.
+
+    Then one hold threshold, the held repeat rate zeroed, and `PHASE_HELD` on every copy.
+    Coach-verified 2026-10-19 on group 129 from the compact AES ELECTRICAL page (owner: the
+    3 s hold works); AGS mode, and groups 82/88, have not run.
+    """
+    bindings = guidata.binding_table(data)
+    beh = describe_group(data, group)
+    raws = {i: bindings[i].raw for i in live}
+    head = f"group {group} has {len(live)} live bindings"
+
+    repeating = [i for i in live if raws[i][2] & BINDING_REPEATS]
+    if repeating:
+        raise GestureEditError(
+            f"{head}; binding(s) {repeating} carry the repeat bit, so a hold would fire "
+            f"every repeat tick instead of once")
+
+    def target(raw):
+        return (raw[0], raw[1], raw[2] & 0x0F & ~BINDING_REPEATS, bytes(raw[4:8]))
+    targets = {target(raws[i]) for i in live}
+    if len(targets) != 1:
+        raise GestureEditError(
+            f"{head} sending to {len(targets)} DGN/selector targets; hold-to-toggle needs one "
+            f"target (one two-state control)")
+
+    if not beh.variants_agree:
+        raise GestureEditError(
+            f"{head} and its variants implement different gestures {beh.kinds}; editing them "
+            f"alike would change what each one does differently")
+    if beh.kind not in _RELEASE_TOGGLES:
+        raise GestureEditError(
+            f"{head} and is {beh.kind!r}; only a release toggle ({', '.join(_RELEASE_TOGGLES)}) "
+            f"can become hold-to-toggle")
+
+    dgn = raws[live[0]][0] | (raws[live[0]][1] << 8)
+    if not (dgn == guidata.DGN_DC_DIMMER_COMMAND_2 and raws[live[0]][4] == 5):
+        _check_two_state_variants(head, dgn, beh, raws)
+
+    if beh.cycles_variant:
+        raise GestureEditError(
+            f"{head} and cycles its variant on release; whether the next hold fires the "
+            f"opposite copy would depend on the cycle and the external setter (unproven)")
+
+    data, edits = set_hold_seconds(data, group, seconds)
+    for i in live:
+        data, e = set_phases(data, i, PHASE_HELD)
+        edits += e
+    data, e = set_repeat_index(data, group, "held", 0)
+    return data, edits + e
+
+
+def _check_two_state_variants(head: str, dgn: int, beh: GroupBehaviour, raws: dict) -> None:
+    """Premise 4(a): two variants whose paired copies differ only in the state they write."""
+    if beh.variants != (0, 1):
+        raise GestureEditError(
+            f"{head} in variants {beh.variants}; a two-state control needs variants (0, 1)")
+    per = {v: [e.binding_index for e in beh.emissions if e.variant == v] for v in (0, 1)}
+    if len(per[0]) != len(per[1]):
+        raise GestureEditError(
+            f"{head}: variant 0 has {len(per[0])} and variant 1 {len(per[1])}, so its copies "
+            f"do not pair")
+    free = {2}
+    if dgn == DGN_GENERIC_INDICATOR_COMMAND_LOW:
+        free.add(_STATE_BYTE)
+    two_state = False
+    for a, b in zip(per[0], per[1]):
+        ra, rb = raws[a], raws[b]
+        other = [k for k in range(len(ra)) if k not in free and ra[k] != rb[k]]
+        if other or (ra[2] & 0x0F) != (rb[2] & 0x0F):
+            raise GestureEditError(
+                f"{head}: bindings {a} and {b} differ in byte(s) {other or [2]}, not just "
+                f"the variant and the state written")
+        if _STATE_BYTE in free and {ra[_STATE_BYTE], rb[_STATE_BYTE]} == {0, 1}:
+            two_state = True
+        elif _STATE_BYTE in free and ra[_STATE_BYTE] != rb[_STATE_BYTE]:
+            raise GestureEditError(
+                f"{head}: bindings {a} and {b} write {ra[_STATE_BYTE]} and {rb[_STATE_BYTE]}, "
+                f"not 0 and 1")
+    if not two_state:
+        raise GestureEditError(
+            f"{head} but no pair writes 0 in one variant and 1 in the other, so it is not a "
+            f"two-state control")

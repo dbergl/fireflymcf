@@ -84,6 +84,7 @@
             "aes_card_layout",
             "append_filter",
             "install_glyph",
+            "remove_records",
             "split_hold_region",
             "swap_aes_electrical",
             "wire_button",
@@ -1567,6 +1568,40 @@
                   "char",
                   "y",
                   "rows"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "remove_records"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "object index or {\"ref\": op_id}"
+                  },
+                  "records": {
+                    "type": "array",
+                    "description": "records to delete: {selector, child?, touch_id?}"
+                  }
+                },
+                "required": [
+                  "target",
+                  "records"
                 ]
               }
             }
