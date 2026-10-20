@@ -820,7 +820,7 @@ the hold becomes a plain tap (`0x0024C7E8`). Firmware behaviour, not a defect of
 
 ---
 
-## 10. Moving a control to another page — `move_control`, UNVERIFIED
+## 10. Moving a control to another page — `move_control`, CONFIRMED ON HARDWARE 2026-10-20
 
 A control is three records (draw, touch region, box), and a touch id maps to its group
 **globally**: `FUN_00256B84` copies the id into the hit-region table whatever page hosts the
@@ -857,6 +857,8 @@ The pasted attach needed font 14 and align 1 made explicit (the settings page le
 align 3 in effect where the paste lands); its colours inherited correctly. The result draws Low
 Volts at the boxes the flashed LV-move build draws it at (`tests/test_move_control.py`).
 
-It has not run on a coach. The halves it reuses have (`remove_records` and `insert_object`,
-flashed in LV-move, 2026-10-19); the generic re-encoding and the automatic compensation have
-not, so `hardware_verified` stays False until a build made with it is flashed.
+Flashed 2026-10-20 in the LV-mc proof build (LV-hold plus `move_control`, the gear centred by a
+`move_element`, and an `assert_layout` on the gear's box) and verified by the owner: the compact
+AES card draws as LV-move's, nothing else moved, and Low Volts on the AES settings page arms and
+disarms on its 3 s hold and repaints with its status. The generic re-encoding and the automatic
+compensation have now run on a coach, so `hardware_verified` is True.
