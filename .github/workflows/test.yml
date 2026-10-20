@@ -7,7 +7,9 @@ name: test
 
 on:
   push:
+    branches: ["**"]        # a tag push runs these through release.yml instead
   pull_request:
+  workflow_call:            # release.yml runs the matrix before it publishes
 
 permissions:
   contents: read

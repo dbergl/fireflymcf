@@ -1,0 +1,42 @@
+name: release
+
+# A version tag (v0.2.0) publishes a GitHub release: the full test matrix first, then the tag is
+# checked against pyproject.toml and the plugin manifest, then the wheel and sdist are built and
+# attached. GitHub releases only; nothing goes to PyPI.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Tag matches the version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: python scripts/check_version.py "$TAG"
+      - name: Build
+        run: |
+          python -m pip install build
+          python -m build
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "$TAG" dist/*
+          --verify-tag --title "fireflymcf $TAG" --generate-notes

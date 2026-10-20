@@ -52,6 +52,20 @@ live in a private research repository. `scripts/link-research.sh` symlinks them 
 gitignored names; without them, the modules that need them are not collected and the run says so.
 The first full run is slow (recipe compiles fill `build/.compiled-images`); later runs reuse it.
 
+## Releasing
+
+Releases are GitHub releases (nothing is published to PyPI). Set the same version in
+`pyproject.toml` and `plugin/.claude-plugin/plugin.json`, commit, then tag and push the tag:
+
+```
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+`.github/workflows/release.yml` runs the test matrix and checks the tag against both files
+(`scripts/check_version.py`). It then attaches the wheel and the source package to a release
+with generated notes. An owner installs a release with
+`pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git@v0.2.0"`.
+
 ## Disclaimer
 
 **Independent and unofficial.** This project is not affiliated with, endorsed by, or supported by
