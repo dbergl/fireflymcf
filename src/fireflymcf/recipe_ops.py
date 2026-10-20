@@ -4,7 +4,7 @@ imports this module at its bottom).
 
 One-group discipline (`wire_button`): `newbutton.retarget_command` allocates a FRESH
 command group on every call, so calling it twice on the same object orphans the first
-group -- the defect `build/from_stock.py` found the hard way (build-then-retarget).
+group -- the defect the original build script found the hard way (build-then-retarget).
 `wire_button` calls it exactly once per compile, on a shell that has never been wired.
 A recipe re-wire is not a second call on the same compiled image; it is a *changed op*
 in the project, and `compile_project` always recompiles the whole project from stock
@@ -2578,8 +2578,8 @@ class SetGesture(Op):
 
     `gestures.make_hold_to_toggle` returns an unsealed image -- `gestures.py` never
     imports `patch` and performs no reseal of its own (checked, not assumed: grep
-    confirms it, and `builds/from_stock.py` only reseals once at the very end of the
-    whole script, well after its own `make_hold_to_toggle` call). This op reseals
+    confirms it, and the original build script resealed only once at the very end, well
+    after its own `make_hold_to_toggle` call). This op reseals
     before returning, matching every other byte-editing op here.
     """
     PARAMS = {
@@ -4708,8 +4708,8 @@ class AddOptionFollower(Op):
 
     Gate mask (Task 13). The gate test defaults to the whole halfword `== 1`, which is what the
     hardware-verified v9..v13 builds emit -- omitting `gate_mask`/`gate_on_value` must therefore
-    stay byte-identical for ever (`tests/test_registers.py` pins those images; they are on a
-    vehicle). But a selector whose word carries TWO fields breaks that test: the pump-auto-off
+    stay byte-identical for ever (the research repository's tests pin those images; they are on
+    a vehicle). But a selector whose word carries TWO fields breaks that test: the pump-auto-off
     work widens `0xEE` to `minutes | link_flag << 8`, so the slot is never 1 and an unmasked gate
     is permanently dead -- the follower stops following and the button stops highlighting, with
     everything still compiling green. Such a build passes `gate_mask=0xFF00, gate_on_value=0x0100`

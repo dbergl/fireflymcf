@@ -132,7 +132,7 @@ def crc16_aug_ccitt(data: bytes) -> int:
     unreflected, no final xor) with a caller-supplied initial value, so seeding it with
     `CRC_INIT` gives the AUG-CCITT variant. It replaced the bit-serial pure-Python loop that
     `_crc16_aug_ccitt_reference` keeps: that loop cost ~0.9 s per MB and was **44% of a full
-    `builds/from_stock.py` run** (315 calls, 28 s of 65 s -- every reseal recomputes nine
+    from-stock build script run** (315 calls, 28 s of 65 s -- every reseal recomputes nine
     checksums, three of them over whole sections). `tests/test_coverage.py` pins the two
     implementations equal on random inputs, and the 27-of-27 corpus check still runs.
     """
