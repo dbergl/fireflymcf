@@ -80,6 +80,37 @@ not data); a colour not in `--list-colors`; floorplan option defaults (emitted b
 stored); an op that refuses this build (ops written against 13.6 check its bytes). Never work
 around a refusal. An `allow_*` parameter is an acknowledgement the owner gives, not a fix.
 
+## Custom artwork (a logo or icon)
+
+The panel draws an icon as a **glyph**: one colour (the control's ink), 16 levels of coverage. The
+owner's picture supplies only the shape. `glyph-import` turns PNG, JPEG, SVG, WebP, GIF, BMP or
+TIFF into `install_glyph` parameters and compiles them against the file before printing them.
+
+1. **Find the target.** Render the page with `--placements`. An icon is a `wtype` 11 record:
+   its `font` is the slot and its `label` the character drawn. `$F glyph-import $M --list` lists
+   the 4bpp slots and their cell heights. Logos go in a big cell (13.6: slot 27, 128 px); small
+   rail icons in slot 24 (48 px, which needs `--claim-block`).
+2. **Import:**
+   `$F glyph-import $M logo.png --slot 27 --height 64 --as-op --id logo --out work/logo.json --preview work/logo-preview.png`.
+   It trims the art to its ink, shrinks it to fit the cell (`--height`/`--width` to size it to the
+   button), centres it vertically, and takes the font's first free character unless `--char` is
+   given. **Look at the preview, and show it to the owner**: it is what the panel will draw.
+3. **Put it on a control.** Paste the op into the project. Then point an existing icon at it
+   with `set_icon` (`slot`, `char`, and `current` when the object holds several icons), or
+   make a new button with `add_glyph_button` + `wire_button`. A character that already holds a
+   glyph is never overwritten (`GLYPH_OCCUPIED`), so a new logo goes on a free character and
+   the control is repointed.
+
+What the picture needs to be:
+- **Best: transparent background** (PNG, WebP, SVG). Transparency is the mark; colours are ignored.
+- **An opaque image** (JPEG) works when its background is one plain colour: dark marks on a light
+  background, or light on dark (`--ink dark|light` overrides the guess).
+- **A photo is refused**: no plain background, no mark to find. Ask for the logo file.
+- **Thin detail vanishes when small.** At 48 px a wordmark is a smudge; check the preview.
+
+A glyph that is large *and* detailed can exceed what a grown build's GuiData takes
+(`RELOCATE_REFUSED`); a smaller `--height` makes a smaller record.
+
 ## Author, validate, compile
 
 ```json

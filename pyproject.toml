@@ -20,9 +20,9 @@ dependencies = []
 
 [project.optional-dependencies]
 # Everything else -- `render`, `pages`, `doctor`, `options`, `pins`, and `patch --recolor` / `--remap` --
-# reads the disassembly or builds pixel arrays, and needs these. `pip install fireflymcf[full]`
+# reads the disassembly or builds pixel arrays, and needs these (resvg-py: `glyph-import` of an SVG). `pip install fireflymcf[full]`
 # enables every command; this is the recommended install.
-full = ["numpy>=1.21", "capstone>=5.0", "Pillow>=10.1"]
+full = ["numpy>=1.21", "capstone>=5.0", "Pillow>=10.1", "resvg-py>=0.5"]
 
 # The test suite. `unicorn` runs authored GuiCode routines (levelfeed, bitcombine) on an emulated
 # Cortex-M in tests/emu.py; it is required, not optional -- routine tests fail without it.
