@@ -213,7 +213,7 @@ def clamp(word: int, minutes_min: int = MINUTES_MIN) -> int | None:
 #     00 d9 fe 19 | ff 96 cc 0f e8 03 d2 ea     a D2 delta of +1000 on selector 0xCC
 #     00 d9 fe 19 | ff 96 cc 0f ff ff d3 ff     its D3 read-back
 #
-# and PC.47 wrote `0xEE` from the Pi with exactly `FF96EE0F0100D1EA`, so the D1 payload is
+# and PC.47 wrote `0xEE` from the bus host with exactly `FF96EE0F0100D1EA`, so the D1 payload is
 # hardware-observed on this selector. The value is little-endian at payload[4..5] (PC.47:
 # `0005` added 0x0500), i.e. frame offset 8 -- which is why the routine copies the template
 # to the stack and then `strh`s the runtime-computed word over that halfword.

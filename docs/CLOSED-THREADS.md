@@ -479,7 +479,7 @@ Verbatim, as part of the documentation cleanup (its design note (not published))
      broadcast periodically, while this one does not.
 
    *The experiment, and it is cheap.* `E3`/`E4` are the Bath/Cargo light options
-   (`GUICODE.md` Finding 23). Run `candump -L can1` on the Pi, have the owner toggle those two
+   (`GUICODE.md` Finding 23). Run `candump -L can1` on the bus, have the owner toggle those two
    OPTIONS rows on the panel, and watch for **`19FED99C`** — the G12 sourcing a config write,
    which has never been seen. If it appears, the payload says what `0xCF` means. If it does not,
    the trigger is something else and the rule may be dead code for a product this coach lacks.

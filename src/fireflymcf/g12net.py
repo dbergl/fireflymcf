@@ -12,7 +12,7 @@ current config before changing it. Enumeration tells you *which* config the devi
 the only backup that exists.
 
 The transport is a `Protocol`, not a base class, so the client is exercised against recorded
-frames and no test opens a socket. `SocketCanBus` uses stdlib `AF_CAN`/`CAN_RAW`: the coach Pi
+frames and no test opens a socket. `SocketCanBus` uses stdlib `AF_CAN`/`CAN_RAW`: the bus host
 has no `python-can` and PEP 668 blocks installing one, and this needs neither.
 """
 from __future__ import annotations

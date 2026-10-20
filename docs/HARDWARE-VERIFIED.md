@@ -110,7 +110,7 @@ count. Rewrite the DGN bytes and the new DGN is registered on the next boot.
 *The round trip.* Var 32 was pointed at **`0x1FEA0` GPS_DATE_TIME_STATUS**, mode 1 of
 `payload[3]` (day of week) — a DGN absent from all three builds and from every capture. Var 32
 is both a bridged var and the `G12 OUTPUTS` row-15 painter, and pin 15 is released in this build,
-so the row was already blank and nothing was lost. Driving the frame from the Pi, row 15 turned
+so the row was already blank and nothing was lost. Driving the frame from the bus host, row 15 turned
 **green** on one day-of-week value and **off** on another, exactly as the compare branches
 predicted. That confirms the whole chain end to end on a DGN Firefly never shipped support for:
 registration, the 18-bit match, extraction mode 1 at a chosen payload byte, the slot→cell bridge,
@@ -126,7 +126,7 @@ letting a build ship a dead subscription.
 ON HARDWARE 2026-09-22.** The "Batt Heat" button shows BMS status DGN `0x18FF7070`: the body
 tracks the **battery heater** (byte 2 bit 0) and a **red wavy-lines glyph** (font slot 23 char
 `'2'`) appears in the top-right while the battery's internal **heater contactor** is closed (byte 1
-bit 2). Build v31; all four combinations were driven from the Pi with `18FF70C0#…` at 5 Hz and all
+bit 2). Build v31; all four combinations were driven from the bus host with `18FF70C0#…` at 5 Hz and all
 four appeared on the panel, the two indicators independent of each other.
 
 *What this does and does not establish.* The RECEIVE half is proven end to end. The DRAWING half
@@ -142,7 +142,7 @@ that state has one — so no state can leave another's pixels. **Test a state in
 TRANSITIONING it, not by holding each state.**
 
 *v32 CONFIRMED ON HARDWARE 2026-09-22.* Flashed `mcf-13.6-BattHeatStatus-v32.bin`, then drove six
-held-15-s states from the Pi (`18FF70C0#70 <b1> <b2> 41 00 00 A5 00` at 10 Hz, over the real BMS's
+held-15-s states from the bus host (`18FF70C0#70 <b1> <b2> 41 00 00 A5 00` at 10 Hz, over the real BMS's
 2-s off frame) so that every edge was crossed: off -> heater on -> heater + contactor -> contactor
 opens -> heater off -> contactor only -> released. The owner confirmed on the panel: blue/cyan body
 tracks the heater, the caption survives the enable, the glyph appears with the contactor and
@@ -403,7 +403,7 @@ discrimination is unexercised until the bridge is live.
 Two things worth carrying for that build-out, both from the file and the captures:
 - **The bridge's display route exists, and six fields of it are now CONFIRMED ON HARDWARE
   2026-08-23** (`BUS-BASELINE.md` **PC.20** — this document's first *transmit* entry). Synthetic
-  frames from the Pi light up the **PD Inverter** page: Enabled (`1FFD4` byte 1), DC Voltage /
+  frames from the bus host light up the **PD Inverter** page: Enabled (`1FFD4` byte 1), DC Voltage /
   Current (`1FEE8`), AC Out Volts / Freq (`1FFD7` byte 0 = `0x41`, output) and AC Input Volts
   (`1FFD7` byte 0 = `0x01`, input). Two traps a bridge must get right: **the panel NEGATES DC
   current** (it computes `1600 − raw×0.05`, proven by two runs at opposite signs), and the

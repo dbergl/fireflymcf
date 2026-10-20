@@ -76,7 +76,7 @@ coach's builds) stays private and depends on this one.
 
 ## Before going public
 
-- [x] Scrub the LAN host and local home paths (2026-10-16): `pi@<gateway>`, `$GHIDRA_HOME`,
+- [x] Scrub the LAN host and local home paths (2026-10-16): the bus host's address, `$GHIDRA_HOME`,
       `$SCRATCH`, relative paths. None left in the tree.
 - [ ] **Replace the git history before flipping public.** History still holds the LAN host and,
       from the first import, the full `tests/answer_key.py` (the captures transcribed). A
