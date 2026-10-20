@@ -46,6 +46,7 @@ the proof behind each one.
 | Move **where a page attaches** a child object | [`move_attach`](RECIPE-OPS.md#move_attach) | New x and/or y for the attach point. | Proven · in v26 |
 | Resize a button or label | [`move_element`](RECIPE-OPS.md#move_element) | Set width and/or height. (Growing a label's *text* past its field is `rename_label` with `allow_grow`, above.) | Proven · in v26 |
 | Remove a control from the screen | [`remove_control`](RECIPE-OPS.md#remove_control) | Parks the control off the visible 480 px canvas (its bindings stay). Choose the park-y (default 900). | **Unverified** |
+| Delete a control from a card, touch area included (e.g. to move it to another page) | [`remove_records`](RECIPE-OPS.md#remove_records) | Deletes the chosen records from one object, which shrinks it. Choose the records, each with an identity check (its child or touch id). A later control in the same card can move, because it was placed relative to the removed one; check the render and correct it with `move_element`. | **Unverified** |
 | Take one light out of a master switch (so "Light Master" no longer turns it on or off) | [`drop_from_master`](RECIPE-OPS.md#drop_from_master) | Give the master's screen title (e.g. "Light Master") and the G12 channel to drop. It leaves both the ON and OFF buttons, so the master neither turns it on nor off; the light's own button still works. Fails loudly if that channel is not in that master. | Proven · in v26 |
 
 ## Colour, font and artwork
