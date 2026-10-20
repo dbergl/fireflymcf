@@ -1,0 +1,45 @@
+name: test
+
+# The public half of the suite on every platform an owner might run the plugin on. The corpus,
+# captures and recipes are private (scripts/link-research.sh), so the modules that need them
+# are not collected here; tests/test_portability.py and the CLI smoke step carry the
+# platform-specific checks.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.10", "3.13"]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -e '.[full,test]'
+      # Without UTF-8 mode: the console a piped run really gets (cp1252 on Windows).
+      - name: CLI smoke
+        run: |
+          fireflymcf --help > help.txt
+          fireflymcf ops > ops.txt
+          fireflymcf ops move_control > op.txt
+          fireflymcf schema > schema.json
+          fireflymcf-tankpatch --help > tank.txt
+      # UTF-8 mode for the tests' own fixture reads; the package's are checked by
+      # test_portability, which forces cp1252 itself.
+      - name: pytest
+        env:
+          PYTHONUTF8: "1"
+        run: python -m pytest tests -q -n auto
