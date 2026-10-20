@@ -9,14 +9,11 @@ The project has two purposes: **describe** the format, and **modify** it safely.
 the bytes, and compiles an ordered list of typed edits (a "recipe") into a flashable image with every
 structural gate this project has. `plugin/` is the Claude Code plugin built on it.
 
-**This repository holds no firmware.** The corpus (`firefly-*/mcf.bin`, `cli.bin`), coach captures
-(and `tests/answer_key.py`, their transcription),
-the reference coach's recipes and builds, and the Ghidra projects live in a private research
-repository (`firefly-firmware`). `scripts/link-research.sh` symlinks the corpus, captures and render
-configurations in under gitignored names so the full suite runs; without them, the tests that need
-them are not collected. The tests that read the reference coach's builds live in that repository
-(`tests/engine/`). The docs cite those paths (`firefly-13.6/mcf.bin`, `captures/…`, `builds/…`) as
-they stand there.
+**This repository holds no firmware.** The firmware corpus, the coach captures and the reference
+coach's builds live in a private research repository (`firefly-firmware`), along with the tests that
+pin those builds. `scripts/link-research.sh` links the data the full suite needs; without it, the
+tests that need it are not collected. Paths the docs cite (`firefly-13.6/mcf.bin`, `captures/…`) are
+that repository's.
 
 ## Start here
 
@@ -88,8 +85,8 @@ npm test --prefix studio/web                       # Studio web unit tests
 claude plugin validate .                           # the marketplace and plugin manifests
 ```
 
-Ghidra, `builds/from_stock.py` and the tests that pin the reference coach's builds byte for byte
-are in the research repository: run them after any change to the engine.
+The tests that pin the reference coach's builds byte for byte are in the research repository: run
+them after any change to the engine.
 
 ## Evidence rules
 
