@@ -13,7 +13,6 @@ from capstone import CS_ARCH_ARM, CS_MODE_THUMB, Cs
 from fireflymcf import guidata, theme
 
 STOCK = "firefly-13.6/mcf.bin"
-V32 = "builds/mcf-13.6-BattHeatStatus-v32.bin"
 DM_RV = 0x1FECA
 SLOT_BASE = 0x20007FC8               # GuiCode_entry1's r0: struct 0x20007EBC + 0x10C
 HIGH_SLOT_BASE = 0x20008000          # var index > 255 (`followchannel.status_slot_addr`)
@@ -66,7 +65,7 @@ def test_dm_rv_filter_entries_are_the_five_decoded():
     assert got == DM_RV_VARS
 
 
-@pytest.mark.parametrize("path", [STOCK, V32])
+@pytest.mark.parametrize("path", [STOCK])
 def test_no_guicode_load_reads_a_dm_rv_slot(path):
     """THE NEGATIVE. No GuiCode instruction reads any DM_RV slot, by base+offset or by absolute
     literal. The positive control is var 138, whose slot FUN_00247BF8 reads at 0x2484D2

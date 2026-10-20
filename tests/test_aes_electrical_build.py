@@ -12,7 +12,7 @@ from fireflymcf import recipe, guidata, records, render, layout
 
 AGS_OBJS = [5, 830, 315, 795, 45, 486, 487, 488]
 
-# The two AES ops in isolation. Was `builds/aes-compact.ffproj.json`; inlined here (and in
+# The two AES ops in isolation. Was the `aes-compact` recipe; inlined here (and in
 # test_aes_trigger.py) when that fixture file was removed, so this golden net still compiles
 # `swap_aes_electrical` + `add_aes_low_volts_trigger` as a standalone 2-op build against stock.
 AES_COMPACT_RECIPE = json.dumps({

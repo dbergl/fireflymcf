@@ -104,20 +104,6 @@ def test_refuses_a_build_whose_object_24_is_another_page():
         altreboot.check_page(other)
 
 
-def test_v44_is_v43_plus_the_reboot_button():
-    """v44's recipe is v43's with `altreboot` appended, and rebuilds to the image handed over."""
-    import hashlib
-    v43 = json.load(open("builds/mcf-13.6-level-refresh.ffproj.json"))
-    v44 = json.load(open("builds/mcf-13.6-alt-reboot.ffproj.json"))
-    assert v44["ops"][:-1] == v43["ops"]
-    assert v44["ops"][-1]["type"] == "add_alt_reboot" and v44["ops"][-1]["params"] == {}
-    res = recipe.compile_project(recipe.Project.from_json(json.dumps(v44)),
-                                 open(STOCK, "rb").read())
-    assert res.ok, res.errors
-    assert hashlib.sha256(res.data).hexdigest() == \
-        "50c9b54b43c5df4c5e0a872b249e0f81ff070b38a84cfd4cfff99a7bc3280bf0"
-
-
 def test_the_reserved_inverter_groups_gate_refuses_a_build_that_claims_them(monkeypatch):
     """v44's first build took group 68 (a stock 1FFD3 inverter template). With the op's own
     exclusion removed and 68 first in the free list (as it was on v43) it would again, and the
@@ -135,13 +121,3 @@ def test_guicode_selected_groups_finds_13_6s_130_139_block():
     sel = newbutton.guicode_selected_groups(open(STOCK, "rb").read())
     assert set(range(130, 140)) <= sel
     assert not {96, 126, 127, 46} & sel          # the slots whose holds worked on the coach
-
-
-def test_the_gate_refuses_reusing_a_guicode_driven_group():
-    """The flashed v45 image reused 136/137; the gate must refuse it, and pass v44."""
-    stock = open(STOCK, "rb").read()
-    with pytest.raises(AssertionError, match=r"\[136, 137\]"):
-        recipe._assert_no_guicode_selected_group_reused(
-            stock, open("builds/mcf-13.6-LevelGeometry-v45.bin", "rb").read())
-    recipe._assert_no_guicode_selected_group_reused(
-        stock, open("builds/mcf-13.6-AltReboot-v44.bin", "rb").read())

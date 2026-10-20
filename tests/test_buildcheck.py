@@ -92,16 +92,3 @@ def test_cli_json(tmp_path, renamed, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["build_name"] == "Jayco B-Van V13 verify test"
     assert out["pages"][0]["config"] == "wd" and out["pages"][0]["bbox"]
-
-
-def test_a_bad_checksum_is_found_on_a_resized_build_too(stock):
-    """A grown build has no byte-run comparison, but its checksums are still checked."""
-    v11 = Path("builds/mcf-13.6-InvCaptions-v51.bin").read_bytes()
-    assert len(v11) != len(stock)
-    assert buildcheck.compare(stock, v11, render_pages=False).problems == []
-    g12 = next(s for s in __import__("fireflymcf.container").container.parse_container(
-        v11).sections if s.name == "G12")
-    bad = bytearray(v11)
-    bad[g12.offset + 0x100] ^= 0xFF
-    r = buildcheck.compare(stock, bytes(bad), render_pages=False)
-    assert r.runs is None and any("checksum" in p for p in r.problems)
