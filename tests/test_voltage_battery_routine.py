@@ -168,7 +168,7 @@ def test_op_compiles_grows_guicode_and_detours_hook():
 def test_op_reports_verified_after_v25():
     # coach-verified 2026-09-12 (v25 flashed; number/fill/colour update live on HOME and
     # ELECTRICAL), so add_voltage_battery is hardware_verified=True and no longer reported
-    # unverified -- even though it grows fresh tier-3 cells. See the reference coach's build log (not published) (v25).
+    # unverified -- even though it grows fresh tier-3 cells.
     res = _compile({"donor": 443, "parent": 902, "x": 690, "y": 334})
     assert res.ok, res.errors
     assert not any("batt" in u for u in res.unverified), res.unverified

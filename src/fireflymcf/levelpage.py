@@ -1,6 +1,6 @@
 """levelpage -- the LEVEL page body (screen 29, object 367): preview and live layouts.
 
-Every coordinate comes from the approved mockup (its design note (not published), drawn by the session script `mock2.py`), whose van and tile geometry is
+Every coordinate comes from the approved mockup, whose van and tile geometry is
 `X(v) = round(cx + (v - 260) * sc)`, `Y(v) = round(top + (v - 40) * sc)` with `cx = 300`,
 `top = 84`, `sc = 0.70` (Python's round, i.e. half to even). `LAYOUT` is the one source of those
 numbers; `tests/test_level_page.py` recomputes the tiles from the mockup math so they cannot drift.
@@ -21,7 +21,7 @@ paints every pixel of its area: its full capsule or navy fill first (spec sectio
 
 "blocks" is always plural: a live switch on `layers == 1` is not worth a fifth arm.
 
-Orientation (`ORIENTATIONS`, owner 2026-09-26, spec `2026-09-26-level-controls-design.md` §1.3):
+Orientation (`ORIENTATIONS`, owner 2026-09-26):
 `"rear"` (the default from v35 on) draws the page as seen by someone facing the van's rear -- the
 van rotated 180 degrees in place (`_rot`: about the body's own centre, `x -> 2*cx - x`,
 `y -> body_top + body_bot - y`), "FRONT" below it, and each wheel's tile at the position nearest
@@ -45,7 +45,7 @@ GREEN, AMBER, RED, DIV = (0x2B, 0xB6, 0x73), (0xE6, 0xA0, 0x28), (0xBE, 0x1E, 0x
 ORANGE = (0xF1, 0x5A, 0x29)
 ACCENT = ORANGE
 
-# The controls (spec 2026-09-26-level-controls-design.md section 2): the stock AES stepper's look,
+# The controls: the stock AES stepper's look,
 # measured from its render (root 16): dark-red buttons, a navy-blue centre panel, white bars.
 MAROON, CENTRE = (0x7C, 0x15, 0x1D), (0x27, 0x28, 0x62)
 

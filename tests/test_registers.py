@@ -13,17 +13,16 @@ from tests.conftest import compiled_image
 from fireflymcf import g12_config, tankbroadcast
 
 REPO = Path(__file__).resolve().parent.parent
-# The shipped v9 (the reference coach's build log (not published) "Pump Link ... (v9) HARDWARE-VERIFIED"): golden-v22-anchor.ffproj.json
+# The shipped v9 (HARDWARE-VERIFIED 2026-08-31, `BUS-BASELINE.md` PC.45): golden-v22-anchor.ffproj.json
 # compiled against firefly-13.6/mcf.bin. The refactor must not move one byte of this.
 V9_SHA256 = "84531793b1e3427e62d891e06536e6459ad394701fe9a36a7449255c0f266167"
 # The FULL golden-v22-anchor.ffproj.json build minus `navslides` -- v13 plus the Water Pump section
 # wired in (Task 11) -- add_pump_auto_off ("pumpauto") run before swap_aes_electrical ("aesswap",
 # passed pump_section={"ref": "pumpauto"}), and pumplink's add_option_follower masked
 # (gate_mask=0xFF00, gate_on_value=0x0100) so its gate survives the widened 0xEE slot. This is
-# the op subset the reference coach's build log (not published)'s "Experimental v14" entry describes and the flashed image
-# `mcf-experiment-v14.bin` (sha256 `fa89c04b…`, see that entry's "what is actually on the coach"
-# note) was built from a commit on this lineage. BUT this test no longer reproduces those flashed
-# bytes: v16 Task 1 (commit 7b4fd92, 2026-09-04, "a zero minute byte pins to the floor and keeps
+# the v14 op subset, and the flashed image `mcf-experiment-v14.bin` (sha256 `fa89c04b…`) was built
+# from a commit on this lineage. BUT this test no longer reproduces those flashed bytes: v16 Task 1
+# (commit 7b4fd92, 2026-09-04, "a zero minute byte pins to the floor and keeps
 # the link flag -- v15 defect 2") rewrote the pump routine's minute-0 clamp, and Task 5
 # (`swap_aes_electrical`'s `link_indicator` param) changed what `aesswap` itself emits for this
 # op set too (both params are set in `builds/golden-v22-anchor.ffproj.json` unconditionally, so "minus
@@ -52,7 +51,7 @@ V14_SHA256 = "cd5f4875c99ade64be8b1d9ed0afb550308e73a466d8467dc162a76a3a425ece"
 # bar and 19 px above object 1409's gated region (y >= 382). A tier-2 display cell
 # (219 @ 0x20039f51), a 44-byte per-tick copy routine chained onto the hook ahead of
 # aeslowvolts/pumpauto/pumplink, and a two-record (directive + readout) object attached to HOME's
-# root (object 4). the reference coach's build log (not published) "Experimental v17". BUILT NOT FLASHED.
+# root (object 4). BUILT NOT FLASHED.
 V17_SHA256 = "b32913a492d6c4a694d1a5a00e69899a752e0676b25e71cf076ad562f9876d98"
 # v18: v17 plus the Absorb/Float rows made right for a 48 V coach (owner 2026-09-04):
 # `rows-permanent` (pin_switch_arm: object 17 record 11 pinned to arm 303 by the firmware's
@@ -60,8 +59,8 @@ V17_SHA256 = "b32913a492d6c4a694d1a5a00e69899a752e0676b25e71cf076ad562f9876d98"
 # (add_register_readout in its NEW `cell_slot` mode: feed the rows' own display cells 162/163
 # from 0x1FECC vars 206/207 with the panel's (raw+1)>>1 rounding, and silence FUN_00247BF8's
 # per-tick config-byte stores at 0x247C34/0x247C3A that would overwrite them). Two 40-byte
-# routines chained ahead of minutes-home; no object authored. the reference coach's build log (not published) "Experimental
-# v18". FLASHED AND VERIFIED 2026-09-05 (PC.60).
+# routines chained ahead of minutes-home; no object authored. FLASHED AND VERIFIED 2026-09-05
+# (PC.60).
 V18_SHA256 = "5340767d743aec333544d016d5dde31185e503e680b2a791d3d0d4866552294b"
 V18_NEW_OPS = ["rows-permanent", "absorb-rows", "float-rows"]
 # v19: v18 plus `shore-brkr-minus` (fix_variant_gate, mode "selector"): var 213's compare byte
@@ -85,7 +84,7 @@ V19_NEW_OPS = ["shore-brkr-minus"]
 # NOT pinned by a test, because the recipe no longer produces it: `cornermark.build_mark_record`
 # now declares a box (v20 drew one column of the glyph without one) and `aesswap.off_at_zero` is
 # gone (v20's swapped-in 'Off' ghosted over the number it replaced; the owner accepted the plain
-# `0`). Round-1 findings are in the reference coach's build log (not published) "Experimental v20".
+# `0`).
 V20_SHA256_SUPERSEDED = "b90c3e148f21e9ff3aaa33aa652bb0e738660b705ca02aa99a26a76aba98b48e"
 V20_SHA256 = "4b639367be48c06876e809231583b44f160b7ddfd3d35ecc887cb760598c77b8"
 V20_NEW_OPS = ["timer-glyph", "pump-timer-mark"]
@@ -183,8 +182,7 @@ def test_experiment_v14_is_byte_stable():
     same op subset today produces different bytes than the image that was actually flashed. It
     still pins that today's tools compile this subset deterministically. `pumpauto` is back in
     the unverified manifest at the time it was written, but v16 was itself flashed as part of
-    v17 and verified (the reference coach's build log (not published) "Experimental v16" -> "### v16 FLASHED AND VERIFIED
-    (as part of v17), 2026-09-04"): the clamp fix (item 8 of the checklist, "Only goes 5-60")
+    v17 and verified 2026-09-04: the clamp fix (item 8 of the checklist, "Only goes 5-60")
     and the Pump Link switch/Low Volts decoupling (items 5-7) both passed, so
     `add_pump_auto_off` and `swap_aes_electrical`'s per-instance flags are both back to
     `hardware_verified = True` and this op subset reports neither unverified. `minutes-home`
@@ -202,8 +200,8 @@ def test_experiment_v14_is_byte_stable():
     assert hashlib.sha256(image.data).hexdigest() == V14_SHA256, \
         "v14's op subset, compiled with today's tools, no longer matches -- update the sha and " \
         "this docstring if the change is intentional"
-    # the reference coach's build log (not published) "Experimental v16" -> "### v16 FLASHED AND VERIFIED (as part of v17),
-    # 2026-09-04": the clamp fix ran on the coach, so pumpauto is verified again.
+    # Flashed and verified 2026-09-04: the clamp fix ran on the coach, so pumpauto is verified
+    # again.
     assert "pumpauto" not in image.unverified
     assert "aesswap" not in image.unverified, \
         "the Water Pump section (and the v16 Pump Link switch) were seen on v17's coach run"
@@ -213,16 +211,15 @@ def test_experiment_v17_is_byte_stable():
     """v17's op subset -- the recipe WITHOUT v18's three ops -- compiled with today's tools.
     v17 = v16 (v15 + Task 1's minute-0 clamp fix + Task 5's `link_indicator` wiring on
     `aesswap`) plus `minutes-home` (the first on-screen register readout, Task 6 of the
-    register-readout plan). the reference coach's build log (not published) "Experimental v17". This is the image ON THE
+    register-readout plan). This is the image ON THE
     COACH, so its pin is kept exact even though the full recipe has moved on to v18.
 
     v14's op subset keeps its own oracle above, built from the recipe MINUS `navslides` and
-    `minutes-home`, because it is the entry the reference coach's build log (not published) describes and the one the
+    `minutes-home`, because it is the subset the
     verification checklist targets -- though, per that test's docstring, it no longer reproduces
     the flashed v14 bytes either, for reasons unrelated to this op.
 
-    v17 itself was FLASHED AND VERIFIED 2026-09-04 (the reference coach's build log (not published) "Experimental v17" ->
-    "### v17 FLASHED AND VERIFIED, 2026-09-04"; `docs/BUS-BASELINE.md` PC.59): all eleven
+    v17 itself was FLASHED AND VERIFIED 2026-09-04 (`docs/BUS-BASELINE.md` PC.59): all eleven
     checklist items passed, including the HOME readout matching the AES page's own minutes
     (items 1-4) and the dashes-then-value sentinel path predicted by `GUICODE.md` Finding 65
     (item 3). So none of this build's three previously-unverified ops report unverified any
@@ -235,10 +232,10 @@ def test_experiment_v17_is_byte_stable():
     image = compiled_image(json.dumps(doc), stock)
     assert hashlib.sha256(image.data).hexdigest() == V17_SHA256, \
         "v17's op subset is no longer byte-identical to the image on the coach"
-    # `show_nav_slides_icon` was coach-verified 2026-09-03 (the build log), so it must not report
+    # `show_nav_slides_icon` was coach-verified 2026-09-03, so it must not report
     # unverified -- this fails if the flag is ever flipped back without a reason.
     assert "navslides" not in image.unverified
-    # v17 FLASHED AND VERIFIED, 2026-09-04 (the reference coach's build log (not published), docs/BUS-BASELINE.md PC.59): the
+    # v17 FLASHED AND VERIFIED, 2026-09-04 (docs/BUS-BASELINE.md PC.59): the
     # clamp fix, the Pump Link switch and the first on-screen register readout (a tier-2 cell)
     # all ran on the coach, so none of these three report unverified any more.
     assert "pumpauto" not in image.unverified
@@ -250,8 +247,8 @@ def test_experiment_v17_is_byte_stable():
 def test_experiment_v18_is_byte_stable():
     """v18's op subset -- the recipe WITHOUT v19's op -- v17 plus `rows-permanent`, `absorb-rows` and `float-rows` -- the
     Absorb/Float rows on `INVERTER / CHARGER SETTINGS` made permanent and fed from `0x1FECC`
-    past the stock decode's 12-18 V fence (`BUS-BASELINE.md` PC.55). the reference coach's build log (not published)
-    "Experimental v18". FLASHED AND VERIFIED 2026-09-05 (`docs/BUS-BASELINE.md` PC.60): rows
+    past the stock decode's 12-18 V fence (`BUS-BASELINE.md` PC.55).
+    FLASHED AND VERIFIED 2026-09-05 (`docs/BUS-BASELINE.md` PC.60): rows
     present after the flash and after a power cycle, dashes with nothing publishing, 57.6/54.0 V
     from an injected frame -- so none of the three new ops report unverified."""
     stock = (REPO / "firefly-13.6" / "mcf.bin").read_bytes()
@@ -265,7 +262,7 @@ def test_experiment_v18_is_byte_stable():
 
 
 def test_experiment_v19_is_byte_stable():
-    """v18 plus `shore-brkr-minus`. the reference coach's build log (not published) "Experimental v19". `shore-brkr-minus` was the
+    """v18 plus `shore-brkr-minus`. `shore-brkr-minus` was the
     only unverified op here until 2026-09-07, when the coach showed the `Shore Brkr Size` `-`
     transmitting `19FED99F#FF96990FFBFFD2FF` (PC.62)."""
     stock = (REPO / "firefly-13.6" / "mcf.bin").read_bytes()
@@ -279,7 +276,7 @@ def test_experiment_v19_is_byte_stable():
 def test_experiment_v21_is_byte_stable():
     """The FULL recipe: v19 plus the Auto Off timer -- the mark on HOME (boxed, after v20's
     round-1 clipping) and the 0-disables floor, with v17's `minutes-home` count switched off.
-    the reference coach's build log (not published) "Experimental v21"; FLASHED AND VERIFIED 2026-09-06 (`BUS-BASELINE.md`
+    FLASHED AND VERIFIED 2026-09-06 (`BUS-BASELINE.md`
     PC.61). `shore-brkr-minus` is the only op still reporting unverified: `pump-timer-mark`
     became hardware-verified with this flash."""
     stock = (REPO / "firefly-13.6" / "mcf.bin").read_bytes()
@@ -291,7 +288,7 @@ def test_experiment_v21_is_byte_stable():
 
 
 def test_experiment_v22_is_byte_stable():
-    """The FULL recipe: v21 plus `no-tank-bcast`. the reference coach's build log (not published) "Experimental v22".
+    """The FULL recipe: v21 plus `no-tank-bcast`.
     FLASHED AND VERIFIED 2026-09-07 (PC.62): zero `19FFB7` on the bus, the raw-ADC and LPG
     broadcasts untouched, and an injected foreign sender driving HOME's FRESH gauge."""
     stock = (REPO / "firefly-13.6" / "mcf.bin").read_bytes()

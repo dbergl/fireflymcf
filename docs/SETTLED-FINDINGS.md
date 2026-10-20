@@ -534,7 +534,7 @@ gestures instead of 18 — was re-run end to end and still exports **the same by
 
 ## Moved out of `CLAUDE.md` on 2026-09-10 — the build-general interlock analysis and the cross-coach constant audit
 
-Verbatim, as part of the documentation cleanup (its design note (not published)). Dated statements below describe the state on the date they carry.
+Verbatim, as part of the documentation cleanup. Dated statements below describe the state on the date they carry.
 
 ### Where an OPTION's interlocks are enforced — the panel, not the G12
 

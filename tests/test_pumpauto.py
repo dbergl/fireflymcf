@@ -95,7 +95,7 @@ def test_clamp_rounds_onto_the_lowered_floor_when_it_is_zero():
 
 
 def test_clamp_pins_a_zero_minute_byte_to_the_floor_and_KEEPS_the_flag():
-    """v15 defect 2 (the build log). `-` at 5 sends -5, the G12 stores 0, and the clamp used to
+    """v15 defect 2. `-` at 5 sends -5, the G12 stores 0, and the clamp used to
     treat 0 as "never configured" and rewrite the DEFAULT with the link flag cleared. Zero IS a
     value the arrows produce; it pins to the floor like any other underflow, flag intact."""
     from fireflymcf import pumpauto
@@ -262,7 +262,7 @@ TYPE_ARMS = {
 #       caught it leaking into the pre-append image when this op landed at the end of the recipe.
 #
 # `aesswap` and `aeslowvolts` stay in: both predate the routine (v10, HARDWARE-VERIFIED) and
-# both are in v12. `invhold` likewise. See the reference coach's build log (not published) 'Experimental v12' / 'v13' / 'v14'.
+# both are in v12. `invhold` likewise.
 #   `no-tank-bcast` (suppress_tank_status) -- v22. Same story again, and the sha gate caught it
 #       the same way. It also RENAMED the build, which the op filter cannot undo, so `_v12`
 #       restores `build_name` as well: the name lands in the header at 0x24 and moves the header
@@ -290,7 +290,8 @@ POST_V12_PARAMS = {"pumplink": ("gate_mask", "gate_on_value"),
 # or `swap_aes_electrical.validate` raises BAD_PARAMS -- `link_indicator needs pump_section` --
 # on the pre-v12 reconstruction, which carries neither).
 
-# the reference coach's build log (not published) 'Experimental v12', and ASSERTED in `_v12()` alongside the allocation gate.
+# The sha256 the coach image v12 was recorded with is pinned below as `V12_SHA256`, and ASSERTED
+# in `_v12()` alongside the allocation gate.
 #
 # The allocation gate alone is not enough, because `POST_V12_OPS` is a BLOCKLIST and so fails
 # open: every op added to the recipe in future is silently *included* in this "pre-append"
@@ -384,7 +385,7 @@ def _v12():
         data = compiled_image(json.dumps(doc), STOCK.read_bytes()).data
         assert hashlib.sha256(data).hexdigest() == V12_SHA256, (
             "the reconstruction is no longer the coach image: it does not match v12's recorded "
-            f"sha256 {V12_SHA256} (the reference coach's build log (not published) 'Experimental v12'; got "
+            f"sha256 {V12_SHA256} (got "
             f"{hashlib.sha256(data).hexdigest()}, {len(data)} bytes). POST_V12_OPS is a "
             "blocklist, so the usual cause is a new recipe op that this filter does not know to "
             "drop and that therefore leaked into the pre-append image; the other cause is a "
@@ -398,7 +399,7 @@ def _v12():
 
 def test_pump_auto_scratch_allocation_is_safe_and_distinct():
     """THE GATE. Every byte of every scratch span must be in SRAM and unreferenced by
-    GuiCode -- the same discipline that excludes the the build log trap cell 203, which is
+    GuiCode -- the same discipline that excludes the trap cell 203, which is
     widget-spare but is live working memory for FUN_00247BF8, the very per-tick function
     this routine chains onto."""
     from fireflymcf import followchannel
@@ -755,7 +756,7 @@ def test_resolve_matches_the_allocation_task_8a_settled():
 
 
 def test_resolve_refuses_a_guicode_live_cell():
-    """The the build log trap: cell 203 (0x2003A2F8) is loaded by the very per-tick function
+    """The trap: cell 203 (0x2003A2F8) is loaded by the very per-tick function
     we hook, so 'widget-spare' is not enough -- the GuiCode-reference scan is."""
     plan = _plan()
     assert 0x2003A2F8 not in (plan.display_addr, plan.tick_anchor_addr,
@@ -959,9 +960,8 @@ def test_setting_zero_minutes_disarms_a_RUNNING_countdown():
     the user stepped down to 0 kept counting, and would have fired and switched the pump off
     after the feature was disabled.
 
-    The owner saw the mark stay lit across a page change with the setting at 0 (the reference coach's build log (not published)
-    "Experimental v20"), which is not a repaint artifact: leaving HOME and returning repaints, so
-    the countdown really was still live.
+    The owner saw the mark stay lit across a page change with the setting at 0, which is not a
+    repaint artifact: leaving HOME and returning repaints, so the countdown really was still live.
     """
     plan, blob, disasm = _sim_setup(0)
     out = _tick(plan, blob, disasm, word=0x0000, display=0, pump_on=True,
@@ -1054,7 +1054,7 @@ def test_the_sentinel_path_disarms_the_uninitialised_countdown():
     """The boot leg of the phantom-countdown mitigation, and the ONLY leg that runs.
 
     The countdown cell lives above `_ebss`, which the panel's C runtime never establishes
-    (the build log v14), so at power-on it holds garbage. The arm step's impossible-value guard
+    (`raminit.py`), so at power-on it holds garbage. The arm step's impossible-value guard
     only catches garbage ABOVE `MINUTES_MAX * 60`; a phantom in [1, 3601] is indistinguishable
     from a live countdown, and a coach that boots with the pump already running would count it
     down and emit an unsolicited channel-44 OFF frame. It cannot be left to "any tick with the

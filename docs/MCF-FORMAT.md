@@ -678,7 +678,7 @@ from a bare-constant scan — `movs r2,#2` is everywhere and proves nothing.*
 config upload from there rather than from the USB stick. If the `G12` section is among what it
 stores, then a panel can re-send it with **no stick present** — which would mean an owner could
 recover their own `G12` section with nothing but the boot menu and a CAN sniffer, and the standing
-"there is no backup" limit (`2026-09-08-g12-network-write-design.md` §8) would be softened.
+"there is no backup" limit would be softened.
 
 **What is NOT established:** whether the `G12` section is among the QUADSPI-stored images (the
 store certainly holds GuiData, 867.5 KB at `0x90000000`), what the two magics distinguish, and

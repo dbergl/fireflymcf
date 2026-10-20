@@ -1,4 +1,4 @@
-"""readout: on-screen register readouts (spec 2026-09-04-register-readout-design.md)."""
+"""readout: on-screen register readouts."""
 from __future__ import annotations
 
 import pytest

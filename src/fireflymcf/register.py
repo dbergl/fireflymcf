@@ -4,8 +4,7 @@ mechanism so it is no longer private to the follower.
 
 Slot addressing is INDEX-SPLIT (proven-from-code, FUN_0021C760 0x0021C9B0-0x0021C9C4; the
 PC.44 lesson): var index <= 0xFF lands at STATUS_SLOT_BASE + idx*2, index > 0xFF at
-STATUS_SLOT_BASE_HIGH + idx*2 -- two separate slot arrays 0x38 bytes apart. See
-its design note (not published).
+STATUS_SLOT_BASE_HIGH + idx*2 -- two separate slot arrays 0x38 bytes apart.
 """
 from __future__ import annotations
 

@@ -132,4 +132,3 @@ intact; relocations are gated), which is the reason to flash only tool-validated
 - `docs/COOKBOOK.md`: command lines for the common changes, and compiling a project.
 - `docs/RECIPE-OPS.md`: every change the engine can make, with its hardware status.
 - `docs/OBJECT-HIERARCHY.md`: how a control is composed, for adding or cloning one.
-- the reference coach's build log (not published): every build flashed to the reference coach and what each settled.

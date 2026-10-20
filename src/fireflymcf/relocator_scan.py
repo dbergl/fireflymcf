@@ -6,8 +6,7 @@ whose target is after the insertion point. That is only safe if *every* such poi
 known by position — a false positive corrupts data, a miss leaves a dangling pointer.
 This module classifies every aligned self-pointer as (a) an object-table entry,
 (b) inside a decoded record body, or (c) unclassified, and reports the counts. The
-unclassified/non-table total is the go/no-go number for the relocator scoped in
-its design note (not published).
+unclassified/non-table total is the go/no-go number for the relocator.
 
 Run:  python3 -m fireflymcf.relocator_scan [mcf.bin ...]
       (defaults to the three corpus builds)

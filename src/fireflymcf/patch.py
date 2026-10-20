@@ -335,7 +335,7 @@ def repad(field: str, old: str, new: str, length: int, align: str = "right") -> 
     leading spaces literally and left-aligns. Padding on the left therefore *moves* every
     renamed label by the difference in name length, which is a visible defect. Padding on
     the right leaves the label's start position identical, and trailing spaces on a
-    left-aligned string are invisible. `MCF-FORMAT.md` §6 and the design spec both record
+    left-aligned string are invisible. `MCF-FORMAT.md` §6 records
     the observation.
 
     A longer name still consumes the indent when it has to: `align="left"` is kept for that,
@@ -866,7 +866,7 @@ def diff_ranges(before: bytes, after: bytes) -> list[tuple[int, int]]:
 
 def verify(before: bytes, after: bytes, edits: list[Edit],
            changed_checksums: list[str]) -> list[str]:
-    """Run the ladder from the design spec. Returns one line per rung, or raises.
+    """Run the verification ladder. Returns one line per rung, or raises.
 
     L1 coverage passes (all 27 CRCs verify, 100% claimed, nothing unclaimed)
     L2 the reader sees the change

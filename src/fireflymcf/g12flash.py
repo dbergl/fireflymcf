@@ -3,7 +3,7 @@
 It listens on a CAN bus and reports what the G12 says about itself: which upload targets it
 carries -- its application, its config, its bootloader -- and each one's version, load address
 and identifiers. It cannot change the device. The write half of the protocol is not implemented
-here, on purpose (its design note (not published)).
+here, on purpose.
 
 WHY YOU MIGHT WANT THIS
 -----------------------

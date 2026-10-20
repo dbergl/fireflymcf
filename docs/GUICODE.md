@@ -1076,8 +1076,8 @@ variants (some colours are `base + imm`). This is the input to making chrome col
 
 ### RESOLVED, 2026-08-15 — `theme.mode7_palette` extracts it; open thread 1 closes
 
-The correction above was implemented and merged (`6dcdabe` extractor, `1714f9b` render wiring; SDD
-working notes, not published). **`src/fireflymcf/theme.py`** exposes
+The correction above was implemented and merged (`6dcdabe` extractor, `1714f9b` render wiring).
+**`src/fireflymcf/theme.py`** exposes
 
 ```python
 mode7_palette(data: bytes) -> dict[int, tuple[int, int, int]]      # {mode-7 index: (R, G, B)}
@@ -2573,8 +2573,7 @@ undrawn rather than shown a wrong shared number.
 
 ## Finding 32 — the widget→status-slot join is not a decodable record field (negative)
 
-`proven-from-code`, 2026-08-16 (status-slot join dig, Tasks 2–3; `build/status-join-notes.md`,
-working notes, not published). Advances
+`proven-from-code`, 2026-08-16 (status-slot join dig, Tasks 2–3). Advances
 `MCF-FORMAT.md` §5.4a open thread 2: how does a GUI object's on/off indicator get the receive-filter
 status-slot index (= variable index) it displays? Two functions were read in full to answer it —
 **answer: it does not come from any per-object GuiData field.**
@@ -2657,8 +2656,8 @@ backed by a direct read, because that function has not been read). The exit, if 
 reading `FUN_00247BF8`.
 
 **Consequence for the new-HOME-output-button feature.** A live on/off indicator on a freely
-cloned/inserted button is **not byte-deliverable** from the record alone
-(its design note (not published) Phase 1). The predictor
+cloned/inserted button is **not byte-deliverable** from the record alone.
+The predictor
 `src/fireflymcf/statusjoin.py::predicted_status_slot` correctly stays `NotImplementedError`, and
 `tests/test_status_join.py::test_predictor_reproduces_every_known_pairing` stays
 `xfail(strict=True)` — a defensible negative, not a fitted guess.
@@ -2715,8 +2714,7 @@ panel-sourced `19FEDB9F#2C…` frame, the pump follows, and a light-off cold boo
 detour, the appended routine, and the grown-GuiCode flash all work on hardware. The routine reads the
 watched channel's state the firmware's own way: the receive-filter slot (`0x20007FC8+var*2`, §5.4c),
 the `0xFFFF` "no data" sentinel as off, and the 3-bit operating-status field (`ubfx #2,#3`; on iff
-field == 1) exactly as ch25's own indicator block at `0x248afc` decodes it. Full seven-round arc:
-the reference coach's build log (not published).
+field == 1) exactly as ch25's own indicator block at `0x248afc` decodes it.
 
 The edge latch is SRAM **`0x20039F68`** — spare `+0x44BC8` colour cell **211**. The obvious first
 spare, cell 203 / **`0x2003A2F8`**, is *widget*-spare but **firmware-live**: `FUN_00247BF8` loads it
@@ -2805,8 +2803,8 @@ pointer table, so its **value/bool** is reachable from a GuiData `value_slot` fi
 (`cell(144)`) *is* indexed. So:
 
 - A live instance-17 **value/bool** is byte-deliverable from GuiData alone: point a cloned or
-  inserted widget's `value_slot` at 69, a relocator-writable record field
-  (its design note (not published)). This partially overturns
+  inserted widget's `value_slot` at 69, a relocator-writable record field.
+  This partially overturns
   Finding 32's blanket "not byte-deliverable" — for a bridged instance's raw value/bool, it now
   is.
 - A live **coloured** on/off indicator (Water-Pump-style) for instance 17 is **not** a simple
@@ -4355,7 +4353,7 @@ wins — the same hazard v5 pinned for `1FFC7`/`1FEA3`/`1FF99`.
 > instance=1)` — one byte at `+4`, `ff` → `01`, shipped as recipe op `pin125` (built as
 > `mcf-experiment-v13.bin`, not yet flashed). `1FFCA` (vars 116/117) is open on the same page and
 > stays unpinned: uncontended today, and a pin with no observation behind it is a guess.
-> *Update: `pin125` shipped in v17, flashed 2026-09-04, and every image since (the reference coach's build log (not published)).*
+> *Update: `pin125` shipped in v17, flashed 2026-09-04, and every image since.*
 
 ### Two more controls behind a switch: `Absorb` and `Float`
 
@@ -5781,7 +5779,7 @@ under the same divider. The photo and the byte-derived render agree.
 **What this rules out.** The rows are not gated on `Battery Type`, and not on the panel adopting an
 inverter: `BUS-BASELINE.md` **PC.53** shows adoption firing on `1FFD4` alone with the rows staying
 away. Nor is `1FFC6` filter pinning involved — that is `Battery Type`'s feed (PC.46), a different
-readout, and in any case the pinning ships in **v13**, which the reference coach's build log (not published) records as built and
+readout, and in any case the pinning ships in **v13**, which was built and
 not flashed.
 
 ### Two residuals, both bounded

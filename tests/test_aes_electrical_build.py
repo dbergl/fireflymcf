@@ -55,7 +55,7 @@ def test_ags_electrical_renders_pixel_identical():
 
 
 def test_swap_is_flagged_hardware_verified():
-    """`swap_aes_electrical` was flashed and confirmed on the coach 2026-09-01 (the reference coach's build log (not published)),
+    """`swap_aes_electrical` was flashed and confirmed on the coach 2026-09-01,
     so it must NOT be reported as unverified -- that flag is what the Studio UI surfaces."""
     _, res = _build()
     assert "aesswap" not in res.unverified

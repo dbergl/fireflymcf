@@ -140,7 +140,7 @@ def test_bridge_addresses_match_the_stock_cell45_block():
 # --- Step 3 (full build): both ops coach-verified 2026-09-01, golden AGS net still green ----
 
 def test_full_build_compiles_with_both_ops_verified():
-    """Both ops were flashed and confirmed on the coach 2026-09-01 (the reference coach's build log (not published)), so the
+    """Both ops were flashed and confirmed on the coach 2026-09-01, so the
     compile must NOT list them as unverified -- the flag is what the Studio UI surfaces."""
     _stock_bytes, res = _build()
     assert res.ok, res.errors

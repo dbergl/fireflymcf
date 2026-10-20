@@ -1,7 +1,5 @@
 """The MCF writer: same-size edits, resealing, and the verification ladder.
 
-Design: its design note (not published)
-
 These tests are written to fail if the writer stops guaranteeing what it claims, not merely
 to exercise it. The invariant tests (I1-I3) are as load-bearing as the happy path -- a
 patcher whose refusals stop working is more dangerous than one that does nothing, because

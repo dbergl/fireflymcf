@@ -3,8 +3,7 @@
 
 `tablegrow` relocates both when a recipe grows them (`readout.allocate_fresh_cells`), leaving the
 stock copy in place but unread. Every reader and writer resolves through here; a fixed
-`gs + CELL_TABLE_OFF` indexes the dead copy (2026-09-25, the LEVEL page's design note §8; guarded by
-tests/test_celltables.py).
+`gs + CELL_TABLE_OFF` indexes the dead copy (2026-09-25; guarded by tests/test_celltables.py).
 """
 from __future__ import annotations
 

@@ -1,6 +1,5 @@
 """The live display-cell/type tables, stock or relocated, and a guard that no module indexes the
-fixed stock offset directly (the 2026-09-25 dead-copy defect, spec
-its design note (not published))."""
+fixed stock offset directly (the 2026-09-25 dead-copy defect)."""
 import ast
 import json
 import re

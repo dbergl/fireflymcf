@@ -1,6 +1,6 @@
 """The recipe engine: a PROJECT is an ordered list of typed ops applied to stock 13.6.
 
-Design: its design note (not published). Every op wraps an
+Every op wraps an
 existing hardware-proven primitive; this module holds no byte-format knowledge of its
 own. `compile_project` is pure and deterministic: same project, byte-identical binary.
 """

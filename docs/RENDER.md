@@ -79,7 +79,7 @@ comparable in size to the decoder dig; it also improves render.py's text sizing.
 ### Render fidelity (approach A) — 2026-08-15 (merged to master)
 
 The decode-derived renderer was extended so a render can preview a patch before flashing —
-all byte-derived, no fitting (SDD: working notes, not published):
+all byte-derived, no fitting:
 - **Per-record-type geometry** is byte-faithful against the full `FUN_00257BFC` frame switch,
   now transcribed as `GUICODE.md` **Finding 21** (`layout._update_frame`).
 - **Horizontal alignment** (align byte `header[3]>>6`: 0/2/3) is applied to a label's own drawn
@@ -100,8 +100,8 @@ only Climate had an oracle, so it validated against Climate — which does **not
 tank-bars, value+unit widgets, or button boxes. Checking `render-screen-home` against `HOME.jpg`
 exposes a punch-list (below).
 
-**Home render fidelity — items 2-4 RESOLVED, 2026-08-15 (merged, SDD
-working notes, not published, oracle `HOME.jpg`):**
+**Home render fidelity — items 2-4 RESOLVED, 2026-08-15 (merged,
+oracle `HOME.jpg`):**
 - **Gauge wells** now draw a byte-derived **outline** (new `Prim.outline`) + the adjacent
   record's **mode-3 decoded level fill**, paired by same-object `obj_index` (a flat-adjacency
   mis-pairing was caught in review).
@@ -113,8 +113,8 @@ working notes, not published, oracle `HOME.jpg`):**
   *(Their **fill** was a labelled heuristic at this date. Superseded twice since — see residual 4
   and the `color_src` note below. Do not read this bullet as the current fill policy.)*
 
-**Proportional-glyph decode — RESOLVED, 2026-08-15 (`GUICODE.md` Finding 22, merged, SDD
-working notes, not published).** Never corruption: the glyph bitmap is 4bpp/1bpp
+**Proportional-glyph decode — RESOLVED, 2026-08-15 (`GUICODE.md` Finding 22, merged).**
+Never corruption: the glyph bitmap is 4bpp/1bpp
 pixel rows under a **per-row vertical-repeat RLE** (blitter `FUN_002510C0`) — a bitstream at glyph
 `+0xe` repeats each stored row `n`× vertically, so the old flat decoder undercounted rows on
 vertically-uniform strokes. `glyphs.decode_glyph` now transcribes it byte-exact (bpp from the
@@ -241,8 +241,8 @@ cuts it.
 
 **Clip — `render._text_clip`, horizontal only.** The drawer installs `box ∩ enclosing clip` before
 drawing and restores it after, and the rectangle is **inclusive** — which is why a record whose box
-collapsed to `x0 == x1` draws exactly one pixel column (v20's corner mark; the reference coach's build log (not published)
-"Experimental v20"). This is specific to wtype 11/13: a **wtype-0** single character is drawn by
+collapsed to `x0 == x1` draws exactly one pixel column (v20's corner mark).
+This is specific to wtype 11/13: a **wtype-0** single character is drawn by
 `FUN_002557C0` and is not bounded, which is why HOME's `V` and CLIMATE's `°` render in full from
 0×0 boxes.
 
@@ -403,7 +403,7 @@ either draws or is on a named do-not-draw list turns the next one into a test fa
 
 ## Moved out of `CLAUDE.md` on 2026-09-10 — the rendering section (Findings 71/72, tank level)
 
-Verbatim, as part of the documentation cleanup (its design note (not published)). Dated statements below describe the state on the date they carry.
+Verbatim, as part of the documentation cleanup. Dated statements below describe the state on the date they carry.
 
 ### Rendering — two compositors, and what the render will not guess
 

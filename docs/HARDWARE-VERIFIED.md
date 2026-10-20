@@ -12,8 +12,8 @@ believable and what stops them being re-derived.
 **Renaming / rendering** (`MCF-FORMAT.md` §6): the renderer reproduces leading spaces
 literally and left-aligns, so padding goes on the **right** — *for a left-aligned label*. A
 record whose R49 h-align byte is **2 centres each line by its PADDED width**, so trailing pad
-shifts the text and `patch.repad(align="center")` is the correct mode there (see the reference build v3 entry
-in the reference coach's build log (not published); owner-observed 2026-08-21). A same-size rename **cannot add
+shifts the text and `patch.repad(align="center")` is the correct mode there (owner-observed
+2026-08-21). A same-size rename **cannot add
 a character** — `'Star\nLink'` (9) will not fit an 8-byte field; `'Bath Fan'` wrapped on its
 *space*. An icon is a character; `'['` on a font that lacks it draws the fallback glyph.
 **A *longer* label is now possible via the relocator** — hardware-confirmed 2026-08-18,
@@ -60,7 +60,7 @@ things had to be right, each found by a hardware round-trip:
 
 **Binding any pin to any button — `src/fireflymcf/statusbind.py`, CONFIRMED ON HARDWARE
 2026-08-18** (`MCF-FORMAT.md` §5.4c, `tests/test_statusbind.py`, `BUS-BASELINE.md` PC.18). The
-`set_state_colour` off-colour repoint (build v9) works on the coach: the pin-15 button is now
+`set_state_colour` off-colour repoint works on the coach: the pin-15 button is now
 visible when off. The status chain is proven end to end and `var` is **one number**
 throughout — receive-filter entry index == slot index == GuiCode's `2*var` immediate (checked on
 all 136 bridge blocks). Three joints are same-size edits, all exposed with premise assertions:
@@ -122,26 +122,26 @@ just never arrives. 13.6 registers 66 from this table, so headroom is ~15–17 (
 registration call sites are uncounted). `retarget_filter` refuses to cross it rather than
 letting a build ship a dead subscription.
 
-**A LIVE INDICATOR on an APPENDED subscription — recipe op `add_aes_batt_heat_status`, CONFIRMED
-ON HARDWARE 2026-09-22.** The "Batt Heat" button shows BMS status DGN `0x18FF7070`: the body
-tracks the **battery heater** (byte 2 bit 0) and a **red wavy-lines glyph** (font slot 23 char
-`'2'`) appears in the top-right while the battery's internal **heater contactor** is closed (byte 1
-bit 2). Build v31; all four combinations were driven from the bus host with `18FF70C0#…` at 5 Hz and all
+**A LIVE INDICATOR on an APPENDED subscription — recipe op `add_aes_batt_heat_status`, CONFIRMED ON
+HARDWARE 2026-09-22.** The "Batt Heat" button shows BMS status DGN `0x18FF7070`: the body tracks the
+**battery heater** (byte 2 bit 0) and a **red wavy-lines glyph** (font slot 23 char `'2'`) appears
+in the top-right while the battery's internal **heater contactor** is closed (byte 1 bit 2). On the
+first build, all four combinations were driven from the bus host with `18FF70C0#…` at 5 Hz and all
 four appeared on the panel, the two indicators independent of each other.
 
-*What this does and does not establish.* The RECEIVE half is proven end to end. The DRAWING half
-of v31 was **wrong in a way this test could not show**, because a held state looks correct however
-it was painted: the owner found that *transitions* were broken. Enabling the heater wiped the
-'Batt Heat' caption and nothing redrew it, and disabling the contactor left the red glyph on the
+*What this does and does not establish.* The RECEIVE half is proven end to end. The DRAWING half of
+that build was **wrong in a way this test could not show**, because a held state looks correct
+however it was painted: the owner found that *transitions* were broken. Enabling the heater wiped
+the 'Batt Heat' caption and nothing redrew it, and disabling the contactor left the red glyph on the
 glass — each until the page was navigated away and back. The cause is that the panel repaints only
-the **arm a switch selects**, and v31 drew the button with TWO switches, so each left whatever the
-other owned untouched: the body arm painted over the sibling caption, and the glyph switch's "off"
-arm drew nothing at all. v32 folds both bits into ONE cell (`bitcombine`) and drives ONE four-arm
-switch whose every arm repaints the whole button — opaque capsule, then caption, then the glyph if
-that state has one — so no state can leave another's pixels. **Test a state indicator by
-TRANSITIONING it, not by holding each state.**
+the **arm a switch selects**, and that build drew the button with TWO switches, so each left
+whatever the other owned untouched: the body arm painted over the sibling caption, and the glyph
+switch's "off" arm drew nothing at all. The fix folds both bits into ONE cell (`bitcombine`) and
+drives ONE four-arm switch whose every arm repaints the whole button — opaque capsule, then caption,
+then the glyph if that state has one — so no state can leave another's pixels. **Test a state
+indicator by TRANSITIONING it, not by holding each state.**
 
-*v32 CONFIRMED ON HARDWARE 2026-09-22.* Flashed `mcf-13.6-BattHeatStatus-v32.bin`, then drove six
+*The fix CONFIRMED ON HARDWARE 2026-09-22.* Flashed, then drove six
 held-15-s states from the bus host (`18FF70C0#70 <b1> <b2> 41 00 00 A5 00` at 10 Hz, over the real BMS's
 2-s off frame) so that every edge was crossed: off -> heater on -> heater + contactor -> contactor
 opens -> heater off -> contactor only -> released. The owner confirmed on the panel: blue/cyan body
@@ -149,15 +149,15 @@ tracks the heater, the caption survives the enable, the glyph appears with the c
 clears when it opens, all without leaving the page. `add_aes_batt_heat_status` is
 `hardware_verified` again.
 
-*The chain the v31 flash does prove, which two earlier builds got wrong.* Appended entry ->
+*The chain the first flash does prove, which two earlier builds got wrong.* Appended entry ->
 receive slot -> **per-tick GuiCode routine** -> a fresh private display cell
-(`readout.allocate_fresh_cells`) -> the cell-table index a wtype-6 switch names as its
-`value_slot`. v28 and v29 pointed the switch straight at the *variable* index, which indexes the
-**cell** table instead — so they read an unrelated constant cell and would never have moved.
-Renders could not catch it (the renderer injects by `value_slot`, i.e. at the broken joint);
+(`readout.allocate_fresh_cells`) -> the cell-table index a wtype-6 switch names as its `value_slot`.
+Two earlier builds pointed the switch straight at the *variable* index, which indexes the **cell**
+table instead — so they read an unrelated constant cell and would never have moved. Renders could
+not catch it (the renderer injects by `value_slot`, i.e. at the broken joint);
 `tests/test_batt_heat_status.py`'s `test_switch_watches_a_cell_fed_from_both_variables` now does,
-pairing routine to variables through the literal pool, and
-`test_every_arm_redraws_the_whole_button` refuses the v31 repaint shape.
+pairing routine to variables through the literal pool, and `test_every_arm_redraws_the_whole_button`
+refuses the two-switch repaint shape.
 
 *Also confirmed: the receive filter really is source-address blind on the bus, not just in the
 decompiler.* The frames were sent from SA `0xC0`, never from the BMS's own `0x70`, and the panel
@@ -166,7 +166,7 @@ reason this test needed no impersonation of the BMS.
 
 **APPENDING a NEW receive entry — `appendfilter.append_filters` / recipe op `append_filter`,
 CONFIRMED ON HARDWARE 2026-09-22.** The table can be *grown*, not merely retargeted, so a new
-subscription costs no existing one. Probe build "v30 Probe New DGN" (v27 + two ops) appended a
+subscription costs no existing one. A probe build appended a
 299th entry for **`0x1FEA0` GPS_DATE_TIME_STATUS**, mode 1 of `payload[0]` — var 298, slot
 `0x20008254` — and showed it on HOME through `add_register_readout`. The panel **booted normally**,
 read **255** with nothing publishing, then followed injected `19FEA0C0#2A…` → **42** and
@@ -199,8 +199,7 @@ fixed by hard-coded addresses. So a new DGN can **re-source an existing indicato
 what this probe did) but cannot add a new readout without inserting GuiCode. Also untested:
 growing the table (tier 2), and the transmit side — 5 all-`FF` binding stubs sit in single-entry
 groups 5/9/15/16/61 and look like the same-size route to sending a new DGN, but none has been
-flashed. Feasibility survey: the 2026-08-22 artifact, `builds/from_stock.py` step 11 (behind
-`FIREFLY_PROBE=filter-dgn`, off by default so the shipped reference image is unchanged).
+flashed.
 
 *It also retroactively rescued the GPS negative.* The three 2026-08-21 injection runs concluded
 "the G12 ignores `1FEA0`", with two caveats left open: the payload layout was inferred, and there
@@ -246,7 +245,7 @@ manual holds with no repeat burst.
   mask and `repeat_held_ms = 0` work on a binding that is not a DC_DIMMER_COMMAND_2 at all.
 
 *The cost, and it is the second observable:* pin 29 stops switching. `set_binding_dgn` therefore
-gates on `allow_capability_change` exactly as `patch.set_channel` does — v11 and v18 both shipped
+gates on `allow_capability_change` exactly as `patch.set_channel` does — two builds shipped
 having silently lost a real control this way, and the build's capability gate caught this edit
 too (narrowed to expect only `(28,5)`, with the reason stated, rather than disabled).
 
@@ -257,21 +256,17 @@ referenced, but by a full-screen 800×480 touch target and a light grid. They ar
 allocator pool either (`unused_command_groups` returns 164/169/229). The confirmed route is
 repointing an existing control's binding.
 
-Both probes live in `builds/from_stock.py` (steps 12 and 13) behind `FIREFLY_PROBE=filter-dgn` /
-`tx-dgn`, **off by default** so the shipped reference image stays byte-identical — 1,069,668 B, sha
-`3b30bb31…` at v5 (`4ad8a4e4…` was v4, before the charger filter pins).
-
 **Hold-to-toggle — CONFIRMED ON HARDWARE 2026-08-19.** `gestures.make_hold_to_toggle` turns a
 single-entry command-5 group into "hold N seconds to switch, either way" in **three same-size
 bytes** (group `+0x00` hold nibble, binding `+0x03` phase mask -> `PHASE_HELD`, group `+0x02`
-held-repeat -> 0). Applied to the pin-29 Starlink button by `builds/from_stock.py` step 9 and
+held-repeat -> 0). Applied to the pin-29 Starlink button and
 verified on the coach: 3 s on, 3 s off, a tap does nothing, holding past the threshold does not
 re-toggle, and pin 15 (left a latch in the same build) still switches on a tap. There was **no
 shipped precedent** — no group in any corpus build sends a DC_DIMMER command on the held phase —
 so this was mechanism-derived until the round-trip settled it.
 
-**Two pins now, and that is what makes it general — CONFIRMED ON HARDWARE 2026-08-21** (reference build
-v4). One confirmed instance of a composition with no shipped precedent leaves
+**Two pins now, and that is what makes it general — CONFIRMED ON HARDWARE 2026-08-21**.
+One confirmed instance of a composition with no shipped precedent leaves
 open whether it worked for a reason particular to that button. It did not: the same three bytes
 on **pin 28**, a different group, on a button built by a different route (`add_button` rather
 than `wire_button` on a cloned shell), behave identically — and they do so while pin 28's stock
@@ -345,15 +340,13 @@ a different mechanism: **mode-7 cells written by GuiCode's theme-init** — RESO
 see open thread 1 and `theme.mode7_palette` (`GUICODE.md` Finding 18).
 
 **Compact AES Electrical page — DONE, flashed and confirmed 2026-09-01**
-(ops `swap_aes_electrical` + `add_aes_low_volts_trigger`, once carried as the standalone
-`builds/aes-compact.ffproj.json` and now exercised inline by `tests/test_aes_electrical_build.py`
-and `tests/test_aes_trigger.py`; full narrative in the reference coach's build log (not published), "The compact AES Electrical
-page"). In AES mode the Electrical
+(ops `swap_aes_electrical` + `add_aes_low_volts_trigger`, exercised by
+`tests/test_aes_electrical_build.py` and `tests/test_aes_trigger.py`). In AES mode the Electrical
 page now shows a **compact frame mirroring the AGS compact layout** (built by rebuilding object
 829 in place with the new reusable `relocate.replace_object_records` primitive, then cloning the
 AGS frame's children with their donor geometry preserved), and the AES **Low Volts** indicator is
-made **live where stock firmware freezes it in AES**. Five things each needed a hardware round-trip
-(see the build log for the round-by-round): the freeze is defeated by an **un-gated appended bridge**
+made **live where stock firmware freezes it in AES**. Five things each needed a hardware round-trip:
+the freeze is defeated by an **un-gated appended bridge**
 (hook `0x0024EE3C` → routine `0x00259BB4`) that faithfully replicates the stock `0x2F` paint block
 — reading the un-frozen receive slot `0x2000801C` and calling the firmware's own `setVariant` via
 fn-pointer `[0x20039908]` (not a byte-poke) to refresh the group-129 variant counter, so the
@@ -369,7 +362,7 @@ live House/Chassis voltages (House read the coach's real 48 V), working gear-tap
 Volts, the AES Engine control, and the Notice-first enable flow.
 
 **A second battery, driven by fresh grown cells — the first tier-3 op on hardware** (`coach48v`,
-`add_voltage_battery`; v25, verified 2026-09-12): the coach 48 V "House" pack now sits beside HOME's
+`add_voltage_battery`; verified 2026-09-12): the coach 48 V "House" pack now sits beside HOME's
 stock chassis 12 V battery. It clones donor 443, GROWS two new `+0x44BC8` cell-table indices
 (665/666) for its colour and gauge level — unprecedented on hardware until this flash — and drives
 them from a per-tick GuiCode routine (green→red at 50.4 V, fill 48.0–54.8 V) sourced from
@@ -395,10 +388,9 @@ referenced from the owner work items, now in `docs/CLOSED-THREADS.md`.
 publishes the coach's inverter/charger onto RV-C, which makes **two chargers**. The alternator DC
 charger (SA `0x80`, charger instance `0x31`) owns `1FFC7`, `1FEA3` and `1FF99`, all three watched
 by open entries (vars 115/260/261) — so the ALTERNATOR SYSTEM page would start showing whichever
-charger transmitted last. reference build v5 pins those three (3 bytes + checksum, image
-still 1,069,668 B, sha `3b30bb31…`). **Not yet confirmed:** with one charger transmitting the
-correct outcome is *no visible change*, which only proves the compare byte is right; the
-discrimination is unexercised until the bridge is live.
+charger transmitted last. Pinning those three costs 3 bytes + checksum. **Not yet confirmed:** with
+one charger transmitting the correct outcome is *no visible change*, which only proves the compare
+byte is right; the discrimination is unexercised until the bridge is live.
 
 Two things worth carrying for that build-out, both from the file and the captures:
 - **The bridge's display route exists, and six fields of it are now CONFIRMED ON HARDWARE
@@ -484,7 +476,7 @@ Two things worth carrying for that build-out, both from the file and the capture
 
 ## Moved out of `CLAUDE.md` on 2026-09-10 — the capability table as of 2026-09-10, the hook chain, and the constraints
 
-Verbatim, as part of the documentation cleanup (its design note (not published)). Dated statements below describe the state on the date they carry.
+Verbatim, as part of the documentation cleanup. Dated statements below describe the state on the date they carry.
 
 ### Hardware-verified capabilities — what can be done, and what it costs
 
@@ -500,26 +492,26 @@ below is the table and the constraints that bite.
 | bind any watched pin to any button's indicator | `statusbind.bind_pin` | PC.18 |
 | give a control a tap / hold / ramp / momentary gesture | `gestures.py`, `cli gestures` | `proven-from-code` + two pins |
 | hold-to-toggle (3 s each way) | `gestures.make_hold_to_toggle` | pins 29 **and** 28 |
-| put a tap and a hold on one control | `holdregion.split_hold_region` (two regions) | PC.22, v7/v8 |
+| put a tap and a hold on one control | `holdregion.split_hold_region` (two regions) | PC.22 |
 | subscribe the panel to a DGN it has never seen | `statusbind.retarget_filter` — **4 bytes** | 2026-08-22 |
 | narrow an open receive filter to one instance | `statusbind.pin_filter_instance` — **1 byte** | `proven-from-code` |
 | transmit a DGN the firmware knows nothing about | `newbutton.set_binding_dgn` — **1 byte** | 2026-08-23 |
 | change what a G12 rule broadcasts | `g12rules.py` — a **G12-only** build, the lowest-risk shape here | not yet flashed |
 | **grow the GuiCode section** (append authored ARM Thumb + a literal pool, then detour a single-caller `bl` into it) | `growsection.grow_section` + the `follow_channel` recipe op (`followchannel.resolve`/`build`/`detour_edit`) | **HARDWARE-VERIFIED 2026-08-31** — the coach flashed and ran a grown-GuiCode image (the light→pump follower), so the flasher accepting a grown *GuiCode* section is now proven, not the open question it was. This is the project's first authored-machine-code output that runs on the coach |
-| **add a genuinely NEW OPTIONS row** (not a repurposed one): a cloned wtype-6 checkbox on a chosen config selector + the follower re-gated to read that selector's status slot | `add_option_follower` recipe op (`optionrow.build_config_toggle`/`append_row` + `followchannel`) | **HARDWARE-VERIFIED 2026-08-31** (`BUS-BASELINE.md` PC.45, `mcf-experiment-v9.bin`) — "Pump Link" on selector `0xEE`: checkbox fills on tap, drives the pump, persists across reboot, Heat Pump left stock. First *new option* on the coach |
-| **create a new panel "register" from a bus value** (a var-table receive-filter entry) | `guidata.variable_table` + read at `followchannel.status_slot_addr` | mechanism proven; its design note (not published). **The slot base is index-split**: var idx ≤ 255 → `0x20007FC8 + idx*2`, idx > 255 → `0x20008000 + idx*2` (`FUN_0021C760` `0x0021C9B0`-`0x0021C9C4`). The flat `base + idx*2` is a **trap** for idx > 255 — it caused the PC.44 v8 failure. Our own routine reading the slot sidesteps the 46-bridge-block paint limit |
-| **expose a var-table entry's slot address as a handle** (reuse an existing subscription) | `register.resolve_register` recipe op | **tooling-verified**; reuse-existing only. Consumes a named DGN subscribed in the variable table, names its slot address, and exposes it as a `{"ref"}` handle any later op can consume. See its design note (not published) and plan. Appending a brand-new var-table entry is future work (hardware-unverified) |
-| **watch any register for edges and drive a channel with gate conditions** (no on-screen display) | `register.follow_register` recipe op | shares the **hardware-verified v9 follower routine** with `follow_channel` and `add_option_follower`. Watches ANY register (by slot address) for an edge, drives a channel, gated by ANY register condition(s). See its design note (not published) and plan. **Coach check warranted the first time a genuinely NEW watch register is used** (a register not previously watched by the shipping follower instances). The on-screen-readout path remains future work (hardware-unverified) |
-| **replace an existing GuiData object's record stream in place** (shrink or grow, at its own index) | `relocate.replace_object_records` | **tooling-verified, reusable beyond this feature — and now the foundation of two coach-verified ops (below).** Overwrites an object's `count`+records at its own table index (so a switch that selects it by contiguous band stays valid), computes the signed `delta`, runs `relocate._apply_downstream_shift`, reseals, and re-runs all five relocate gates. This is what makes an in-place rebuild of a *direct-content* switch candidate possible — `relocate.relocate` alone is insert-only. See its design note (not published) and its design note (not published) (Task 1) |
-| **replace the AES Electrical page with a compact frame, reusing the stock all-in-one layout as a settings sub-page** | `aescompact.py` (`swap_electrical_to_compact`/`build_settings_screen`/`wire_settings_nav`) + `swap_aes_electrical` recipe op (`aesswap`) | **HARDWARE-VERIFIED, firefly-13.6, 2026-09-01** (5 flash/verify rounds — the reference coach's build log (not published)). Object 829 (the AES-mode Electrical body) is rebuilt as a **faithful structural mirror of the AGS compact frame (object 830)** using **preserved container wrappers** — donor geometry composes correctly because it stays flow-relative inside its own container, rather than being flattened/absolutised — carrying: House/Chassis voltage gauges (objects 443/440), the compact cluster (a clone of object 315), and the Inverter block (object 1421, gated on slot 113); Solar is omitted. AGS path **byte-golden by construction** — only object 829 (via `replace_object_records`) and the stranded screen-31 root are touched; no AGS object is created, modified or renumbered. AES-specific retargets inside the cluster clone: the settings **⚙** gear navigates by **TAP through the ACTION dispatcher** — a guarded, same-size 2-byte GuiCode edit at runtime `0x0024B96A` (file `0x1B1EA`: `movs r3,#0xe`→`#0x1c`, screen 14→28) repurposing the orphaned action leaf `0x7DE`, with the touch region stamped `0x7DE` and left at donor-relative geometry so it stays aligned with the visible capsule; the engine control is the **real AES Engine control, object 353** (touch groups 13/14, status `value_slot` 169 → band 526–529, Start/Stop indicators 167/168 → shared objects 249/251) — **not** the AGS GEN control (352) — plus an invisible flow-gated spacer (an empty wtype-11 label; wtype-9 is flow-exempt and can't substitute) restoring 352's vertical rhythm since 353 carries no gen-hours line; the enable pill's touch id is `0x7E2` (the AES enable ACTION, which routes through the "Notice:" page and then the 3-second-hold Warning) instead of AGS group 128 (`0x0080`, which skips the Notice). The all-in-one AES content is cloned out first and rebuilt into the stranded screen-28 root (object 31) as the settings sub-page. its design note (not published), its design note (not published)–3.2 |
-| **chain several authored per-tick routines on the one GuiCode hook** (any mix of `add_option_follower` / `follow_channel` / `follow_register` / `add_aes_low_volts_trigger` in one recipe) | `followchannel.hook_state` / `chain_from_hook`; no new op — the growing ops chain by themselves | **HARDWARE-VERIFIED 2026-09-01**, `build/mcf-experiment-v10.bin`: follower + Low Volts bridge both work through hook → bridge → follower → `FUN_00247BF8` |
-| **send the Inverter capsule's gear to `INVERTER / CHARGER SETTINGS`** instead of the read-only `PD Inverter` readout | `retarget_inverter_gear` op (`aescompact.retarget_inverter_gear`) — one guarded 2-byte GuiCode edit | **HARDWARE-VERIFIED 2026-09-02** (v12). Action `0x7F7`'s leaf at `0x0024C842`: screen 39 → 14. Object 1421 is the id's only carrier and draws on BOTH compact frames, so the AGS capsule follows **by design**; screen 39 is left with no route |
-| **expose the AES Low Volts arming state as a live, recoloring control** (stock GuiCode freezes its display in AES) | `aeslowvolts` op (`add_aes_low_volts_trigger`) | **HARDWARE-VERIFIED, firefly-13.6, 2026-09-01** — toggles both ways in AES, confirmed on the coach by switching AGS↔AES to force a repaint. An un-gated appended bridge (hook `0x0024EE3C` → routine `0x00259BB4` → tail-call `FUN_00247BF8`) is a **faithful un-gated replica of the stock `0x2F` block**: it reads the un-frozen `0x2F` receive slot `0x2000801C` and — calling the firmware's own `setVariant` via fn-pointer `[0x20039908]` (r0=0x81, r1=`!armed`), **not a byte-poke** — refreshes the group-129 variant counter *and* writes recolor cell 45 (`0x2003A814`), so the AES page's Low Volts box (a verbatim clone of 315's Triggers/Low-Volts recolor box, `value_slot 45`/child 285) recolors and toggles both ways, matching the AGS behavior. Surfaces a control stock firmware hides in AES rather than editing the freeze gate itself. its design note (not published), §3.3 (Mechanism B, as revised on the coach) |
-| **feed an EXISTING readout's cell from any register, past a stock decode fence** (no widget authored; the routine above targets the stock cell and the stock per-tick stores that would overwrite it are replaced by `nop`, each guarded as a proven store to that cell) | `add_register_readout` with `cell_slot` + `silence` (`readout.existing_display_cell`/`silence_writers`; `register.resolve_register(var_index=)` for `0x1FECC`'s two same-filter entries) | **HARDWARE-VERIFIED 2026-09-05** (v18, `absorb-rows`/`float-rows`, `BUS-BASELINE.md` PC.60): the `Absorb`/`Float` rows read dashes with nothing publishing and 57.6/54.0 V from an injected `0x1FECC` — values the stock fence can never pass — fed from vars 206/207 with the panel's own `(raw+1)>>1`. The one ordering fact: the hook chain runs *before* `FUN_00247BF8`, so its config-byte copies at `0x247C34`/`0x247C3A` had to be silenced or they win every tick |
-| **stop the G12 broadcasting `1FFB7` TANK_STATUS for a tank instance** (so a different RV-C sender can own it) | `suppress_tank_status` recipe op (`tankbroadcast.py`); `src/fireflymcf/tankpatch.py` for an arbitrary user-supplied MCF | **HARDWARE-VERIFIED 2026-09-07 (v22, `BUS-BASELINE.md` PC.62)**: zero `19FFB7` in a 12 s capture against ~48 in every earlier one, with `18BFC19C` and `19AAB79C` untouched — and then an injected `19FFB7AF#002238FFFFFFFFFF` from a foreign SA drove HOME's FRESH gauge to **61%** (34/56), `000D64…` to **13%**, while unclaimed tanks read `--%`. So freeing an instance for another RV-C sender works end to end with no GuiData or GuiCode edit in the path. The rule engine exposes `[r4,#8]`/`[r4,#0xC]`/`[r4,#0x10]` = activate / deactivate / is-active per rule index, pinned by rule #93: activated at `+0x18F6`, deactivated at `+0x19AC`, and that is the LPG broadcast the coach is seen starting and stopping with the `0xEF` mode write. The edit NOPs the activating `blx r3` — 2 bytes per instance, in the **independently flashable** G12 section, records left intact so the revert is one byte-pair. **Instance 1 (black) needs no patch at all**: it is gated on `cfg[0xEC]`, the Black Tank OPTIONS row, re-read every tick — `19FED99F#FF96EC0F0000D1EA` silences it and `…0100D1EA` restores it (absolute `D1 EA`, both already in the captures), though that lever also *hides* the HOME BLACK gauge where the patch does not. Instances 0/2 have no gate anywhere and are patch-only |
-| **pin a type-6 switch to one arm regardless of its slot** (three same-size u16s: `child_base`, `count := 1`, `match[arm] := 0xFFFF` — the firmware's default-arm rule) | `pin_switch_arm` recipe op (`switchpin.py`) | **HARDWARE-VERIFIED 2026-09-05** (v18, `rows-permanent`, PC.60): object 17 record 11 → 303; the `Absorb`/`Float` rows were present straight after the flash and after a power cycle, where stock hid them after every flash. Refuses an arm whose match value another switch reads |
-| **put a state-gated mark in a corner of an existing button** (a wtype-6 switch appended as the host's last record over a one-character arm and an empty arm, both flow-neutral) | `add_corner_mark` recipe op (`cornermark.py`) | **HARDWARE-VERIFIED 2026-09-06** (v21, PC.61). Every piece is coach-proven separately — the wtype-6 two-arm switch (v16's Pump Link button, v18's pinned `Absorb`/`Float` rows), `replace_object_records` (v11's compact AES page) and `install_glyph` (the Starlink logo) — and the composition is now proven too. **Three rules it enforces, each paid for once on the coach:** a **visible label MUST declare a box** (v20 copied `_flow_anchor`'s two-coordinate shape, which is for records that never draw, and the panel clipped the glyph to a zero-width box — one column of pixels; `render.py` does not clip text to the record box, so the preview was identical and only the layout walk's `(x0,y0,x1,y1)` showed it); the arms are **flow-neutral** (every text wtype commits its coordinates as the new flow origin and that carries back out to the PARENT, so an absolutely-placed mark drags the host's siblings — it moved HOME's `Tank Heater` 467 px), and the **`0xFFFF` default arm must be at the BASE** or a no-match draws nothing. `verify` re-walks the page in both switch states, refuses if anything but the mark moves, and — after v20 shipped a mark clipped to one column — refuses if the **placed box** is smaller than the glyph. A visible label MUST declare width and height; `_flow_anchor`'s two-coordinate shape is for records that never draw. `render.py` now reproduces it: `FUN_002559A0` clips wtype-11/13 text to its box **inclusively**, so `x0 == x1` leaves exactly one column (`GUICODE.md` Finding 69, `render._text_clip`). A **wtype-0** single character is drawn by a different routine and is NOT bounded (HOME's `V`, CLIMATE's `°`, both 0×0 and both fine on the coach) — so "the panel clips text to its box" is true for 11/13 and false in general. Both axes are clipped, so a collapsed box draws its glyph's top-left pixel and usually nothing. **And the record's own box is the WHOLE clip** — `GUICODE.md` **Finding 70**, 2026-09-06: only a wtype-7 or wtype-14 record can narrow the enclosing clip (`FUN_00256C54` cases 7/`0x0E`, gated on record flag `0x200`), the base rectangle is the whole 800×480 panel written once at GUI init, and **no wtype-7 or wtype-14 record exists in any of the three builds** (every object decodes; identical wtype sets). So `_text_clip` is exact, not approximate — pinned by `tests/test_render_bytes.py` so a build that grows one fails a test. That also retired a wrong note: `FUN_00251BB4` is a drawn-extent accumulator (it *unions* into `0x2003A994`), not a container clip. Getting there fixed a second defect: **Finding 37's line-advance rule had shipped DEAD** — `_effective_line_height` referenced a `metrics` `render` does not import, and a bare `except Exception` swallowed the `NameError` on every call (`docs/RENDER.md`) |
-| **show ANY register as a live number on ANY page** (a display cell, a per-tick copy routine on the hook chain, an authored directive+readout object) | `add_register_readout` recipe op (`readout.py`: `allocate_display_cell`, `resolve`/`build`/`detour_edit`, `author_readout_object`) | **HARDWARE-VERIFIED 2026-09-04 (v17)**, tier-2 byte cell — `builds/golden-v22-anchor.ffproj.json`'s `minutes-home` op (the reference coach's build log (not published) "Experimental v17" -> "### v17 FLASHED AND VERIFIED, 2026-09-04"; `docs/BUS-BASELINE.md` PC.59) shows the Auto Off minute byte (`DGN_CONFIG` selector `0xEE`) on HOME via display cell 219 (`0x20039f51`, tier 2) and a routine chained ahead of `aeslowvolts`/`pumpauto`/`pumplink`; also confirmed the sentinel-to-dashes width-overflow rule (`GUICODE.md` Finding 65) on hardware for a byte cell. `add_register_readout.hardware_verified` is `True` by default now, but **tier 3 (fresh SRAM) remains unverified and reports so per instance** — a coach photo of one tier does not vouch for an address nothing has ever touched (its design note (not published) item 7) |
+| **add a genuinely NEW OPTIONS row** (not a repurposed one): a cloned wtype-6 checkbox on a chosen config selector + the follower re-gated to read that selector's status slot | `add_option_follower` recipe op (`optionrow.build_config_toggle`/`append_row` + `followchannel`) | **HARDWARE-VERIFIED 2026-08-31** (`BUS-BASELINE.md` PC.45) — "Pump Link" on selector `0xEE`: checkbox fills on tap, drives the pump, persists across reboot, Heat Pump left stock. First *new option* on the coach |
+| **create a new panel "register" from a bus value** (a var-table receive-filter entry) | `guidata.variable_table` + read at `followchannel.status_slot_addr` | mechanism proven. **The slot base is index-split**: var idx ≤ 255 → `0x20007FC8 + idx*2`, idx > 255 → `0x20008000 + idx*2` (`FUN_0021C760` `0x0021C9B0`-`0x0021C9C4`). The flat `base + idx*2` is a **trap** for idx > 255 — it caused the PC.44 failure. Our own routine reading the slot sidesteps the 46-bridge-block paint limit |
+| **expose a var-table entry's slot address as a handle** (reuse an existing subscription) | `register.resolve_register` recipe op | **tooling-verified**; reuse-existing only. Consumes a named DGN subscribed in the variable table, names its slot address, and exposes it as a `{"ref"}` handle any later op can consume. Appending a brand-new var-table entry is future work (hardware-unverified) |
+| **watch any register for edges and drive a channel with gate conditions** (no on-screen display) | `register.follow_register` recipe op | shares the **hardware-verified follower routine** with `follow_channel` and `add_option_follower`. Watches ANY register (by slot address) for an edge, drives a channel, gated by ANY register condition(s). **Coach check warranted the first time a genuinely NEW watch register is used** (a register not previously watched by the shipping follower instances). The on-screen-readout path remains future work (hardware-unverified) |
+| **replace an existing GuiData object's record stream in place** (shrink or grow, at its own index) | `relocate.replace_object_records` | **tooling-verified, reusable beyond this feature — and now the foundation of two coach-verified ops (below).** Overwrites an object's `count`+records at its own table index (so a switch that selects it by contiguous band stays valid), computes the signed `delta`, runs `relocate._apply_downstream_shift`, reseals, and re-runs all five relocate gates. This is what makes an in-place rebuild of a *direct-content* switch candidate possible — `relocate.relocate` alone is insert-only. |
+| **replace the AES Electrical page with a compact frame, reusing the stock all-in-one layout as a settings sub-page** | `aescompact.py` (`swap_electrical_to_compact`/`build_settings_screen`/`wire_settings_nav`) + `swap_aes_electrical` recipe op (`aesswap`) | **HARDWARE-VERIFIED, firefly-13.6, 2026-09-01** (5 flash/verify rounds). Object 829 (the AES-mode Electrical body) is rebuilt as a **faithful structural mirror of the AGS compact frame (object 830)** using **preserved container wrappers** — donor geometry composes correctly because it stays flow-relative inside its own container, rather than being flattened/absolutised — carrying: House/Chassis voltage gauges (objects 443/440), the compact cluster (a clone of object 315), and the Inverter block (object 1421, gated on slot 113); Solar is omitted. AGS path **byte-golden by construction** — only object 829 (via `replace_object_records`) and the stranded screen-31 root are touched; no AGS object is created, modified or renumbered. AES-specific retargets inside the cluster clone: the settings **⚙** gear navigates by **TAP through the ACTION dispatcher** — a guarded, same-size 2-byte GuiCode edit at runtime `0x0024B96A` (file `0x1B1EA`: `movs r3,#0xe`→`#0x1c`, screen 14→28) repurposing the orphaned action leaf `0x7DE`, with the touch region stamped `0x7DE` and left at donor-relative geometry so it stays aligned with the visible capsule; the engine control is the **real AES Engine control, object 353** (touch groups 13/14, status `value_slot` 169 → band 526–529, Start/Stop indicators 167/168 → shared objects 249/251) — **not** the AGS GEN control (352) — plus an invisible flow-gated spacer (an empty wtype-11 label; wtype-9 is flow-exempt and can't substitute) restoring 352's vertical rhythm since 353 carries no gen-hours line; the enable pill's touch id is `0x7E2` (the AES enable ACTION, which routes through the "Notice:" page and then the 3-second-hold Warning) instead of AGS group 128 (`0x0080`, which skips the Notice). The all-in-one AES content is cloned out first and rebuilt into the stranded screen-28 root (object 31) as the settings sub-page. |
+| **chain several authored per-tick routines on the one GuiCode hook** (any mix of `add_option_follower` / `follow_channel` / `follow_register` / `add_aes_low_volts_trigger` in one recipe) | `followchannel.hook_state` / `chain_from_hook`; no new op — the growing ops chain by themselves | **HARDWARE-VERIFIED 2026-09-01**: follower + Low Volts bridge both work through hook → bridge → follower → `FUN_00247BF8` |
+| **send the Inverter capsule's gear to `INVERTER / CHARGER SETTINGS`** instead of the read-only `PD Inverter` readout | `retarget_inverter_gear` op (`aescompact.retarget_inverter_gear`) — one guarded 2-byte GuiCode edit | **HARDWARE-VERIFIED 2026-09-02**. Action `0x7F7`'s leaf at `0x0024C842`: screen 39 → 14. Object 1421 is the id's only carrier and draws on BOTH compact frames, so the AGS capsule follows **by design**; screen 39 is left with no route |
+| **expose the AES Low Volts arming state as a live, recoloring control** (stock GuiCode freezes its display in AES) | `aeslowvolts` op (`add_aes_low_volts_trigger`) | **HARDWARE-VERIFIED, firefly-13.6, 2026-09-01** — toggles both ways in AES, confirmed on the coach by switching AGS↔AES to force a repaint. An un-gated appended bridge (hook `0x0024EE3C` → routine `0x00259BB4` → tail-call `FUN_00247BF8`) is a **faithful un-gated replica of the stock `0x2F` block**: it reads the un-frozen `0x2F` receive slot `0x2000801C` and — calling the firmware's own `setVariant` via fn-pointer `[0x20039908]` (r0=0x81, r1=`!armed`), **not a byte-poke** — refreshes the group-129 variant counter *and* writes recolor cell 45 (`0x2003A814`), so the AES page's Low Volts box (a verbatim clone of 315's Triggers/Low-Volts recolor box, `value_slot 45`/child 285) recolors and toggles both ways, matching the AGS behavior. Surfaces a control stock firmware hides in AES rather than editing the freeze gate itself |
+| **feed an EXISTING readout's cell from any register, past a stock decode fence** (no widget authored; the routine above targets the stock cell and the stock per-tick stores that would overwrite it are replaced by `nop`, each guarded as a proven store to that cell) | `add_register_readout` with `cell_slot` + `silence` (`readout.existing_display_cell`/`silence_writers`; `register.resolve_register(var_index=)` for `0x1FECC`'s two same-filter entries) | **HARDWARE-VERIFIED 2026-09-05** (`BUS-BASELINE.md` PC.60): the `Absorb`/`Float` rows read dashes with nothing publishing and 57.6/54.0 V from an injected `0x1FECC` — values the stock fence can never pass — fed from vars 206/207 with the panel's own `(raw+1)>>1`. The one ordering fact: the hook chain runs *before* `FUN_00247BF8`, so its config-byte copies at `0x247C34`/`0x247C3A` had to be silenced or they win every tick |
+| **stop the G12 broadcasting `1FFB7` TANK_STATUS for a tank instance** (so a different RV-C sender can own it) | `suppress_tank_status` recipe op (`tankbroadcast.py`); `src/fireflymcf/tankpatch.py` for an arbitrary user-supplied MCF | **HARDWARE-VERIFIED 2026-09-07 (`BUS-BASELINE.md` PC.62)**: zero `19FFB7` in a 12 s capture against ~48 in every earlier one, with `18BFC19C` and `19AAB79C` untouched — and then an injected `19FFB7AF#002238FFFFFFFFFF` from a foreign SA drove HOME's FRESH gauge to **61%** (34/56), `000D64…` to **13%**, while unclaimed tanks read `--%`. So freeing an instance for another RV-C sender works end to end with no GuiData or GuiCode edit in the path. The rule engine exposes `[r4,#8]`/`[r4,#0xC]`/`[r4,#0x10]` = activate / deactivate / is-active per rule index, pinned by rule #93: activated at `+0x18F6`, deactivated at `+0x19AC`, and that is the LPG broadcast the coach is seen starting and stopping with the `0xEF` mode write. The edit NOPs the activating `blx r3` — 2 bytes per instance, in the **independently flashable** G12 section, records left intact so the revert is one byte-pair. **Instance 1 (black) needs no patch at all**: it is gated on `cfg[0xEC]`, the Black Tank OPTIONS row, re-read every tick — `19FED99F#FF96EC0F0000D1EA` silences it and `…0100D1EA` restores it (absolute `D1 EA`, both already in the captures), though that lever also *hides* the HOME BLACK gauge where the patch does not. Instances 0/2 have no gate anywhere and are patch-only |
+| **pin a type-6 switch to one arm regardless of its slot** (three same-size u16s: `child_base`, `count := 1`, `match[arm] := 0xFFFF` — the firmware's default-arm rule) | `pin_switch_arm` recipe op (`switchpin.py`) | **HARDWARE-VERIFIED 2026-09-05** (PC.60): object 17 record 11 → 303; the `Absorb`/`Float` rows were present straight after the flash and after a power cycle, where stock hid them after every flash. Refuses an arm whose match value another switch reads |
+| **put a state-gated mark in a corner of an existing button** (a wtype-6 switch appended as the host's last record over a one-character arm and an empty arm, both flow-neutral) | `add_corner_mark` recipe op (`cornermark.py`) | **HARDWARE-VERIFIED 2026-09-06** (PC.61). Every piece is coach-proven separately — the wtype-6 two-arm switch (the Pump Link button, the pinned `Absorb`/`Float` rows), `replace_object_records` (the compact AES page) and `install_glyph` (the Starlink logo) — and the composition is now proven too. **Three rules it enforces, each paid for once on the coach:** a **visible label MUST declare a box** (a first build copied `_flow_anchor`'s two-coordinate shape, which is for records that never draw, and the panel clipped the glyph to a zero-width box — one column of pixels; `render.py` does not clip text to the record box, so the preview was identical and only the layout walk's `(x0,y0,x1,y1)` showed it); the arms are **flow-neutral** (every text wtype commits its coordinates as the new flow origin and that carries back out to the PARENT, so an absolutely-placed mark drags the host's siblings — it moved HOME's `Tank Heater` 467 px), and the **`0xFFFF` default arm must be at the BASE** or a no-match draws nothing. `verify` re-walks the page in both switch states, refuses if anything but the mark moves, and — after a build shipped a mark clipped to one column — refuses if the **placed box** is smaller than the glyph. A visible label MUST declare width and height; `_flow_anchor`'s two-coordinate shape is for records that never draw. `render.py` now reproduces it: `FUN_002559A0` clips wtype-11/13 text to its box **inclusively**, so `x0 == x1` leaves exactly one column (`GUICODE.md` Finding 69, `render._text_clip`). A **wtype-0** single character is drawn by a different routine and is NOT bounded (HOME's `V`, CLIMATE's `°`, both 0×0 and both fine on the coach) — so "the panel clips text to its box" is true for 11/13 and false in general. Both axes are clipped, so a collapsed box draws its glyph's top-left pixel and usually nothing. **And the record's own box is the WHOLE clip** — `GUICODE.md` **Finding 70**, 2026-09-06: only a wtype-7 or wtype-14 record can narrow the enclosing clip (`FUN_00256C54` cases 7/`0x0E`, gated on record flag `0x200`), the base rectangle is the whole 800×480 panel written once at GUI init, and **no wtype-7 or wtype-14 record exists in any of the three builds** (every object decodes; identical wtype sets). So `_text_clip` is exact, not approximate — pinned by `tests/test_render_bytes.py` so a build that grows one fails a test. That also retired a wrong note: `FUN_00251BB4` is a drawn-extent accumulator (it *unions* into `0x2003A994`), not a container clip. Getting there fixed a second defect: **Finding 37's line-advance rule had shipped DEAD** — `_effective_line_height` referenced a `metrics` `render` does not import, and a bare `except Exception` swallowed the `NameError` on every call (`docs/RENDER.md`) |
+| **show ANY register as a live number on ANY page** (a display cell, a per-tick copy routine on the hook chain, an authored directive+readout object) | `add_register_readout` recipe op (`readout.py`: `allocate_display_cell`, `resolve`/`build`/`detour_edit`, `author_readout_object`) | **HARDWARE-VERIFIED 2026-09-04**, tier-2 byte cell — a `minutes-home` op (`docs/BUS-BASELINE.md` PC.59) shows the Auto Off minute byte (`DGN_CONFIG` selector `0xEE`) on HOME via display cell 219 (`0x20039f51`, tier 2) and a routine chained ahead of `aeslowvolts`/`pumpauto`/`pumplink`; also confirmed the sentinel-to-dashes width-overflow rule (`GUICODE.md` Finding 65) on hardware for a byte cell. `add_register_readout.hardware_verified` is `True` by default now, but **tier 3 (fresh SRAM) remains unverified and reports so per instance** — a coach photo of one tier does not vouch for an address nothing has ever touched |
 
 **GuiCode-growing ops CHAIN on the per-tick hook (2026-09-01, `followchannel.hook_state`).**
 `add_option_follower`, `follow_channel`, `follow_register` and `add_aes_low_volts_trigger` all detour
@@ -528,9 +520,9 @@ two of them in one recipe refused each other. Now a routine appended onto a deto
 tail-branches to the routine the hook currently reaches, and the hook moves to the new one:
 hook → newest → … → `FUN_00247BF8`. Each routine stays byte-identical to its proven form apart from
 that branch target, and `chain_from_hook` walks the result. **HARDWARE-VERIFIED 2026-09-01:**
-`build/mcf-experiment-v10.bin` (the reference coach's build log (not published)) runs on the coach with both the follower and
-the AES Low Volts bridge working through the chain — and it is the **currently-running image**,
-the first single build carrying every proven feature (reference build v8 + Pump Link + compact AES page). A
+a build runs on the coach with both the follower and the AES Low Volts bridge working through
+the chain — the first single build carrying every feature proven by then (Pump Link + compact AES
+page). A
 preprocessor merging the routines was considered and rejected: it would emit new machine code no
 coach test covers.
 
@@ -561,7 +553,7 @@ coach test covers.
 - **The panel only ever sends command 5 (toggle)**; the G12 holds and alternates state. **Command 0
   marks a light** (21 = "act while held", shared with motors). The **G12 acts on any RV-C instance**
   regardless of the pin sheet, so a remap's destination needs no enabling.
-- **A channel can be dropped from a master control** (`drop_from_master`, v26, 2026-09-14). The
+- **A channel can be dropped from a master control** (`drop_from_master`, 2026-09-14). The
   bath light (ch25) was removed from the Light Master by neutralising its six bindings in the ON/OFF
   groups — DGN → `0xFFFF` and phase mask → 0. On the coach, Light Master ON/OFF no longer switches
   the bath light while its own button still works. The phase-mask zero is the hard guarantee (the

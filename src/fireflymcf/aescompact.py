@@ -294,7 +294,7 @@ PUMP_BUTTON_LABEL_REC = 1
 PUMP_BUTTON_TEXT = "Pump Link"              # 9 chars over 'Low\nVolts' (9) -- same size
 PUMP_BUTTON_TOUCH_REC = 9                   # 315[9]: the Low Volts wtype-12 touch region
 
-# The Pump Link state arms (v16, the build log v15 defect 1). Stock shows an on/off state on a
+# The Pump Link state arms (v16; fixes v15's defect 1, below). Stock shows an on/off state on a
 # button with a wtype-6 switch over pre-coloured capsule arms that carry their own caption --
 # 45 stock switches do it, the AES enable pill among them: object 173 'Enable' (fill index 10,
 # dark) and 174 'Enabled' (fill index 35, cyan), keyed by a byte cell. Those two are the donors;
@@ -780,7 +780,7 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
         raise ValueError("link_display_slot and link_arms_base must be given together")
     if link_display_slot is None:
         # v14/v15 shape: a static box + caption (the box's fill index is the Low Volts cell --
-        # the build log v15 defect 1 -- kept only so the pre-v16 image stays reproducible).
+        # v15's defect 1 -- kept only so the pre-v16 image stays reproducible).
         btn_box = _clone_with_geom(data, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_BOX_REC,
                                    {2: PUMP_CONTENT_W, 3: PUMP_BUTTON_H})
         btn_label = _clone_with_geom(data, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC,
@@ -870,7 +870,7 @@ BATT_HEAT_OFF_ID = 0x18EF709F
 
 # A solid, static button fill (a colour-table index that resolves to a fixed colour, not a live
 # cell): the Low Volts box donor (285[0]) uses mode-7 index 45, which is the Low Volts RECOLOR
-# cell -- copying it verbatim makes the button track the Low Volts state (the build log v15 defect 1).
+# cell -- copying it verbatim makes the button track the Low Volts state (v15's defect 1).
 # Repointing that index to 35 (the enable pill's lit "Enabled" colour, cyan) gives a solid button
 # that stands out against the navy page and is not wired to any live cell.
 BATT_HEAT_FILL_INDEX = 35

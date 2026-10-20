@@ -885,7 +885,7 @@ slip.
 by the capture host. The owner flashed successive patched GuiData sections from USB and
 operated the touchscreen.
 **Coach:** Jayco B-Van, floorplan WD, firmware 13.6 with the `Bath Fan` → `Starlink`
-patch of its design note (not published)–12.
+patch.
 
 ### Result 1 — the panel does not cache bindings
 
@@ -3723,7 +3723,7 @@ only `0x2F`/`0x31`. Untested prediction worth one future check: `0xDA` tracks So
 # PC.42 — selector `0xEE` is writable, echoed, and inert: the Pump Link gate candidate passes (2026-08-31)
 
 **The question.** Phase A of the Pump-Link-as-new-option design
-(its design note (not published)) picked selector **`0xEE`**
+picked selector **`0xEE`**
 as the borrowed state for a genuinely new OPTIONS row, on file evidence: swept every 5 s by the
 13.6 G12 section; options-family cell (`E3..EF` block); **unseeded** by the table-`0x67`
 config-defaults routine (like Heat Pump `0xEB`); zero panel consumers in 13.6 (one receive var —
@@ -3842,7 +3842,7 @@ the `0x15FCE`→config-buffer receive path to find a selector that is register-b
 side-effect-free, then re-gate the follower on that register. `0xEE` remains valid as the G12-stored
 state; what it lacks is a panel-side readback.
 
-## PC.44 — CORRECTED 2026-08-31 (see its design note (not published))
+## PC.44 — CORRECTED 2026-08-31
 
 **The root cause in PC.44 above is WRONG and is retracted.** The `0xEE` config-selector status
 slot **is** written by the receive filter every sweep — the follower simply read the **wrong
@@ -3882,7 +3882,7 @@ array), not the flat `0x2000820A` the PC.44 build used. Owner flashed it and con
 (the index-split base), now fixed in `followchannel.status_slot_addr`; (2) `0x15FCE` config-selector
 status slots ARE written by the receive filter and are readable by authored code — the earlier
 "config selectors have no panel-side readback" conclusion is fully retracted; (3) **the var-table
-entry is a working, general "create a new register" mechanism** (its design note (not published))
+entry is a working, general "create a new register" mechanism**
 — a genuinely new, side-effect-free, persistent OPTIONS row driven by a chosen config selector,
 built from stock, running on the coach. This is the project's first new *option* (as opposed to a
 repurposed row) proven on hardware.
@@ -4051,8 +4051,7 @@ while the routine runs every paint tick — so seeding on the sentinel would hav
 owner's stored `0xEE`, Pump Link flag included, on the first tick of every power-up. The routine
 now writes **nothing to the bus** while the slot reads `0xFFFF`; it sets the display byte and
 disarms its own countdown, both panel-local. A genuinely cleared cell is bootstrapped by the
-owner's first tap plus the clamp, not by a seed. See
-its design note (not published)
+owner's first tap plus the clamp, not by a seed.
 **The coach was left as found:** `0xEE` = `0x0001`, Pump Link ON, verified by read-back.
 
 ---
@@ -4551,7 +4550,7 @@ is not merely the cheapest route — it is the only one.
 
 ## PC.58 — a `wtype-8` readout repaints from a cell an appended routine writes; the Pump Link button was reading the wrong cell — `observed-on-hardware`, 2026-09-04
 
-`mcf-experiment-v15.bin` on the coach (the reference coach's build log (not published), v15 "FLASHED AND VERIFIED"). Three
+`mcf-experiment-v15.bin` on the coach, flashed and verified. Three
 observations that settle things the file could not:
 
 1. **Live repaint.** The `Auto Off` minutes readout (a `wtype-8` on spare cell 215, written by the
@@ -4571,8 +4570,8 @@ observations that settle things the file could not:
 
 ## PC.59 — the first on-screen register readout, and a byte cell's sentinel draws dashes — observed-on-hardware, 2026-09-04
 
-`mcf-experiment-v17.bin` on the coach (the reference coach's build log (not published), "Experimental v17" -> "### v17
-FLASHED AND VERIFIED, 2026-09-04"). Setup: v17's `minutes-home` op (`add_register_readout`) put
+`mcf-experiment-v17.bin` on the coach, flashed and verified
+2026-09-04. Setup: v17's `minutes-home` op (`add_register_readout`) put
 the Auto Off minute byte of `DGN_CONFIG` selector `0xEE` on HOME (object 4) at `(300, 357)`, on
 display cell **219** (SRAM `0x20039f51`, tier 2 — an odd spare byte, `fresh=False`), driven by a
 44-byte per-tick copy routine chained onto the hook ahead of the AES Low Volts bridge, the pump
@@ -4968,8 +4967,8 @@ the loader **puts** GuiData rather than somewhere it keeps a spare copy for you.
 
 **The consequence for the write path is the one that matters, and it is unchanged and now firm:**
 there is no read-back in this protocol and no way to make the device hand its config back, so
-**the MCF you are running is the only backup that exists**
-(`2026-09-08-g12-network-write-design.md` §8). That limit is no longer "probably" — it has been
+**the MCF you are running is the only backup that exists**.
+That limit is no longer "probably" — it has been
 tested from both ends.
 
 *Shape worth carrying: a capability read out of code is not a capability you can reach. The
@@ -5258,7 +5257,7 @@ G12 as `195FCE9C#99000BFF…` (`0xFF0B` int16). The gate disables the control wh
 straight through — `21 → 16 → 11 → 6 → 1 → −4 → …` never lands on 0 and never disables. That is
 11.23's design faithfully reproduced, and it is a *disable-at-zero*, not a clamp.
 
-the reference coach's build log (not published)'s note that an injected −45 "was applied instantly and read back as 0" is **not**
+An earlier note that an injected −45 "was applied instantly and read back as 0" is **not**
 evidence of a clamp: the value was 45 at the time, so −45 lands on 0 by arithmetic. −245 sitting
 in G12 storage is the actual answer.
 
@@ -5274,8 +5273,7 @@ confirmed.
 ## PC.61 — an Auto Off timer indicator, and a byte borrow recovered on the wire — observed-on-hardware, 2026-09-06
 
 Two images across three rounds: **`build/mcf-experiment-v20.bin`** (sha256 `b90c3e14…`) and
-**`build/mcf-experiment-v21.bin`** (sha256 `4b639367…`), both the reference coach's build log (not published) "Experimental
-v20"/"v21". v21 is **FLASHED AND VERIFIED**.
+**`build/mcf-experiment-v21.bin`** (sha256 `4b639367…`). v21 is **FLASHED AND VERIFIED**.
 
 ### The headline: PC.47's borrow model holds in the other direction
 
@@ -5331,7 +5329,7 @@ White on the button's lit cyan is legible — the owner's call, after round 1's 
 
 ## PC.60 — a stock readout fed past its decode fence, and a switch pinned through a flash — observed-on-hardware, 2026-09-05
 
-**`build/mcf-experiment-v18.bin`** (sha256 `5340767d…`; the reference coach's build log (not published) "Experimental v18").
+**`build/mcf-experiment-v18.bin`** (sha256 `5340767d…`).
 The owner flashed it and reported against the checklist:
 
 | item | result |
@@ -5352,7 +5350,7 @@ The owner flashed it and reported against the checklist:
 - **Silencing a stock per-tick store works and is necessary.** Item 2's dashes (not `25.5 V`)
   are the `0xFFFF` sentinel passing through our routine into a cell that `FUN_00247BF8` used to
   overwrite with a config byte every tick; the two `strh` → `nop` edits at `0x247C34`/`0x247C3A`
-  took, and the hook-chain-before-`FUN_00247BF8` ordering (the reference coach's build log (not published) v18) is confirmed the
+  took, and the hook-chain-before-`FUN_00247BF8` ordering is confirmed the
   hard way — had the stores still run, the rows would have read `25.5 V`.
 - **`pin_switch_arm` holds across a flash and a power cycle.** Stock hid the rows after every
   flash (PC.55: the slot-23 gate is power-up SRAM). Items 1 and 5 show them in both states, so

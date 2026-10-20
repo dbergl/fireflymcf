@@ -48,7 +48,7 @@ UNVERIFIED_ALLOWLIST: set[str] = {
     # their pages, Pump Link, Auto Off -/+, Battery Heater hold/tap); the heater colours and
     # contactor glyph still track the BMS.
     "cards",
-    # mcf-13.6-inverter-readouts (v49): built 2026-10-15, not flashed. Coach test: the build log v49.
+    # mcf-13.6-inverter-readouts (v49): built 2026-10-15, not flashed.
     #   alarms / alarms-status -- the Ignore Alarms button (18EF709F#4D53..1770 on a hold, the
     #     zeroed cancel on a tap) and its byte-2-bit-1 status;
     #   acin-v / acin-a / acout-a -- draw:false readouts on fresh cells (the amps with the new

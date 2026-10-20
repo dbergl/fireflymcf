@@ -8,7 +8,7 @@
 Screen 29 is the second page titled `SLIDES/AWNINGS` — the auto-levelling page. It is orphaned in
 stock: its only ACTION leaf is `0x7ED` and **no `wt-12` region in the image carries that id**
 (`navmap`), so nothing can navigate to it. v14 reveals the nav rail's authored sixth icon and
-points its `0x7DC` leaf here (`navicon`, the reference coach's build log (not published)).
+points its `0x7DC` leaf here (`navicon`).
 
 The owner's interest is **indication, not actuation**: publishing levelling/attitude data onto
 RV-C and having the coach show how level it is. This document is the brief for that.

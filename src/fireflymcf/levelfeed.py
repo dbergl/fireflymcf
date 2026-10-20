@@ -1,5 +1,5 @@
 """The LEVEL page's per-tick routine: copies the fourteen 0x0FFB0 receive slots into display cells
-and derives the wheel/banner/short/word state cells (spec 2026-09-25-level-page-design.md §4).
+and derives the wheel/banner/short/word state cells.
 
 One routine, one hook link. Every slot read treats 0xFFFF as n/a (FUN_0021C374 writes it on
 refresh-class expiry, and it is the boot value).

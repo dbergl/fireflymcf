@@ -863,7 +863,7 @@ class DropFromMaster(Op):
     emitting on any gesture phase. Same-size, in-place, no binding-count change.
 
     The bath light's own dedicated control is untouched, so the load stays fully
-    operable; only the master loses it. FLASHED AND VERIFIED 2026-09-14 (v26): with
+    operable; only the master loses it. FLASHED AND VERIFIED 2026-09-14: with
     ch25 dropped, the coach's bath light no longer responds to Light Master, and its
     own button still works, so the op is `hardware_verified = True`.
 
@@ -882,7 +882,7 @@ class DropFromMaster(Op):
     produces. The build's capability gate then surfaces the intended loss instead of a
     repurposed group silently eating a real control.
     """
-    hardware_verified = True     # FLASHED AND VERIFIED 2026-09-14 (v26)
+    hardware_verified = True     # FLASHED AND VERIFIED 2026-09-14
     PARAMS = {
         "properties": {
             "master": {"type": "string",
@@ -1655,7 +1655,7 @@ def _trailing_gap(r: "records.WRecord") -> int:
 def _gauge_level_indices(data: bytes) -> set:
     """`+0x44BC8` indices already named by some wt-33 fillA-mode7 record's undecoded trailing
     u16 -- the gauge/capsule partial-fill "empty offset" `records.decode_record` reads but
-    never exposes on `WRecord` (its design note (not published); located here by `_trailing_gap`, not a hand-rolled geometry sum -- an
+    never exposes on `WRecord` (located here by `_trailing_gap`, not a hand-rolled geometry sum -- an
     earlier version summed only `colour + geom` widths and silently mislocated the field
     whenever a record also carried one of the header-gated-but-unexposed R18-R22/R29-R34
     bytes: wrong on 276 of the 13.6 corpus's 840 wt-33 records (diff histogram
@@ -1757,7 +1757,7 @@ def _isolate_cell(data: bytes, ctx, index: int, width: int, vtype, note: str):
 
 # --- Task 5: position the chassis/coach battery pair on object 902 ----------------------------
 #
-# Object 902's own records are FLOW-positioned (its design note (not published) has the full derivation, pinned by `test_two_batteries_centered_
+# Object 902's own records are FLOW-positioned (pinned by `test_two_batteries_centered_
 # in_lower_right`): a record's x/y geometry is a DELTA off the position the previous FLOW-GATED
 # record committed (`layout._in_flow_gate`; wtype 5/11 both gate, wtype 33 does not), not an
 # absolute or container-relative offset -- and a container's subtree recursion
@@ -1899,7 +1899,6 @@ class AddVoltageBattery(Op):
     colour, gauge level and value -- onto fresh SRAM so the per-tick routine below can
     drive this battery alone (leaving donor 443 and chassis object 440 untouched),
     then reposition the pair and add the 'House' label object 902 itself was missing.
-    See its design note (not published).
 
     The attach is UNPOSITIONED (`insert.insert_object(..., position=None)`): object
     902's only wtype-5 container record (child 440) carries x geometry but no y, so
@@ -1938,10 +1937,10 @@ class AddVoltageBattery(Op):
     `followchannel.scan_display_cell`'s existing-pointer discipline -- the latter found no
     safe candidate among the tiny remaining pool on 13.6 (its own GuiCode-reference scan
     rejected the rest). Every allocation is tier-3-shaped: unprecedented on hardware. The
-    coach settled it: v25 (`build/mcf-experiment-v25-coach48v-live.bin`) was flashed and
+    coach settled it: the op was flashed and
     verified 2026-09-12 -- the House 48V battery's number, fill and colour all update live
     on both HOME and the compact ELECTRICAL page -- so this op is now
-    `hardware_verified = True` (the reference coach's build log (not published), v25). The grow, the fresh cells, the
+    `hardware_verified = True`. The grow, the fresh cells, the
     per-tick routine, the container watch-cell retarget and the donor 48V rescale are all
     proven on the physical panel.
 
@@ -1986,7 +1985,7 @@ class AddVoltageBattery(Op):
     object-table length before the insert) and the three `*_cell` values are the fresh
     SRAM addresses a later routine writes.
     """
-    hardware_verified = True      # coach-verified 2026-09-12 (the reference coach's build log (not published), v25)
+    hardware_verified = True      # coach-verified 2026-09-12
 
     PARAMS = {
         "properties": {
@@ -4949,7 +4948,7 @@ class RetargetInverterGear(Op):
     Declares no capability delta: an action-dispatcher screen constant, no G12 group/binding.
     """
 
-    hardware_verified = True     # coach-verified 2026-09-02 (the reference coach's build log (not published), v12)
+    hardware_verified = True     # coach-verified 2026-09-02
 
     PARAMS = {
         "properties": {
@@ -5060,7 +5059,7 @@ class AppendFilter(Op):
       APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
     """
 
-    # COACH-VERIFIED 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0,
+    # COACH-VERIFIED 2026-09-22: var 298 appended for 0x1FEA0,
     # the panel booted with the 299-entry table, and the HOME readout followed injected payload[0]
     # values 42 then 7 -- registration, match, extraction, slot and routine, end to end.
     hardware_verified = True
@@ -5284,12 +5283,11 @@ class AddRegisterReadout(Op):
     a display cell (readout.allocate_display_cell, three sramreach-checked tiers), a per-tick copy
     routine chained on the hook, and a wtype-9 directive + wtype-8 readout object attached to
     `page` at absolute (x, y). The coach has shown a wtype-8 repaints from a routine-written cell
-    (PC.58); this op's first instance (v17's `minutes-home`, a tier-2 cell) was itself FLASHED
-    AND VERIFIED 2026-09-04 (the reference coach's build log (not published) "Experimental v17"; `docs/BUS-BASELINE.md`
-    PC.59). `hardware_verified` is `True` by default now, but a TIER-3 instance -- a fresh SRAM
-    cell no stock instruction names -- keeps it `False` per instance (`apply`, when
-    `cell.fresh`): a coach photo of one tier does not vouch for an address nothing has ever
-    touched (design spec Sec5 item 7)."""
+    (PC.58); this op's first instance (a `minutes-home` readout on a tier-2 cell) was itself FLASHED
+    AND VERIFIED 2026-09-04 (`docs/BUS-BASELINE.md` PC.59). `hardware_verified` is `True` by default
+    now, but a TIER-3 instance -- a fresh SRAM cell no stock instruction names -- keeps it `False`
+    per instance (`apply`, when `cell.fresh`): a coach photo of one tier does not vouch for an
+    address nothing has ever touched."""
     hardware_verified = True
     PARAMS = {
         "properties": {
@@ -5399,10 +5397,10 @@ class AddRegisterReadout(Op):
                 out, cell_edits = readout.silence_writers(data, cell, self.silence)
                 silenced = sorted(self.silence)
                 remaining = readout.stock_writers(out, cell)
-                # this mode was FLASHED AND VERIFIED on v18, 2026-09-05 (the reference coach's build log (not published)
-                # "Experimental v18"; `docs/BUS-BASELINE.md` PC.60): the Absorb/Float rows read
-                # dashes with nothing publishing and 57.6/54.0 V from an injected 0x1FECC --
-                # values the stock fence could never pass -- so the class default stands here
+                # this mode was FLASHED AND VERIFIED 2026-09-05 (`docs/BUS-BASELINE.md` PC.60): the
+                # Absorb/Float rows read dashes with nothing publishing and 57.6/54.0 V from an
+                # injected 0x1FECC -- values the stock fence could never pass -- so the class
+                # default stands here
             elif not self.draw:
                 # A cell nothing names yet: a reused "spare" index would look free to the next
                 # allocation (its tier 3 repointed one under an earlier draw:false readout), so
@@ -5424,7 +5422,7 @@ class AddRegisterReadout(Op):
             # tier 3: a spare index repointed at fresh SRAM no stock instruction names. The
             # class default (True) covers tiers 1/2, which v17's coach run vouches for; a fresh
             # address is unprecedented on hardware regardless, so this instance stays
-            # unverified until ITS tier has its own coach photo (design spec Sec5 item 7).
+            # unverified until ITS tier has its own coach photo.
             self.hardware_verified = False
         ctx.edits.extend(cell_edits)
         # the routine: build at the current append point, grow, detour (the follower sequence)
@@ -5671,14 +5669,13 @@ class SwapAesElectrical(Op):
                  refuses rather than wire the button to stale or absent ids.
 
     `hardware_verified = True` by default -- HARDWARE-VERIFIED on the owner's coach 2026-09-01
-    over five flash/verify rounds (the reference coach's build log (not published), `builds/mcf-13.6-AES_Compact.bin`): AGS
+    over five flash/verify rounds: AGS
     page unchanged, compact AES frame drawn, gear taps to the settings sub-page, gauges live,
     Engine control and enable-pill routing as designed -- all with `pump_section` unset. Before
-    v17, `validate` set this `False` per instance the moment `pump_section` was given, because
-    the outlined Water Pump section it adds had not been on a coach. It has now: v16 (the pump
-    section, and its Pump Link switch when `link_indicator` is also given) was FLASHED AND
-    VERIFIED as part of v17, 2026-09-04 (the reference coach's build log (not published) "Experimental v16" -> "### v16
-    FLASHED AND VERIFIED (as part of v17), 2026-09-04", checklist items 5-7), so `validate` no
+    2026-09-04, `validate` set this `False` per instance the moment `pump_section` was given,
+    because the outlined Water Pump section it adds had not been on a coach. It has now: the pump
+    section, and its Pump Link switch when `link_indicator` is also given, were FLASHED AND
+    VERIFIED 2026-09-04 (checklist items 5-7), so `validate` no
     longer touches the flag for either param and every instance keeps the class default.
 
     Capability delta `(set(), set())`: nothing here touches a G12 group/binding -- the AES pill's
@@ -5692,8 +5689,8 @@ class SwapAesElectrical(Op):
     the resolved `pump_section_ids` tuple.
     """
 
-    hardware_verified = True     # coach-verified 2026-09-01 (the reference coach's build log (not published)); False per
-                                 # instance in validate() when pump_section is given (below)
+    hardware_verified = True     # coach-verified 2026-09-01, with or without
+                                 # pump_section since 2026-09-04 (validate(), below)
 
     PARAMS = {
         "properties": {
@@ -5720,11 +5717,10 @@ class SwapAesElectrical(Op):
                 "BAD_PARAMS",
                 "pump_section must be {'ref': op_id} or omitted/null, got %r"
                 % (self.pump_section,), op_id=self.spec.id)
-        # The Water Pump section (pump_section) and its v16 Pump Link switch (link_indicator)
-        # were both seen on the coach as part of v17 (the reference coach's build log (not published) "Experimental v16" ->
-        # "### v16 FLASHED AND VERIFIED (as part of v17), 2026-09-04", checklist items 5-7), so
+        # The Water Pump section (pump_section) and its Pump Link switch (link_indicator) were
+        # both seen on the coach, flashed and verified 2026-09-04 (checklist items 5-7), so
         # this instance keeps the class default (`hardware_verified = True`) whether or not
-        # pump_section is given -- unlike before v17, when giving it forced the flag False here.
+        # pump_section is given -- unlike before then, when giving it forced the flag False here.
 
         self.link_indicator = self._param("link_indicator", None)
         if self.link_indicator is not None and not (
@@ -6040,7 +6036,7 @@ class AddAesLowVoltsTrigger(Op):
 
     `hardware_verified = True`: HARDWARE-VERIFIED on the owner's coach 2026-09-01 -- the Low Volts
     control recolors and arms/disarms both ways in AES, confirmed by switching AGS<->AES to force a
-    repaint (the reference coach's build log (not published), `builds/mcf-13.6-AES_Compact.bin`).
+    repaint.
 
     Capability delta `(set(), set())`: group 129's bindings are 0x1FED9 config writes (channel
     None, outside `recipe.capabilities`) and the bridge is GuiCode -- the group/binding tables
@@ -6058,7 +6054,7 @@ class AddAesLowVoltsTrigger(Op):
                      appended, or the detour site was not the stock `bl`.
     """
 
-    hardware_verified = True     # coach-verified 2026-09-01 (the reference coach's build log (not published))
+    hardware_verified = True     # coach-verified 2026-09-01
 
     PARAMS = {
         "properties": {
@@ -6207,7 +6203,7 @@ class AddAesBattHeat(Op):
     is destination-filtered (owner-confirmed), so `0x9F` is accepted and the reference `0xFD` is
     neither needed nor spoofed. The gate that this path can emit a novel proprietary-A DGN at
     priority 6 with a raw payload is `proven-from-code` + a hardware oracle
-    (`tests/test_binding_frame.py`, its design note (not published)).
+    (`tests/test_binding_frame.py`).
 
     Runs AFTER `swap_aes_electrical` (it appends to the rebuilt compact object 829). Two steps:
 
@@ -6447,7 +6443,7 @@ class AddAltReboot(Op):
       REPLACE_REFUSED -- the page's record stream could not be relocated.
     """
 
-    hardware_verified = True     # coach-verified 2026-10-05 on v46: one 197F809F#0100FF.. per
+    hardware_verified = True     # coach-verified 2026-10-05: one 197F809F#0100FF.. per
                                  # 3-s hold on can1, the APS-500 re-claimed and sent its boot query
 
     PARAMS = {
@@ -6582,8 +6578,8 @@ class AddAesBattHeatStatus(Op):
       BAD_REF           -- `button` names an op with no handle (not run, later, or disabled).
     """
 
-    # COACH-VERIFIED 2026-09-22 (v32), both halves. RECEIVE: v31 -- both appended subscriptions
-    # delivered, all four states seen from injected 18FF70C0 frames. DRAWING: v32 -- one combined
+    # COACH-VERIFIED 2026-09-22, both halves. RECEIVE: both appended subscriptions
+    # delivered, all four states seen from injected 18FF70C0 frames. DRAWING: one combined
     # cell, one switch, whole-button arms, blue/cyan; injected frames TRANSITIONED through all six
     # edges (off -> heater -> heater+contactor -> contactor opens -> heater off -> contactor only)
     # and the owner confirmed the caption survives an enable and the glyph clears on a disable.
@@ -6691,7 +6687,7 @@ class AddAesBattHeatStatus(Op):
         # The body pair comes from the firmware's own palette rather than from pinned indices, so
         # the button rests at exactly the blue every other button rests at and lights to exactly
         # their cyan. A static index is preferred (`resolve_fill_index`), which is what keeps the
-        # fill from coupling to some other widget's live state -- the build log v15 defect 1.
+        # fill from coupling to some other widget's live state -- v15's defect 1 (`aescompact.py`).
         try:
             off_index = theme.resolve_fill_index(out, color=aescompact.BATT_HEAT_OFF_RGB)
             on_index = theme.resolve_fill_index(out, color=aescompact.BATT_HEAT_ON_RGB)
@@ -6839,7 +6835,7 @@ class AddAesBattHeatStatus(Op):
 class AesCardLayout(Op):
     """Re-lay out the compact AES ELECTRICAL frame (object 829) as HOME's 2x2 card grid --
     Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock
-    sizes (its design note (not published)).
+    sizes.
 
     Runs AFTER swap_aes_electrical, add_aes_batt_heat and add_aes_batt_heat_status (built with
     the full-width heater: `x 84, y 156, w 328, h 54`). Asserts the exact v47 record shapes of
@@ -6851,7 +6847,7 @@ class AesCardLayout(Op):
       REPLACE_REFUSED -- a record stream could not be relocated.
     """
 
-    hardware_verified = True     # flashed 2026-10-15 (v48; defects fixed in v49, v50 runs it)
+    hardware_verified = True     # flashed 2026-10-15; draw defects fixed same day
 
     PARAMS = {"properties": {}, "required": []}
 
@@ -6898,7 +6894,7 @@ class AesCardLayout(Op):
 @op("add_card_readouts")
 class AddCardReadouts(Op):
     """Captioned live readouts inside an aes_card_layout card (v49: the Inverter card's right
-    column -- spec its design note (not published)).
+    column).
 
     Each row is a white caption over a right-justified value and its unit. A value names either
     an `add_register_readout` op built with `draw: false` (`{"ref": id}`, its display cell) or an
@@ -6912,7 +6908,7 @@ class AddCardReadouts(Op):
       REPLACE_REFUSED -- 829 could not be relocated.
     """
 
-    hardware_verified = True     # flashed 2026-10-15 (v49, v50): readouts live on the coach
+    hardware_verified = True     # flashed 2026-10-15: readouts live on the coach
 
     PARAMS = {
         "properties": {
@@ -7161,10 +7157,10 @@ class AddBattHeatBatteryGlyph(Op):
       NOT_A_BATTERY    -- a named object is not a House battery (seven-record signature).
       WRAP_REFUSED     -- the arms, the match table or the switch could not be built or spliced.
     """
-    # COACH-VERIFIED 2026-09-26 (flashed as part of v34a): the white glyph appears and clears with
+    # COACH-VERIFIED 2026-09-26: the white glyph appears and clears with
     # the heater contactor on the HOME and ELECTRICAL House batteries. Owner note: with the voltage
     # raised 11 px the number is harder to read; the layout is open for redesign.
-    # COACH-VERIFIED (outline style, v47): flashed, the numbers sit at their stock position, and
+    # COACH-VERIFIED (outline style): flashed, the numbers sit at their stock position, and
     # the owner saw the House battery outlined orange with the heater running (reported 2026-10-10).
     hardware_verified = True
 
@@ -7412,10 +7408,9 @@ class AddPumpAutoOff(Op):
       DETOUR_REFUSED -- the bytes at the detour's file offset were not the plan's expected
                      stock/chained `bl`; a grow shifted something it should not have.
 
-    `hardware_verified = True` again as of v17 (2026-09-04, the reference coach's build log (not published) "Experimental
-    v16" -> "### v16 FLASHED AND VERIFIED (as part of v17), 2026-09-04"): v16's Task 1 shortened
-    the routine by 4 bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach
-    as part of the flashed v17 image (checklist item 8, "Only goes 5-60", and item 10, the
+    `hardware_verified = True` again as of 2026-09-04: a later task shortened the routine by 4
+    bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach, flashed and
+    verified 2026-09-04 (checklist item 8, "Only goes 5-60", and item 10, the
     timed shutoff) -- so "pumpauto" (or whatever id a project gives this op) no longer appears
     in the compile result's `unverified` manifest.
 
@@ -7450,14 +7445,12 @@ class AddPumpAutoOff(Op):
     it (e.g. by narrowing the widened extraction mode) on its own judgement.
     """
 
-    hardware_verified = True     # the v15 routine was coach-verified 2026-09-04 (repaint,
-                                 # countdown, persistence -- the reference coach's build log (not published) "Experimental
-                                 # v15" FLASHED AND VERIFIED section); v16's Task 1 then deleted
-                                 # two 2-byte instructions from this routine for the minute-0
-                                 # clamp fix (the reference coach's build log (not published) "Experimental v16", commit
-                                 # 7b4fd92), and THOSE bytes ran on the coach as part of the
-                                 # flashed v17 image ("### v16 FLASHED AND VERIFIED (as part of
-                                 # v17), 2026-09-04" -- checklist items 8 and 10).
+    hardware_verified = True     # the first routine was coach-verified 2026-09-04
+                                 # (repaint, countdown, persistence); a later task then
+                                 # deleted two 2-byte instructions from this routine for the
+                                 # minute-0 clamp fix (commit 7b4fd92), and THOSE bytes ran on
+                                 # the coach too, flashed and verified 2026-09-04 (checklist
+                                 # items 8 and 10).
 
     PUMP_LINK_SELECTOR = 0xEE
     LINK_SUBSCRIPTION_VAR = 289
@@ -7783,7 +7776,7 @@ class ShowNavSlidesIcon(Op):
     Declares no capability delta: a switch base and an action-dispatcher screen constant; no G12
     group or binding changes, so the panel gains no new command it could not already send.
 
-    HARDWARE-VERIFIED 2026-09-03 (the reference coach's build log (not published), v14): the coach draws the six-icon rail and
+    HARDWARE-VERIFIED 2026-09-03: the coach draws the six-icon rail and
     the slide-out icon opens screen 29, a page no route reached in stock.
     """
 
@@ -7869,9 +7862,8 @@ class PinSwitchArm(Op):
     re-walking every screen root that reaches the switch's object for several slot values and
     checking the arm is placed on each and the other stock arms on none.
 
-    HARDWARE-VERIFIED 2026-09-05 (v18, the reference coach's build log (not published) "Experimental v18" -> "v18 FLASHED
-    AND VERIFIED"): the rows were present immediately after the flash and again after a power
-    cycle, where stock hid them after every flash.
+    HARDWARE-VERIFIED 2026-09-05 (`docs/BUS-BASELINE.md` PC.60): the rows were present immediately
+    after the flash and again after a power cycle, where stock hid them after every flash.
     """
 
     hardware_verified = True
@@ -7951,7 +7943,7 @@ class FixVariantGate(Op):
     No capability delta: the control's bindings are untouched; only which variant the tick
     selects, or which selector the gate watches, changes.
 
-    HARDWARE-VERIFIED 2026-09-07 (`BUS-BASELINE.md` PC.62). Running on the coach in v21, the `-`
+    HARDWARE-VERIFIED 2026-09-07 (`BUS-BASELINE.md` PC.62). Running on the coach, the `-`
     put `19FED99F#FF96990FFBFFD2FF` on the bus -- a `D2 FF` delta of `0xFFFB` = -5, byte-exact
     against the prediction and the `+`'s `0500D2FF` mirrored -- followed by the `D2 EA` echo and
     the `D3 FF` read-back. The button had transmitted nothing in five presses across three
@@ -8080,7 +8072,7 @@ class AddCornerMark(Op):
       MARK_REFUSED -- `cornermark.add_mark` refused (a duplicate switch on the same cell, a bad
               object index, a record that failed its self-decode, or a relocate gate)
 
-    **HARDWARE-VERIFIED 2026-09-06** (`BUS-BASELINE.md` PC.61, v21): the Auto Off timer face
+    **HARDWARE-VERIFIED 2026-09-06** (`BUS-BASELINE.md` PC.61): the Auto Off timer face
     appears in the HOME Water Pump button's lower-right corner while the countdown runs and goes
     when it stops, with `Water Pump` and `Tank Heater` unmoved in both states.
 
@@ -8316,7 +8308,7 @@ class SuppressTankStatus(Op):
     No capability delta: this REMOVES a broadcast the G12 makes. Nothing in the panel's
     (channel, command) capability set changes -- no binding, group or DGN filter is touched.
 
-    HARDWARE-VERIFIED 2026-09-07 (`BUS-BASELINE.md` PC.62), flashed as v22. A 12-second capture
+    HARDWARE-VERIFIED 2026-09-07 (`BUS-BASELINE.md` PC.62). A 12-second capture
     carries **zero** `19FFB7` frames where every earlier capture carries ~48, while the controls
     hold exactly as designed: `18BFC19C` still sends all four raw ADCs and `19AAB79C` still sends
     the LPG mirror. The panel then showed a **foreign** sender driving its stock gauge -- an
@@ -8381,7 +8373,7 @@ class SuppressTankStatus(Op):
 class AddLevelPage(Op):
     """The LEVEL page on screen 29 (root object 32, the stranded SLIDES/AWNINGS auto-level page
     `show_nav_slides_icon` routes the nav rail's slide icon to), fed by the level sensor's
-    `0x0FFB0` records (its design note (not published)).
+    `0x0FFB0` records.
 
     The body, object 367 (root 32's only child page, record 32[6]), is replaced in place with
     `levelpage.build_body`'s stream (`relocate.replace_object_records`); root 32's records 0-5
@@ -8405,7 +8397,7 @@ class AddLevelPage(Op):
     Preview (`preview` true) draws the mockup's example state as static text: no receive side,
     no cells and no GuiCode (v34a, a drawing check before the live build).
 
-    Controls (`controls` true; spec `2026-09-26-level-controls-design.md` sections 2-4): the
+    Controls (`controls` true): the
     Blocks-carried stepper (- / +) and the Zero Level button. Three free group slots
     (`newbutton.free_group_slots` minus `levelcontrols.RESERVED_GROUPS` -- 68/69, the
     inverter/charger templates the PD-inverter bridge will drive -- taken in order minus, plus,

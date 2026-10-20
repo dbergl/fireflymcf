@@ -1,8 +1,6 @@
 """The 48V battery per-tick routine: read a bus voltage slot, drive a cloned battery's three
 isolated status cells (value number, colour word, gauge fill level), tail-chain on the hook.
 
-Spec: its design note (not published).
-
 `AddVoltageBattery` (recipe_ops.py) clones donor 443 into a fresh object beside the chassis
 battery and repoints its colour / gauge-level / value cells onto three fresh SRAM words nothing
 stock names. That leaves those cells dead -- the stock per-tick block `FUN_00247BF8` writes only

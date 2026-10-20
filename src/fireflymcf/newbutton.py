@@ -343,7 +343,7 @@ def clone_onto_home(data: bytes, position: tuple[int, int] | None = None
 # The clone commands RV-C instance == G12 pin 15: unbound (no existing binding commands
 # it, per BUS-BASELINE/answer-key), latch, and its indicator colour cell is indexed --
 # chosen 2026-08-16 after a dig found the earlier candidate (27) is a motor channel with
-# a command conflict (see its design note (not published)).
+# a command conflict.
 TARGET_CHANNEL = 15
 
 # The single-press toggle: ONE DC_DIMMER_COMMAND_2 binding carrying command 5 (toggle). The
@@ -843,7 +843,7 @@ assert len(NEW_LABEL_RAW) == len(TARGET_LABEL_RAW)
 # box is 84 wide and carries its own geom[0]=135 x-offset, which rides on top of the attach
 # record's origin, so the drawn left edge is NEW_X + 135: centring an 84-wide box at x=612 wants
 # a left edge of 570, hence NEW_X = 435. y=404 sits ~13px under the battery and ~14px above the
-# quadrant's bottom edge. Verified on the coach (v8, 2026-08-17).
+# quadrant's bottom edge. Verified on the coach 2026-08-17.
 NEW_X = 435
 NEW_Y = 404
 

@@ -2,7 +2,7 @@
 base-pointer GuiData table.
 
 The expected address lists are a byte-derived oracle, not a fit: they were confirmed by a
-spike disassembly of 13.6's GuiCode (working notes, not published) before this module existed, so a stub or a desynced scan would not
+spike disassembly of 13.6's GuiCode before this module existed, so a stub or a desynced scan would not
 reproduce them by chance. This is discovery only -- Task 3 uses these to actually relocate
 and grow the table; nothing here modifies an image.
 """

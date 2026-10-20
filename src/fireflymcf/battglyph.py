@@ -8,8 +8,8 @@ the number is anchored 2 px above its bottom, so without the raise the glyph run
 number (owner chose bottom-right + raised number from mockups, 2026-09-24).
 
 **Why the whole battery goes inside a switch.** A battery is drawn by an enrolled wt5 container
-that watches the voltage cell and repaints its WHOLE child -- number and fill -- on every change
-(v25, the reference coach's build log (not published)). A glyph laid over it as a sibling would be wiped on the next voltage
+that watches the voltage cell and repaints its WHOLE child -- number and fill -- on every change.
+A glyph laid over it as a sibling would be wiped on the next voltage
 tick and not come back until its own cell changed. So the battery object itself becomes ONE
 enrolled wt6 switch on the Batt Heat state cell (`add_aes_batt_heat_status`'s fold: bit 0 heater,
 bit 1 contactor), and each of its four arms draws the whole battery, the contactor arms adding the

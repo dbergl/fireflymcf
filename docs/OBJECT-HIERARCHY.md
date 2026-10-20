@@ -289,8 +289,7 @@ raises — the standing "check your tests can fail" rule).
 ## 7. Worked case: replacing a switch-selected object in place, and reusing a stranded root
    (the compact AES Electrical page)
 
-Full design and plan: its design note (not published),
-its design note (not published). This is a second recipe for
+This is a second recipe for
 attaching a page-sized amount of content, alongside §4's clean-button recipe, for the case where
 the target is not a free child slot but an object *already selected by a switch's contiguous
 band* — the situation §2's "switch candidates are a contiguous object band" rule describes.
@@ -417,7 +416,7 @@ chose to leave it.
 sub-page body), the cluster clone (an appended object, not 315 itself), and stranded root 31
 (rebuilt in place). The switch on object 5, object 830, object 315, and object 45 are never
 touched — the AGS render path is byte-identical by construction, not by a golden-test
-coincidence. **Hardware-verified on the coach, firefly-13.6, 2026-09-01** (the reference coach's build log (not published)):
+coincidence. **Hardware-verified on the coach, firefly-13.6, 2026-09-01**:
 AGS page unchanged; the AES compact page mirrors it; the gear reaches the settings sub-page; both
 voltage gauges are live; the engine control shows the real AES Engine/Start/Stop/Not-Running
 content; Low Volts recolors and arms both ways; the enable pill routes through the Notice page.

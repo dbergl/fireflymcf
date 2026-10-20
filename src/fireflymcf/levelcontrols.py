@@ -1,7 +1,7 @@
 """The LEVEL page controls: what the Blocks-carried stepper (- / +) and Zero Level send, the
 bindings that send it, their group-table entries, and a decoder of one whole press.
 
-Spec: its design note (not published) section 3. This module holds
+This module holds
 data and a model; it writes nothing into an image (the page op does, via
 `optionrow._grow_bindings` and `newbutton.free_group_slots`).
 

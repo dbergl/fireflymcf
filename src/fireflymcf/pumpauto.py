@@ -335,7 +335,7 @@ def resolve(data: bytes, *, config: "_register.Register",
 
     # The two scratch cells, in `scan_display_cell`'s own order and under its own discipline
     # (2-aligned, both bytes in SRAM and GuiCode-unreferenced -- the scan that excludes the
-    # the build log trap cell 203, which is widget-spare but is live working memory for the very
+    # trap cell 203, which is widget-spare but is live working memory for the very
     # per-tick function this routine chains onto).
     display_slot, display_addr = followchannel.scan_display_cell(data)
     countdown_slot, countdown_addr = followchannel.scan_display_cell(
@@ -592,7 +592,7 @@ def build(plan: PumpAutoPlan, code_load_addr: int) -> tuple[bytes, list]:
     emit(4, lambda h, s: (thumb.strb_imm12(2, 0, 0), "strb.w r2, [r0]"))
     # AND DISARM THE COUNTDOWN. This is the boot-time zeroing of the uninitialised cell, and
     # it is the ONLY place it can happen: the countdown lives above `_ebss`, which the panel's
-    # C runtime never establishes (the build log v14), so at power-on it holds garbage. A garbage
+    # C runtime never establishes (`raminit.py`), so at power-on it holds garbage. A garbage
     # value at or below `MINUTES_MAX * 60` is indistinguishable from a live countdown -- the
     # arm step's impossible-value guard sits above that range by construction -- so a coach
     # that boots with the pump already running would count a phantom interval down and put an

@@ -45,7 +45,7 @@ Every `builds/*.ffproj.json` is validated automatically by `tests/test_builds_va
 
 ## Moved out of `CLAUDE.md` on 2026-09-10 — the 2026-09-01 speed pass and the parallel-run measurements
 
-Verbatim, as part of the documentation cleanup (its design note (not published)). Dated statements below describe the state on the date they carry.
+Verbatim, as part of the documentation cleanup. Dated statements below describe the state on the date they carry.
 
 **The 2026-09-01 speed pass (serial 26m49s → 4m42s; parallel 6m49s → 60 s; `from_stock.py`
 67 s → 7.5 s, byte-identical output).** Three things, all in the library, none in the tests:
