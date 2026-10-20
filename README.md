@@ -54,17 +54,43 @@ The first full run is slow (recipe compiles fill `build/.compiled-images`); late
 
 ## Releasing
 
-Releases are GitHub releases (nothing is published to PyPI). Set the same version in
-`pyproject.toml` and `plugin/.claude-plugin/plugin.json`, commit, then tag and push the tag:
+Releases are GitHub releases; nothing is published to PyPI. A version tag starts
+`.github/workflows/release.yml`: the test matrix on Linux, Windows and macOS, a check that the tag
+matches both version files (`scripts/check_version.py`), then a release with generated notes and
+the wheel and source package attached.
+
+1. **Pick the version.** The last number for fixes only (0.2.0 → 0.2.1); the middle one for new
+   features such as an op or a command (→ 0.3.0).
+2. **Set it in both files, on a branch**: `version` in `pyproject.toml` and `"version"` in
+   `plugin/.claude-plugin/plugin.json`. Check them:
+   ```
+   .venv/bin/python scripts/check_version.py v0.3.0    # prints "version 0.3.0", or what disagrees
+   ```
+3. **Merge to `main`, push, and wait for that push's CI run to pass.**
+4. **Tag the commit on `main` and push the tag.** It must start with `v`; `0.3.0` starts nothing.
+   ```
+   git checkout main && git pull
+   git tag -a v0.3.0 -m "fireflymcf 0.3.0"
+   git push origin v0.3.0
+   ```
+5. **Watch the release run** (`gh run list`, or the Actions tab). It ends with the release at
+   `https://github.com/dbergl/fireflymcf/releases/tag/v0.3.0`.
+
+**If the run fails, nothing is published.** Fix it on `main`, then move the tag to the fixed
+commit:
 
 ```
-git tag v0.2.0 && git push origin v0.2.0
+git push origin :refs/tags/v0.3.0
+git tag -d v0.3.0
+git tag -a v0.3.0 -m "fireflymcf 0.3.0"
+git push origin v0.3.0
 ```
 
-`.github/workflows/release.yml` runs the test matrix and checks the tag against both files
-(`scripts/check_version.py`). It then attaches the wheel and the source package to a release
-with generated notes. An owner installs a release with
-`pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git@v0.2.0"`.
+Move only a tag that never produced a release. Once a release exists, someone may have installed
+it by its tag: ship the fix as the next version instead.
+
+An owner installs a release with
+`pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git@v0.3.0"`.
 
 ## Disclaimer
 
