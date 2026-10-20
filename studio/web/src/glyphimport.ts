@@ -4,7 +4,7 @@
 // A glyph carries COVERAGE, not colour: one value per pixel, painted later in whatever
 // ink the widget's text colour resolves to. So the channel that matters in the source
 // artwork is ALPHA -- the black disc behind a logo must not come along, only the marks.
-// That is the same rule `builds/from_stock.py` applies when it rasterises the Starlink
+// That is the same rule the original build script applied when it rasterised the Starlink
 // SVG (`min(15, alpha >> 4)` per pixel), transcribed here so an imported PNG and the
 // build script produce identical pixels from identical artwork.
 //
