@@ -36,6 +36,8 @@ def _unencoded_text_io(tree: ast.AST):
         if isinstance(f, ast.Name) and f.id == "open":
             mode = _mode(node, 1)
         elif isinstance(f, ast.Attribute) and f.attr == "open":
+            if isinstance(f.value, ast.Name) and f.value.id == "Image":
+                continue                      # Pillow's Image.open: images, never text
             mode = _mode(node, 0)
         elif isinstance(f, ast.Attribute) and f.attr == "fdopen":
             mode = _mode(node, 1)
@@ -57,7 +59,7 @@ def test_every_text_file_is_opened_as_utf8():
 def test_scan_catches_an_unencoded_open():
     tree = ast.parse("open(p)\nopen(p, 'w')\nPath(p).read_text()\nopen(p, 'rb')\n"
                      "open(p, encoding='utf-8')\nPath(p).open('rb')\nos.fdopen(fd, 'w')\n"
-                     "os.fdopen(fd, 'wb')\n")
+                     "os.fdopen(fd, 'wb')\nImage.open(p)\n")
     assert list(_unencoded_text_io(tree)) == [1, 2, 3, 7]
 
 
