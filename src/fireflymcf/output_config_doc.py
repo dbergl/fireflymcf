@@ -388,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     data = open(args.mcf, "rb").read()
     text = render(data)
-    with open(args.out, "w") as fh:
+    with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(text)
     print("wrote %s (%d bytes)" % (args.out, len(text)))
     return 0

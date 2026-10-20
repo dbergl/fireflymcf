@@ -43,7 +43,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from fireflymcf import g12net, upload
+from fireflymcf import console, g12net, upload
 
 REFUSED = 2
 
@@ -130,6 +130,7 @@ def _describe(found: g12net.Enumeration) -> str:
 
 
 def main(argv=None) -> int:
+    console.utf8()
     args = _parser().parse_args(argv)
     source = upload.LOADER_SA if args.as_loader else upload.PROBE_SA
 

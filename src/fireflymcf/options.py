@@ -438,7 +438,7 @@ class CoachConfig:
         optional; a missing one falls back to the dataclass default. `preview` (runtime
         display values, not byte-derived -- see the field comment) is loaded verbatim.
         """
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             raw = json.load(f)
         extra_slots = {int(k): v for k, v in raw.get("extra_slots", {}).items()}
         return CoachConfig(floorplan=raw.get("floorplan"),

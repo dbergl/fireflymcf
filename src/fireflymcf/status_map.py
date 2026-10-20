@@ -69,7 +69,7 @@ def load_bridge(build: str = "136") -> dict[int, dict]:
     Vars with no clean 2-dest block are absent (i.e. not cleanly bridged).
     """
     out: dict[int, dict] = {}
-    with open(_bridge_path(build)) as fh:
+    with open(_bridge_path(build), encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
             if not line or line.startswith("#"):
@@ -593,7 +593,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     data = open(args.mcf, "rb").read()
     text = build_report(data, args.build)
-    with open(args.out, "w") as fh:
+    with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(text)
     print("wrote %s (%d bytes)" % (args.out, len(text)))
     return 0

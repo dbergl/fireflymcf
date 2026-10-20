@@ -472,10 +472,10 @@ def project_schema(registry: dict | None = None) -> dict:
 
 
 def main() -> int:
-    DOC_PATH.write_text(render())
+    DOC_PATH.write_text(render(), encoding="utf-8")
     print("wrote %s" % DOC_PATH)
     SCHEMA_PATH.parent.mkdir(exist_ok=True)
-    SCHEMA_PATH.write_text(json.dumps(project_schema(), indent=2) + "\n")
+    SCHEMA_PATH.write_text(json.dumps(project_schema(), indent=2) + "\n", encoding="utf-8")
     print("wrote %s" % SCHEMA_PATH)
     return 0
 
