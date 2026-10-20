@@ -69,7 +69,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import armimg, container, coverage, embedded, guidata, options, patch
+from . import armimg, console, container, coverage, embedded, guidata, options, patch
 # `render` (and its Pillow/numpy dependency) is imported lazily in `_cmd_render` so the
 # read/patch commands run on a stdlib-only install -- see `pyproject.toml` extras.
 
@@ -730,7 +730,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     """
     from . import recipe, validate
     try:
-        project = recipe.Project.from_json(Path(args.project).read_text())
+        project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
         if args.stock:
             stock = Path(args.stock).read_bytes()
         else:
@@ -787,7 +787,7 @@ def _cmd_coach_config(args: argparse.Namespace) -> int:
     floorplans = options.floorplan_options(data)
     names = sorted({livecfg.canonical_option(b.name) for b in options.option_bindings(data)})
     if args.capture:
-        live = livecfg.decode_capture(Path(args.capture).read_text(errors="replace"))
+        live = livecfg.decode_capture(Path(args.capture).read_text(encoding="utf-8", errors="replace"))
         if not live.frames:
             raise ValueError(f"{args.capture} holds no configuration frames (DGN 0x15FCE); "
                              "capture at least 10 s of the RV-C bus with `candump -L`")
@@ -807,7 +807,7 @@ def _cmd_coach_config(args: argparse.Namespace) -> int:
                              % (", ".join(map(repr, unknown)), ", ".join(names)))
         body = {"floorplan": args.floorplan, "options": list(args.option)}
     _check_writable(Path(args.out), Path(args.image))
-    Path(args.out).write_text(json.dumps(body, indent=2) + "\n")
+    Path(args.out).write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
     if args.json:
         print(json.dumps(dict(body, ok=True, out=args.out), indent=2))
     else:
@@ -894,7 +894,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
         raise ValueError(f"refusing to write {out}: the bootloader lists only mcf-*.bin files")
     _check_writable(out, stock_path)
     try:
-        project = recipe.Project.from_json(Path(args.project).read_text())
+        project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
         stock = stock_path.read_bytes()
         result = recipe.compile_project(project, stock)
     except recipe.RecipeError as exc:
@@ -939,7 +939,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     sidecar = {"sha256": sha, "size": len(data), "build_name": patch.build_name(data),
                "project": str(args.project), "stock_sha256": project.base_sha256,
                "manifest": result.manifest, "unverified": result.unverified}
-    Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2))
+    Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     if args.json:
         print(json.dumps(dict(sidecar, ok=True, out=str(out)), indent=2))
         return 0
@@ -964,7 +964,7 @@ def _cmd_glyph_export(args: argparse.Namespace) -> int:
                 "type": "install_glyph", "params": spec}
     text = json.dumps(spec, indent=2)
     if args.out:
-        Path(args.out).write_text(text + "\n")
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
         print("wrote %s (%d rows, %dx%d)"
               % (args.out, len(spec.get("params", spec)["rows"]),
                  len(spec.get("params", spec)["rows"][0]),
@@ -1599,7 +1599,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
                                 "font": p.font, "value_slot": p.value_slot,
                                 "depth": p.depth}
                                for p in placed]}
-        Path(args.placements).write_text(json.dumps(body, indent=1))
+        Path(args.placements).write_text(json.dumps(body, indent=1), encoding="utf-8")
         print(f"wrote {args.placements}  ({len(placed)} placed record(s))")
 
     # The AES/AGS indicator (slot 129) and the ELECTRICAL run-time caption (slot 269) are wtype-13
@@ -1655,6 +1655,7 @@ def _cmd_render(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    console.utf8()
     parser = argparse.ArgumentParser(prog="fireflymcf")
     sub = parser.add_subparsers(dest="command", required=True)
 

@@ -55,7 +55,7 @@ class ProjectStore:
         if p.exists():
             raise StoreError("EXISTS", "project %r already exists" % name, status=409)
         project = recipe.Project(base_sha256=self.base_sha256, build_name=None, ops=[])
-        p.write_text(project.to_json())
+        p.write_text(project.to_json(), encoding="utf-8")
         return {"name": name, "mtime": p.stat().st_mtime,
                 "project": json.loads(project.to_json())}
 
@@ -63,7 +63,7 @@ class ProjectStore:
         p = self._path(name)
         if not p.exists():
             raise StoreError("NOT_FOUND", "no project %r" % name, status=404)
-        text = p.read_text()
+        text = p.read_text(encoding="utf-8")
         recipe.Project.from_json(text)          # validate; raises RecipeError
         return {"name": name, "mtime": p.stat().st_mtime, "project": json.loads(text)}
 
@@ -71,7 +71,7 @@ class ProjectStore:
         p = self._path(name)
         if not p.exists():
             raise StoreError("NOT_FOUND", "no project %r" % name, status=404)
-        return recipe.Project.from_json(p.read_text())
+        return recipe.Project.from_json(p.read_text(encoding="utf-8"))
 
     def save(self, name: str, project_doc: dict, expected_mtime: float | None) -> float:
         p = self._path(name)
@@ -83,14 +83,14 @@ class ProjectStore:
                              % (expected_mtime, p.stat().st_mtime), status=409)
         text = json.dumps(project_doc, indent=2)
         recipe.Project.from_json(text)          # refuse whole on invalid; raises RecipeError
-        prev_text = p.read_text()
+        prev_text = p.read_text(encoding="utf-8")
         bak = p.with_suffix(p.suffix + ".bak")
         fd, tmp = tempfile.mkstemp(dir=str(self.root), suffix=".tmp")
         bak_fd, bak_tmp = tempfile.mkstemp(dir=str(self.root), suffix=".bak.tmp")
         try:
-            with os.fdopen(fd, "w") as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(text)
-            with os.fdopen(bak_fd, "w") as f:
+            with os.fdopen(bak_fd, "w", encoding="utf-8") as f:
                 f.write(prev_text)
             os.replace(bak_tmp, bak)
             os.replace(tmp, p)

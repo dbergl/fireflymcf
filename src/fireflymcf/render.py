@@ -88,13 +88,27 @@ COL = {
 
 _FONT_REG = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 _FONT_BLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+#: (bold, regular) file names tried after the Debian path, found by Pillow in the platform's
+#: own font directories: DejaVu elsewhere on Linux, Arial on Windows and macOS.
+_FONT_NAMES = (("DejaVuSans-Bold.ttf", "DejaVuSans.ttf"), ("arialbd.ttf", "arial.ttf"),
+               ("Arial Bold.ttf", "Arial.ttf"))
 _font_cache: dict[tuple[bool, int], ImageFont.FreeTypeFont] = {}
 
 
 def _font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont:
+    """The text-fallback font (a glyph the panel file cannot supply). Any machine has one: the
+    last resort is Pillow's own bundled font, which needs no system font at all."""
     key = (bold, size)
     if key not in _font_cache:
-        _font_cache[key] = ImageFont.truetype(_FONT_BLD if bold else _FONT_REG, size)
+        paths = [_FONT_BLD if bold else _FONT_REG] + [n[0 if bold else 1] for n in _FONT_NAMES]
+        for path in paths:
+            try:
+                _font_cache[key] = ImageFont.truetype(path, size)
+                break
+            except OSError:
+                continue
+        else:
+            _font_cache[key] = ImageFont.load_default(size)
     return _font_cache[key]
 
 

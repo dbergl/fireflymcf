@@ -320,7 +320,7 @@ def create_app(stock_path: str = "firefly-13.6/mcf.bin",
         sidecar_path = path + ".json"
         if os.path.exists(sidecar_path):
             try:
-                with open(sidecar_path) as f:
+                with open(sidecar_path, encoding="utf-8") as f:
                     recorded_etag = json.load(f).get("etag")
             except (OSError, ValueError):
                 # Corrupt sidecar (truncated write, manual edit, a future format
