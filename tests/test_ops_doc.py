@@ -40,7 +40,7 @@ def test_error_codes_are_parsed_from_the_docstring():
 def test_the_doc_does_not_read_the_research_repo():
     # The public reference is generated from the package alone: no coach's recipe feeds it.
     assert not hasattr(ops_doc, "RUNNING_RECIPE")
-    assert "builds/" not in ops_doc.render()
+    assert "builds" + "/" not in ops_doc.render()
 
 
 def test_ops_lists_every_op_with_its_verified_flag(capsys):

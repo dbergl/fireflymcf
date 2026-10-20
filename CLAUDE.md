@@ -12,9 +12,11 @@ structural gate this project has. `plugin/` is the Claude Code plugin built on i
 **This repository holds no firmware.** The corpus (`firefly-*/mcf.bin`, `cli.bin`), coach captures
 (and `tests/answer_key.py`, their transcription),
 the reference coach's recipes and builds, and the Ghidra projects live in a private research
-repository (`firefly-firmware`). `scripts/link-research.sh` symlinks them in under gitignored names
-so the full suite runs; without them, the tests that need them are not collected. The docs cite
-those paths (`firefly-13.6/mcf.bin`, `captures/…`, `builds/…`) as they stand there.
+repository (`firefly-firmware`). `scripts/link-research.sh` symlinks the corpus, captures and render
+configurations in under gitignored names so the full suite runs; without them, the tests that need
+them are not collected. The tests that read the reference coach's builds live in that repository
+(`tests/engine/`). The docs cite those paths (`firefly-13.6/mcf.bin`, `captures/…`, `builds/…`) as
+they stand there.
 
 ## Start here
 

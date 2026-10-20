@@ -63,7 +63,7 @@ def test_all_water_reproduces_the_image_on_the_coach(tmp_path, capsys):
 
 
 @pytest.mark.skipif(not (REPO / "build/mcf-experiment-v22-notankbcast.bin").exists(),
-                    reason="build/ is gitignored; run builds/experiment first")
+                    reason="build/ is gitignored; build the v22 experiment image first")
 def test_the_g12_section_matches_the_flashed_v22_image(tmp_path):
     out = tmp_path / "mcf-tanks.bin"
     assert run(STOCK, "--all-water", "--no-rename", "-o", out) == 0

@@ -1,6 +1,5 @@
 """The Ignore Alarms button (v49): `add_aes_batt_heat` as a generic BMS command button --
 `enable_wire` / `off_wire` / `text` / `group_pool` -- and `add_aes_bms_button_status`."""
-import hashlib
 import json
 from pathlib import Path
 
@@ -66,14 +65,6 @@ def test_bad_wire_refused():
     bad["params"]["enable_wire"] = "4d53"
     res = _compile(BASE_OPS + [bad])
     assert not res.ok and any("BAD_PARAMS" in str(e) for e in res.errors), res.errors
-
-
-def test_v47_unchanged():
-    p = json.loads((REPO / "builds/mcf-13.6-batt-outline.ffproj.json").read_text())
-    res = recipe.compile_project(recipe.Project.from_json(json.dumps(p)), STOCK.read_bytes())
-    assert res.ok, res.errors
-    assert hashlib.sha256(res.data).hexdigest() == hashlib.sha256(
-        (REPO / "builds/mcf-13.6-BattOutline-v47.bin").read_bytes()).hexdigest()
 
 
 # --- add_aes_bms_button_status ------------------------------------------------------------------
