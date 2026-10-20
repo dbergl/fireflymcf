@@ -1,5 +1,4 @@
 import hashlib
-import json
 import struct
 import pytest
 from fireflymcf import cli, guidata, patch, records, recipe
@@ -27,7 +26,7 @@ def labels_of(data, obj_index):
 
 
 def _pump_feature_ops():
-    """The op list `builds/golden-v22-anchor.ffproj.json` composes for the whole Water Pump
+    """The op list the reference coach's `golden-v22-anchor` recipe composes for the whole Water Pump
     feature -- a fresh list of `recipe.OpSpec` every call, since callers mutate `.params`
     freely:
 
@@ -1109,104 +1108,6 @@ def test_follow_channel_op_produces_a_sealed_gated_follower(stock, stock_hash):
     assert recipe.capabilities(out) == recipe.capabilities(stock)
 
 
-def test_experiment_build_uses_new_pump_link_option_row(stock, stock_hash):
-    """B3.2: the shipped Experimental build's `pumplink` op is `add_option_follower` --
-    a dedicated new 'Pump Link' OPTIONS row -- not `follow_channel`'s Heat Pump
-    repurpose. Supersedes the old byte-diff blast-radius test for `follow_channel`
-    (which asserted the Heat Pump label field was the ONE legitimate rewrite site);
-    that op is no longer part of this build, so that specific proof no longer applies,
-    and `add_option_follower`'s own from-stock blast radius is already exhaustively
-    proven at the op level by
-    `test_add_option_follower_composes_toggle_row_and_gated_follower`.
-
-    What only a FULL-build compile can show -- and what this test adds -- is that
-    Heat Pump stays untouched, and every other declared feature still verifies, in
-    the presence of the other ~21 experiment ops. `recipe._finish` runs every op's
-    `verify()` against the SAME final compiled image, so `result.ok` alone already
-    proves each feature structurally; the substring checks below just name that proof
-    per-feature (CLAUDE.md build-hygiene: assert every feature, never inherit one)."""
-    from pathlib import Path
-    from fireflymcf import config, layout
-
-    doc = json.loads(Path("builds/golden-v22-anchor.ffproj.json").read_text())
-    # ENABLED ops only: the manifest carries one entry per compiled op, and the project may hold
-    # disabled ones (`minutes-home` since 2026-09-06 -- kept so the v17/v18/v19 pins can restore
-    # it, see tests/test_registers.py).
-    op_ids = [o["id"] for o in doc["ops"] if o.get("enabled", True)]
-    assert "pumplink" in op_ids, "pumplink op missing from builds/golden-v22-anchor.ffproj.json"
-    # add_option_follower reuses a FIXED command-group slot (optionrow.REUSE_GROUP_SLOT
-    # == 164); "left"/"wire" allocate their own groups dynamically (lowest free id) and
-    # would otherwise claim 164 first, refusing pumplink with TOGGLE_REFUSED. So pumplink
-    # must run before both.
-    assert op_ids.index("pumplink") < op_ids.index("left"), \
-        "pumplink must run before 'left' -- it needs group slot 164 still free"
-    assert op_ids.index("pumplink") < op_ids.index("wire"), \
-        "pumplink must run before 'wire' -- it needs group slot 164 still free"
-    pumplink_spec = next(o for o in doc["ops"] if o["id"] == "pumplink")
-    assert pumplink_spec["type"] == "add_option_follower", (
-        "pumplink must use add_option_follower (a new OPTIONS row), not follow_channel "
-        "(which repurposes the Heat Pump row) -- got %r" % pumplink_spec["type"])
-    assert "gate_option" not in pumplink_spec["params"] \
-        and "gate_label" not in pumplink_spec["params"], (
-        "gate_option/gate_label are follow_channel params; add_option_follower has no "
-        "such params -- their presence means the JSON was not fully rewired")
-
-    project = recipe.Project.from_json(json.dumps(doc))
-    assert project.base_sha256 == stock_hash, \
-        "the project file is pinned to a different base image"
-    result = recipe.compile_project(project, stock)
-    assert result.ok, result.errors
-    out = result.data
-
-    assert len(result.manifest) == len(op_ids) and all(result.manifest), \
-        "every op must verify something on the final image"
-    manifest_by_id = dict(zip(op_ids, result.manifest))
-
-    # --- Heat Pump is stock: nothing in this build renames it or reads its selector as
-    # a gate any more -- still 0xEB, still "Heat Pump", all 7 stock label sites intact
-    # (the old follow_channel rename would have shrunk this to 6).
-    assert config.option_selector(out, 0x0A) == 0xEB
-    assert len(patch.find_label_sites(out, "Heat Pump")) == 7
-
-    # --- the new 'Pump Link' row exists, gates on 0xEE, and drives watch=25 -> target=44.
-    # AddOptionFollower.verify() already proved the row/group/detour/same-cell facts
-    # structurally against `out`; this pins the same facts by name in the manifest so a
-    # future param change that silently dropped the gate/selector fails here too.
-    pl = manifest_by_id["pumplink"]
-    assert "'Pump Link'" in pl, pl
-    assert "0xee" in pl.lower(), pl
-    assert "watch=25 -> target=44" in pl, pl
-
-    # Rendered on the OPTIONS page too (not just registered structurally). pumplink runs
-    # right after "tank" (the only earlier op, and it inserts no objects), so its new
-    # object is the first index past stock's object table -- not "the last object table
-    # entry", which would now belong to a later op (e.g. "left"/"shell").
-    new_idx = len(guidata.object_tables(stock)[1])
-    placed = layout.Screen(out).walk(46)
-    assert any(p.obj_index == new_idx and p.wtype == 11
-               and (p.label or "").strip() == "Pump Link" for p in placed), \
-        "Pump Link row did not render on the OPTIONS page"
-
-    # --- every other experiment feature, asserted present by name -------------------
-    assert "tank-heater" in manifest_by_id["tank"]
-    assert "Overflow" in manifest_by_id["left"] and "pin 28" in manifest_by_id["left"]
-    assert "28 - Overflow Valve" in manifest_by_id["row28"]
-    assert "29 - Starlink" in manifest_by_id["row29"]
-    assert "Renogy 48v Inverter" in manifest_by_id["optname"]
-    assert "option interlocks removed" in manifest_by_id["uncouple"]
-    assert manifest_by_id["pin115"] and manifest_by_id["pin260"] and manifest_by_id["pin261"]
-    assert manifest_by_id["invhold"]
-    assert manifest_by_id["hold"] and manifest_by_id["hold-left"]
-    assert manifest_by_id["logo"] and manifest_by_id["shell"] and manifest_by_id["wire"]
-
-    # No unexpected capability change: `_finish`'s capability gate already enforces
-    # every op's declared delta matches the actual one; pumplink declares (set(), set()).
-    assert recipe.capabilities(out) != recipe.capabilities(stock), \
-        "the experiment build is expected to gain/lose some capabilities from its " \
-        "other features (e.g. pin 28/29 buttons) -- if this ever matches stock exactly " \
-        "something upstream silently stopped wiring a control"
-
-
 def test_add_option_follower_composes_toggle_row_and_gated_follower(stock, stock_hash):
     """B3.1: one op that builds the 0xEE toggle group, appends a 'Pump Link' OPTIONS
     checkbox row, and installs a follower routine gated on that row -- with Heat Pump
@@ -1606,8 +1507,8 @@ def test_swap_link_indicator_refuses_a_ref_without_a_display_slot(stock, stock_h
 # OPTIONS row before add_pump_auto_off ever runs).
 # ======================================================================================
 
-_PUMPLINK_PARAMS = {"watch_channel": 25, "target_channel": 44}    # matches builds/experiment
-                                                                  # .ffproj.json's "pumplink" op
+_PUMPLINK_PARAMS = {"watch_channel": 25, "target_channel": 44}    # matches the reference coach's
+                                                                  # recipe's "pumplink" op
 
 
 def test_add_pump_auto_off_creates_the_toggle_when_run_alone_on_stock(stock, stock_hash):

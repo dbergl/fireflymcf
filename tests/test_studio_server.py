@@ -566,7 +566,7 @@ def test_reference_pages(client, stock):
 
 def test_reference_pins_commanded_covers_every_engine_refused_channel(client, stock):
     # Regression for a desync between two independently-written predicates: reference.pins
-    # computes "commanded" from recipe.capabilities (the same gate builds/from_stock.py uses
+    # computes "commanded" from recipe.capabilities (the same gate the reference build script uses
     # to refuse silently repurposing a channel already driven by a control group), while
     # guidata.channel_commands walks the binding table on its own, independently, to the same
     # end. If they ever drift, the GUI could offer a pin as "free" that the engine would

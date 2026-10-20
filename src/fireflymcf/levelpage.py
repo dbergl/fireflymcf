@@ -39,9 +39,9 @@ GREEN, AMBER, RED, DIV = (0x2B, 0xB6, 0x73), (0xE6, 0xA0, 0x28), (0xBE, 0x1E, 0x
 # The "needs blocks" accent (wheel tiles and SHORT ON BLOCKS). AMBER is what v34a flashed with (it
 # was this module's only default at the time); on the panel it reads as a pale yellow and white text
 # on it washes out (owner photo, 2026-09-26). ORANGE is the static palette's own orange (mode-6 index
-# 7, #F15A29) and is the default from v34b on. `builds/mcf-13.6-level-preview.ffproj.json` (v34a's
-# project) pins neither `accent` nor `orientation`, so it reproduces the flashed v34a image only at
-# commit `3f24759`, before this default and the SHORT text's y and colour changed.
+# 7, #F15A29) and is the default since. A project that pins neither `accent` nor `orientation`
+# reproduces an image built under the old default only with the code of that time, before this
+# default and the SHORT text's y and colour changed.
 ORANGE = (0xF1, 0x5A, 0x29)
 ACCENT = ORANGE
 

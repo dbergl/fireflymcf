@@ -552,25 +552,6 @@ def test_free_group_slots_is_a_superset_of_unused_command_groups():
         newbutton.free_group_slots(data))
 
 
-def test_free_group_slots_finds_capacity_where_the_narrow_one_is_exhausted():
-    """The measured fact this task exists for: on the v12 image the stock spares are
-    gone and the relaxed allocator still has room for the two Auto Off arrows.
-
-    This used to read `build/mcf-experiment-v12.bin` behind a `pytest.skip` -- gitignored,
-    untracked, produced by nothing in this tree -- so on a clean checkout the one test that
-    measures the capacity the Auto Off arrows need silently vanished. It borrows
-    `test_pumpauto._v12()`, which reconstructs that same pre-append coach image from tracked
-    inputs, pinned to v12's recorded sha and gated on the scratch allocation. Deliberately the
-    same helper rather than a second copy of the op filter: this test and the ones there are
-    evidence about ONE image, and they must not be able to drift apart.
-    """
-    from tests.test_pumpauto import _v12
-
-    v12 = _v12()
-    assert newbutton.unused_command_groups(v12) == []
-    assert len(newbutton.free_group_slots(v12)) >= 2
-
-
 def test_free_group_slots_is_sorted_and_unique():
     data = _d()
     free = newbutton.free_group_slots(data)
@@ -612,7 +593,7 @@ def test_building_on_a_channel_leaves_no_orphan_group_on_the_default_one():
     `retarget_command` allocates a FRESH group every call, so build-then-retarget leaves the
     first group -- still carrying a command-5 binding on the abandoned channel -- orphaned in
     the table. Nothing references it, but the image can still express that capability, which
-    is exactly what `builds/from_stock.py`'s capability gate refuses.
+    is exactly what the reference build script's capability gate refuses.
 
     Found 2026-08-19 building 'Overflow Valve' on pin 28: the gate reported a gained (15,5).
     """

@@ -4,7 +4,7 @@
 It drops the whole table -- every group, so every control -- if any group has both top bits of
 byte 1 set, or if the tag-0x10 directory entry's extra count (`b3`) exceeds 10. Neither is a
 structural gate, so a build that broke one would still pass the ladder. Checked on every stock
-build and on the running coach's recipe.
+build. (The private research repository runs them on the running coach's recipe too.)
 """
 from __future__ import annotations
 
@@ -12,10 +12,9 @@ from pathlib import Path
 
 import pytest
 
-from fireflymcf import guidata, recipe
+from fireflymcf import guidata
 
 BUILDS = ("firefly-11.23/mcf.bin", "firefly-13.6/mcf.bin", "firefly-14.7 (Terrain)/mcf.bin")
-EXPERIMENT = Path("builds/golden-v22-anchor.ffproj.json")
 
 
 def _descriptor(data: bytes, tag: int) -> bytes:
@@ -27,13 +26,8 @@ def _descriptor(data: bytes, tag: int) -> bytes:
     raise AssertionError(f"no tag-{tag:#04x} directory entry")
 
 
-@pytest.fixture(scope="module", params=BUILDS + ("experiment recipe",))
+@pytest.fixture(scope="module", params=BUILDS)
 def image(request) -> bytes:
-    if request.param == "experiment recipe":
-        stock = Path("firefly-13.6/mcf.bin").read_bytes()
-        result = recipe.compile_project(recipe.Project.from_json(EXPERIMENT.read_text()), stock)
-        assert result.ok, result.errors
-        return result.data
     return Path(request.param).read_bytes()
 
 

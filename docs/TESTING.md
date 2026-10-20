@@ -25,9 +25,7 @@ of `src/`, the canonical project JSON and the stock hash, so a recipe compiles o
 version, not once per test or per worker. Editing anything under `src/` invalidates it, which is
 why the first run after an edit is the slow one. A test that requests `monkeypatch` (or a module
 using `pytest.MonkeyPatch`) always compiles for real: a patched engine must never be served an
-unpatched result. Tests that need an op's handles use the `compile_with_handles` fixture; tests
-that patch one op re-apply it from `compile_prefix_seed`; `shared_memo` caches any other pure,
-expensive result (`test_level_page`'s page renders). Delete the directory to force a cold run.
+unpatched result. Delete the directory to force a cold run.
 
 Two test-hygiene rules from `CLAUDE.md` that apply here:
 
@@ -37,9 +35,14 @@ Two test-hygiene rules from `CLAUDE.md` that apply here:
   granularity) plus size, so a same-length edit within the same second runs stale bytecode:
   `find tests -name __pycache__ -type d -exec rm -rf {} +`.
 
-## Auto-discovery validation for new experimental builds
+## The reference coach's builds
 
-Every `builds/*.ffproj.json` is validated automatically by `tests/test_builds_validate.py`, which compiles the project through all structural gates, asserts the build passes, and asserts that any unverified ops fall within the project's allowlist. A new experimental build needs no new test module — simply drop the `.ffproj.json` in `builds/`. Hand-written per-build tests that pin a frozen build byte for byte live with the builds, in the research repository.
+The tests that read the reference coach's builds — its recipes and committed images, the
+auto-discovery check that every recipe compiles green through the gates, and the byte-for-byte
+pins of frozen builds — live in the private research repository, with their own copy of the
+compile cache (and its `compile_with_handles`, `compile_prefix_seed` and `shared_memo` fixtures).
+Run them there after any engine change. The tests here need only the stock corpus, the captures
+and the render configurations, or nothing.
 
 ---
 

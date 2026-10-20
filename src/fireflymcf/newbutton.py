@@ -869,7 +869,7 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     `retarget_command` call allocates a FRESH group from `allocate_command_group`, so the
     first group -- still carrying a command-5 binding on the abandoned channel -- stays in
     the table as an orphan. It is unreachable, but it is a live capability the image can
-    still express, and `builds/from_stock.py`'s capability gate correctly refuses it. Pass
+    still express, and the capability gate (`recipe.capabilities`) correctly refuses it. Pass
     the destination channel here and only one group is ever allocated.
 
     `label` is padded with trailing spaces to the donor field's width and must not exceed

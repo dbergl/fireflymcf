@@ -3960,8 +3960,8 @@ time one actually did.
 instance=1)` writes `+4` from `ff` to `01`; entry `+5` is already `0x00`, so the compare tests
 payload[0] against 1 — admitting the inverter's instance 1 and rejecting the WS500's `0x31`.
 Instance 1 is the right target: every charger/inverter command DGN this page emits addresses
-instance 1 (`HARDWARE-VERIFIED.md`, PC.23). Shipped as recipe op `pin125` in
-`builds/golden-v22-anchor.ffproj.json` → `build/mcf-experiment-v13.bin`. **Built, not yet flashed.**
+instance 1 (`HARDWARE-VERIFIED.md`, PC.23). Shipped as a recipe op on that pin
+in a research build. **Built, not yet flashed.**
 
 *The trade, stated because it is a choice:* a pinned entry whose device changes instance goes
 **blank**, where the open one showed the wrong device. Silent-and-correct beats loud-and-wrong here

@@ -47,10 +47,12 @@ scripts/link-research.sh [RESEARCH_REPO]       # link the private research data 
 .venv/bin/python -m pytest -q -n auto          # the full suite
 ```
 
-Most tests read the firmware corpus, coach captures and recipes, which are not distributable and
-live in a private research repository. `scripts/link-research.sh` symlinks them in under
-gitignored names; without them, the modules that need them are not collected and the run says so.
-The first full run is slow (recipe compiles fill `build/.compiled-images`); later runs reuse it.
+Most tests read the firmware corpus, coach captures and render configurations, which are not
+distributable and live in a private research repository. `scripts/link-research.sh` symlinks them
+in under gitignored names; without them, the modules that need them are not collected and the run
+says so. The tests that pin the reference coach's builds (its recipes and committed images) live
+in that research repository, not here. The first full run is slow (recipe compiles fill
+`build/.compiled-images`); later runs reuse it.
 
 ## Releasing
 

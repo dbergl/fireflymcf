@@ -5,7 +5,7 @@ ink the widget's text colour resolves to. So the importer's whole job is to deci
 owner's picture, which pixels are the mark:
 
 - **An image with transparency** (PNG, WebP, GIF, an SVG): the alpha channel is the coverage,
-  `min(15, alpha >> 4)` -- the rule `builds/from_stock.py` applied to the Starlink SVG and
+  `min(15, alpha >> 4)` -- the rule the original build script applied to the Starlink SVG and
   Studio's importer (`studio/web/src/glyphimport.ts`) transcribes, so the three agree.
 - **An opaque image** (JPEG, BMP, a flattened PNG): the background is read from the border,
   which must be one plain colour; a light background makes the dark pixels the mark and a dark

@@ -684,7 +684,7 @@ def _three_branch_gates(mcf):
 def test_unmasked_multi_gate_blob_is_byte_identical(mcf_136):
     """FINDING 2: the sha256 pins in tests/test_registers.py only ever exercise ONE of the four
     branches of the shared emitter (`mask == 0xFFFF, value <= 0xFF` -> a single `cmp r0,#imm8`),
-    because `builds/golden-v22-anchor.ffproj.json` carries no `follow_register` op. Pin the other three
+    because the reference coach's `golden-v22-anchor` recipe carries no `follow_register` op. Pin the other three
     against bytes captured from the pre-Task-13 tree, so the refactor's whole surface has durable
     byte cover and not just disassembly-text assertions."""
     watch, gates = _three_branch_gates(mcf_136)

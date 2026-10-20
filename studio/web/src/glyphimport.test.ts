@@ -13,7 +13,7 @@ describe("rowsFromRGBA", () => {
     expect(rows).toEqual(["ff"]);
   });
 
-  it("quantises 8-bit alpha to 4bpp exactly as builds/from_stock.py does", () => {
+  it("quantises 8-bit alpha to 4bpp exactly as the original build script did", () => {
     // min(15, alpha >> 4) — the transcription this whole module exists to keep honest.
     const alphas = [0, 15, 16, 17, 136, 239, 240, 255];
     const rows = rowsFromRGBA(rgba(alphas.map((a) => [0, 0, 0, a])), alphas.length, 1);

@@ -1,17 +1,13 @@
 """The live display-cell/type tables, stock or relocated, and a guard that no module indexes the
 fixed stock offset directly (the 2026-09-25 dead-copy defect)."""
 import ast
-import json
-import re
 from pathlib import Path
 
 import pytest
 
-from fireflymcf import celltables, guidata, recipe, status_map, tablegrow
+from fireflymcf import celltables, tablegrow
 
 STOCK = "firefly-13.6/mcf.bin"
-V33 = "builds/mcf-13.6-BattHeatGlyph-v33.bin"
-V33_PROJECT = "builds/mcf-13.6-batt-heat-glyph.ffproj.json"
 
 
 def test_stock_offsets_are_the_known_constants():
@@ -21,27 +17,7 @@ def test_stock_offsets_are_the_known_constants():
     assert celltables.row_count(d) == 665
 
 
-def test_v33_resolves_the_relocated_table():
-    d = open(V33, "rb").read()
-    off = celltables.cell_table_off(d)
-    assert off != 0x44BC8, "v33 relocated the table; resolving to the stock offset is the defect"
-    assert off == guidata.find_variable_tables(d)[0]
-    # `status_map.cell_table` already follows the relocation for its BASE the same way
-    # `celltables` does (both call `guidata.find_variable_tables`) -- but its LENGTH is a
-    # heuristic best-effort walk that trims trailing zero words (module docstring), and v33's
-    # table has been grown TWICE (`add_voltage_battery` then `add_aes_batt_heat_status`); each
-    # `tablegrow.grow_indexed_tables` call pads up to the next Thumb `cmp.w #imm` encodable bound
-    # (tablegrow.py:432-507), leaving legitimate but currently-unwritten zero rows INSIDE the true
-    # table (verified: indices 667/668/670/671/672 are zero, 665/666/669 are the real grown
-    # cells). `status_map.cell_table`'s trailing-zero trim cannot tell those apart from padding
-    # past the table's real end, so it under-counts (670) against the structurally-proven bound
-    # `celltables.row_count` reads from the GuiCode `cmp.w` gate (673) -- a lower bound, not
-    # equality.
-    assert celltables.row_count(d) >= len(status_map.cell_table(d))
-    assert celltables.row_count(d) == 673
-
-
-@pytest.mark.parametrize("path", [STOCK, V33])
+@pytest.mark.parametrize("path", [STOCK])
 def test_the_live_table_is_the_one_a_gui_code_base_literal_actually_loads(path):
     """Spec §8's other half of "resolve the live table from the descriptor": refuse to have
     resolved a table copy no GuiCode reader/writer literal actually points at. On stock and on
@@ -132,51 +108,3 @@ def test_the_allow_list_stays_exact():
         assert lineno in _flagged_lines(p), (
             "%s:%d is allow-listed but no longer contains a flagged name/literal -- remove the "
             "stale allow-list entry" % (path_str, lineno))
-
-
-def _v33_recipe_plus(*extra_ops):
-    proj = json.load(open(V33_PROJECT))
-    proj["build_name"] = "celltables-test"
-    proj["ops"].extend(extra_ops)
-    return proj
-
-
-def test_add_register_readout_tier3_on_a_relocated_table_binds_the_live_cell():
-    """The defect (spec Sec8): `add_register_readout`'s tier-3 allocation
-    (`statusbind.index_cell` + `readout._ensure_type`) used to write the FIXED stock table
-    offsets. v33's cell/type tables are already relocated (two earlier ops in its own recipe --
-    `coach48v`/`add_voltage_battery` and `status`/`add_aes_batt_heat_status` -- grow them via
-    `readout.allocate_fresh_cells`), so a third op landing on tier 3 wrote a cell/type update to a
-    dead copy nothing reads.
-
-    Reproduced 2026-09-25 (pre-fix): appending a register readout with `width_bytes=2` to v33's
-    own recipe (exhausting the halfword-safe and odd-byte spares so `allocate_display_cell` falls
-    through to tier 3) raised `AssertionError` inside `AddRegisterReadout.verify`
-    (`recipe_ops.py`'s read of the dead type-table copy did not match what `_ensure_type` had
-    actually written, because `statusbind.set_variable_type`'s WRITE already resolved the type
-    table structurally while the stale READ constant did not -- the two disagreed only because
-    the table had moved). Fixed: both sides now resolve through `celltables`.
-    """
-    proj = _v33_recipe_plus(
-        {"id": "probe-var", "type": "append_filter", "enabled": True,
-         "params": {"dgn": 0x1FEA0, "mode": 1, "payload_byte": 1}},
-        {"id": "probe-ro", "type": "add_register_readout", "enabled": True,
-         "params": {"register": {"ref": "probe-var"}, "width_bytes": 2,
-                    "page": 367, "x": 100, "y": 100}})
-    stock = open(STOCK, "rb").read()
-    res = recipe.compile_project(recipe.Project.from_json(json.dumps(proj)), stock)
-    assert res.ok, res.errors
-
-    tier3 = [m for m in res.manifest if "add_register_readout" in m and "tier 3" in m]
-    assert tier3, ("expected the probe readout to land on tier 3 (every cheaper tier consumed "
-                   "by v33's own recipe); it did not, so this no longer exercises the relocated-"
-                   "table defect: %r" % res.manifest)
-    m = re.search(r"cell (\d+) @ (0x[0-9a-f]+)", tier3[0])
-    slot, addr = int(m.group(1)), int(m.group(2), 16)
-
-    # The live +0x44BC8 table entry the widget's value_slot resolves through must now be the
-    # SAME address the appended per-tick routine writes -- not a stale/dead-copy value.
-    cells = status_map.cell_table(res.data)
-    assert cells[slot] == addr, (
-        "the live cell table still names %#x at slot %d; the tier-3 write landed on the dead "
-        "stock-offset copy instead of the relocated table" % (cells[slot], slot))

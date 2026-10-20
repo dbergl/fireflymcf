@@ -1,12 +1,13 @@
 """Corpus fixtures, and the shared recipe-compile cache.
 
 The corpus files are read once per session — they total ~3 MB, so caching them avoids
-re-reading on every test without any meaningful memory cost. `compiled_image` (bottom of the
-file) is the other half: the in-test recipe compiles that replaced the untracked local .bin
-files several modules used to read, memoised so `pytest -n auto` pays for each one once
-instead of once per xdist worker.
+re-reading on every test without any meaningful memory cost. The other half (bottom of the
+file) routes every test's `recipe.compile_project` through a disk cache, so `pytest -n auto`
+pays for each compile once instead of once per xdist worker.
+
+The tests that pin the reference coach's builds (its recipes and committed images) live in the
+private research repository, with a copy of this cache.
 """
-import copy
 import hashlib
 import json
 import os
@@ -29,20 +30,20 @@ VERSION_DIRS = {
 
 
 # ---------------------------------------------------------------------------------------
-# Research data. The corpus, captures, recipes and docs live in the private research repository
+# Research data. The corpus, captures and configurations live in the private research repository
 # and are symlinked in by `scripts/link-research.sh`. Without them, a test module that reaches
-# for any of them (by path, or through a corpus fixture or `compiled_image`) is not collected,
-# since several read the corpus at import time; the run's header says how many were left out. A
-# module that slips past this scan fails loudly on a missing file rather than passing.
+# for any of them (by path, or through a corpus fixture) is not collected, since several read
+# the corpus at import time; the run's header says how many were left out. A module that slips
+# past this scan fails loudly on a missing file rather than passing.
 # ---------------------------------------------------------------------------------------
 
-RESEARCH_PATHS = (*VERSION_DIRS.values(), "captures", "builds", "configs",
+RESEARCH_PATHS = (*VERSION_DIRS.values(), "captures", "configs",
                   "build/coach-wd.json", "tests/answer_key.py")
 _RESEARCH_MISSING = [p for p in RESEARCH_PATHS if not (REPO_ROOT / p).exists()]
 # A module whose need is indirect (a library function reads a research path) declares it with a
 # module-level `NEEDS_RESEARCH_DATA = "<why>"`; the scan below sees the name.
-_RESEARCH_TOKENS = ("firefly-1", "captures", "builds", "configs", "coach-wd",
-                    "compiled_image", "answer_key", "corpus", "mcf_136", "mcf_1123", "mcf_147",
+_RESEARCH_TOKENS = ("firefly-1", "captures", "configs", "coach-wd",
+                    "answer_key", "corpus", "mcf_136", "mcf_1123", "mcf_147",
                     "cli_136", "cli_1123", "cli_147", "NEEDS_RESEARCH_DATA")
 
 
@@ -119,31 +120,22 @@ def cli_147(corpus) -> bytes:
 # ---------------------------------------------------------------------------------------
 # The shared recipe-compile cache.
 #
-# Three test modules now compile a recipe IN-TEST rather than reading an untracked, gitignored
-# .bin that no script in this tree produces: `test_registers.py` (the v9 characterization
-# oracle and the full v14 build), `test_aes_layout_nav.py` (the full build, plus a two-op AES
-# subset), and `test_pumpauto.py` (the pre-append v12 image the scratch allocation is derived
-# from). A full compile is ~10 s of CPU.
-#
-# Under `pytest -n auto` every xdist worker is a separate process, so a per-module cache is one
-# compile PER WORKER. Measured on a 16-way run: adding test_pumpauto's compile behind a plain
-# module-level cache took the suite from 77 s to 117 s, because its 28 image tests are spread
-# across workers and each worker paid the compile again. With this cache it is back to the
-# noise around the original number.
+# A full compile is ~10 s of CPU. Under `pytest -n auto` every xdist worker is a separate
+# process, so a per-module cache is one compile PER WORKER; this one is shared across workers
+# on disk.
 #
 # `compile_project` is a pure function of three things -- the stock image, the exact recipe
-# JSON, and the code in `tools/` -- so the cache key is the SHA-256 of all three. Any edit to a
-# tool module, a packaged data file or a recipe changes the key, and a stale image can never be
-# served. The cache lives under `build/` (gitignored, where generated images already go); one
+# JSON, and the code in `src/` -- so the cache key is the SHA-256 of all three. Any edit to a
+# library module, a packaged data file or a recipe changes the key, and a stale image can never
+# be served. The cache lives under `build/` (gitignored, where generated images already go); one
 # process compiles while holding a lock file and the rest wait on it and then read its result.
 #
 # A cached blob is also CHECKSUMMED, not merely present. The entry ordering below (blob first,
 # metadata last) covers an ordinary interleaved write, but not a crash mid-write, and not any
-# out-of-band mutation of a 1 MB file sitting in a gitignored directory. A cache outlives the
-# consumers that happen to pin their result today -- `test_aes_layout_nav`'s two-op subset pins
-# nothing -- so the metadata carries `sha256(data)` and a mismatch is treated as a MISS: the
-# reader recompiles and overwrites the bad entry rather than serving it. Each file is fsynced
-# before its rename, so the rename cannot commit over unwritten data.
+# out-of-band mutation of a 1 MB file sitting in a gitignored directory, so the metadata
+# carries `sha256(data)` and a mismatch is treated as a MISS: the reader recompiles and
+# overwrites the bad entry rather than serving it. Each file is fsynced before its rename, so
+# the rename cannot commit over unwritten data.
 # ---------------------------------------------------------------------------------------
 
 IMAGE_CACHE_DIR = REPO_ROOT / "build" / ".compiled-images"
@@ -152,11 +144,6 @@ IMAGE_CACHE_DIR = REPO_ROOT / "build" / ".compiled-images"
 # left by one Ctrl-C must not stall every run after it.
 _STALE_LOCK_AFTER = 300.0
 _MEMO: dict[str, "CompiledImage"] = {}
-
-
-class CompiledImage(NamedTuple):
-    data: bytes
-    unverified: tuple[str, ...]
 
 
 class _Entry(NamedTuple):
@@ -283,120 +270,6 @@ def _cached_entry(project, stock: bytes):
     value = _disk_memo("compile", [hashlib.sha256(stock).hexdigest(), project.to_json()],
                        produce)
     return (value, None) if isinstance(value, _Entry) else (None, value)
-
-
-def compiled_image(project_json: str, stock: bytes) -> CompiledImage:
-    """Compile `project_json` against `stock` through the shared cache.
-
-    Returns the image bytes and the recipe's unverified manifest. Raises through
-    `recipe`'s own errors; asserts the project's `base_sha256` really is this stock.
-    """
-    from fireflymcf import recipe
-
-    project = recipe.Project.from_json(project_json)
-    assert hashlib.sha256(stock).hexdigest() == project.base_sha256, "wrong stock base"
-    entry, failed = _cached_entry(project, stock)
-    assert failed is None, failed.errors
-    return CompiledImage(entry.data, entry.unverified)
-
-
-@pytest.fixture(scope="session")
-def compile_with_handles():
-    """`f(project, stock) -> (CompileResult, handles)`: a compile plus the op handles of its
-    final state (`compile_cached`'s last prefix snapshot), shared across workers like every
-    other compile. For tests that inspect what an op recorded (cells, groups, arms)."""
-    from fireflymcf import recipe
-
-    def run(project, stock):
-        def produce():
-            cache: dict = {}
-            res = recipe.compile_cached(project, stock, cache)
-            if not res.ok:
-                raise _Failed((res, None))
-            enabled = [s for s in project.ops if s.enabled]
-            _data, snap = cache[recipe._prefix_key(project.base_sha256, enabled)]
-            return (_Entry(res.data, tuple(res.manifest), tuple(res.unverified)), snap[2])
-
-        value = _disk_memo("handles", [hashlib.sha256(stock).hexdigest(), project.to_json()],
-                           produce)
-        entry, handles = value
-        if not isinstance(entry, _Entry):          # a failed compile, returned uncached
-            return entry, handles
-        return (recipe.CompileResult(True, entry.data, [], list(entry.manifest),
-                                     list(entry.unverified)), copy.deepcopy(handles))
-
-    return run
-
-
-def _lv_build(drop: tuple) -> bytes:
-    """`tests/lvbuilds.py`'s image of the v52 Low Volts recipe with the ops `drop` names
-    removed, shared across workers through `_disk_memo`; skipped when the research builds are
-    not linked in."""
-    from tests import lvbuilds
-
-    if not lvbuilds.available():
-        pytest.skip("builds/ or firefly-13.6/mcf.bin not linked in")
-
-    def produce():
-        res = lvbuilds.compile_with(lvbuilds.LOW_VOLTS_MOVE, drop=drop)
-        if not res.ok:
-            raise _Failed(res)
-        return res.data
-
-    value = _disk_memo("lvbuild", [lvbuilds.STOCK_136.read_bytes(),
-                                   lvbuilds.LOW_VOLTS_MOVE.read_bytes(), "\0".join(drop)],
-                       produce)
-    assert isinstance(value, bytes), value.errors
-    return value
-
-
-@pytest.fixture(scope="session")
-def lv_hold() -> bytes:
-    """`builds/mcf-13.6-low-volts-move.ffproj.json` without its last three ops: the 3 s Low
-    Volts hold, with Low Volts still on the compact ELECTRICAL card."""
-    from tests import lvbuilds
-    return _lv_build(lvbuilds.HOLD_DROP)
-
-
-@pytest.fixture(scope="session")
-def lv_move() -> bytes:
-    """`builds/mcf-13.6-low-volts-move.ffproj.json` as is: Low Volts moved to the AES settings
-    page."""
-    return _lv_build(())
-
-
-@pytest.fixture(scope="session")
-def shared_memo():
-    """`f(kind, parts, produce)`: `produce()` cached across tests and xdist workers under
-    (`kind`, the `src/` digest, `parts`). For an expensive pure result -- a page render of a fixed
-    image -- that several tests or parameters ask for."""
-    return _disk_memo
-
-
-@pytest.fixture(scope="session")
-def compile_prefix_seed():
-    """`f(project, stock, upto) -> dict`: a fresh `compile_cached` cache holding only the state
-    after the project's first `upto` enabled ops, shared across workers. A test that patches the
-    op after the prefix re-applies just that op (and what follows) under its patch."""
-    from fireflymcf import recipe
-
-    def run(project, stock, upto):
-        enabled = [s for s in project.ops if s.enabled][:upto]
-        key = recipe._prefix_key(project.base_sha256, enabled)
-        prefix = recipe.Project(base_sha256=project.base_sha256,
-                                build_name=project.build_name, ops=enabled)
-
-        def produce():
-            cache: dict = {}
-            res = recipe.compile_cached(prefix, stock, cache)
-            assert res.ok, res.errors
-            return cache[key]
-
-        state = _disk_memo("prefix", [hashlib.sha256(stock).hexdigest(), prefix.to_json()],
-                           produce)
-        return {key: copy.deepcopy(state)}
-
-    return run
 
 
 # ---------------------------------------------------------------------------------------

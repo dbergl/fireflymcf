@@ -2,7 +2,7 @@
 
 Almost every reader in this package is a pure function of an MCF's *bytes* -- the table
 parsers, the object-pointer scan, the GuiCode disassembly passes -- and a build or a test
-run calls the same one many times on the same bytes: `builds/from_stock.py` parsed the
+run calls the same one many times on the same bytes: a from-stock build script parsed the
 object tables 74 times, the binding table 2,585 times and disassembled GuiCode 29 times
 before anything here was cached (profiled 2026-09-01). This module is the one place that
 memoisation lives, so the rules are stated once:

@@ -616,7 +616,7 @@ fix.
 
 **Rule for authoring a glyph:** set the y-bearing to `(font cell height − glyph height) / 2`
 unless the record draws with v-align 1, in which case it is a direct offset from the box top.
-`builds/from_stock.py` asserts this against the font's own cell rather than hardcoding 37.
+`install_glyph` asserts this against the font's own cell rather than hardcoding 37.
 
 **Confirmed on the coach, 2026-08-19** (owner, `Custom v22`): with `y = 37` the logo sits centred
 in its button. Three flashes were needed and each ruled something out — v20 (`y = 0`) showed the
@@ -651,7 +651,7 @@ whole time, and two rounds were spent calibrating instead of deriving.
 ### Hold-to-toggle — `gestures.make_hold_to_toggle`, CONFIRMED ON HARDWARE 2026-08-19
 
 "Hold 3 s to switch it on, hold 3 s to switch it off" is **three same-size bytes** on a
-single-entry command-5 group, and `builds/from_stock.py` step 9 applies them to the Starlink
+single-entry command-5 group, and the reference coach's build applies them to the Starlink
 (pin 29) button:
 
 | byte | from | to | why |
