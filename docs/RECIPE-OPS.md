@@ -47,7 +47,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02 (v12). | yes |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
-| [`set_gesture`](#set_gesture) | same-size | Convert a control's single toggle group to hold-to-toggle. | Flashed 2026-08-19 (pins 28 and 29). | yes |
+| [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
 | [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04 (v17). | yes |
 | [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
@@ -61,10 +61,11 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06 (v21). PC.61. | yes |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27 (v35): live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since v37. Zero Level is unverified. | **no** |
-| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe. | Superseded. | yes |
+| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15 (v48; its three draw defects fixed in v49, flashed the same day). | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
+| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22 (reference build v7/v8). | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
 | [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
@@ -340,9 +341,9 @@ Error codes:
 
 ### set_gesture
 
-Convert a control's single toggle group to hold-to-toggle.
+Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129).
 
-- **Hardware status:** Flashed 2026-08-19 (pins 28 and 29).
+- **Hardware status:** Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested.
 - **Proof:** `gestures.py`, `CONTROL-BEHAVIOR.md`
 - **Implementation:** `recipe_ops.SetGesture`
 
@@ -358,7 +359,7 @@ Error codes:
 - `BAD_PARAMS` — kind is not one of "latch"/"hold_to_toggle"
 - `NOT_SUPPORTED` — kind="latch" was requested on a group whose current `.kind` is not already "latch"; v1 has no latch-conversion primitive. offers=["disable_gesture_op"] — the fix is to remove/disable whichever earlier op made the group non-latch, not to fit a new edit here.
 - `NO_SUCH_GROUP` — the group could not be resolved at all: `group` (or the group `target` resolves to via `newbutton.object_group`) is out of range (`gestures.describe_group` raises a bare `IndexError`), or `target` names an object with no `IMAGE_OPCODE` record to read a group off of (`newbutton.object_group` raises a bare `ValueError`). Both are mapped here rather than left to crash `compile_project` unstructured; a `RecipeError` raised underneath (e.g. `resolve_target`'s own `BAD_REF`, which subclasses `ValueError`) is never remapped — it is re-raised as-is.
-- `GESTURE_REFUSED` — `gestures.make_hold_to_toggle` raised `GestureEditError`: the group does not hold exactly one live binding, that binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle, it already carries the repeat bit, or `seconds` does not fit the hold-threshold nibble.
+- `GESTURE_REFUSED` — `gestures.make_hold_to_toggle` raised `GestureEditError`: a single-entry group's binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle or carries the repeat bit; a multi-binding group fails one of the five premises (no repeat bit, one DGN/selector target, variants agreeing on a release toggle, variants that write 0 and 1 or all command-5 toggles, no variant cycling on release); the group has no live binding; or `seconds` does not fit the hold-threshold nibble.
 
 ### set_icon
 
@@ -660,9 +661,9 @@ Error codes:
 
 ### add_low_volts_control
 
-Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe.
+Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge.
 
-- **Hardware status:** Superseded.
+- **Hardware status:** Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge.
 - **Proof:** the reference coach's build log (not published) "The compact AES Electrical page"
 - **Implementation:** `recipe_ops.AddLowVoltsControl`
 
@@ -752,6 +753,27 @@ Error codes:
 - `GLYPH_OCCUPIED` — char's stub entry already decodes as a real (non-placeholder) glyph -- this op only claims a character that currently falls back to the shared placeholder block
 - `GLYPH_STUB_SHARED` — char's stub entry is shared by more than just char (the placeholder-sharing set is bigger than [char]), so repointing it would repoint every character sharing it
 - `RELOCATE_REFUSED` — `relocate.relocate` refused the insertion. Mapped here the same way `RenameLabel` maps `GROW_REFUSED`: a relocating primitive's own `RelocationError` must not escape `compile_project`'s `except RecipeError` filter as a bare, unstructured exception.
+
+### remove_records
+
+Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay.
+
+- **Hardware status:** Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.
+- **Proof:** `relocate.replace_object_records`
+- **Implementation:** `recipe_ops.RemoveRecords`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `target` | integer\|object | yes |  | object index or {"ref": op_id} |
+| `records` | array | yes |  | records to delete: {selector, child?, touch_id?} |
+
+Error codes:
+
+- `BAD_PARAMS` — `records` is empty, an entry has no identity assertion, two entries name the same record, or the removal would leave the object empty.
+- `NO_SUCH_RECORD` — a selector matched nothing (from `_select_record`).
+- `EXPECT_MISMATCH` — a record's child_index or touch id is not what the entry asserts.
+- `POINTER_INSIDE` — a GuiCode or LCD literal points into the part of the object that would move.
+- `RELOCATE_REFUSED` — `relocate.replace_object_records` refused (a gate failed).
 
 ### split_hold_region
 

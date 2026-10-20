@@ -40,6 +40,11 @@ ELECTRICAL_AES_BODY = 829
 # (`layout.screen_object_map`), so the rebuild is in-place at this index and needs no
 # screen-map/match-table edit.
 AES_SETTINGS_ROOT = 31
+
+# Stock's own group-129 Low Volts controls: the AGS Triggers panel and the AGS settings body
+# (`objects 31/315/795` register touch id 129 on stock 13.6; 31 is rebuilt above). Neither is an
+# AES control, so neither counts as the control the AES Low Volts bridge drives.
+AGS_LOW_VOLTS_HOSTS = (315, 795)
 SETTINGS_SCREEN_ID = 28
 
 # The AGS settings frame (screen 46 == object 45) whose six records are the read-only donors for

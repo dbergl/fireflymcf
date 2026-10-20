@@ -2522,9 +2522,14 @@ class InstallGlyph(Op):
 @op("set_gesture")
 class SetGesture(Op):
     """Change one control group's interaction model. v1 supports exactly one
-    direction: converting a single-entry command-5 toggle group to hold-to-toggle
-    (`gestures.make_hold_to_toggle`, hardware-confirmed 2026-08-19 on the pin-29
-    Starlink button). Converting the other way (`kind: "latch"`) is not implemented
+    direction: converting a toggle group to hold-to-toggle
+    (`gestures.make_hold_to_toggle`). A single-entry command-5 toggle is
+    hardware-confirmed (2026-08-19, the pin-29 Starlink button). A variant-selected
+    multi-binding group (13.6's group 129, Low Volts: a selector write that the
+    group's external variant setter points at 0 or 1, plus its read-back) gets the
+    same edit on every live copy; COACH-VERIFIED 2026-10-19 on group 129 from the
+    compact AES ELECTRICAL page (owner: the 3 s hold works). AGS mode is untested.
+    Converting the other way (`kind: "latch"`) is not implemented
     for anything that is not already a latch -- it verifies and no-ops on a latch,
     and refuses everything else rather than half-editing it.
 
@@ -2560,10 +2565,14 @@ class SetGesture(Op):
                      `resolve_target`'s own `BAD_REF`, which subclasses
                      `ValueError`) is never remapped — it is re-raised as-is.
       GESTURE_REFUSED — `gestures.make_hold_to_toggle` raised `GestureEditError`:
-                        the group does not hold exactly one live binding, that
-                        binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle, it
-                        already carries the repeat bit, or `seconds` does not fit
-                        the hold-threshold nibble.
+                        a single-entry group's binding is not a
+                        `DC_DIMMER_COMMAND_2` command-5 toggle or carries the repeat
+                        bit; a multi-binding group fails one of the five premises
+                        (no repeat bit, one DGN/selector target, variants agreeing on
+                        a release toggle, variants that write 0 and 1 or all
+                        command-5 toggles, no variant cycling on release); the group
+                        has no live binding; or `seconds` does not fit the
+                        hold-threshold nibble.
 
     `gestures.make_hold_to_toggle` returns an unsealed image -- `gestures.py` never
     imports `patch` and performs no reseal of its own (checked, not assumed: grep
@@ -2623,7 +2632,7 @@ class SetGesture(Op):
             raise RecipeError("GESTURE_REFUSED", str(err))
         ctx.edits.extend(e)
         data, _ = patch.reseal(data)
-        ctx.handles[self.spec.id] = {"gid": gid}
+        ctx.handles[self.spec.id] = {"gid": gid, "multi": len(beh.emissions) > 1}
         return data
 
     def verify(self, data, ctx):
@@ -2639,8 +2648,165 @@ class SetGesture(Op):
         for dead in (gestures.PHASE_PRESS, gestures.PHASE_TAP,
                      gestures.PHASE_RELEASE_HELD):
             assert not beh.on(dead), "a tap must not switch the load"
-        return "gesture: group %d hold-to-toggle (%d s each way)" % (
-            gid, self.seconds)
+        if not ctx.handles[self.spec.id].get("multi", False):
+            return "gesture: group %d hold-to-toggle (%d s each way)" % (
+                gid, self.seconds)
+        assert set(beh.kinds.values()) == {"hold-only"}, beh.kinds
+        assert len(held) == len(beh.emissions), "every live copy must fire on the hold"
+        return ("gesture: group %d hold-to-toggle (%d s each way) on all %d live bindings "
+                "of variants %s; direction is chosen by the group's external variant "
+                "setter; COACH-VERIFIED 2026-10-19 (group 129, compact AES ELECTRICAL; AGS "
+                "mode untested)"
+                % (gid, self.seconds, len(beh.emissions),
+                   "/".join(str(v) for v in beh.variants)))
+
+
+@op("remove_records")
+class RemoveRecords(Op):
+    """Delete chosen records from one object, shrinking it, so a control is gone from the
+    page rather than parked off it.
+
+    Parking (`remove_control`, `move_element` to y=900) rewrites geometry, and fails on a
+    record that carries none: a wtype-12 touch region inside a card can have no `y`, so its
+    hit area would stay live, invisible, on the page. This op instead rebuilds the object's
+    record stream without the chosen records and swaps it in with
+    `relocate.replace_object_records`, which shifts every downstream table, directory entry,
+    container field and GuiCode literal by the size change, reseals, and reruns the
+    relocator's gates.
+
+    **The one hole it closes itself.** `relocate._verify_guicode_pointers` documents that a
+    shrink swallowing an address GuiCode points to passes its gate. Everything after the first
+    removed record moves down inside the object, and `replace_object_records` shifts only
+    references at or after the object's END. So this op refuses if any GuiCode or LCD Firmware
+    literal targets the object between its first removed record and its end.
+
+    **The records after a removed one can move.** Each record lays out relative to the frame the
+    previous drawn record left (`layout.py`), and a removed wtype-5 attach takes its own offset
+    and its child's frame with it. On the compact AES card, removing the Low Volts attach (+29 y)
+    lifted the "AES" gear button 29 px until a `move_element` gave the gear the offset back. This
+    op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved.
+
+    Bindings and groups are untouched: a removed touch region stops this object reaching its
+    group, and the group still runs from any other object that registers the same id. So
+    `recipe.capabilities` is unchanged and no delta is declared.
+
+    Params:
+      target: object index | {'ref': op_id} -- the object holding the records (resolved via
+              `resolve_target`).
+      records: list of {selector, child?, touch_id?} -- each `selector` is
+               `_select_record`'s (wtype, label, nth), resolved against the object BEFORE any
+               removal, so nth counts are the stock ones. `child` asserts the record's
+               container `child_index`; `touch_id` asserts a wtype-12 record's trailing id.
+               Each entry must carry at least one of label/child/touch_id, so an entry
+               cannot remove whatever record happens to sit at an nth.
+
+    Error codes:
+      BAD_PARAMS -- `records` is empty, an entry has no identity assertion, two entries
+                   name the same record, or the removal would leave the object empty.
+      NO_SUCH_RECORD -- a selector matched nothing (from `_select_record`).
+      EXPECT_MISMATCH -- a record's child_index or touch id is not what the entry asserts.
+      POINTER_INSIDE -- a GuiCode or LCD literal points into the part of the object that
+                        would move.
+      RELOCATE_REFUSED -- `relocate.replace_object_records` refused (a gate failed).
+
+    `hardware_verified = True`: COACH-VERIFIED 2026-10-19 (owner). The Low Volts attach and touch
+    region were removed from the compact AES card (object 1427) with the gear button's offset
+    restored; the card draws without it and the moved control works on the settings page.
+    """
+    hardware_verified = True
+
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "records": {"type": "array",
+                        "description": "records to delete: {selector, child?, touch_id?}"},
+        },
+        "required": ["target", "records"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.records = self._param("records", kind=list)
+        if not self.records:
+            raise RecipeError("BAD_PARAMS", "records is empty", op_id=self.spec.id)
+        for entry in self.records:
+            if not isinstance(entry, dict) or not isinstance(entry.get("selector"), dict):
+                raise RecipeError("BAD_PARAMS", "each record entry needs a selector dict",
+                                  op_id=self.spec.id)
+            if (entry["selector"].get("label") is None and "child" not in entry
+                    and "touch_id" not in entry):
+                raise RecipeError(
+                    "BAD_PARAMS", "entry %r asserts nothing about the record it removes; give "
+                    "a selector label, child or touch_id" % (entry,), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[obj])
+        doomed = []
+        for entry in self.records:
+            rec = _select_record(data, gs, tab, obj, entry["selector"], self.spec.id)
+            if "child" in entry and rec.child_index != entry["child"]:
+                raise RecipeError("EXPECT_MISMATCH", "object %d record %r has child %r, "
+                                  "expected %r" % (obj, entry["selector"], rec.child_index,
+                                                   entry["child"]))
+            if "touch_id" in entry:
+                tid = (data[rec.end - 2] | (data[rec.end - 1] << 8)) if rec.wtype == 12 else None
+                if tid != entry["touch_id"]:
+                    raise RecipeError("EXPECT_MISMATCH", "object %d record %r has touch id "
+                                      "%r, expected %r" % (obj, entry["selector"], tid,
+                                                           entry["touch_id"]))
+            if rec.offset in (r.offset for r in doomed):
+                raise RecipeError("BAD_PARAMS", "two entries name the record at %#x"
+                                  % rec.offset)
+            doomed.append(rec)
+        kept = [r for r in recs if r.offset not in {d.offset for d in doomed}]
+        if not kept:
+            raise RecipeError("BAD_PARAMS", "removing every record would leave object %d "
+                              "empty" % obj)
+
+        moved_from = min(d.offset for d in doomed) - gs
+        obj_end = recs[-1].end - gs
+        for section in ("GuiCode", "LCD"):
+            for pos, rel in theme.section_guidata_pointers(data, section):
+                if moved_from <= rel < obj_end:
+                    raise RecipeError(
+                        "POINTER_INSIDE", "%s literal @ %#x points at GuiData+%#x, inside "
+                        "object %d after its first removed record; the shrink would move what "
+                        "it names" % (section, pos, rel, obj))
+
+        body = bytes([len(kept)]) + b"".join(data[r.offset:r.end] for r in kept)
+        try:
+            out, edits = relocate.replace_object_records(data, obj, body)
+        except relocate.RelocationError as err:
+            raise RecipeError("RELOCATE_REFUSED", str(err))
+        ctx.edits.extend(edits)
+        ctx.handles[self.spec.id] = {
+            "obj": obj, "count": len(kept),
+            "gone": [(d.wtype, d.child_index,
+                      (data[d.end - 2] | (data[d.end - 1] << 8)) if d.wtype == 12 else None)
+                     for d in doomed]}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[h["obj"]])
+        assert len(recs) == h["count"], "object %d has %d records, wanted %d" % (
+            h["obj"], len(recs), h["count"])
+        for wtype, child, tid in h["gone"]:
+            if wtype == 12 and tid is not None:
+                assert tid not in gestures.touch_ids(data, h["obj"], tab), \
+                    "touch id %d still registered by object %d" % (tid, h["obj"])
+            elif child is not None:
+                assert not any(r.wtype == wtype and r.child_index == child for r in recs), \
+                    "object %d still attaches child %d" % (h["obj"], child)
+        return "remove_records: object %d lost %d record(s) %s, now %d" % (
+            h["obj"], len(h["gone"]),
+            ", ".join("wtype %d%s" % (w, " touch %d" % t if t is not None else
+                                      " child %d" % c if c is not None else "")
+                      for w, c, t in h["gone"]), h["count"])
 
 
 @op("pin_filter_instance")
@@ -5014,31 +5180,32 @@ class AddAesLowVoltsTrigger(Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
-        frame = records.object_records(data, gs + tab[aescompact.ELECTRICAL_AES_BODY])
 
-        # rev4: the Low Volts control lives in the cloned cluster the compact frame's cluster
-        # container (record 5) recurses into -- locate it structurally (no handle dependency).
-        cluster_index = frame[aescompact.frame_roles(data, frame)["cluster"]].child_index
-        assert cluster_index is not None, \
-            "compact frame record 5 is not the cluster container"
-        recs = records.object_records(data, gs + tab[cluster_index])
-
-        # The AGS-style Low Volts control: a wtype-5 recolor container reading value_slot 45 (the
-        # same cell the bridge drives), NOT a wtype-6 checkbox on a spare cell.
-        cont = next((r for r in recs if r.wtype == 5 and r.value_slot == h["recolor_slot"]), None)
-        assert cont is not None, \
-            "cloned cluster %d has no wtype-5 Low Volts container reading recolor slot %d" \
-            % (cluster_index, h["recolor_slot"])
-        cell_addr = struct.unpack_from(
-            "<I", data, gs + celltables.cell_table_off(data) + cont.value_slot * 4)[0]
-        assert cell_addr == h["cell_addr"], \
-            "container slot %d resolves to %#x, the bridge writes cell 45 at %#x" % (
-                cont.value_slot, cell_addr, h["cell_addr"])
-
-        # Its touch region carries id 129 (group 129 arms 0x2F).
-        ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
-        assert h["touch_id"] in ids, \
-            "cloned cluster does not carry the Low Volts touch id %d (has %s)" % (h["touch_id"], ids)
+        # The Low Volts control this bridge drives: a wtype-5 recolor container reading
+        # value_slot 45 (the cell the bridge writes) in an object that also registers touch id
+        # 129. `swap_aes_electrical` puts one in the compact frame's cloned cluster; a later op
+        # may move it (`remove_records` + `add_low_volts_control`), so look in every object
+        # rather than only there. Stock's AGS hosts are excluded: they are not AES controls.
+        hosts = []
+        for idx in range(len(tab)):
+            if idx in aescompact.AGS_LOW_VOLTS_HOSTS or not tab[idx]:
+                continue
+            recs = records.object_records(data, gs + tab[idx])
+            conts = [r for r in recs if r.wtype == 5 and r.value_slot == h["recolor_slot"]]
+            if not conts:
+                continue
+            ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
+            if h["touch_id"] not in ids:
+                continue
+            for cont in conts:
+                cell_addr = struct.unpack_from(
+                    "<I", data, gs + celltables.cell_table_off(data) + cont.value_slot * 4)[0]
+                assert cell_addr == h["cell_addr"], \
+                    "object %d container slot %d resolves to %#x, the bridge writes cell 45 " \
+                    "at %#x" % (idx, cont.value_slot, cell_addr, h["cell_addr"])
+            hosts.append(idx)
+        assert hosts, ("no object outside the AGS panel carries a wtype-5 Low Volts container "
+                       "on recolor slot %d with touch id %d" % (h["recolor_slot"], h["touch_id"]))
 
         # The un-gated display bridge is appended and the stock hook detoured to its entry.
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
@@ -5052,12 +5219,12 @@ class AddAesLowVoltsTrigger(Op):
             h["entry"], [hex(c) for c in chain])
         assert chain[-1] == followchannel.TAIL_TARGET
 
-        return ("add_aes_low_volts_trigger: AGS-style Low Volts control (object %d, wtype-5 "
+        return ("add_aes_low_volts_trigger: AGS-style Low Volts control (object(s) %s, wtype-5 "
                 "recolor container on slot %d / cell %#x, touch id %d -> group 129) driven by an "
                 "UN-GATED bridge that mirrors the stock cell-45 block (0x2F slot %#x -> counter + "
                 "cell 45) each tick; detour GuiCode+%#x -> %#x; HARDWARE-UNVERIFIED (coach test: "
                 "recolor + two-way toggle in AES)"
-                % (aescompact.ELECTRICAL_AES_BODY, h["recolor_slot"], h["cell_addr"],
+                % (", ".join(map(str, hosts)), h["recolor_slot"], h["cell_addr"],
                    h["touch_id"], h["gate_addr"], h["hook_at"], h["entry"]))
 
 
