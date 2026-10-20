@@ -928,7 +928,7 @@ class DropFromMaster(Op):
         for c in controls:
             assert self.channel not in c.channels, \
                 "drop: channel %d still in %r %s" % (self.channel, self.master, c.label)
-        return "drop: channel %d removed from %r ON+OFF — HARDWARE-VERIFIED (v26)" % (
+        return "drop: channel %d removed from %r ON+OFF — HARDWARE-VERIFIED (coach, 2026-09-14)" % (
             self.channel, self.master)
 
 
@@ -2446,7 +2446,7 @@ class InstallGlyph(Op):
             raise RecipeError(
                 "BEARING_OFF_CONVENTION",
                 "y-bearing %d does not centre a %d px glyph in slot %d's %d px cell "
-                "(convention: %d -- the v20 build drew 33 px high for exactly this); "
+                "(convention: %d -- an early build drew 33 px high for exactly this); "
                 "pass force_y for a v-align-1 record" % (self.y, self.height,
                                                          self.slot, cell, convention),
                 offers=["use_convention", "force"])
@@ -2623,7 +2623,7 @@ class SetGesture(Op):
             if beh.kind != "latch":
                 raise RecipeError(
                     "NOT_SUPPORTED",
-                    "group %d is %r; v1 cannot convert it to a latch — disable the "
+                    "group %d is %r; this op cannot convert it to a latch — disable the "
                     "gesture op that made it so, or leave the stock behaviour"
                     % (gid, beh.kind), offers=["disable_gesture_op"])
             ctx.handles[self.spec.id] = {"gid": gid}
@@ -5700,9 +5700,9 @@ class SwapAesElectrical(Op):
             "link_indicator": {"type": ["object", "null"], "default": None,
                                "description": "{'ref': add_option_follower op id}: wire the "
                                               "Pump Link button to that op's 0/1 display cell "
-                                              "as a wtype-6 switch over dark/lit arms (v16)"},
+                                              "as a wtype-6 switch over dark/lit arms"},
             "off_at_zero": {"type": "boolean", "default": False,
-                            "description": "v20: show 'Off' instead of '0 Min' when the Auto "
+                            "description": "show 'Off' instead of '0 Min' when the Auto "
                                            "Off minute count is 0 (the disabled setting), via "
                                            "a wtype-6 switch over two readout arms"},
         },
@@ -6256,7 +6256,8 @@ class AddAesBattHeat(Op):
                            "description": "where the command group comes from: the first free "
                                           "slot (the heater, byte-stable), or "
                                           "newbutton.hold_safe_groups (a group GuiCode does not "
-                                          "drive -- v45's holds on 136/137 were dead)"},
+                                          "drive; holds on GuiCode-driven 136/137 were dead on "
+                                          "a coach)"},
         },
         "required": [],
     }
@@ -6786,7 +6787,7 @@ class AddAesBattHeatStatus(Op):
                   and r.child_index in band]
         assert not others, \
             "a second switch (slots %s) selects the Batt Heat arm band; each switch repaints only " \
-            "its own arm, which is how v31 lost the caption and kept a stale glyph" % (
+            "its own arm, which is how an earlier build lost the caption and kept a stale glyph" % (
                 [r.value_slot for r in others],)
 
         # THE GUARD for the v31 repaint defects: EVERY arm must draw the full-size opaque capsule
@@ -7269,13 +7270,12 @@ class AddBattHeatBatteryGlyph(Op):
             return ("add_batt_heat_battery_glyph: batteries %s each one enrolled switch on state "
                     "cell %d, four whole-battery arms, terminals and a %d px body ring in RGB %s "
                     "while the contactor is closed, number at its stock position; "
-                    "HARDWARE-VERIFIED (coach, v47, reported 2026-10-10)"
+                    "HARDWARE-VERIFIED (coach, 2026-10-10)"
                     % (sorted(h["wrapped"]), h["slot_state"], battglyph.OUTLINE_INSET,
                        self.outline_rgb))
         return ("add_batt_heat_battery_glyph: batteries %s each one enrolled switch on state "
                 "cell %d, four whole-battery arms, white slot-%d '%s' bottom-right while the "
-                "contactor is closed, number raised %d px; HARDWARE-VERIFIED (coach 2026-09-26, "
-                "flashed as part of v34a)"
+                "contactor is closed, number raised %d px; HARDWARE-VERIFIED (coach, 2026-09-26)"
                 % (sorted(h["wrapped"]), h["slot_state"], battglyph.GLYPH_FONT_SLOT,
                    battglyph.GLYPH_CHAR, battglyph.NUMBER_RAISE))
 
@@ -7467,7 +7467,7 @@ class AddPumpAutoOff(Op):
                                 "description": "recorded for provenance; the routine's actual "
                                 "fallback is the fixed pumpauto.MINUTES_DEFAULT (30)"},
             "allow_disable": {"type": "boolean", "default": False,
-                              "description": "v20: lower the minute floor from 5 to 0, so 0 is "
+                              "description": "lower the minute floor from 5 to 0, so 0 is "
                               "a legal setting that disables Auto Off, and emit the borrow "
                               "recovery a '-' press at that floor needs"},
         },
@@ -8456,33 +8456,33 @@ class AddLevelPage(Op):
                                      "op installed"},
             "accent": {"type": "array", "default": list(levelpage.ACCENT),
                        "description": "[r, g, b] of the needs-blocks wheel tiles and the SHORT ON "
-                                      "BLOCKS strip; v34a flashed with pale amber (0xE6,0xA0,0x28), "
-                                      "this module's only default at the time -- v34a's project "
-                                      "pins neither accent nor orientation and no longer "
-                                      "reproduces that image now that the default is orange"},
+                                      "BLOCKS strip. The default was pale amber (0xE6,0xA0,0x28) "
+                                      "before it became orange, so a project that sets neither "
+                                      "accent nor orientation no longer reproduces an image "
+                                      "built under the old default"},
             "orientation": {"type": "string", "default": "rear",
                             "enum": list(levelpage.ORIENTATIONS),
                             "description": "\"rear\": the van drawn rotated 180 degrees (front at "
                                            "the bottom, driver on the right), each wheel's tile "
                                            "beside its rotated wheel; \"front\": the original "
-                                           "drawing, which v34b pins"},
+                                           "drawing"},
             "controls": {"type": "boolean", "default": False,
                          "description": "add the Blocks-carried stepper (- / + send 18EFFF9F "
                                         "4C5604/4C5603) and Zero Level (3-s hold sends 19FDE89F "
                                         "and 19FDEA9F); three new groups, four new bindings"},
             "arrow_probe": {"type": "boolean", "default": False,
-                            "description": "DIAGNOSTIC (v39): draw the tiles' arrow three ways "
+                            "description": "DIAGNOSTIC: draw the tiles' arrow three ways "
                                            "plus once outside the arms (`levelpage.ARROW_PROBE`) "
                                            "to find what cuts it on the coach"},
             "repaint": {"type": "boolean", "default": False,
                         "description": "repaint-on-change: each LEVEL/popup value sits in a "
                                        "two-arm switch on a toggle the routine flips when the "
                                        "value changes, so a narrower value never leaves the old "
-                                       "one's edge (v42 on the coach)"},
+                                       "one's edge (verified on the coach)"},
             "popup_background": {"type": "boolean", "default": False,
                                  "description": "the setup popup paints its own background, "
                                                 "header bar and 'LEVEL SETUP' title (a screen "
-                                                "change clears to white, v42 on the coach)"},
+                                                "change clears to white, seen on the coach)"},
             "setup": {"type": "boolean", "default": False,
                       "description": "move Zero Level and the Blocks-carried stepper into a LEVEL "
                                      "SETUP popup on screen 12 (`levelsetup`), with block height "
@@ -8492,14 +8492,14 @@ class AddLevelPage(Op):
                          "description": "add Wheelbase and Track rows to the LEVEL SETUP popup "
                                         "(-/+ 0.5 in on level-sensor ops 0Bh-0Eh, repeating "
                                         "while held; values from record 04h bytes 1-4), in a "
-                                        "taller five-row dialog (v45). Needs `setup`"},
+                                        "taller five-row dialog. Needs `setup`"},
             "arrow_last": {"type": "boolean", "default": False,
                            "description": "draw each wheel tile's up arrow after its two readouts: "
                                           "a readout repaints its background over about 50 px "
-                                          "left of its pen whatever its field width (v40 on the "
-                                          "coach), which wiped the arrow drawn before it (v37-v39)"},
+                                          "left of its pen whatever its field width (seen on the "
+                                          "coach), which wiped the arrow drawn before it"},
             "arrow_probe2": {"type": "boolean", "default": False,
-                             "description": "DIAGNOSTIC (v40): one tile draws its arrow last, "
+                             "description": "DIAGNOSTIC: one tile draws its arrow last, "
                                             "another paints its readout backgrounds green/blue "
                                             "(`levelpage.ARROW_PROBE2_*`)"},
             "fill_safe": {"type": "boolean", "default": False,
@@ -8507,11 +8507,12 @@ class AddLevelPage(Op):
                                          "3 characters) so no background fill can cover the "
                                          "arrow or leave the tile in any measuring class "
                                          "(`readoutfill`); 10+ layers / 10.0+ in show dashes. "
-                                         "False keeps v34b-v37's (2, 4)"},
+                                         "False keeps the original (2, 4)"},
             "stepper_dgn": {"type": "integer", "default": levelcontrols.STEPPER_DGN_DEFAULT,
                             "description": "the 18-bit DGN the - / + send on: 0x0EFFF (J1939 "
-                                           "proprietary-A, v35/v36) or 0x1EFBF (the RV-C custom "
-                                           "DGN addressed to the sensor at BF: 19EFBF9F, v37); "
+                                           "proprietary-A, the first form flashed) or 0x1EFBF (the "
+                                           "RV-C custom DGN addressed to the sensor at BF: "
+                                           "19EFBF9F, in use since 2026-09-28); "
                                            "needs `controls`"},
         },
         "required": ["arrow"],

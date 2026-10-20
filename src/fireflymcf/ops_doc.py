@@ -229,7 +229,7 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "aes_card_layout": ("structural",
         "Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, "
         "Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the "
-        "v47 shape of object 829 and the private AES cluster.",
+        "compact frame's shape (object 829) and the private AES cluster.",
         "Flashed 2026-10-15; its three draw defects were fixed and verified the same day.",
         "`cardlayout.py`"),
     "add_card_readouts": ("structural",
