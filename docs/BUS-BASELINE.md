@@ -2,7 +2,7 @@
 
 **Captured:** 2026-08-12 12:19:41, 20 s, 1139 frames (~57 frames/s)
 **Coach:** Jayco B-Van, the subject vehicle
-**Host:** `pi@<gateway>` (Raspberry Pi, Debian bookworm, aarch64)
+**Host:** a Linux machine on the coach's RV-C bus (SocketCAN, `candump`/`cansend`)
 **Interface:** `can1`, altname `can_rvc` — `can_rvc` is *not* a separate device
 **Log:** `captures/candump-2026-08-12_121941.log`
 **Method:** `candump -l -L can1`, listen-only. Nothing was transmitted. `rvc2mqtt` was
@@ -1310,7 +1310,7 @@ not appear.
 # PC.20 — Driving the PD Inverter page from synthetic frames (2026-08-23)
 
 **The first entry in this document where frames were TRANSMITTED.** Everything before PC.19 is
-listen-only. Here the Pi (`pi@<gateway>`, `can_rvc` = `can1`) injected status frames to find out
+listen-only. Here the bus host (`can_rvc` = `can1`) injected status frames to find out
 which of the panel's dormant inverter/charger subscriptions actually paint something, ahead of the
 owner adding a bridge that publishes the coach's inverter/charger onto RV-C.
 
@@ -1483,7 +1483,7 @@ meant to surface. Not investigated.
 
 # PC.21 — the option interlock is the panel's alone, by injection (2026-08-23)
 
-**Captured:** 2026-08-23, live on the coach over `ssh pi@<gateway>`, interface **`can1`**
+**Captured:** 2026-08-23, live on the coach, interface **`can1`**
 (altname `can_rvc`; note `can_bms` is `can0`, the 11-bit BMS bus — the RV-C bus is `can1`).
 **Method:** owner-authorized **transmit**. This is the entry that closes `GUICODE.md` Finding 50.
 
@@ -1606,7 +1606,7 @@ the holds. Confirmed-by-inclusion, not observed.
 
 # PC.23 — The G12 is the inverter/charger's commander, and it broadcasts to **instance 1**
 
-**Captured:** 2026-08-23, `can1` (`can_rvc`) from the Pi, probe source address `0xC0`
+**Captured:** 2026-08-23, `can1` (`can_rvc`) from the bus host, probe source address `0xC0`
 **Method:** transmit. Read-back requests first (non-mutating), then one signed adjust per
 selector, each **immediately reversed and verified by read-back**. This document's third
 transmit entry.
@@ -1812,7 +1812,7 @@ where the other could see.
 # PC.25 — `1FFB7` is TANK_STATUS. The awning ignition interlock is REFUTED (2026-08-24)
 
 `captures/pc25-ignition-vs-ffb7-2026-08-24-EXCERPT.log` — **an excerpt**; the full log is
-`~/pc25-ignition.log` on the Pi and should be copied here. Owner-driven, both DGNs on one trace:
+a capture on the bus host and should be copied here. Owner-driven, both DGNs on one trace:
 
 ```
 candump -L can1 | tee ~/pc25-ignition.log | grep -E '19FBDA9C|19FFB79C'
@@ -2304,10 +2304,10 @@ decoded and in none of our tables. Recorded, not investigated.
 
 # PC.30 — the write side of screen 14, and the `0x99` negative holds (2026-08-24)
 
-**Captured:** 2026-08-24, `can1` (`can_rvc`) from the Pi, 10 min unfiltered,
+**Captured:** 2026-08-24, `can1` (`can_rvc`) from the bus host, 10 min unfiltered,
 `captures/pc30-screen14-writes-2026-08-24.log` (40,462 frames)
 **Method:** observation only. The owner pressed four controls on the panel; nothing was
-transmitted from the Pi. This closes the row PC.29 left open — *"its buttons emit the frames their
+transmitted from the bus host. This closes the row PC.29 left open — *"its buttons emit the frames their
 bindings describe"* — for four of object 17's seven controls.
 
 The capture was taken unfiltered on purpose. This project has twice produced a confident wrong
@@ -2342,7 +2342,7 @@ Dropout` send **one `D2 EA` per step**, while `Max Chrge Rate` and `Shore Brkr S
 | `0x82 +2` | `19FFD09C#01FFFFFFFFD600FF` +5.6 ms | #52 | `p[5:7]` LE ← 214 |
 
 Two relay frames per DGN across the whole capture, one per press, all **instance 1**. PC.23
-established this mapping by *injecting* `0x1FED9` from the Pi; this is the first time it has been
+established this mapping by *injecting* `0x1FED9` from the bus host; this is the first time it has been
 driven by an actual finger on the panel, and the rule table reproduces every frame byte-for-byte
 with its substitution mask applied.
 
@@ -2432,7 +2432,7 @@ frames confirm it was untouched.
 
 # PC.31 — `Battery Type` is an ENUMERATED CYCLE, not a delta (2026-08-24)
 
-**Captured:** 2026-08-24, `can1` from the Pi, `captures/pc31-battery-type-2026-08-24.log`
+**Captured:** 2026-08-24, `can1` from the bus host, `captures/pc31-battery-type-2026-08-24.log`
 **Method:** six owner presses, then four probe transmits from SA `0xC0` to restore the value,
 each verified by a `D3 FF FFFF` read-back. Completes the fourth of PC.23's four relay mappings —
 the one PC.30 deliberately skipped.
@@ -3503,7 +3503,7 @@ read-back carries `FFFF`. The G12 **accumulates**: across nineteen `+0002` trios
 sweep walked `FC03 → FE03 → 0004 → 0204 → … → 2204`, i.e. **1020 → 1058, +2 each**, frame for frame
 and sweep-report for sweep-report. Decrement is `FE FF` (−2 as `int16`).
 
-**So to set start-at to a target from the Pi, replay the panel: send N of these trios of the right
+**So to set start-at to a target from the bus, replay the panel: send N of these trios of the right
 sign, N = |target − current| / 2, then confirm the `195FCE9C#31` sweep reads the target's LE
 bytes.** 51.0 V is `FC 03`.
 
@@ -3548,7 +3548,7 @@ mid-range and safe; the coach's stop-at of 53.0 V (1060) already satisfies the g
 # PC.40 — the coach ran 11.23: floorplan slot 7, the true value→code map, and Service Mode's cross-version join (2026-08-30)
 
 `captures/pc-1123-session-2026-08-30.log` — 160,799 frames, `can1`, one continuous capture
-spanning the whole session (the Pi rode through every panel power cycle). Baseline snapshot:
+spanning the whole session (the bus host rode through every panel power cycle). Baseline snapshot:
 `captures/pc-1123-preflash-baseline-2026-08-30.log`. The owner flashed **stock 11.23's
 GuiCode+GuiData pair only** — G12 and LCD Firmware stayed at current — and the mixed panel ran
 fine (NETWORK DIAGNOSTICS: `7IN COLOR LCD CONFIG: 11.23`, `G12 CONFIG: 13.6`, both green).
@@ -3733,7 +3733,7 @@ dropped its sweep record entirely; no G12 MCF rule beyond its own sweep record; 
 reference (offset-`0x1DC`/`movs #0xEE` scan — the usual Thumb-1 weak-negative caveat applies).
 The one thing the file cannot show is the G12 **app**'s behaviour, hence this test.
 
-**The test, all from the Pi (`cansend`/`candump` on can1, SA `0xC0`), coach on the
+**The test, all from the bus host (`cansend`/`candump` on can1, SA `0xC0`), coach on the
 `Experimental` v7 image:**
 
 1. *Baseline:* `195FCE9C#EE00FFFF00000000` every ~5.0 s — value `0xFFFF`, unset, matching the
@@ -3799,7 +3799,7 @@ to read `0xEE`'s var-table status slot (`0x2000820A`) and act as a bridge block 
 the cloned group 164 + a display cell `0x20039F60`). Built from stock, all gates green, merged to
 main (`c73d112`).
 
-**What the coach showed (owner, on the panel + `candump`/`cansend` via `pi@<gateway>`):**
+**What the coach showed (owner, on the panel + `candump`/`cansend` on the bus):**
 
 - **The row RENDERS correctly** — the OPTIONS page draws "Pump Link" at the bottom of the left
   column, exactly as the in-repo compositor previewed, with Heat Pump restored to stock beside it.
@@ -3891,7 +3891,7 @@ repurposed row) proven on hardware.
 
 # PC.46 — `Battery Type` reads the WRONG CHARGER: the open `1FFC6` filter, observed with two devices on the bus (2026-09-02)
 
-**Captured:** 2026-09-02, `can1`, via `ssh pi@<gateway>` — a 15 s census, a 60 s window and a
+**Captured:** 2026-09-02, `can1` — a 15 s census, a 60 s window and a
 600 s window (44,797 frames). The long capture is `build/captures-scratch/1ffc6-contention-2026-09-02.log`
 (gitignored scratch, not promoted into `captures/`).
 **Method:** passive `candump -L` only. **No frame was transmitted for this entry.**
@@ -3993,7 +3993,7 @@ byte-fields do not interfere. The stock ± arrows are delta emitters (group 103/
 `0x0E`), so a delta-capable `0xEE` is what lets the new stepper be **stock bindings with a
 different selector byte** instead of authored code.
 
-**Method.** From the Pi (`cansend`/`candump` on can1, SA `0xC0`), coach on the `Experimental` v12
+**Method.** From the bus host (`cansend`/`candump` on can1, SA `0xC0`), coach on the `Experimental` v12
 image, Pump Link ON. Every step read back with the stock `D3` frame; the sequence ends with an
 absolute restore.
 
@@ -4060,7 +4060,7 @@ its design note (not published)
 # PC.48 — the awning ignition interlock is BUS-FED, and the panel's lock label reads a DIFFERENT instance than the G12's lock (2026-09-03)
 
 `captures/pc48-awning-lock-injection-2026-09-03.log`. Ignition off, engine off, coach on
-`Experimental` v12. From the Pi (SA `0xC0`, `can1`) we replayed the G12's own engine-running
+`Experimental` v12. From the bus host (SA `0xC0`, `can1`) we replayed the G12's own engine-running
 indicator byte-for-byte — `19FBDAC0#FB01FFFFFFFFFFFF` — at 1 Hz, and cleared it with `FB00`.
 
 **Result 1 — a table-`0x61` receive record really does write its cell** (`MCF-FORMAT.md` §9a.3,
@@ -4275,7 +4275,7 @@ and recalled having seen them after a device announced itself. `GUICODE.md` reco
 instance 1 or 2**; this tests that from the bus.
 
 **Method.** With the owner's bridge stopped and `0x42` confirmed silent, we replayed its own
-frames from the Pi as SA `0x42`. Phase 1, 45 s: **only** `19FFD442#01025FFFFFFFFFFF`. Phase 2,
+frames from the bus host as SA `0x42`. Phase 1, 45 s: **only** `19FFD442#01025FFFFFFFFFFF`. Phase 2,
 45 s: that plus the five other DGNs the bridge sources (`1FFC6`, `1FEE8`, `1FECA`, `1FFD7`,
 `1FFCA`).
 
@@ -4509,7 +4509,7 @@ confirm the reading rather than contradict it.
 ## PC.57 — the levelling page ignores its own subscriptions — `observed-on-hardware`, 2026-09-03
 
 **Captured:** `captures/pc57-leveling-status-injection-2026-09-03.log`, `can1` via
-`ssh pi@<gateway>`, 6,337 frames. Probe SA **`0xC0`** (census that day: `9C` G12, `9F` panel,
+6,337 frames. Probe SA **`0xC0`** (census that day: `9C` G12, `9F` panel,
 `80` Wakespeed, `42` the owner's bridge, `70`, `65`, `FD`).
 
 **Why.** `docs/LEVELING-PAGE.md` §3 says all 18 of screen 29's state-driven cells have no writer, so
@@ -4608,7 +4608,7 @@ a build this project authored, and the first for a cell this narrow (a single by
 
 ## PC.63 — a G12 update captured on the wire: the upload protocol decoded, and the flashed section reconstructed byte-for-byte — observed-on-hardware, 2026-09-08
 
-**Method:** `candump -L can1` running on the coach Pi for 259 s while the owner performed a normal
+**Method:** `candump -L can1` running on the bus host for 259 s while the owner performed a normal
 USB-stick update and selected **row 3 (`G12`)** on the MANUAL LOAD screen — the row every previous
 captured flash had skipped. An empty `LogFile.txt` was placed in `0:/SpyderConfig` first, so the
 loader's own account of the same event is beside the capture.
@@ -4786,7 +4786,7 @@ priority 4 buys.
 
 ## PC.64 — the G12 enumerated passively from a third node, no frame transmitted — observed-on-hardware, 2026-09-08
 
-`fireflymcf-g12flash probe --interface can1` on the coach Pi, listening 20 s and **transmitting
+`fireflymcf-g12flash probe --interface can1` on the bus host, listening 20 s and **transmitting
 nothing at all**. It reported all four upload targets, and every field matches the `0FF01` frames
 of PC.63 exactly:
 
@@ -4826,7 +4826,7 @@ reach, and the whole write path rests on it.
 
 ## PC.65 — the G12 answers a stranger, and hands over its whole flash map — observed-on-hardware, 2026-09-08
 
-`g12flash.py probe --interface can1 --request --target 0x9C` from the coach Pi: **one** 8-byte
+`g12flash.py probe --interface can1 --request --target 0x9C` from the bus host: **one** 8-byte
 `1FED8` REQUEST, sent from source address `0xC0`, after a 20 s listen confirming `0xC0` was free.
 
 **Result 1 — the G12 answers a requester that is not the panel's loader.** All 29 parameters came
@@ -4939,7 +4939,7 @@ an absence. *The first fix was right about the symptom and wrong about the rule.
 
 ## PC.69 — the loader demands `mcf.bin`: the QUADSPI store is unreachable without it, and the loophole is CLOSED — observed-on-hardware, 2026-09-08
 
-The refined test of PC.68, run with the coach Pi's gadget carrying **`SpyderConfig/cli.bin` and no
+The refined test of PC.68, run with the bus host's USB gadget carrying **`SpyderConfig/cli.bin` and no
 `mcf*.bin`**. The panel booted into the loader and stopped at:
 
 ```
@@ -5004,7 +5004,7 @@ the loader and it ships on the stick** (§4.1 — `mcf.bin` + `cli.bin` in a dir
 loader to run and reproduces this entry's result exactly, teaching nothing.
 
 The test is therefore **`SpyderConfig/cli.bin`, no `mcf*.bin`**: the loader runs, finds no image
-file, and we learn whether it can still enumerate and offer a QUADSPI-sourced load. The coach Pi's
+file, and we learn whether it can still enumerate and offer a QUADSPI-sourced load. The bus host's
 `~/firefly/usbstick.sh` provides the gadget; the volume needs that one file added. Its safety
 argument survives unchanged — the panel flashes files named `mcf-*.bin` and there are none.
 

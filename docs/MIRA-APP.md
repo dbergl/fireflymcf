@@ -98,7 +98,7 @@ from S3; reinstalling the app also forces a fresh board read.
 
 Pure helpers (version maths, zlib pack/unpack, bulk framing, filter derivation) import
 without `bleak` and are pinned by `tests/test_mira_config.py`. The BLE transport needs
-`bleak` and a BlueZ host in range (e.g. the coach pi; the module is single-link, so close the
+`bleak` and a BlueZ host in range (e.g. a Raspberry Pi in the coach; the module is single-link, so close the
 phone app first).
 
 ```

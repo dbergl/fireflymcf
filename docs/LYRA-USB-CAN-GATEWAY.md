@@ -1,7 +1,7 @@
 # Lyra touchscreen USB port = live CAN gateway
 
 Findings from inspecting the Lyra touchscreen over its micro-USB port (2026-08-30),
-with the coach reachable as `pi@<gateway>` and full RV-C bus access on `can1`.
+with a Linux host on the coach's RV-C bus (`can1`).
 
 ## What the port is
 
@@ -35,7 +35,7 @@ sync    type len   CAN identifier     flag  len   payload    ??
   (`trailer_ok`) and counts failures in `--summary`.
 
 Decoder: `tools/lyra_usbcan.py` (reads raw bytes on stdin, e.g.
-`ssh pi@<gateway> 'sudo cat /dev/ttyACM0' | python3 tools/lyra_usbcan.py`; `--summary` aggregates
+`cat /dev/ttyACM0 | python3 tools/lyra_usbcan.py` on the host the gateway is plugged into; `--summary` aggregates
 by ID for baseline-vs-event diffing).
 
 ## The port also takes commands — read from code, never exercised
@@ -106,7 +106,7 @@ but not proven to be, the internal drive command; use `1FEDB` for control. Docum
 
 ## Load / instance map
 
-From the coach's live rvc2mqtt floorplan (on the Pi at `/opt/<gateway>/configs/rvc2mqtt/`,
+From the coach's live rvc2mqtt floorplan (its `rvc2mqtt` configuration,
 base + `.override.yml`), cross-checked against a non-actuating status poll
 (`cansend can1 18EAFF44#DAFE01FFFFFFFFFF`, a J1939 Request for `1FEDA`) that made the G12
 Controller (`0x9C`) report all 44 instances without energizing anything:
@@ -127,7 +127,7 @@ Node identities (override): `0x9C` = G12 Controller (drives loads), `0x9F` = Tou
 - **Instance 25 (bathroom light)** is tied to the **water pump** by an external automation —
   toggling it runs the pump.
 - **Instance 44** is the water pump directly.
-- **Instance 29 (starlink)** likely powers the Starlink dish; actuating it may drop the Pi's own
+- **Instance 29 (starlink)** likely powers the Starlink dish; actuating it may drop the bus host's own
   backhaul and your SSH/Tailscale session.
 - Safe-to-actuate lights: 1, 21, 22, 23, 24, 32, 34, 35. After any actuation test, return all
   outputs to off.
@@ -161,7 +161,7 @@ the boot series behind PC.56.
 ## No DFU interface, ever — so no `dfu-util` route, 2026-09-03
 
 Asked whether an STM32 command-line tool could attach during the boot window. **It cannot, and the
-reason is the device, not the tooling.** Every enumeration in the Pi's kernel log across more than
+reason is the device, not the tooling.** Every enumeration in the bus host's kernel log across more than
 ten boots — including the whole PC.56 cold-boot series — is `0483:5740`, this CDC port. DFU would
 enumerate as **`0483:df11`** and never has, not even momentarily, and a brief appearance would still
 be logged because it would have to enumerate to exist.
@@ -171,9 +171,9 @@ which needs **BOOT0 asserted at reset** — a hardware condition a host cannot r
 cable. This panel boots straight into its application, which brings up CDC. `dfu-util` and
 STM32CubeProgrammer would find nothing to talk to, so installing them is wasted effort.
 
-**Booting with the Pi attached takes ~4x longer, and the cause is NOT host-mode probing.**
+**Booting with the bus host attached takes ~4x longer, and the cause is NOT host-mode probing.**
 Measured on `can1` by the panel's own silence: eleven ordinary cold boots put `0x9F` off the bus for
-**8-11 s**, while the boot with the Pi attached took **33.8 s**. ~~The panel is probably probing in
+**8-11 s**, while the boot with the bus host attached took **33.8 s**. ~~The panel is probably probing in
 OTG host mode for a firmware image and timing out.~~ **Refuted the same day by the owner:** with an
 **OTG adapter and a real USB stick** on that port — the panel genuinely acting as host — it
 **booted quickly and did not show the flash menu**. So host-mode probing is fast, and the delay
@@ -189,13 +189,13 @@ even with an OTG adapter and a known-good image present.
 
 *Consequence for the emulated-stick experiment below, and it makes it simpler:* it should target the
 panel's **USB-A** port, which is already a host, so **no OTG adapter is needed** — a USB-C-to-USB-A
-cable from the Pi in gadget mode is a plain device-to-host connection. Whether that port accepts an
+cable from the bus host in gadget mode is a plain device-to-host connection. Whether that port accepts an
 emulated volume is untested and is the thing to find out.
 
-**An emulated stick is prepared but not yet run** (`/home/pi/firefly/usbstick.sh` on the coach Pi,
+**An emulated stick is prepared but not yet run** (a `usbstick.sh` gadget script on the bus host,
 a 64 MB FAT32 volume labelled `FIREFLY`, deliberately **empty** so it cannot trigger an update).
-The Pi 4 has a UDC and `dwc2` enabled, so it can present mass storage on its USB-C port, which
-cables straight into the panel's **USB-A** flash port; the owner reports the Pi's USB-C is
+The bus host (a Raspberry Pi 4) has a UDC and `dwc2` enabled, so it can present mass storage on its USB-C port, which
+cables straight into the panel's **USB-A** flash port; the owner reports its USB-C is
 physically awkward to reach, so this is deferred. It would trace what the
 panel reads — filesystem expectations, directory walk, filename matching — turning the update path
 from behavioural knowledge into a read trace, and could stage builds without writing a physical

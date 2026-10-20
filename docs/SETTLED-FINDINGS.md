@@ -49,7 +49,7 @@ re-impose the coupling on receipt either** — it lives in the tap handler alone
 `E6:=0`, sweep byte-identical to baseline. The asymmetry in (a) is `observed-on-hardware` too
 (owner: disabling AGS leaves PI set; either AES then clears it).
 
-*Bus access, for next time:* `ssh pi@<gateway>`, and the RV-C bus is **`can1`** (altname
+*Bus access, for next time:* the RV-C bus is **`can1`** (altname
 `can_rvc`) — `can_bms` is `can0`, the 11-bit BMS bus, so `candump can_bms` shows none of this.
 `0x42` is now **claimed** by the owner's PD-inverter bridge; `0xC0` was free and is the probe SA.
 

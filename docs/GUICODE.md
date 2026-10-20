@@ -4718,7 +4718,7 @@ read whatever they were left at — and the read-backs agree (`0x99` = 0, `0x88`
 
 ### What is and is not confirmed, stated plainly
 
-PC.23 proved the **G12** relays four selectors, by injecting `0x1FED9` from the Pi at SA `0xC0`.
+PC.23 proved the **G12** relays four selectors, by injecting `0x1FED9` from the bus host at SA `0xC0`.
 It did **not** press a button, and it could not have — the page cannot be opened. So:
 
 | claim | status |
@@ -4915,7 +4915,6 @@ the screen and incomplete for the switch.
 the open `1FFB7` instance-3 bit that "Where a pin's behaviour is enforced" flags as the one
 unproven link in the awning interlock chain:
 
-    ssh pi@<gateway>
     candump -L can1 | grep -i 19FBDA9C
 
 then turn the key. `AA 01` / `AA 00` settles it outright — and slot 132 paints the row on

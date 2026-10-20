@@ -697,7 +697,7 @@ stick the panel boots straight to the normal GUI: the loader never runs, so howe
 QUADSPI source path is, nothing reaches it from a cold boot. **The refined question is the live
 one**: the loader needs *a stick*, not necessarily *the right file*, and PC.63's log already shows
 `No Configurator files found` followed by a successful enumerate-and-match — so "found a file" and
-"has targets to offer" are known not to be the same condition. The way to ask is the coach Pi's `usbstick.sh` gadget
+"has targets to offer" are known not to be the same condition. The way to ask is a USB mass-storage gadget on the bus host
 carrying **`SpyderConfig/cli.bin` and no `mcf*.bin`** -- an *empty* volume is a null test, because
 `cli.bin` is itself the loader and ships on the stick (§4.1).
 
@@ -993,7 +993,7 @@ DGN-field compares). The entry has no field to hold an address either. Two conse
   sentinel at `+4`, *any* device driving that DGN drives that widget, and the last frame to
   arrive wins. On 13.6, 66 of 298 entries are open this way.
 - **Priority is not a discriminator.** This is the panel-side reason the 2026-08-22 receive probe
-  matched a priority-6 frame from the Pi, and why the three GPS injection runs at priorities 3, 5
+  matched a priority-6 frame from the bus host, and why the three GPS injection runs at priorities 3, 5
   and 6 behaved identically.
 
 The only per-device discrimination available is the masked payload compare at `+4`/`+5` — which
