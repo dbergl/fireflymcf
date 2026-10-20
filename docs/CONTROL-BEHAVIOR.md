@@ -817,3 +817,46 @@ execute the stub with whatever was in `r3` and write a garbage screen id.
 
 **And Service Mode bypasses it**: with `0x2003A528 == 1` the protected-area delay is removed, so
 the hold becomes a plain tap (`0x0024C7E8`). Firmware behaviour, not a defect of this edit.
+
+---
+
+## 10. Moving a control to another page — `move_control`, UNVERIFIED
+
+A control is three records (draw, touch region, box), and a touch id maps to its group
+**globally**: `FUN_00256B84` copies the id into the hit-region table whatever page hosts the
+record (§1). So a control moves between pages by moving its records; no group, binding or DGN
+changes, and the moved control runs the same action. What breaks is **layout**, which is
+flow-relative (`FUN_00257BFC`, `layout.py`): each record lays out from the frame the previous
+drawn record left, and inherits font, align and colours from its predecessors.
+
+`move_control` does the whole move as one recipe op and measures it with `pagewalk` (the layout
+replay, every record keyed by its `(object, record)` path from the page root, every switch arm
+walked):
+
+* **Source.** It removes the records (`remove_records`' removal), then re-walks the page and
+  puts back what the removal moved: the first moved record's x/y geometry field takes the shift
+  back, and the records placed from it return with it. It refuses (`CANNOT_COMPENSATE`) when the
+  moved record has no x/y field or no record of the source object places it, and
+  (`STATE_CHANGED`) when the removal changed a surviving record's inherited font, align, colours
+  or value slot: fixing its position would leave it styled wrong.
+* **Destination.** It pastes the records as a new object attached to the destination
+  (`insert.insert_object`, whose attach is a byte clone of the destination's first wtype-5
+  record; refused if that clone carries a value slot), re-encoded with absolute x, y
+  (`absrecord.absolute`), the first font field and the first non-zero align made explicit,
+  register fields dropped. A record that only inherits a value slot from an attach that stays
+  behind is refused. A byte-shared child
+  (the button face behind an attach) is attached, never cloned, and the attach keeps its
+  `value_slot`, so the face repaints from the same cell (`OBJECT-HIERARCHY.md` §1a).
+* **Assertion.** It re-walks both pages and refuses unless every other record is where it was
+  and the moved records sit at their source boxes translated to `at`, styled as they were.
+
+On the reference coach's compact AES card (object 1427), moving Low Volts (the attach of child
+285, `value_slot` 45, and touch id 129) to the AES settings page (object 1425) takes one
+compensation edit: the "AES ⚙" gear's y field gets back the +29 px the removed attach carried.
+The pasted attach needed font 14 and align 1 made explicit (the settings page leaves font 9 and
+align 3 in effect where the paste lands); its colours inherited correctly. The result draws Low
+Volts at the boxes the flashed LV-move build draws it at (`tests/test_move_control.py`).
+
+It has not run on a coach. The halves it reuses have (`remove_records` and `insert_object`,
+flashed in LV-move, 2026-10-19); the generic re-encoding and the automatic compensation have
+not, so `hardware_verified` stays False until a build made with it is flashed.

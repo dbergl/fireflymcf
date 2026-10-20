@@ -53,6 +53,7 @@
         },
         "type": {
           "enum": [
+            "assert_layout",
             "drop_from_master",
             "fix_variant_gate",
             "move_attach",
@@ -84,6 +85,7 @@
             "aes_card_layout",
             "append_filter",
             "install_glyph",
+            "move_control",
             "remove_records",
             "split_hold_region",
             "swap_aes_electrical",
@@ -112,6 +114,59 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "assert_layout"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "root": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "page root object index or {\"ref\": op_id}"
+                  },
+                  "switch_values": {
+                    "type": "object",
+                    "description": "optional {switch child base: value} for the walk"
+                  },
+                  "slot_values": {
+                    "type": "object",
+                    "description": "optional {slot: value} for the walk"
+                  },
+                  "expect": {
+                    "type": "array",
+                    "description": "records and their absolute box: {select, x?, y?, w?, h?}"
+                  },
+                  "snapshot": {
+                    "type": "boolean",
+                    "description": "true: record the walk for a later unchanged_since"
+                  },
+                  "unchanged_since": {
+                    "type": "string",
+                    "description": "id of an earlier snapshot of the same root"
+                  },
+                  "except": {
+                    "type": "array",
+                    "description": "selects left out of the unchanged_since comparison"
+                  }
+                },
+                "required": [
+                  "root"
+                ]
+              }
+            }
+          }
+        },
         {
           "if": {
             "properties": {
@@ -1568,6 +1623,69 @@
                   "char",
                   "y",
                   "rows"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "move_control"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "from": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "object index or {\"ref\": op_id} holding the control"
+                  },
+                  "to": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "destination object index or {\"ref\": op_id}"
+                  },
+                  "records": {
+                    "type": "array",
+                    "description": "the control's records: {selector, child?, touch_id?}"
+                  },
+                  "at": {
+                    "type": "object",
+                    "description": "{x, y}: absolute top-left of the moved control"
+                  },
+                  "source_root": {
+                    "type": "integer",
+                    "description": "optional: measure only this source page root"
+                  },
+                  "dest_root": {
+                    "type": "integer",
+                    "description": "optional: measure only this destination page root"
+                  },
+                  "switch_values": {
+                    "type": "object",
+                    "description": "optional {switch child base: value}: measure only this set"
+                  },
+                  "slot_values": {
+                    "type": "object",
+                    "description": "optional {slot: value}: measure only this set"
+                  }
+                },
+                "required": [
+                  "from",
+                  "to",
+                  "records",
+                  "at"
                 ]
               }
             }

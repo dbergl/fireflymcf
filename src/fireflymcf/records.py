@@ -149,6 +149,12 @@ class WRecord:
                                      # is correct regardless of preceding presence-masked fields;
                                      # `color_offset(data, rec, role)` exposes it with a round-trip
                                      # guard. Lets a caller repoint a mode-7 fill index (recolour).
+    # Cursor positions the decoder passes whether or not the field there is present, so a
+    # caller can ADD a field (set its gate bit, insert its bytes here) without replaying the
+    # decoder (`absrecord`). File offsets, like the others.
+    aux_off: int | None = None       # cursor at R18: the R18-R20 register-index bytes start here
+    geom_base_off: int | None = None  # cursor at R23: the geometry loop starts here
+    r42_off: int | None = None       # cursor at the R42 gate: R42's u16 is (or would be) here
 
     @property
     def end(self) -> int:
@@ -251,6 +257,7 @@ def decode_record(data: bytes, off: int, loader_r35: bool = False) -> WRecord:
         u24()
 
     # R18-R20 aux bytes pack the per-coord register indices (2 bits each: in, out, in, out).
+    aux_off = p[0]
     a18 = u8() if b0 & 0x40 else 0
     a19 = u8() if b0 & 0x80 else 0
     a20 = u8() if b7 & 1 else 0
@@ -265,6 +272,7 @@ def decode_record(data: bytes, off: int, loader_r35: bool = False) -> WRecord:
 
     geom: list = [None] * 6                                   # R23-R28 the six layout coords
     geom_off: list = [None] * 6
+    geom_base_off = p[0]
     for i, (byte, bit) in enumerate(_PEN_BITS):
         if (b2 if byte == 2 else b6) & bit:
             geom_off[i] = p[0]
@@ -302,6 +310,7 @@ def decode_record(data: bytes, off: int, loader_r35: bool = False) -> WRecord:
     value_slot_off = None
     if aee & 0x2cf0: value_slot_off = p[0]; value_slot = u16()  # R40
     if (aed & 0x2140) or (aee & 0x4000): value_slot_off = p[0]; value_slot = u16()  # R41
+    r42_off = p[0]
     if (b4 & 0x20) and ((aed & 0x00070c3f) or (aee & 0xf)):   # R42
         value_slot_off = p[0]; value_slot = u16()
     corner_mask = None
@@ -384,7 +393,8 @@ def decode_record(data: bytes, off: int, loader_r35: bool = False) -> WRecord:
                    h_align=h_align, v_align=v_align, line_height=line_height,
                    line_height_adds_font=line_height_adds_font, colors=colors,
                    fmt=fmt, fmt_off=fmt_off,
-                   color_off=color_off)
+                   color_off=color_off, aux_off=aux_off, geom_base_off=geom_base_off,
+                   r42_off=r42_off)
 
 
 def geom_offset(data: bytes, rec: WRecord, i: int) -> int | None:

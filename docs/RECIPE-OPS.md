@@ -34,6 +34,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 
 | op | class | purpose | hardware status | verified |
 |---|---|---|---|---|
+| [`assert_layout`](#assert_layout) | same-size | Check, at its place in the recipe, that chosen records (by walk key, object and record, or label) sit at given absolute boxes, or that nothing on a page moved since an earlier snapshot. Changes no bytes. | Check-only: changes no bytes, so there is nothing to run on a coach. | yes |
 | [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14 (v26): the coach bath light (ch25) no longer follows Light Master. | yes |
 | [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07 (v22), mode `selector`. PC.62. Other modes unverified. | yes |
 | [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed (the reference build). | yes |
@@ -65,6 +66,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15 (v48; its three draw defects fixed in v49, flashed the same day). | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
+| [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | UNVERIFIED. Built from coach-proven halves (`remove_records`, `insert_object`); the absolute re-encoding and the compensation have not run on a coach. | **no** |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22 (reference build v7/v8). | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
@@ -82,6 +84,32 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 ## Same-size edits
 
 Bytes change in place. Nothing moves, so no pointer needs repair. Lowest risk.
+
+### assert_layout
+
+Check, at its place in the recipe, that chosen records (by walk key, object and record, or label) sit at given absolute boxes, or that nothing on a page moved since an earlier snapshot. Changes no bytes.
+
+- **Hardware status:** Check-only: changes no bytes, so there is nothing to run on a coach.
+- **Proof:** `pagewalk.py`
+- **Implementation:** `recipe_ops.AssertLayout`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `root` | integer\|object | yes |  | page root object index or {"ref": op_id} |
+| `switch_values` | object |  |  | optional {switch child base: value} for the walk |
+| `slot_values` | object |  |  | optional {slot: value} for the walk |
+| `expect` | array |  |  | records and their absolute box: {select, x?, y?, w?, h?} |
+| `snapshot` | boolean |  |  | true: record the walk for a later unchanged_since |
+| `unchanged_since` | string |  |  | id of an earlier snapshot of the same root |
+| `except` | array |  |  | selects left out of the unchanged_since comparison |
+
+Error codes:
+
+- `BAD_PARAMS` — no form or more than one, a malformed select or expect entry, `except` without `unchanged_since`, or `unchanged_since` naming no earlier snapshot, or one of another root or other switch/slot values.
+- `NO_MATCH` — a select names no record of the walk.
+- `AMBIGUOUS` — a label select without `nth` names more than one record, or an {object, record} select a record drawn under several keys (each is listed).
+- `LAYOUT_MISMATCH` — an `expect` field differs from the placed box (`pagewalk.describe` lines: expected box -> actual box and the delta).
+- `LAYOUT_MOVED` — `unchanged_since` found records moved, restyled, gone or appeared (`pagewalk.describe` lines).
 
 ### drop_from_master
 
@@ -753,6 +781,43 @@ Error codes:
 - `GLYPH_OCCUPIED` — char's stub entry already decodes as a real (non-placeholder) glyph -- this op only claims a character that currently falls back to the shared placeholder block
 - `GLYPH_STUB_SHARED` — char's stub entry is shared by more than just char (the placeholder-sharing set is bigger than [char]), so repointing it would repoint every character sharing it
 - `RELOCATE_REFUSED` — `relocate.relocate` refused the insertion. Mapped here the same way `RenameLabel` maps `GROW_REFUSED`: a relocating primitive's own `RelocationError` must not escape `compile_project`'s `except RecipeError` filter as a bare, unstructured exception.
+
+### move_control
+
+Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page.
+
+- **Hardware status:** UNVERIFIED. Built from coach-proven halves (`remove_records`, `insert_object`); the absolute re-encoding and the compensation have not run on a coach.
+- **Proof:** `pagewalk.py`, `absrecord.py`, `CONTROL-BEHAVIOR.md` §10
+- **Implementation:** `recipe_ops.MoveControl`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `from` | integer\|object | yes |  | object index or {"ref": op_id} holding the control |
+| `to` | integer\|object | yes |  | destination object index or {"ref": op_id} |
+| `records` | array | yes |  | the control's records: {selector, child?, touch_id?} |
+| `at` | object | yes |  | {x, y}: absolute top-left of the moved control |
+| `source_root` | integer |  |  | optional: measure only this source page root |
+| `dest_root` | integer |  |  | optional: measure only this destination page root |
+| `switch_values` | object |  |  | optional {switch child base: value}: measure only this set |
+| `slot_values` | object |  |  | optional {slot: value}: measure only this set |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param, `from == to`, an object out of range, an entry with no identity assertion or two entries naming one record, or a removal that would leave `from` empty.
+- `NO_SUCH_RECORD` — a selector matched nothing (from `_select_record`).
+- `EXPECT_MISMATCH` — a record's child_index or touch id is not what the entry asserts.
+- `POINTER_INSIDE` — a GuiCode or LCD literal points into the part of `from` that would move.
+- `RELOCATE_REFUSED` — `relocate.replace_object_records` refused.
+- `NO_ROOT` — no page root reaches `from` or `to`, a given root does not, or the first source root's walk does not draw the chosen records.
+- `TOUCH_OVERLAP` — a moved touch region, translated to `at`, meets a destination one.
+- `OFF_CANVAS` — a moved drawn record, translated to `at`, leaves the 800x480 canvas.
+- `UNSUPPORTED_RECORD` — a chosen record's wtype is not re-encodable, its font is unresolved, it inherits a value slot from an attach that stays, the attach `insert_object` would clone onto `to` carries a value slot, or `absrecord.absolute` cannot carry a field it needs.
+- `REGISTER_DEPENDENCY` — a moved record writes a register a record that stays reads.
+- `CANNOT_COMPENSATE` — the removal moved a record with no x/y field to put the shift back in, one no record of `from` places, or one whose size changed; or the passes did not converge.
+- `STATE_CHANGED` — the removal changed a surviving record's inherited font, align, colours or `value_slot`, or a pasted record's differs from its source.
+- `ARM_DISAGREES` — the walks disagree on the record the removal moved first, or its shift.
+- `LAYOUT_MOVED` — after the paste, a record other than the moved control moved, appeared or went, or a pasted record is not at its translated box.
+- `INSERT_REFUSED` — `insert.insert_object` refused (no wtype-5 template on `to`, or a gate).
 
 ### remove_records
 

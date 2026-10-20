@@ -54,6 +54,10 @@ UNVERIFIED_ALLOWLIST: set[str] = {
     #   acin-v / acin-a / acout-a -- draw:false readouts on fresh cells (the amps with the new
     #     subtract-and-clamp routine); invrows -- the captioned rows in the Inverter card.
     "alarms", "alarms-status", "acin-v", "acin-a", "acout-a", "invrows",
+    # the move_control proof build (LV-mc): built 2026-10-20, not flashed. Coach test: the
+    # compact AES card draws without Low Volts and the gear where LV-move has it; Low Volts on
+    # the AES settings page arms and disarms on a 3 s hold and repaints with its status.
+    "mv",
 }
 # (battglyph removed again 2026-10-10: v47 was flashed, its numbers sit at the stock position and
 # the owner saw the orange outline with the heater running, so the outline style reports itself
