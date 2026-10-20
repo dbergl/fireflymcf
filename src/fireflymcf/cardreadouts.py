@@ -1,5 +1,4 @@
-"""Captioned live readouts drawn inside a cardlayout card (v49: the ELECTRICAL Inverter card --
-spec its design note (not published)).
+"""Captioned live readouts drawn inside a cardlayout card (v49: the ELECTRICAL Inverter card).
 
 One private object holds, per row: a white caption (`cardlayout.title_record`, font 5), a number
 directive and a wtype-8 readout (`readout.author_readout_object`'s two records, the readout's font

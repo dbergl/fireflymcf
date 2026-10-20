@@ -1,5 +1,5 @@
 """On-screen register readouts: a display cell, a per-tick copy routine, a directive + readout
-record pair. Spec: its design note (not published).
+record pair.
 
 The mechanism is the Water Pump minute readout generalised (pumpauto step 3): a wtype-8 draws
 the cell its value_slot names every tick (coach, PC.58), a wtype-9 directive walked before it

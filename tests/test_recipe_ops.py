@@ -1450,9 +1450,8 @@ def test_add_pump_auto_off_composes_and_is_hardware_verified(stock, stock_hash):
     # apply order (which must create the 0xee toggle from scratch to run standalone on stock)
     # actually produces.
     assert len(guidata.binding_table(r.data)) == len(guidata.binding_table(stock)) + 10
-    # hardware_verified = True again as of v17 (the reference coach's build log (not published) "Experimental v16" ->
-    # "### v16 FLASHED AND VERIFIED (as part of v17), 2026-09-04"): v16's minute-0 clamp fix
-    # (checklist item 8, "Only goes 5-60") ran on the coach as part of the flashed v17 image.
+    # hardware_verified = True again as of 2026-09-04: the minute-0 clamp fix (checklist
+    # item 8, "Only goes 5-60") ran on the coach, flashed and verified that day.
     assert r.unverified == []
 
 
@@ -1510,17 +1509,15 @@ def test_add_pump_auto_off_link_toggle_carries_no_absolute_write(stock, stock_ha
 def test_swap_aes_electrical_reads_the_pump_section_ref_when_ordered_first(stock, stock_hash):
     """The path Task 9 designs for: add_pump_auto_off runs first and publishes a handle,
     swap_aes_electrical reads it via {"ref": "pumpauto"} and wires the Water Pump section
-    onto the compact frame -- both hardware-verified as of v17 (the reference coach's build log (not published) "Experimental
-    v16" -> "### v16 FLASHED AND VERIFIED (as part of v17), 2026-09-04")."""
+    onto the compact frame -- both hardware-verified 2026-09-04."""
     from fireflymcf import records, guidata, recipe
     r = compile_ops(stock, stock_hash,
                     recipe.OpSpec(id="pumpauto", type="add_pump_auto_off", params={}),
                     recipe.OpSpec(id="aes", type="swap_aes_electrical",
                                   params={"pump_section": {"ref": "pumpauto"}}))
     assert r.ok, r.errors
-    # Both "aes" (the pump-section instance of aesswap) and "pumpauto" ran on the coach as part
-    # of v17 (the reference coach's build log (not published) "Experimental v16"/"Experimental v17" FLASHED AND VERIFIED
-    # sections), so neither reports unverified any more.
+    # Both "aes" (the pump-section instance of aesswap) and "pumpauto" ran on the coach,
+    # flashed and verified 2026-09-04, so neither reports unverified any more.
     assert set(r.unverified) == set()
     from fireflymcf import aescompact
     gs, _ = guidata.guidata_extent(r.data)
@@ -1587,9 +1584,8 @@ def test_swap_with_link_indicator_wires_the_pump_link_switch_to_the_bridge_cell(
     # nothing on the page reads cell 45 for the Pump Link any more
     assert not any(x.wtype == 33 and x.colors and x.colors[0] == ("fillA", 7, 45)
                    for x in recs[7:]), "the v15 box that read the Low Volts cell is gone"
-    # v16's Pump Link switch (this test's own subject) was itself hardware-verified as part of
-    # v17 (the reference coach's build log (not published) "Experimental v16" -> "### v16 FLASHED AND VERIFIED (as part of
-    # v17), 2026-09-04", checklist items 5-7), so "aes" no longer reports unverified.
+    # The Pump Link switch (this test's own subject) was itself hardware-verified 2026-09-04
+    # (checklist items 5-7), so "aes" no longer reports unverified.
     assert "aes" not in r.unverified
 
 
@@ -1688,9 +1684,8 @@ def test_add_pump_auto_off_adopts_an_existing_toggle_when_composed_after_add_opt
              for e in ents if e.raw[optionrow.FUNCTION_FIELD] == optionrow.DELTA_FUNCTION}
     assert deltas == {0x0100, -0x0100}
 
-    # pumplink is hardware-verified (v9 on the coach); pumpauto is verified again as of v17
-    # (the reference coach's build log (not published) "Experimental v16" -> "### v16 FLASHED AND VERIFIED (as part of v17),
-    # 2026-09-04") -- the clamp fix ran on the coach.
+    # pumplink is hardware-verified (2026-08-31); pumpauto is verified again as of 2026-09-04
+    # -- the clamp fix ran on the coach.
     assert composed.unverified == []
 
 
@@ -1807,7 +1802,7 @@ def test_add_register_readout_refuses_an_x_outside_the_panel(stock, stock_hash):
 def test_add_register_readout_on_stock_draws_the_minutes_on_home(stock, stock_hash):
     """On stock this lands on tier 1 (cell 211, `fresh=False`) -- the same tier class as v17's
     own `minutes-home` (tier 2, also not fresh), which was FLASHED AND VERIFIED 2026-09-04
-    (the reference coach's build log (not published) "Experimental v17", `docs/BUS-BASELINE.md` PC.59), so
+    (`docs/BUS-BASELINE.md` PC.59), so
     `AddRegisterReadout`'s class default is `hardware_verified = True` and a non-fresh cell
     keeps it."""
     from fireflymcf import followchannel, guidata, readout, recipe, sramreach
@@ -1850,8 +1845,8 @@ def _readout_claimed_image(stock):
 
 def test_add_register_readout_tier_2_cell_reports_verified(stock, stock_hash):
     """A tier-2 cell (an odd spare byte, `fresh=False`) is exactly what v17's `minutes-home`
-    used on the coach -- cell 219 @ 0x20039f51 (the reference coach's build log (not published) "Experimental v17";
-    FLASHED AND VERIFIED 2026-09-04, `docs/BUS-BASELINE.md` PC.59). Forcing tier 1 to refuse
+    used on the coach -- cell 219 @ 0x20039f51 (FLASHED AND
+    VERIFIED 2026-09-04, `docs/BUS-BASELINE.md` PC.59). Forcing tier 1 to refuse
     (`_readout_claimed_image`) and asking for a width-1 readout lands on tier 2, and the op's
     class default (`hardware_verified = True`) survives a non-fresh instance."""
     from fireflymcf import recipe
@@ -1865,10 +1860,9 @@ def test_add_register_readout_tier_2_cell_reports_verified(stock, stock_hash):
 
 
 def test_add_register_readout_tier_3_fresh_cell_stays_unverified(stock, stock_hash):
-    """Tier 3 (a spare index repointed at fresh SRAM no stock instruction names) is the one
-    case the design spec (2026-09-04-register-readout-design.md Sec5 item 7) says keeps
-    `hardware_verified = False` even after the class default flips True: a coach photo of one
-    tier does not vouch for an address nothing has ever touched. Forcing every halfword-safe
+    """Tier 3 (a spare index repointed at fresh SRAM no stock instruction names) is the one case
+    that keeps `hardware_verified = False` even after the class default flips True: a coach photo of
+    one tier does not vouch for an address nothing has ever touched. Forcing every halfword-safe
     cell claimed (`_readout_claimed_image`) and asking for a width-2 readout leaves no odd
     spare byte to use either, so `allocate_display_cell` falls through to tier 3."""
     from fireflymcf import recipe

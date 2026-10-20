@@ -1,6 +1,5 @@
 """The v48 four-card ELECTRICAL page: object 829 (the compact AES frame) re-laid out as HOME's
-2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump
-(its design note (not published)).
+2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump.
 
 Pinned to the v47 shape: the frame's and the private AES cluster's wtype sequences, and every
 edited geometry slot's prior value, are asserted before anything is written. Shared objects

@@ -1,6 +1,6 @@
 """Insert bytes into GuiData and repair every downstream reference.
 
-its design note (not published) (Phase-1 spike, run with
+A Phase-1 spike (run with
 `python3 -m fireflymcf.relocator_scan`) established that a GuiData record embeds
 **no live absolute self-pointer** -- the only `0x900xxxxx` words a relocator must repair
 are the four object-pointer tables (`guidata.object_tables`), which carry 94.5-97.2% of

@@ -73,7 +73,7 @@ VARIANT_SETTER = 0x20039908
 # `STATUS_SLOT_BASE + var*2` was correct only for index <= 255 and put every high-index var
 # (e.g. the 0xEE config selector, var 289) 56 bytes into unwritten space -- the PC.44 bug that
 # made the v8 Pump Link follower read a slot the firmware never wrote (the value was live at
-# 0x20008242 all along). §5.4c / its design note (not published).
+# 0x20008242 all along). `MCF-FORMAT.md` §5.4c.
 # The mechanism now lives in `register.py`; re-exported here so existing references
 # (`followchannel.status_slot_addr`, `followchannel.STATUS_SLOT_BASE`, ...) still resolve.
 from .register import (STATUS_SLOT_BASE, STATUS_SLOT_BASE_HIGH,  # re-exported: the register
@@ -562,8 +562,8 @@ def plan_from_registers(data: bytes, *, watch: Condition, target_channel: int,
     0xFFFF unset sentinel satisfies is refused here rather than authored.
 
     The routine reads watch/gate slots as generic halfwords, so watching a different existing
-    register is the verified v9 routine with different resolved inputs, not new machine code --
-    but the first use against a NEW watch register still warrants a coach check (spec risk c)."""
+    register is the verified routine with different resolved inputs, not new machine code --
+    but the first use against a NEW watch register still warrants a coach check."""
     if not (1 <= watch.mask <= 0xFF):
         raise FollowChannelError(f"watch mask must be a nonzero byte (1..0xFF), got {watch.mask:#x}")
     if watch.value & ~watch.mask:
@@ -1010,7 +1010,7 @@ def scan_display_cell(data: bytes, exclude: tuple = ()) -> tuple[int, int]:
     Same discipline as `_scan_latch_cell`/`resolve`'s `alloc_display` -- "widget-spare"
     (`statusbind.spare_cell_indices`) is NOT enough, because stock GuiCode keeps live working
     memory in some spare cells (cell 203 / 0x2003A2F8 is loaded by the very per-tick function we
-    hook), so the GuiCode-reference scan is what actually excludes the the build log trap cell 203.
+    hook), so the GuiCode-reference scan is what actually excludes the trap cell 203.
     Returns `(cell_index, cell_addr)` or raises `FollowChannelError`."""
     gs, _ = guidata.guidata_extent(data)
     spares = statusbind.spare_cell_indices(data)

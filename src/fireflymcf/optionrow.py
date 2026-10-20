@@ -751,7 +751,7 @@ def build_config_stepper(data: bytes, selector: int, step: int) -> ConfigStepper
     """Clone the stock `0x0E` +/- arrow groups onto `selector` with a `+/-step` delta.
 
     The arrows are pure binding data: a repeating press delta, a release zero-delta, and
-    a `D3` read-back (its design note (not published)).
+    a `D3` read-back.
     The G12 adds the delta and echoes the result, so nothing here authors code.
 
     `step` must be a byte-safe magnitude (1..255): the packed 0xEE register keeps the

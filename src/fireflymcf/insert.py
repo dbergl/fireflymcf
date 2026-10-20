@@ -1,7 +1,6 @@
 """Clone an existing GuiData object and attach it to a page as a genuinely new object.
 
-This is Task 2 of the GuiData relocator build (design spec
-its design note (not published) sections 2 and 4). It sits
+This is Task 2 of the GuiData relocator build. It sits
 on top of Task 1's `relocate` (`relocate.py`) and adds two things:
 
 - `clone_object(data, donor_index)` -- the exact byte span of an existing object. Because

@@ -22,8 +22,8 @@ filter, the title and rows of every screen the opcode table can decode.
 
 `patch` rewrites a label, repoints a control's G12 channel, and/or moves a draw
 element to an absolute pixel position, then reseals the
-container's checksums. It only ever makes same-size edits, runs the five-rung ladder from
-its design note (not published), and refuses to write if any rung
+container's checksums. It only ever makes same-size edits, runs the five-rung verification
+ladder, and refuses to write if any rung
 fails or if the destination lies inside a read-only corpus directory.
 
 `options` lists every OPTIONS-page checkbox binding -- name, value-slot, the register it

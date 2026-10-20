@@ -32,7 +32,7 @@ def _object_bytes(data, obj):
 
 
 # The stock chassis (object 440) and house/coach (object 443, the clone's donor) battery
-# cells, from its design note (not published)'s
+# cells, by their
 # pinned field map: fillA mode-7 colour index, wt-8 value_slot index.
 STOCK_COLOR_202 = 0x20039D5C
 STOCK_COLOR_206 = 0x2003A664

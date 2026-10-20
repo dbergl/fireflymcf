@@ -139,7 +139,7 @@ def _access_width(mnemonic: str) -> int:
 def _cell_widths(data: bytes) -> dict:
     """cell addr -> bytes read, from the variable-type table (stock `+0x4492C`, FUN_00251E38;
     resolved live via `celltables.type_table_off` -- a fixed offset reads the dead copy on a
-    relocated table, e.g. v32/v33 (spec `2026-09-25-level-page-design.md` §8)."""
+    relocated table, e.g. v32/v33."""
     from . import guidata
     gs, _ = guidata.guidata_extent(data)
     cells = status_map.cell_table(data)

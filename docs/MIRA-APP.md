@@ -231,7 +231,7 @@ in the template). Routing (`power.svc.js`): `DC_POWER_STATUS` instance 1 → hou
 `0x19FFF400`, is `CHASSIS_MOBILITY_STATUS`, not a battery.)
 
 The coach's 48 V hardware is **Renogy** (the APS-500 alternator-charger at SA `0x80`; see
-the reference coach's build log (not published), `docs/SETTLED-FINDINGS.md`). The app's `Renogy.cls.js` is hardwired to
+`docs/SETTLED-FINDINGS.md`). The app's `Renogy.cls.js` is hardwired to
 `this._sourceAddress = 0x80` and reads `DC_SOURCE_STATUS_1/2/11` + `CHARGER_STATUS` gated on SA `0x80`.
 State-of-charge comes from `DC_SOURCE_STATUS_2` (`0x1FFFC`): `SOC = ceil(can[4] / 2)`, treated invalid
 if `can[4] > 200`. Our captured `0x1FFFC` payload `0178c024c2ffffff` → `can[4] = 0xC2 = 194` →

@@ -1,7 +1,6 @@
 """v25 (2026-09-11/12): the coach-48V battery live-repaint + ELECTRICAL 48V rescale.
 
-Covers the two coach-observed defects the v25 design fixes
-(its design note (not published)):
+Covers the two coach-observed defects the v25 design fixes:
 
 1. `live_repaint` retargets the clone's enrolled wt5 CONTAINER record (on the parent object) to
    watch the live coach cell 209 instead of the chassis cell 205 it inherited from the template.

@@ -44,19 +44,18 @@ those as "the panel uses this DGN." `cli`/`guidata.variable_table` gives the per
 
 **Tooling entry points:** `register.resolve_register` turns a listed subscription into a slot handle
 (a `{"ref"}` consumed by later ops); `register.follow_register` reads that handle to watch the slot
-for edges and drive a channel with gate conditions (see its design note (not published)).
+for edges and drive a channel with gate conditions.
 
 **Two `0x15FCE` selectors worth naming individually (13.6):**
 
 - **`0xEF` — AES/AGS mode** (1 = AGS, 2 = AES, 3 = AES-Single). This is the value behind slot 37
-  (`0x2003A38C`), the wt-6 match value that selects object 829 (AES) vs 830 (AGS) on the
-  Electrical page and gates the Low Volts freeze below. `docs/OBJECT-HIERARCHY.md` §7 and
-  its design note (not published) walk the switch and
-  the freeze in full. **The AES enable/disable affordance is a GuiCode action, not this DGN
-  directly:** touch id `0x7E2` (handler `0x0024C72A`, gate `0x20039F19`) — disabled state routes
-  through a "Notice:" interstitial (screen 18 / object 21) before a 3-second-hold Warning screen;
-  the AGS mode pill (binding group `0x0080`) jumps straight to that same Warning screen, skipping
-  the Notice. Only after the hold does the panel emit the `0x1FED9` selector-`0xEF` config write
+  (`0x2003A38C`), the wt-6 match value that selects object 829 (AES) vs 830 (AGS) on the Electrical
+  page and gates the Low Volts freeze below. `docs/OBJECT-HIERARCHY.md` §7 walks the switch and the
+  freeze in full. **The AES enable/disable affordance is a GuiCode action, not this DGN directly:**
+  touch id `0x7E2` (handler `0x0024C72A`, gate `0x20039F19`) — disabled state routes through a
+  "Notice:" interstitial (screen 18 / object 21) before a 3-second-hold Warning screen; the AGS mode
+  pill (binding group `0x0080`) jumps straight to that same Warning screen, skipping the Notice.
+  Only after the hold does the panel emit the `0x1FED9` selector-`0xEF` config write
   this bullet describes. The compact AES page's own enable pill is stamped with `0x7E2` (not
   `0x0080`) so it gets the Notice flow too — see `docs/OBJECT-HIERARCHY.md` §7.
 - **`0x2F` — Low Volts arming.** Var-table entry **42**, receive slot **`0x2000801C`**
@@ -72,9 +71,7 @@ for edges and drive a channel with gate conditions (see its design note (not pub
   `setVariant` via fn-pointer `[0x20039908]` (r0=0x81, r1=`!armed`) and writes cell 45 directly,
   rather than adding a new receive-filter entry, a spare display cell, or touching the freeze gate.
   A new *consumer* of an existing register, not a new subscription. **Hardware-verified,
-  firefly-13.6, 2026-09-01** — toggles both ways in AES. See
-  its design note (not published), §3.3 and
-  its design note (not published).
+  firefly-13.6, 2026-09-01** — toggles both ways in AES (`docs/HARDWARE-VERIFIED.md`).
 
 ## 2. Panel TRANSMITS — bindings, GuiCode, and the LCD's own
 

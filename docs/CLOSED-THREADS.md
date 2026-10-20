@@ -12,7 +12,7 @@ citations was checked to resolve before the move (GUICODE Findings 14/16/17/18/1
 **Where to find what other documents cite as `CLAUDE.md` defect 0a/0b/0c, `CLAUDE.md` owner work
 item 0-5, or `CLAUDE.md`'s "Open threads" / "State and next step":** those sections left
 `CLAUDE.md` on 2026-09-10 and are appended verbatim at the end of this file (defects, work items,
-open threads) and of the reference coach's build log (not published) (state and next step).
+open threads).
 
 ---
 
@@ -24,7 +24,7 @@ Finding 61 (2026-09-02). The "seven closed" in the heading is also dated: the ei
 ## The eight original open threads — seven closed
 
 1. **Chrome colour source — RESOLVED, 2026-08-15 (`GUICODE.md` Finding 18 + its colour-dig
-   correction; SDD working notes, not published, merged to master `1714f9b`).** Each
+   correction; merged to master `1714f9b`).** Each
    widget record carries mode-tagged colour fields (`records.WRecord.colors`): **mode 3 = inline
    BGR**, **mode 6 = palette index**, **mode 7 = colour-table index**, 0/4 = inherit. The chrome
    uses **mode 7**, and the mode-7 table `DAT_002535B4 = 0x90044BC8` is the **same table as the
@@ -120,7 +120,7 @@ Finding 61 (2026-09-02). The "seven closed" in the heading is also dated: the ei
    **CONFIRMED ON HARDWARE 2026-08-17**: the reloc-fixed build boots, and a new HOME button
    (`newbutton.build_home_button`) toggles G12 pin 15, shows its live state, and repaints in
    place — see "Adding a new button" below.
-   Design: its design note (not published). Authoring is
+   Authoring is
    **clone + same-size retarget**, not a from-scratch encoder.
 7. **Content-render extents** (`+0x6c12..+0x6c18`) — **RESOLVED, 2026-08-14 (`GUICODE.md`
    Finding 14).** Approach A now reproduces the Climate page's vertical layout from the bytes,
@@ -293,7 +293,7 @@ text is retained deliberately: mechanisms were built on both symptoms and both h
 
 ## Moved out of `CLAUDE.md` on 2026-09-10 — known firmware defects, owner work items, open threads, foundations
 
-Verbatim, as part of the documentation cleanup (its design note (not published)). Dated statements below describe the state on the date they carry.
+Verbatim, as part of the documentation cleanup. Dated statements below describe the state on the date they carry.
 
 ### Known firmware defects (not ours to have caused)
 
@@ -412,8 +412,7 @@ Verbatim, as part of the documentation cleanup (its design note (not published))
    **The in-coach test ran 2026-08-30 and both sub-questions closed the other way than the code assumed** — full record `BUS-BASELINE.md` PC.40, headline in this item's title. Two standing rules it re-paid: the name pairing that rested on the label run's *position* was the part that was wrong (the handler *values* were bytes and held), and `Ship Mode` at "value 1" plus `3RD/4RD` "unconfirmed at 8" were both artifacts of one off-by-one — the picker offers **both**, at 0 and 7.
 
 4. **AES-page "Low Volts" button recolor — CLOSED, HARDWARE-VERIFIED 2026-09-01.** Shipped as the
-   `aeslowvolts` op (capability table above; the reference coach's build log (not published) "The compact AES Electrical page";
-   design spec `2026-09-01-compact-aes-electrical-page-design.md` §3.3). The cause stood: cell 45's
+   `aeslowvolts` op (capability table above). The cause stood: cell 45's
    sole writer at `0x0024A176` is skipped in AES mode by the `bls.w` at `0x0024A172`. The fix did
    **not** patch that gate — it appends an un-gated replica of the block onto the per-tick hook,
    calling the firmware's own `setVariant`, so stock code is untouched and the control recolors both

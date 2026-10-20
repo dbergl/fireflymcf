@@ -1,6 +1,6 @@
 """Repointing a control's G12 channel.
 
-Phase 2 of its design note (not published). The edit itself is
+The edit itself is
 one byte per binding entry, so the same-size invariant is trivially satisfied; everything
 worth testing is what `set_channel` *refuses*.
 

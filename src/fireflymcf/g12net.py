@@ -2,9 +2,8 @@
 
 This module can **enumerate** a device: ask what upload targets it carries and what versions
 they are, and nothing else. It cannot write. The transfer half of the protocol
-(`MCF-FORMAT.md` §4.4, `BUS-BASELINE.md` PC.63) is deliberately not implemented here; see
-its design note (not published) for what has to be
-answered on hardware before it is.
+(`MCF-FORMAT.md` §4.4, `BUS-BASELINE.md` PC.63) is deliberately not implemented here; questions
+remain to be answered on hardware before it is.
 
 **There is no read-back anywhere in this protocol**, so there is no way to fetch a device's
 current config before changing it. Enumeration tells you *which* config the device holds --
