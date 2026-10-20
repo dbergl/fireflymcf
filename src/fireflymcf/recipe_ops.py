@@ -3350,12 +3350,13 @@ class MoveControl(Op):
                       went, or a pasted record is not at its translated box.
       INSERT_REFUSED -- `insert.insert_object` refused (no wtype-5 template on `to`, or a gate).
 
-    `hardware_verified = False`: the remove and paste halves reuse coach-proven mechanisms
-    (`remove_records`, `insert.insert_object` as `add_low_volts_control` uses it), but the
-    generic absolute re-encoding and the automatic compensation have not run on a coach.
+    `hardware_verified = True`: COACH-VERIFIED 2026-10-20 (owner), the LV-mc proof build. It
+    moved Low Volts from the compact AES card (object 1427) to the AES settings page (1425),
+    finding the gear button's compensation itself; the card draws as LV-move did, nothing else
+    moved, and the moved button arms and disarms on its 3 s hold and repaints with its status.
     Registers `ctx.handles[op_id]`; `{'ref': op_id}` resolves to the new object.
     """
-    hardware_verified = False
+    hardware_verified = True
 
     PARAMS = {
         "properties": {
@@ -3773,7 +3774,7 @@ class MoveControl(Op):
                    for r in records.object_records(data, gs + tab[h["to"]])), \
             "object %d does not attach object %d" % (h["to"], h["object"])
         return ("move_control: %d record(s) from object %d to object %d at (%d, %d); source "
-                "compensated by %d edit(s); UNVERIFIED on a coach"
+                "compensated by %d edit(s)"
                 % (h["moved"], h["from"], h["to"], h["at"][0], h["at"][1], h["compensated"]))
 
 

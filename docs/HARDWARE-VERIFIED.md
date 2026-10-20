@@ -299,6 +299,15 @@ records lay out from the previous drawn frame; one `move_element` restored the o
 centred it. On the coach the settings-page button arms, disarms and recolours through
 `add_aes_low_volts_trigger`'s bridge, with the 3 s hold.
 
+**Moving a control between pages in one op: `move_control` — CONFIRMED ON HARDWARE 2026-10-20**
+(owner). The LV-mc proof build made the same move with one op instead of three: `move_control`
+removed Low Volts' attach and touch region (id 129) from object 1427, found the compensation
+itself (one edit: the gear's y gets back the 29 px the removed attach carried), re-encoded the
+records at absolute positions and pasted them into a new object attached to 1425, the AES
+settings page's body. It asserted every page that shows either object, in every switch state,
+unchanged apart from the move. The compact card draws as LV-move's (byte-identical, pixel-identical
+render), nothing else moved, and the moved button arms, disarms and recolours with the 3 s hold.
+
 **Where a glyph lands vertically — `proven-from-code`** (`CONTROL-BEHAVIOR.md` §7a). A `wtype 11`
 label's glyph draws at `box_y0 + ((box_h - font[0x07]) >> 1) + glyph[0x0c]`: the centring block is
 the **font cell** (`ldrb r1,[r3,#7]` @`0x00255C30`, centre arm @`0x00255D3C`, no guard against a

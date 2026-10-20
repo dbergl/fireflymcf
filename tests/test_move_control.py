@@ -99,11 +99,11 @@ def test_moves_low_volts_and_restores_the_gear(moved):
         assert gear.box[:2] == GEAR_BOX, root
     assert 129 not in gestures.touch_ids(moved.data, SRC)
     assert 129 in gestures.touch_ids(moved.data, _new_object(moved.data))
-    assert recipe.REGISTRY["move_control"].hardware_verified is False
-    assert "mv" in moved.unverified
+    assert recipe.REGISTRY["move_control"].hardware_verified is True
+    assert "mv" not in moved.unverified
     line = [m for m in moved.manifest if m.startswith("move_control:")]
     assert line == ["move_control: 2 record(s) from object 1427 to object 1425 at (618, 89); "
-                    "source compensated by 1 edit(s); UNVERIFIED on a coach"]
+                    "source compensated by 1 edit(s)"]
 
 
 def test_lands_where_lv_move_drew_it(moved, lv_move):

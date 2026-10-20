@@ -127,8 +127,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "it, put back what the removal moved on the source page, paste it at an absolute "
         "position (a new object under a clone of the destination's first attach), and assert "
         "nothing else moved on either page.",
-        "UNVERIFIED. Built from coach-proven halves (`remove_records`, `insert_object`); the "
-        "absolute re-encoding and the compensation have not run on a coach.",
+        "Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES "
+        "settings page, the gear's compensation found by the op.",
         "`pagewalk.py`, `absrecord.py`, `CONTROL-BEHAVIOR.md` §10"),
     "assert_layout": ("same-size",
         "Check, at its place in the recipe, that chosen records (by walk key, object and record, "
