@@ -118,6 +118,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Park a control off the 480 px canvas by rewriting its attach records' y. Bindings "
         "stay.",
         "UNVERIFIED. Never flashed.", "`CompileResult.unverified`"),
+    "remove_records": ("structural",
+        "Delete chosen records from one object (shrinking it), so a control is gone from the "
+        "page, its touch region included. Bindings stay.",
+        "UNVERIFIED. Never flashed.", "`relocate.replace_object_records`"),
     "drop_from_master": ("same-size",
         "Remove one channel from a master control (its ON+OFF group pair), so the master no "
         "longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0.",
