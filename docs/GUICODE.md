@@ -5829,7 +5829,7 @@ Three searches, all negative:
 trap, not a mystery.** The negative above is real and complete for *direct* addressing, and that is
 exactly its signature. Counting all 664 widget slots whose pointer lands in GuiCode's RAM, **209
 have no literal reference in GuiCode at all** — and that set contains **var 115** and **var 125**,
-which `builds/golden-v22-anchor.ffproj.json`'s `pin115`/`pin125` ops independently identify as
+which a research build's recipe ops on those pins independently identify as
 `CHARGER_STATUS` (`0x1FFC7`) and `CHARGER_CONFIGURATION_STATUS` (`0x1FFC6`). Those are written by
 the LCD firmware's receive path **by index off a table base**, the exact mechanism `CLAUDE.md`
 records as invisible to a pool-literal scan. The unreferenced 209 are the receive-fed class, and

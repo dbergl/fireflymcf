@@ -3,8 +3,8 @@
 Compile a recipe through every universal gate `recipe.compile_project` already runs — the
 structural gates, the capability gate, each op's own `verify()`, and the seal check — and render
 one PASS/FAIL verdict. This is the single definition of "validated": the `validate` CLI command
-and `tests/test_builds_validate.py` both call `validate()` so they can never disagree on what a
-safe-to-flash build is. Read-only: it writes no image.
+and the research repository's recipe tests both call `validate()` so they can never disagree on
+what a safe-to-flash build is. Read-only: it writes no image.
 """
 from __future__ import annotations
 
