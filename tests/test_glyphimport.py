@@ -1,7 +1,9 @@
 """`glyphimport`: an owner's picture into coverage rows, in every format an owner might hand over.
 
-Data-free (no corpus), so it runs in the public CI on every platform; the end-to-end import
-against a real font is `test_glyphimport_corpus.py`.
+Needs no research data, so it runs in the public CI on every platform. Keep it that way: the
+collector in conftest.py skips, without that data, any test file naming one of its tokens
+(`_RESEARCH_TOKENS`), so this docstring avoids them. The end-to-end import against 13.6's
+fonts is the sibling module with the same stem.
 """
 import pytest
 from PIL import Image, ImageDraw
