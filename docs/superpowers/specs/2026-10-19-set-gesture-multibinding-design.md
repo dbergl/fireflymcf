@@ -161,3 +161,16 @@ reinstalling, and the result of `fireflymcf validate` on the coach project
 (the owner's project file, which already contains
 `lv-hold {"target": 285, "group": 129, "kind": "hold_to_toggle", "seconds": 3}`). The owner's
 session will then compile, verify and hand over the flashable build.
+
+## Outcome (2026-10-19)
+
+Implemented in `gestures._make_multi_hold_to_toggle`. Bindings 449/450 are the selector `0x2F`
+read-back request (`D3`) that follows each write, the same consumer, which PC.39 shows is what
+repaints the button; both pairs are converted. Flashed and verified by the owner the same day:
+the 3 s hold works. The op is now verified for this path; AGS mode is untested.
+
+**Correction to "What group 129 is" above.** Object 795 is not on AUTO ENGINE START SETTINGS.
+`fireflymcf bus-map --name "Low Volts"` places stock's reachable group-129 control on AUTO GEN
+START SETTINGS (AGS mode), and the owner reports that the AES floorplan's AUTO ENGINE START
+SETTINGS page has no Low Volts button. On this coach, the compact ELECTRICAL page (object 1427)
+is the only Low Volts button.

@@ -279,6 +279,16 @@ than `wire_button` on a cloned shell), behave identically — and they do so whi
 is the runtime confirmation that the right group is being picked. Treat `make_hold_to_toggle` as
 a general primitive rather than a one-off.
 
+**A variant-selected group, every copy alike — CONFIRMED ON HARDWARE 2026-10-19** (owner). Low
+Volts (13.6 group 129) holds four `0x1FED9` bindings: a selector `0x2F` write of 0 (variant 0)
+or 1 (variant 1), each followed by its read-back request. GuiCode sets the variant from the
+live selector value (`0x0024A176`), so the copy that runs is the right direction.
+`make_hold_to_toggle` now converts such a group when five premises hold
+(`gestures._make_multi_hold_to_toggle`): six same-size bytes (hold nibble, held repeat, and
+`PHASE_HELD` on all four bindings). Flashed in the reference coach's build with the 3 s hold,
+pressed from the compact AES ELECTRICAL page: the hold works. AGS mode, where stock also draws
+the control on AUTO GEN START SETTINGS, has not run.
+
 **Where a glyph lands vertically — `proven-from-code`** (`CONTROL-BEHAVIOR.md` §7a). A `wtype 11`
 label's glyph draws at `box_y0 + ((box_h - font[0x07]) >> 1) + glyph[0x0c]`: the centring block is
 the **font cell** (`ldrb r1,[r3,#7]` @`0x00255C30`, centre arm @`0x00255D3C`, no guard against a
