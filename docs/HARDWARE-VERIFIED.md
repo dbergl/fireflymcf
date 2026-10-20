@@ -289,6 +289,16 @@ live selector value (`0x0024A176`), so the copy that runs is the right direction
 pressed from the compact AES ELECTRICAL page: the hold works. AGS mode, where stock also draws
 the control on AUTO GEN START SETTINGS, has not run.
 
+**Moving a control between pages: deleted from one, added to another — CONFIRMED ON HARDWARE
+2026-10-19** (owner). Low Volts left the compact AES ELECTRICAL card and went to the AES settings
+page (screen 28, body object 1425). `remove_records` deleted its wtype-5 attach (child 285) and
+its touch region (id 129) from object 1427, shrinking it through
+`relocate.replace_object_records`; `add_low_volts_control` put a "Triggers:" title and the button
+on 1425. Deleting the attach moved the next record, the "AES" gear button, up 29 px, because
+records lay out from the previous drawn frame; one `move_element` restored the offset and
+centred it. On the coach the settings-page button arms, disarms and recolours through
+`add_aes_low_volts_trigger`'s bridge, with the 3 s hold.
+
 **Where a glyph lands vertically — `proven-from-code`** (`CONTROL-BEHAVIOR.md` §7a). A `wtype 11`
 label's glyph draws at `box_y0 + ((box_h - font[0x07]) >> 1) + glyph[0x0c]`: the centring block is
 the **font cell** (`ldrb r1,[r3,#7]` @`0x00255C30`, centre arm @`0x00255D3C`, no guard against a
