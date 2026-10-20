@@ -974,6 +974,50 @@ def _cmd_glyph_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_glyph_import(args: argparse.Namespace) -> int:
+    """Turn an owner's artwork into `install_glyph` parameters -- `glyph-export`'s inverse.
+
+    The params are compiled against the image before they are printed, so what this writes is
+    what `install_glyph` accepts: the slot, a free character, the conventional y-bearing.
+    """
+    from . import glyphimport
+    data = Path(args.image).read_bytes()
+    if args.list:
+        print("slot  cell  chars")
+        for f in glyphimport.font_slots(data):
+            print("%4d  %4d  %r..%r" % (f["slot"], f["cell"], f["first"], f["last"]))
+        return 0
+    if not args.artwork or args.slot is None:
+        print("error: glyph-import needs ARTWORK and --slot (or --list)", file=sys.stderr)
+        return 2
+    try:
+        spec, rule = glyphimport.import_glyph(
+            data, args.artwork, args.slot, args.char, ink=args.ink, height=args.height,
+            width=args.width, trim=not args.no_trim, claim_block=args.claim_block)
+    except glyphimport.ArtworkError as e:
+        print("error: %s" % e, file=sys.stderr)
+        return 1
+    rows = spec["rows"]
+    summary = ("%dx%d glyph from %s (%s coverage), slot %d char %r, y %d"
+               % (len(rows[0]), len(rows), Path(args.artwork).name, rule, spec["slot"],
+                  spec["char"], spec["y"]))
+    if args.preview:
+        glyphimport.preview(rows, args.preview)
+    if args.as_op:
+        spec = {"id": args.id or ("glyph-%d-%s" % (spec["slot"], spec["char"])),
+                "type": "install_glyph", "params": spec}
+    text = json.dumps(spec, indent=2)
+    if args.out:
+        Path(args.out).write_text(text + "\n", encoding="utf-8")
+        print("wrote %s: %s" % (args.out, summary))
+    else:
+        print(text)
+        print(summary, file=sys.stderr)
+    if args.preview:
+        print("preview: %s" % args.preview, file=sys.stderr)
+    return 0
+
+
 def _cmd_g12_rules(args: argparse.Namespace) -> int:
     """Show how the G12 turns a stored config selector into an RV-C command broadcast.
 
@@ -1764,6 +1808,32 @@ def main(argv: list[str] | None = None) -> int:
                    help="wrap it as a complete recipe op, ready to paste into a .ffproj.json")
     p.add_argument("--id", help="op id to use with --as-op")
     p.set_defaults(func=_cmd_glyph_export)
+
+    p = sub.add_parser("glyph-import",
+                       help="turn artwork (PNG, JPEG, SVG, WebP, ...) into install_glyph "
+                            "parameters (JSON)")
+    p.add_argument("image", help="the stock mcf.bin the project compiles from")
+    p.add_argument("artwork", nargs="?", help="the picture; omit with --list")
+    p.add_argument("--list", action="store_true",
+                   help="list the 4bpp icon fonts a glyph can go in, with their cell heights")
+    p.add_argument("--slot", type=int, help="font slot (see --list)")
+    p.add_argument("--char", help="the character to claim; default: the font's first free one")
+    p.add_argument("--height", type=int, help="glyph height in px (default: the art's own, "
+                                              "shrunk to fit the font cell)")
+    p.add_argument("--width", type=int, help="glyph width in px (aspect kept if only one given)")
+    p.add_argument("--ink", choices=["auto", "alpha", "dark", "light"], default="auto",
+                   help="which pixels are the mark: transparency, or dark/light pixels on a "
+                        "plain background (default: decide from the image)")
+    p.add_argument("--no-trim", action="store_true",
+                   help="keep the art's empty margins instead of trimming to its ink")
+    p.add_argument("--claim-block", action="store_true",
+                   help="also take a placeholder-block character (icon font 24's spare ones)")
+    p.add_argument("--preview", metavar="PNG", help="also write how the panel will draw it")
+    p.add_argument("--out", help="write to this file instead of stdout")
+    p.add_argument("--as-op", action="store_true",
+                   help="wrap it as a complete recipe op, ready to paste into a .ffproj.json")
+    p.add_argument("--id", help="op id to use with --as-op")
+    p.set_defaults(func=_cmd_glyph_import)
 
     p = sub.add_parser("g12-rules",
                        help="G12 rules mapping a config selector to an RV-C command broadcast")

@@ -65,7 +65,7 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 | a button to drive a different output | `remap_channel` | the channel number from the pin sheet; crossing dim/latch needs `allow_capability_change` and costs the pin its switching. The default retargets the indicator (unverified); `move_display_list` is the coach-proven path |
 | a new button on a page | `add_button` (HOME, boxed, captioned) or `add_glyph_button` + `wire_button` (icon button, any page) | the channel, the off colour, the page root. Build on the target pin |
 | a hold instead of a tap, or both | `set_gesture`, `split_hold_region` | the control's group (`gestures`) |
-| their own artwork as an icon | `install_glyph` | the font slot and a free character; pixels as hex rows (`glyph-export --as-op` shows the shape) |
+| their own artwork as an icon | `install_glyph` | the font slot and a free character; pixels as hex rows: `glyph-import MCF ART --slot N --as-op --preview P.png` makes them from a PNG, JPEG, SVG or other picture |
 | a logo or QR image replaced | not an op: `fireflymcf swap-image` (same-size, in place) | the image index from `image-export` |
 | a readout fixed for a 48 V coach, or any bus value shown on screen | `add_register_readout`, with `resolve_register` for the source | the DGN and instance or selector (`docs/DGN-MAP.md`); whether the stock decode is fenced (`decodeguards.py`) |
 | one output to follow another | `add_option_follower` (with an OPTIONS checkbox), `follow_channel`, `follow_register` | watch and target channels |
