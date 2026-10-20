@@ -63,7 +63,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
-| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
+| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
@@ -458,7 +458,7 @@ Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-min
 | `text` | string |  | "Batt Heat" | button caption |
 | `enable_wire` | string |  | "aa55000000008ca0" | 8-byte payload (hex) sent once on a 1-s hold |
 | `off_wire` | string |  | "aa55000000000000" | 8-byte payload (hex) sent on a tap |
-| `group_pool` | string {"free", "hold_safe"} |  | "free" | where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive -- v45's holds on 136/137 were dead) |
+| `group_pool` | string {"free", "hold_safe"} |  | "free" | where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 were dead on a coach) |
 
 Error codes:
 
@@ -662,18 +662,18 @@ Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as 
 | `dgn` | integer |  | 65456 | the level sensor's 18-bit DGN |
 | `refresh` | integer |  | 1 | staleness class of the 14 entries (1 = 10 s) |
 | `arrow` | object | yes |  | {slot, char}: the up-arrow glyph an earlier install_glyph op installed |
-| `accent` | array |  | [241, 90, 41] | [r, g, b] of the needs-blocks wheel tiles and the SHORT ON BLOCKS strip; v34a flashed with pale amber (0xE6,0xA0,0x28), this module's only default at the time -- v34a's project pins neither accent nor orientation and no longer reproduces that image now that the default is orange |
-| `orientation` | string {"front", "rear", "rear-low"} |  | "rear" | "rear": the van drawn rotated 180 degrees (front at the bottom, driver on the right), each wheel's tile beside its rotated wheel; "front": the original drawing, which v34b pins |
+| `accent` | array |  | [241, 90, 41] | [r, g, b] of the needs-blocks wheel tiles and the SHORT ON BLOCKS strip. The default was pale amber (0xE6,0xA0,0x28) before it became orange, so a project that sets neither accent nor orientation no longer reproduces an image built under the old default |
+| `orientation` | string {"front", "rear", "rear-low"} |  | "rear" | "rear": the van drawn rotated 180 degrees (front at the bottom, driver on the right), each wheel's tile beside its rotated wheel; "front": the original drawing |
 | `controls` | boolean |  | false | add the Blocks-carried stepper (- / + send 18EFFF9F 4C5604/4C5603) and Zero Level (3-s hold sends 19FDE89F and 19FDEA9F); three new groups, four new bindings |
-| `arrow_probe` | boolean |  | false | DIAGNOSTIC (v39): draw the tiles' arrow three ways plus once outside the arms (`levelpage.ARROW_PROBE`) to find what cuts it on the coach |
-| `repaint` | boolean |  | false | repaint-on-change: each LEVEL/popup value sits in a two-arm switch on a toggle the routine flips when the value changes, so a narrower value never leaves the old one's edge (v42 on the coach) |
-| `popup_background` | boolean |  | false | the setup popup paints its own background, header bar and 'LEVEL SETUP' title (a screen change clears to white, v42 on the coach) |
+| `arrow_probe` | boolean |  | false | DIAGNOSTIC: draw the tiles' arrow three ways plus once outside the arms (`levelpage.ARROW_PROBE`) to find what cuts it on the coach |
+| `repaint` | boolean |  | false | repaint-on-change: each LEVEL/popup value sits in a two-arm switch on a toggle the routine flips when the value changes, so a narrower value never leaves the old one's edge (verified on the coach) |
+| `popup_background` | boolean |  | false | the setup popup paints its own background, header bar and 'LEVEL SETUP' title (a screen change clears to white, seen on the coach) |
 | `setup` | boolean |  | false | move Zero Level and the Blocks-carried stepper into a LEVEL SETUP popup on screen 12 (`levelsetup`), with block height and tolerance steppers and AUTO; the LEVEL page gets a Setup button and a read-only Carried. Needs `controls` |
-| `geometry` | boolean |  | false | add Wheelbase and Track rows to the LEVEL SETUP popup (-/+ 0.5 in on level-sensor ops 0Bh-0Eh, repeating while held; values from record 04h bytes 1-4), in a taller five-row dialog (v45). Needs `setup` |
-| `arrow_last` | boolean |  | false | draw each wheel tile's up arrow after its two readouts: a readout repaints its background over about 50 px left of its pen whatever its field width (v40 on the coach), which wiped the arrow drawn before it (v37-v39) |
-| `arrow_probe2` | boolean |  | false | DIAGNOSTIC (v40): one tile draws its arrow last, another paints its readout backgrounds green/blue (`levelpage.ARROW_PROBE2_*`) |
-| `fill_safe` | boolean |  | false | narrow the wheel tiles' readout fields (layers 1, lift 3 characters) so no background fill can cover the arrow or leave the tile in any measuring class (`readoutfill`); 10+ layers / 10.0+ in show dashes. False keeps v34b-v37's (2, 4) |
-| `stepper_dgn` | integer |  | 61439 | the 18-bit DGN the - / + send on: 0x0EFFF (J1939 proprietary-A, v35/v36) or 0x1EFBF (the RV-C custom DGN addressed to the sensor at BF: 19EFBF9F, v37); needs `controls` |
+| `geometry` | boolean |  | false | add Wheelbase and Track rows to the LEVEL SETUP popup (-/+ 0.5 in on level-sensor ops 0Bh-0Eh, repeating while held; values from record 04h bytes 1-4), in a taller five-row dialog. Needs `setup` |
+| `arrow_last` | boolean |  | false | draw each wheel tile's up arrow after its two readouts: a readout repaints its background over about 50 px left of its pen whatever its field width (seen on the coach), which wiped the arrow drawn before it |
+| `arrow_probe2` | boolean |  | false | DIAGNOSTIC: one tile draws its arrow last, another paints its readout backgrounds green/blue (`levelpage.ARROW_PROBE2_*`) |
+| `fill_safe` | boolean |  | false | narrow the wheel tiles' readout fields (layers 1, lift 3 characters) so no background fill can cover the arrow or leave the tile in any measuring class (`readoutfill`); 10+ layers / 10.0+ in show dashes. False keeps the original (2, 4) |
+| `stepper_dgn` | integer |  | 61439 | the 18-bit DGN the - / + send on: 0x0EFFF (J1939 proprietary-A, the first form flashed) or 0x1EFBF (the RV-C custom DGN addressed to the sensor at BF: 19EFBF9F, in use since 2026-09-28); needs `controls` |
 
 Error codes:
 
@@ -719,7 +719,7 @@ Error codes:
 
 ### aes_card_layout
 
-Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster.
+Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster.
 
 - **Hardware status:** Flashed 2026-10-15; its three draw defects were fixed and verified the same day.
 - **Proof:** `cardlayout.py`
@@ -877,8 +877,8 @@ Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one,
 | parameter | type | required | default | meaning |
 |---|---|---|---|---|
 | `pump_section` | object\|null |  | null | {"ref": op_id} of an add_pump_auto_off op; when given, the compact frame carries its Water Pump section |
-| `link_indicator` | object\|null |  | null | {'ref': add_option_follower op id}: wire the Pump Link button to that op's 0/1 display cell as a wtype-6 switch over dark/lit arms (v16) |
-| `off_at_zero` | boolean |  | false | v20: show 'Off' instead of '0 Min' when the Auto Off minute count is 0 (the disabled setting), via a wtype-6 switch over two readout arms |
+| `link_indicator` | object\|null |  | null | {'ref': add_option_follower op id}: wire the Pump Link button to that op's 0/1 display cell as a wtype-6 switch over dark/lit arms |
+| `off_at_zero` | boolean |  | false | show 'Off' instead of '0 Min' when the Auto Off minute count is 0 (the disabled setting), via a wtype-6 switch over two readout arms |
 
 Error codes:
 
@@ -974,7 +974,7 @@ The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OF
 |---|---|---|---|---|
 | `link_group` | integer |  | 164 | the config-toggle group id this op must create or adopt for the 0xEE toggle (optionrow.REUSE_GROUP_SLOT); any other value refuses |
 | `minutes_default` | integer |  | 30 | recorded for provenance; the routine's actual fallback is the fixed pumpauto.MINUTES_DEFAULT (30) |
-| `allow_disable` | boolean |  | false | v20: lower the minute floor from 5 to 0, so 0 is a legal setting that disables Auto Off, and emit the borrow recovery a '-' press at that floor needs |
+| `allow_disable` | boolean |  | false | lower the minute floor from 5 to 0, so 0 is a legal setting that disables Auto Off, and emit the borrow recovery a '-' press at that floor needs |
 
 Error codes:
 

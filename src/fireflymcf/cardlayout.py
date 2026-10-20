@@ -251,14 +251,14 @@ def _check_shape(data: bytes, cluster_index: int) -> None:
     frame = _records(data, body)
     shapes = [V47_FRAME_WTYPES + BUTTON_GROUP * (n - 1) for n in sorted(BUTTON_BOXES)]
     if [r.wtype for r in frame] not in shapes:
-        raise CardLayoutError("object %d is not the v47 compact frame (wtypes %s)"
+        raise CardLayoutError("object %d is not the expected compact AES frame (wtypes %s)"
                               % (body, [r.wtype for r in frame]))
     if frame[5].child_index != cluster_index:
         raise CardLayoutError("frame[5] points at %s, not the cluster %d"
                               % (frame[5].child_index, cluster_index))
     cluster = _records(data, cluster_index)
     if [r.wtype for r in cluster] != V47_CLUSTER_WTYPES:
-        raise CardLayoutError("object %d is not the v47 AES cluster (wtypes %s)"
+        raise CardLayoutError("object %d is not the expected AES cluster (wtypes %s)"
                               % (cluster_index, [r.wtype for r in cluster]))
     if cluster[CLUSTER_TRIGGERS].label != "Triggers:":
         raise CardLayoutError("cluster record %d is %r, not 'Triggers:'"
@@ -270,7 +270,8 @@ def _check_shape(data: bytes, cluster_index: int) -> None:
     inset_fills = [(role, m, v) for role, m, v in frame[FRAME_PUMP_INSET].colors
                    if role in ("fillA", "fillB")]
     if inset_fills != [("fillA", 7, 3), ("fillB", 7, 3)]:
-        raise CardLayoutError("pump inset outline is not the v47 navy (fills %s)" % inset_fills)
+        raise CardLayoutError("pump inset outline is not the expected navy (fills %s)"
+                              % inset_fills)
     bases = _button_bases(frame)
     boxes = [tuple(_s16(g) for g in frame[b].geom[:4]) for b in bases]
     if boxes != BUTTON_BOXES[len(bases)]:

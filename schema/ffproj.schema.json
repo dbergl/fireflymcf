@@ -892,7 +892,7 @@
                       "free",
                       "hold_safe"
                     ],
-                    "description": "where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive -- v45's holds on 136/137 were dead)"
+                    "description": "where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 were dead on a coach)"
                   }
                 },
                 "required": []
@@ -1322,7 +1322,7 @@
                       90,
                       41
                     ],
-                    "description": "[r, g, b] of the needs-blocks wheel tiles and the SHORT ON BLOCKS strip; v34a flashed with pale amber (0xE6,0xA0,0x28), this module's only default at the time -- v34a's project pins neither accent nor orientation and no longer reproduces that image now that the default is orange"
+                    "description": "[r, g, b] of the needs-blocks wheel tiles and the SHORT ON BLOCKS strip. The default was pale amber (0xE6,0xA0,0x28) before it became orange, so a project that sets neither accent nor orientation no longer reproduces an image built under the old default"
                   },
                   "orientation": {
                     "type": "string",
@@ -1332,7 +1332,7 @@
                       "rear",
                       "rear-low"
                     ],
-                    "description": "\"rear\": the van drawn rotated 180 degrees (front at the bottom, driver on the right), each wheel's tile beside its rotated wheel; \"front\": the original drawing, which v34b pins"
+                    "description": "\"rear\": the van drawn rotated 180 degrees (front at the bottom, driver on the right), each wheel's tile beside its rotated wheel; \"front\": the original drawing"
                   },
                   "controls": {
                     "type": "boolean",
@@ -1342,17 +1342,17 @@
                   "arrow_probe": {
                     "type": "boolean",
                     "default": false,
-                    "description": "DIAGNOSTIC (v39): draw the tiles' arrow three ways plus once outside the arms (`levelpage.ARROW_PROBE`) to find what cuts it on the coach"
+                    "description": "DIAGNOSTIC: draw the tiles' arrow three ways plus once outside the arms (`levelpage.ARROW_PROBE`) to find what cuts it on the coach"
                   },
                   "repaint": {
                     "type": "boolean",
                     "default": false,
-                    "description": "repaint-on-change: each LEVEL/popup value sits in a two-arm switch on a toggle the routine flips when the value changes, so a narrower value never leaves the old one's edge (v42 on the coach)"
+                    "description": "repaint-on-change: each LEVEL/popup value sits in a two-arm switch on a toggle the routine flips when the value changes, so a narrower value never leaves the old one's edge (verified on the coach)"
                   },
                   "popup_background": {
                     "type": "boolean",
                     "default": false,
-                    "description": "the setup popup paints its own background, header bar and 'LEVEL SETUP' title (a screen change clears to white, v42 on the coach)"
+                    "description": "the setup popup paints its own background, header bar and 'LEVEL SETUP' title (a screen change clears to white, seen on the coach)"
                   },
                   "setup": {
                     "type": "boolean",
@@ -1362,27 +1362,27 @@
                   "geometry": {
                     "type": "boolean",
                     "default": false,
-                    "description": "add Wheelbase and Track rows to the LEVEL SETUP popup (-/+ 0.5 in on level-sensor ops 0Bh-0Eh, repeating while held; values from record 04h bytes 1-4), in a taller five-row dialog (v45). Needs `setup`"
+                    "description": "add Wheelbase and Track rows to the LEVEL SETUP popup (-/+ 0.5 in on level-sensor ops 0Bh-0Eh, repeating while held; values from record 04h bytes 1-4), in a taller five-row dialog. Needs `setup`"
                   },
                   "arrow_last": {
                     "type": "boolean",
                     "default": false,
-                    "description": "draw each wheel tile's up arrow after its two readouts: a readout repaints its background over about 50 px left of its pen whatever its field width (v40 on the coach), which wiped the arrow drawn before it (v37-v39)"
+                    "description": "draw each wheel tile's up arrow after its two readouts: a readout repaints its background over about 50 px left of its pen whatever its field width (seen on the coach), which wiped the arrow drawn before it"
                   },
                   "arrow_probe2": {
                     "type": "boolean",
                     "default": false,
-                    "description": "DIAGNOSTIC (v40): one tile draws its arrow last, another paints its readout backgrounds green/blue (`levelpage.ARROW_PROBE2_*`)"
+                    "description": "DIAGNOSTIC: one tile draws its arrow last, another paints its readout backgrounds green/blue (`levelpage.ARROW_PROBE2_*`)"
                   },
                   "fill_safe": {
                     "type": "boolean",
                     "default": false,
-                    "description": "narrow the wheel tiles' readout fields (layers 1, lift 3 characters) so no background fill can cover the arrow or leave the tile in any measuring class (`readoutfill`); 10+ layers / 10.0+ in show dashes. False keeps v34b-v37's (2, 4)"
+                    "description": "narrow the wheel tiles' readout fields (layers 1, lift 3 characters) so no background fill can cover the arrow or leave the tile in any measuring class (`readoutfill`); 10+ layers / 10.0+ in show dashes. False keeps the original (2, 4)"
                   },
                   "stepper_dgn": {
                     "type": "integer",
                     "default": 61439,
-                    "description": "the 18-bit DGN the - / + send on: 0x0EFFF (J1939 proprietary-A, v35/v36) or 0x1EFBF (the RV-C custom DGN addressed to the sensor at BF: 19EFBF9F, v37); needs `controls`"
+                    "description": "the 18-bit DGN the - / + send on: 0x0EFFF (J1939 proprietary-A, the first form flashed) or 0x1EFBF (the RV-C custom DGN addressed to the sensor at BF: 19EFBF9F, in use since 2026-09-28); needs `controls`"
                   }
                 },
                 "required": [
@@ -1822,12 +1822,12 @@
                       "null"
                     ],
                     "default": null,
-                    "description": "{'ref': add_option_follower op id}: wire the Pump Link button to that op's 0/1 display cell as a wtype-6 switch over dark/lit arms (v16)"
+                    "description": "{'ref': add_option_follower op id}: wire the Pump Link button to that op's 0/1 display cell as a wtype-6 switch over dark/lit arms"
                   },
                   "off_at_zero": {
                     "type": "boolean",
                     "default": false,
-                    "description": "v20: show 'Off' instead of '0 Min' when the Auto Off minute count is 0 (the disabled setting), via a wtype-6 switch over two readout arms"
+                    "description": "show 'Off' instead of '0 Min' when the Auto Off minute count is 0 (the disabled setting), via a wtype-6 switch over two readout arms"
                   }
                 },
                 "required": []
@@ -2012,7 +2012,7 @@
                   "allow_disable": {
                     "type": "boolean",
                     "default": false,
-                    "description": "v20: lower the minute floor from 5 to 0, so 0 is a legal setting that disables Auto Off, and emit the borrow recovery a '-' press at that floor needs"
+                    "description": "lower the minute floor from 5 to 0, so 0 is a legal setting that disables Auto Off, and emit the borrow recovery a '-' press at that floor needs"
                   }
                 },
                 "required": []

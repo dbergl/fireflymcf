@@ -576,8 +576,8 @@ def build_report(data: bytes, build: str = "136") -> str:
       "slot N are one cell, and the live-redraw invariant (`MCF-FORMAT.md` §6.0a) requires all "
       "three fields to name that one cell. Splitting them — fillA at the colour index while a "
       "`value_slot` names the bool cell — is a real failure mode, not a theoretical one: it was "
-      "flashed (pin-15 build v7) and gave a button whose **box repainted live but whose caption "
-      "vanished** until the page was re-entered. Setting all three equal (v8) fixed it on the "
+      "flashed (on pin 15) and gave a button whose **box repainted live but whose caption "
+      "vanished** until the page was re-entered. Setting all three equal fixed it on the "
       "coach. The `bool vslot` column below is documentation of where the bool cell sits, not a "
       "value to write into a widget.")
     a("")
