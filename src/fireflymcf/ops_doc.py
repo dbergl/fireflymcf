@@ -121,16 +121,17 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "remove_records": ("structural",
         "Delete chosen records from one object (shrinking it), so a control is gone from the "
         "page, its touch region included. Bindings stay.",
-        "UNVERIFIED. Never flashed.", "`relocate.replace_object_records`"),
+        "Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.", "`relocate.replace_object_records`"),
     "drop_from_master": ("same-size",
         "Remove one channel from a master control (its ON+OFF group pair), so the master no "
         "longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0.",
         "Flashed 2026-09-14 (v26): the coach bath light (ch25) no longer follows Light Master.",
         "`mastergroup.py`, `CONTROL-BEHAVIOR.md` §3; the reference coach's build log (not published) \"Experimental v26\""),
     "add_low_volts_control": ("structural",
-        "Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). "
-        "Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe.",
-        "Superseded.", "the reference coach's build log (not published) \"The compact AES Electrical page\""),
+        "Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. "
+        "Recolour and direction come from `add_aes_low_volts_trigger`'s bridge.",
+        "Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and "
+        "recolours with that bridge.", "the reference coach's build log (not published) \"The compact AES Electrical page\""),
     "follow_channel": ("guicode",
         "Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a "
         "repurposed OPTIONS row.",

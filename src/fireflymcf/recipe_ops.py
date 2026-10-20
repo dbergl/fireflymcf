@@ -2709,9 +2709,11 @@ class RemoveRecords(Op):
                         would move.
       RELOCATE_REFUSED -- `relocate.replace_object_records` refused (a gate failed).
 
-    `hardware_verified = False` until a build carrying it has been flashed.
+    `hardware_verified = True`: COACH-VERIFIED 2026-10-19 (owner). The Low Volts attach and touch
+    region were removed from the compact AES card (object 1427) with the gear button's offset
+    restored; the card draws without it and the moved control works on the settings page.
     """
-    hardware_verified = False
+    hardware_verified = True
 
     PARAMS = {
         "properties": {
@@ -2800,7 +2802,7 @@ class RemoveRecords(Op):
             elif child is not None:
                 assert not any(r.wtype == wtype and r.child_index == child for r in recs), \
                     "object %d still attaches child %d" % (h["obj"], child)
-        return "remove_records: object %d lost %d record(s) %s, now %d; HARDWARE-UNVERIFIED" % (
+        return "remove_records: object %d lost %d record(s) %s, now %d" % (
             h["obj"], len(h["gone"]),
             ", ".join("wtype %d%s" % (w, " touch %d" % t if t is not None else
                                       " child %d" % c if c is not None else "")

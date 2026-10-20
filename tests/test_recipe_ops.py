@@ -2164,7 +2164,7 @@ def test_remove_records_deletes_the_low_volts_face_and_touch(stock, stock_hash):
                     recipe.OpSpec(id="rm", type="remove_records",
                                   params={"target": 315, "records": _LV}))
     assert r.ok, r.errors
-    assert r.unverified == ["rm"]
+    assert r.unverified == []
     assert len(r.data) < len(stock)
     gs2, tab2 = guidata.guidata_extent(r.data)[0], guidata.object_tables(r.data)[1]
     after = records.object_records(r.data, gs2 + tab2[315])

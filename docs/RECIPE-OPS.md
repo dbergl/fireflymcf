@@ -61,11 +61,11 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06 (v21). PC.61. | yes |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27 (v35): live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since v37. Zero Level is unverified. | **no** |
-| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe. | Superseded. | yes |
+| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the v47 shape of object 829 and the private AES cluster. | Flashed 2026-10-15 (v48; its three draw defects fixed in v49, flashed the same day). | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22 (probe build "v30 Probe New DGN"): var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
-| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | UNVERIFIED. Never flashed. | **no** |
+| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22 (reference build v7/v8). | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
 | [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
@@ -661,9 +661,9 @@ Error codes:
 
 ### add_low_volts_control
 
-Copy the AGS Low Volts arm onto the AES ELECTRICAL view (records only, no recolour). Superseded by `add_aes_low_volts_trigger`; not in any flashed recipe.
+Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge.
 
-- **Hardware status:** Superseded.
+- **Hardware status:** Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge.
 - **Proof:** the reference coach's build log (not published) "The compact AES Electrical page"
 - **Implementation:** `recipe_ops.AddLowVoltsControl`
 
@@ -758,7 +758,7 @@ Error codes:
 
 Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay.
 
-- **Hardware status:** UNVERIFIED. Never flashed.
+- **Hardware status:** Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.
 - **Proof:** `relocate.replace_object_records`
 - **Implementation:** `recipe_ops.RemoveRecords`
 
