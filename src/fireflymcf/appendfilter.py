@@ -69,7 +69,7 @@ class NewFilter:
     dgn: int                     # 18-bit DGN
     mode: int                    # statusbind.LIVE_MODES
     payload_byte: int
-    refresh: int = 3             # staleness class; 3 is what the live DC_DIMMER status vars use
+    refresh: int = 3             # staleness class 0-3 = 2 s/10 s/30 s/never; 3 is the DC_DIMMER vars' class
     instance: int = statusbind.FILTER_DISABLED
     compare_byte: int = statusbind.FILTER_DISABLED
 

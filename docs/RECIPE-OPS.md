@@ -69,7 +69,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
 | [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
-| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
+| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
@@ -894,7 +894,7 @@ Error codes:
 
 ### append_filter
 
-Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20.
+Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status.
 
 - **Hardware status:** Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7.
 - **Proof:** `src/fireflymcf/appendfilter.py`, `docs/HARDWARE-VERIFIED.md`
@@ -905,7 +905,7 @@ Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table
 | `dgn` | integer | yes |  | 18-bit DGN to receive |
 | `mode` | integer | yes |  | extraction mode (statusbind.LIVE_MODES) |
 | `payload_byte` | integer | yes |  | payload byte the mode reads |
-| `refresh` | integer |  | 3 | staleness class 0..3 |
+| `refresh` | integer |  | 3 | staleness class: 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never expires. Use 1 or 2 for a live status |
 | `instance` | integer |  | 255 | filter value for +4; 255 = no filter |
 | `compare_byte` | integer |  | 255 | +5: low nibble = payload byte compared, high nibble = 2-bit mask select (0 = whole byte) |
 

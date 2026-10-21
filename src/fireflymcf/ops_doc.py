@@ -211,7 +211,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Flashed 2026-09-06. PC.61.", "`cornermark.py`, `BUS-BASELINE.md` PC.61"),
     "append_filter": ("structural",
         "Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in "
-        "the padding arena, count bumped in the descriptor and GuiCode header +0x20.",
+        "the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` "
+        "defaults to 3, which never expires: the slot keeps its last value when the publisher "
+        "goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status.",
         "Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected "
         "values 42 then 7.",
         "`src/fireflymcf/appendfilter.py`, `docs/HARDWARE-VERIFIED.md`"),
