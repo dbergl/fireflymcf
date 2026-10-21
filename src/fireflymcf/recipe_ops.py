@@ -6459,9 +6459,10 @@ class AddAesBattHeat(Op):
             self.hardware_verified = False
 
     def apply(self, data, ctx):
-        gt = guidata.group_table(data)
         binding_start = len(guidata.binding_table(data))
 
+        # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
+        # this op never did; byte identity keeps the old list)
         free = (newbutton.free_group_slots(data) if self.group_pool == "free"
                 else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
         if not free:
@@ -6470,45 +6471,33 @@ class AddAesBattHeat(Op):
                               op_id=self.spec.id)
         group = free[0]
 
-        donor = gt[aescompact.BATT_HEAT_HOLD_DONOR_GROUP]
-        if donor.raw[0] >> 4 < 1:
-            raise RecipeError(
-                "GROW_REFUSED",
-                "hold-donor group %d has a 0-second hold nibble; a hold could not register"
-                % aescompact.BATT_HEAT_HOLD_DONOR_GROUP, op_id=self.spec.id)
-
-        enable = newbutton.binding_raw(aescompact.BATT_HEAT_DGN, self.enable_wire,
-                                       gesture_mask=aescompact.BATT_HEAT_ENABLE_MASK)
-        off = newbutton.binding_raw(aescompact.BATT_HEAT_DGN, self.off_wire,
-                                    gesture_mask=aescompact.BATT_HEAT_OFF_MASK)
-        entry = optionrow._clone_group_entry(donor.raw, binding_start, 2)
         try:
-            out, grow_edits = optionrow._grow_bindings(
-                data, bytes(enable) + bytes(off), [(group, entry)])
+            entry = rvcbutton.gesture_group(data, form="tap_hold", hold_seconds=None,
+                                            binding_start=binding_start, count=2)
+            blob = rvcbutton.bindings(aescompact.BATT_HEAT_DGN, form="tap_hold",
+                                      tap=self.off_wire, hold=self.enable_wire,
+                                      off=None, on=None)
+        except rvcbutton.RvcButtonError as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
+        try:
+            out, grow_edits = optionrow._grow_bindings(data, blob, [(group, entry)])
         except optionrow.OptionRowError as e:
             raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
         ctx.edits.extend(grow_edits)
 
-        # append the button's records to the (already-compact) object 829.
-        gs, _ = guidata.guidata_extent(out)
-        table = guidata.object_tables(out)[1]
-        obj_start = gs + table[aescompact.ELECTRICAL_AES_BODY]
-        recs = records.object_records(out, obj_start)
-        old_count = out[obj_start]
-        records_raw = bytes(out[obj_start + 1:recs[-1].end])
+        # donors are read from stock: object 829's own records are the rebuilt compact frame
+        # by now, so the stock all-in-one 829 is the only stable source for its box records.
         try:
-            # donors are read from stock: object 829's own records are the rebuilt compact frame
-            # by now, so the stock all-in-one 829 is the only stable source for its box records.
-            frags = aescompact.build_batt_heat_button(
-                ctx.stock, touch_id=group, x=self.x, y=self.y, w=self.w, h=self.h,
-                text=self.text)
+            frags = rvcbutton.button_records(
+                ctx.stock, touch_id=group, w=self.w, h=self.h, text=self.text, glyph=None,
+                font=None, fill_index=None, x=self.x, y=self.y)
         except ValueError as e:
             raise RecipeError("BUTTON_REFUSED", str(e), op_id=self.spec.id)
-        new_body = bytes([old_count + len(frags)]) + records_raw + b"".join(frags)
         try:
-            out, repl_edits = relocate.replace_object_records(
-                out, aescompact.ELECTRICAL_AES_BODY, new_body)
-        except relocate.RelocationError as e:
+            out, repl_edits, _ = rvcbutton.place(
+                out, parent=aescompact.ELECTRICAL_AES_BODY, x=self.x, y=self.y, frags=frags,
+                mode="append")
+        except rvcbutton.RvcButtonError as e:
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         ctx.edits.extend(repl_edits)
 
@@ -6520,6 +6509,8 @@ class AddAesBattHeat(Op):
             "binding_start": binding_start,
             "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
+            "glyph": None, "font": None, "parent": aescompact.ELECTRICAL_AES_BODY,
+            "placement": "append", "toggle": None,
         }
         return out
 
