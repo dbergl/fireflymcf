@@ -242,6 +242,12 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "existing display slot. Attached to 829 directly after the card titles.",
         "Flashed 2026-10-15: the readouts are live on the coach.",
         "`cardreadouts.py`, `readout.py`"),
+    "add_enum_label": ("structural",
+        "Show a received value as text from a table (1-16 entries plus a default for stale and "
+        "unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted "
+        "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
+        "(optionally on a fill) attached under `parent`.",
+        "UNVERIFIED.", "`enumlabel.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "

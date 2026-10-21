@@ -80,6 +80,7 @@
             "add_button",
             "add_card_readouts",
             "add_corner_mark",
+            "add_enum_label",
             "add_glyph_button",
             "add_level_page",
             "add_low_volts_control",
@@ -1271,6 +1272,85 @@
                   "expect",
                   "font",
                   "char"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_enum_label"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "parent": {
+                    "description": "object index or {ref: op_id}"
+                  },
+                  "x": {
+                    "type": "integer"
+                  },
+                  "y": {
+                    "type": "integer"
+                  },
+                  "w": {
+                    "type": "integer"
+                  },
+                  "h": {
+                    "type": "integer"
+                  },
+                  "font": {
+                    "type": "integer"
+                  },
+                  "align": {
+                    "type": "string",
+                    "default": "left",
+                    "description": "left | centre | right"
+                  },
+                  "colour": {
+                    "type": "array",
+                    "default": [
+                      255,
+                      255,
+                      255
+                    ]
+                  },
+                  "background": {
+                    "type": [
+                      "array",
+                      "null"
+                    ],
+                    "default": null
+                  },
+                  "source": {
+                    "type": "object",
+                    "description": "{ref}|{var}|{dgn, instance|selector}, + mask?, shift?"
+                  },
+                  "values": {
+                    "type": "object",
+                    "description": "{\"<int>\": text}, 1-16 entries"
+                  },
+                  "default": {
+                    "type": "string",
+                    "default": "--"
+                  }
+                },
+                "required": [
+                  "parent",
+                  "x",
+                  "y",
+                  "w",
+                  "h",
+                  "font",
+                  "source",
+                  "values"
                 ]
               }
             }

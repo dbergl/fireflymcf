@@ -31,9 +31,11 @@ from fireflymcf import bitcombine
 from fireflymcf import cardlayout
 from fireflymcf import cardreadouts
 from fireflymcf import cornermark
+from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
+from fireflymcf import statusfold
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
 from fireflymcf import variantgates
@@ -5249,6 +5251,53 @@ def _resolve_register_spec(data, ctx, spec: dict, op_id: str) -> "register.Regis
         raise RecipeError("NO_SUCH_REGISTER", str(e), op_id=op_id)
 
 
+def _resolve_status_source(data, ctx, spec, op_id: str) -> tuple[int, int, int]:
+    """`(slot_addr, var_index, live_mode)` of a status source, from exactly one of:
+
+    - `{"ref": op_id}`: a `resolve_register` / `append_filter` handle (`_resolve_register_spec`),
+      or any other handle carrying a variable index (`var_index`, else `var`);
+    - `{"var": N}`: variable-table entry N outright;
+    - `{"dgn": D, "instance"|"selector": V}`: the one existing entry (`_resolve_register_spec`).
+
+    `slot_addr` is the receive slot the filter writes (`register.status_slot_addr`, index-split);
+    `live_mode` the entry's extraction mode (`raw[2] >> 4`, `statusbind.LIVE_MODES`), read as
+    `register.resolve_register` and `appendfilter.handle_for` decode it. Other keys (`mask`,
+    `shift`, a compare) are the caller's. Codes: BAD_PARAMS (not exactly one form), BAD_REF,
+    NO_SUCH_REGISTER."""
+    if not isinstance(spec, dict):
+        raise RecipeError("BAD_PARAMS", "source must be an object, got %r" % (spec,), op_id=op_id)
+    forms = [k for k in ("ref", "var", "dgn") if spec.get(k) is not None]
+    if len(forms) != 1:
+        raise RecipeError("BAD_PARAMS", "source needs exactly one of 'ref', 'var' or 'dgn'; got "
+                          "%s (%r)" % (forms or "none", spec), op_id=op_id)
+    var = None
+    if forms == ["ref"]:
+        h = ctx.handles.get(spec["ref"])
+        if h is None:
+            raise RecipeError("BAD_REF", "ref %r names no prior op handle" % (spec["ref"],),
+                              op_id=op_id)
+        if all(k in h for k in _REGISTER_HANDLE_KEYS):
+            reg = _resolve_register_spec(data, ctx, {"ref": spec["ref"]}, op_id)
+            return reg.slot_addr, reg.var_index, reg.extract_mode
+        var = h.get("var_index", h.get("var"))
+        if not isinstance(var, int) or isinstance(var, bool):
+            raise RecipeError("BAD_REF", "ref %r carries no variable index" % (spec["ref"],),
+                              op_id=op_id)
+    elif forms == ["var"]:
+        var = spec["var"]
+        if not isinstance(var, int) or isinstance(var, bool):
+            raise RecipeError("BAD_PARAMS", "source var must be an integer, got %r" % (var,),
+                              op_id=op_id)
+    else:
+        reg = _resolve_register_spec(data, ctx, spec, op_id)
+        return reg.slot_addr, reg.var_index, reg.extract_mode
+    vt = guidata.variable_table(data)
+    if not 0 <= var < len(vt):
+        raise RecipeError("NO_SUCH_REGISTER", "var %d is not in the %d-entry variable table"
+                          % (var, len(vt)), op_id=op_id)
+    return register.status_slot_addr(var), var, vt[var].raw[2] >> 4
+
+
 @op("follow_register")
 class FollowRegister(Op):
     """Generic register-follower: watch ANY register for an edge and drive a channel, gated by
@@ -7235,6 +7284,261 @@ class AddAesBmsButtonStatus(Op):
         return ("add_aes_bms_button_status: %r lit by var %d mask %d via cell %d (2-arm switch, "
                 "blue/cyan); UNVERIFIED on the coach" % (h["text"], h["var"], h["mask"],
                                                         h["slot"]))
+
+
+@op("add_enum_label")
+class AddEnumLabel(Op):
+    """Show a value as text from a table, on any page: `{"0": "Off", "1": "Cool", ...}`.
+
+    A per-tick routine (`statusfold.Enum`, one per op, chained on the per-tick hook) reads the
+    source slot, masks and shifts it, and writes a display cell: the index 0..n-1 of the matching
+    key, or n for stale or any value not in `values`. The label is one wtype-6 switch on that
+    cell (enrolled for live redraw) with n+1 arms matched on 0..n, the last drawing `default`;
+    every value the routine writes is matched (`enumlabel`). Each arm is a wtype-11 label in a
+    declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
+    `background` fill when one is given. The switch is absolute at `x, y`, in a new object
+    attached under `parent` (`insert.insert_object`). The cell is a spare, GuiCode-unreferenced
+    one (`followchannel.scan_display_cell`), else a freshly grown one
+    (`readout.allocate_fresh_cells`).
+
+    Params:
+      parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
+              attach record to clone).
+      x, y: absolute pen; w, h: the label box (inclusive); font: the font slot.
+      align: "left" | "centre" | "right" (default "left").
+      colour: [r, g, b] text colour (default white); background: [r, g, b] | null (default
+              null), the arm's fill. Both must be palette colours.
+      source: {ref} | {var} | {dgn, instance|selector}, with optional mask (default 0xFFFF) and
+              shift (default 0) applied to the slot before the lookup.
+      values: {"<int>": text}, 1-16 entries; default: text for stale and unlisted values ("--").
+
+    Error codes:
+      BAD_PARAMS       -- a malformed param: empty or >16 `values`, a non-integer or duplicate
+                          key, an empty text, an unknown align, mask/shift out of range, a
+                          source that is not exactly one form, or a non-positive box.
+      BAD_REF          -- a `parent` or `source` ref names no usable handle.
+      NO_SUCH_REGISTER -- the source names no variable-table entry.
+      NO_DISPLAY_CELL  -- no spare cell and the cell table could not be grown.
+      NO_COLOUR        -- `colour` or `background` is not in this build's palette.
+      LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed.
+      OFF_CANVAS       -- the box leaves the 800x480 canvas.
+      DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "font": {"type": "integer"},
+            "align": {"type": "string", "default": "left",
+                      "description": "left | centre | right"},
+            "colour": {"type": "array", "default": [255, 255, 255]},
+            "background": {"type": ["array", "null"], "default": None},
+            "source": {"type": "object",
+                       "description": "{ref}|{var}|{dgn, instance|selector}, + mask?, shift?"},
+            "values": {"type": "object", "description": "{\"<int>\": text}, 1-16 entries"},
+            "default": {"type": "string", "default": "--"},
+        },
+        "required": ["parent", "x", "y", "w", "h", "font", "source", "values"],
+    }
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if v is None:
+            return None
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def validate(self):
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h, self.font = (
+            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
+        if not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
+        align = self._param("align", "left", kind=str)
+        if align not in enumlabel.ALIGNS:
+            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
+        self.align = enumlabel.ALIGNS[align]
+        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
+        self.background = self._rgb("background", self._param("background", None))
+        self.source = self._param("source", kind=dict)
+        self.mask = self.source.get("mask", 0xFFFF)
+        self.shift = self.source.get("shift", 0)
+        if not (isinstance(self.mask, int) and 1 <= self.mask <= 0xFFFF):
+            raise self._bad("source mask must be 1..0xFFFF, got %r" % (self.mask,))
+        if not (isinstance(self.shift, int) and 0 <= self.shift <= 15):
+            raise self._bad("source shift must be 0..15, got %r" % (self.shift,))
+        values = self._param("values", kind=dict)
+        if not 1 <= len(values) <= statusfold.MAX_KEYS:
+            raise self._bad("values takes 1-%d entries, got %d" % (statusfold.MAX_KEYS,
+                                                                  len(values)))
+        table = {}
+        for k, text in values.items():
+            if not (isinstance(k, str) and k.isdigit() and str(int(k)) == k
+                    and int(k) <= 0xFFFF):
+                raise self._bad("values key %r is not a decimal integer 0..65535" % (k,))
+            if not isinstance(text, str) or not text:
+                raise self._bad("values[%r] must be a non-empty string, got %r" % (k, text))
+            table[int(k)] = text
+        self.keys = tuple(sorted(table))
+        self.texts = [table[k] for k in self.keys]
+        self.default = self._param("default", "--", kind=str)
+        if not self.default:
+            raise self._bad("default must be a non-empty string")
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
+                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
+                                 _CANVAS_H), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        slot_addr, var, live_mode = _resolve_status_source(data, ctx, self.source, oid)
+        try:
+            colour = theme.resolve_fill_index(data, color=self.colour)
+            bg = (None if self.background is None
+                  else theme.resolve_fill_index(data, color=self.background))
+        except theme.PaletteError as e:
+            raise RecipeError("NO_COLOUR", str(e), op_id=oid)
+        try:
+            arms = [enumlabel.build_arm(data, text=t, font=self.font, w=self.w, h=self.h,
+                                        align=self.align, colour_index=colour, bg_index=bg)
+                    for t in self.texts + [self.default]]
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        # The cell is chosen from THIS image, before the routine's pool names it.
+        out, tier = data, 2
+        try:
+            slot, cell_addr = followchannel.scan_display_cell(data)
+        except followchannel.FollowChannelError:
+            try:
+                out, cells, cell_edits = readout.allocate_fresh_cells(
+                    data, [(2, readout._TYPE_FOR_WIDTH[2])])
+            except readout.ReadoutError as e:
+                raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=oid)
+            ctx.edits.extend(cell_edits)
+            ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
+            (cell,) = cells
+            slot, cell_addr, tier = cell.slot, cell.addr, 3
+        item = statusfold.Enum(slot_addr=slot_addr, mask=self.mask, shift=self.shift,
+                               keys=self.keys, cell_addr=cell_addr)
+        try:
+            plan = statusfold.resolve(out, [item])
+        except followchannel.FollowChannelError as e:
+            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
+        except statusfold.StatusFoldError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, oid)
+        try:
+            blob, _ = statusfold.build(plan, code_load_addr)
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except (statusfold.StatusFoldError, growsection.GrowSectionError) as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(
+            gcs.offset + load_off, b"", blob, "GuiCode",
+            "enum label: var %d mask %#x shift %d keys %s -> cell %d @ %#x"
+            % (var, self.mask, self.shift, list(self.keys), slot, cell_addr)))
+        try:
+            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
+        except followchannel.FollowChannelError as e:
+            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
+        file_off = gcs.offset + hook_at
+        if grown[file_off:file_off + 4] != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
+                              op_id=oid)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
+                         "enum label: detour bl -> %#x" % code_load_addr))
+        out, _ = patch.reseal(bytes(buf))
+        try:
+            placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
+                                                    arms=arms, value_slot=slot)
+            restore = self._restore(placed, parent)
+            if restore is not None:
+                placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
+                                                        arms=arms, value_slot=slot,
+                                                        restore=restore)
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        out, _ = patch.reseal(placed)
+        gs, tab = _gs_tab(out)
+        sw = records.object_records(out, gs + tab[index])[0]
+        ctx.handles[oid] = {
+            "object": index, "parent": parent, "slot": slot, "cell_addr": cell_addr,
+            "cell_tier": tier, "arms_base": sw.child_index, "var": var, "slot_addr": slot_addr,
+            "live_mode": live_mode, "mask": self.mask, "shift": self.shift,
+            "values": dict(zip(self.keys, self.texts)), "default": self.default,
+        }
+        return out
+
+    def _restore(self, placed, parent):
+        """The `(font, align)` to write back after the label (`enumlabel.place`'s `restore`), or
+        None when the walk already carries the label's own state past it (or reaches no page)."""
+        gs, tab = _gs_tab(placed)
+        attach = len(records.object_records(placed, gs + tab[parent])) - 1
+        states = enumlabel.entering_state(placed, parent, attach)
+        if len(states) > 1:
+            raise enumlabel.EnumLabelError(
+                "the pages reaching object %d enter it with different font/align states %s; "
+                "one label cannot restore them all" % (parent, sorted(states, key=str)))
+        if not states:
+            return None
+        ((font, align),) = states
+        font = font if font not in (None, self.font) else None
+        align = align if align not in (0, pd.ALIGN_NO_SHIFT) else 0
+        return None if font is None and not align else (font, align)
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        parent = records.object_records(data, gs + tab[h["parent"]])
+        assert any(r.wtype == 5 and r.child_index == h["object"] for r in parent), \
+            "the label object %d is not attached under %d" % (h["object"], h["parent"])
+        sw = records.object_records(data, gs + tab[h["object"]])[0]
+        n = len(h["values"])
+        assert sw.wtype == 6 and sw.value_slot == h["slot"] and sw.count == n + 1, \
+            "expected one %d-arm switch on cell %d" % (n + 1, h["slot"])
+        assert sw.header[4] & _ENROLL_BIT, "switch not enrolled for live redraw"
+        cands = guidata.switch_candidates(data, sw, guidata.find_match_table(data))
+        by_value = dict(cands)
+        assert sorted(by_value) == list(range(n + 1)) and len(cands) == n + 1, \
+            "match values %s" % cands
+        want = [h["values"][k] for k in sorted(h["values"])] + [h["default"]]
+        got = []
+        for k in range(n + 1):
+            arm = records.object_records(data, gs + tab[by_value[k]])
+            lab = [r for r in arm if r.wtype == 11]
+            assert len(lab) == 1 and lab[0].geom[2] and lab[0].geom[3], \
+                "arm %d needs one label with a declared box" % k
+            got.append(lab[0].label)
+        assert got == want, "arm texts %s, expected %s" % (got, want)
+        assert status_map.cell_table(data)[h["slot"]] == h["cell_addr"]
+        gc = theme.guicode_section(data)
+        code = data[gc.offset:gc.offset + gc.length]
+        assert struct.pack("<II", h["slot_addr"], h["cell_addr"]) in code, \
+            "no routine maps var %d into cell %#x" % (h["var"], h["cell_addr"])
+        return ("add_enum_label: var %d (mask %#x, shift %d) -> cell %d (tier %d) -> %d-arm "
+                "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
+                % (h["var"], h["mask"], h["shift"], h["slot"], h["cell_tier"], n + 1, got[:-1],
+                   h["default"], h["object"], h["parent"]))
 
 
 @op("add_batt_heat_battery_glyph")
