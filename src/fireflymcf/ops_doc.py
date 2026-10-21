@@ -253,7 +253,7 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted "
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
         "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
-        "`parent`.",
+        "`parent`. A preview without slot values (Studio, `render`) draws that blank arm.",
         "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
