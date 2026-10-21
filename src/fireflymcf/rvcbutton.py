@@ -279,20 +279,6 @@ def _object_index(data: bytes) -> int:
     return len(guidata.object_tables(data)[1]) - 1
 
 
-def _states_after(data: bytes, parent: int, attach_index: int) -> set:
-    """The `(font, align)` each base walk of a page reaching `parent` carries out of record
-    `attach_index`'s subtree (the state after its last record)."""
-    step = (parent, attach_index)
-    found: set = set()
-    for root in pagewalk.reaching_roots(data, parent):
-        walk = pagewalk.walk_records(data, root)
-        for i, r in enumerate(walk):
-            inside = step in r.key
-            if inside and (i + 1 == len(walk) or step not in walk[i + 1].key):
-                found.add((r.font, r.align))
-    return found
-
-
 def place(data: bytes, *, parent: int, x: int, y: int, frags: list[bytes],
           mode: str = "attach") -> tuple[bytes, list, int]:
     """`(image, edits, object_index)`: `frags` placed on `parent` (module docstring). For
@@ -316,7 +302,7 @@ def place(data: bytes, *, parent: int, x: int, y: int, frags: list[bytes],
         index = _object_index(out)
         gs, tab = guidata.guidata_extent(out)[0], guidata.object_tables(out)[1]
         attach = len(records.object_records(out, gs + tab[parent])) - 1
-        leaving = _states_after(out, parent, attach)
+        leaving = enumlabel.leaving_state(out, parent, attach)
         if len(leaving) != 1:
             raise RvcButtonError(f"the pages reaching object {parent} leave the button with "
                                  f"font/align states {sorted(leaving, key=str)}; expected one")
