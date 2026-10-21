@@ -3800,6 +3800,9 @@ class PinFilterInstance(Op):
       compare: int (default 0) — the entry's existing `+5` byte, asserted, not
                written. Its low nibble picks the payload byte and its high nibble
                the mask; keeping it out of the edit is what holds this to one byte.
+      from_instance: int|None (default None) — given, the op re-pins: the entry
+               must currently compare exactly this instance, and `instance` replaces
+               it (an entry moves from one device to another).
 
     Error codes:
       FILTER_REFUSED — `statusbind.pin_filter_instance` raised: the entry is
@@ -3821,6 +3824,10 @@ class PinFilterInstance(Op):
                     "description": "expected DGN of the entry (asserted, not written)"},
             "compare": {"type": "integer", "default": 0,
                         "description": "expected entry +5 (payload byte + mask selector)"},
+            "from_instance": {"type": ["integer", "null"], "default": None,
+                              "description": "re-pin: the instance the entry currently "
+                                             "compares (asserted); omitted, the entry "
+                                             "must be an unpinned 0xFF one"},
         },
         "required": ["var", "instance"],
     }
@@ -3830,12 +3837,14 @@ class PinFilterInstance(Op):
         self.instance = self._param("instance", kind=int)
         self.dgn = self._param("dgn", None)
         self.compare = self._param("compare", 0, kind=int)
+        self.from_instance = self._param("from_instance", None)
 
     def apply(self, data, ctx):
         try:
             data, e = statusbind.pin_filter_instance(
                 data, self.var, self.instance,
-                expect_dgn=self.dgn, expect_compare=self.compare)
+                expect_dgn=self.dgn, expect_compare=self.compare,
+                from_instance=self.from_instance)
         except statusbind.StatusBindError as err:
             raise RecipeError("FILTER_REFUSED", str(err), op_id=self.spec.id)
         ctx.edits.extend(e)
