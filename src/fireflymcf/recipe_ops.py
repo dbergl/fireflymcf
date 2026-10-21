@@ -6576,6 +6576,13 @@ class AddAesBattHeat(Op):
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
             "glyph": None, "font": None, "parent": aescompact.ELECTRICAL_AES_BODY,
             "placement": "append", "toggle": None,
+            # the keys an `add_rvc_button` handle carries, with the values this preset builds:
+            # the static fill index's colour (None when this build's palette does not resolve
+            # it), the BMS DGN, the tap-or-hold form on the donor's hold nibble, off on a tap
+            # and enable on a hold (`_rvc_button_bindings` rebuilds the two bindings from them)
+            "colour": _palette_rgb(data, aescompact.BATT_HEAT_FILL_INDEX),
+            "dgn": aescompact.BATT_HEAT_DGN, "form": "tap_hold", "seconds": entry[0] >> 4,
+            "tap": self.off_wire, "hold": self.enable_wire,
         }
         return out
 
@@ -8333,6 +8340,13 @@ class AddRvcButton(Op):
         return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
                 "UNVERIFIED on the coach"
                 % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
+
+
+def _palette_rgb(data, index):
+    """`[r, g, b]` of mode-7 palette `index` in `data` (`theme.mode7_palette`), or None when the
+    palette does not resolve it."""
+    rgb = theme.mode7_palette(data).get(index)
+    return None if rgb is None else list(rgb)
 
 
 def _rvc_button_bindings(h):

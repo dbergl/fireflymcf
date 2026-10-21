@@ -326,3 +326,31 @@ def test_inert_source_refuses():
     (`statusbind.LIVE_MODES`), so a light on it would never change."""
     msg = _errors(BASE + [_status([_entry("b1", 1, source={"var": 185})])])
     assert "NO_SUCH_REGISTER" in msg and "mode 0" in msg
+
+
+def test_preset_handle_has_the_rvc_button_keys(monkeypatch):
+    """A status op reads its button's handle with `.get`: the `add_aes_batt_heat` preset's must
+    carry every key an `add_rvc_button`'s does, with the values the preset really builds (fill
+    index 35's colour, DGN 0xEF70, the tap-or-hold form on the donor's 1-s hold nibble, off on
+    tap and enable on hold)."""
+    from fireflymcf import aescompact
+    seen = {}
+    real = recipe._finish
+
+    def spy(project, stock, data, ctx, ops):
+        seen["ctx"], seen["data"] = ctx, data
+        return real(project, stock, data, ctx, ops)
+    monkeypatch.setattr(recipe, "_finish", spy)
+    _ok(ALARMS_BASE[:2] + BASE[1:2])
+    preset, button = seen["ctx"].handles["battheat"], seen["ctx"].handles["b1"]
+    assert set(button) - set(preset) == set(), sorted(set(button) - set(preset))
+    palette = theme.mode7_palette(_stock())
+    assert preset["colour"] == list(palette[aescompact.BATT_HEAT_FILL_INDEX]) == [0, 174, 239]
+    assert (preset["dgn"], preset["form"], preset["seconds"]) == (aescompact.BATT_HEAT_DGN,
+                                                                   "tap_hold", 1)
+    assert (preset["tap"], preset["hold"]) == (aescompact.BATT_HEAT_OFF_WIRE,
+                                               aescompact.BATT_HEAT_ENABLE_WIRE)
+    g = guidata.group_table(seen["data"])[preset["group"]]
+    bt = guidata.binding_table(seen["data"])
+    assert b"".join(bytes(bt[g.start + k].raw) for k in range(g.count)) == \
+        recipe_ops._rvc_button_bindings(preset), "the handle does not rebuild the bindings"
