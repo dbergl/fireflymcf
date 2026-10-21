@@ -612,15 +612,24 @@ class Recolor(Op):
       color: [r,g,b] (list of 3 ints 0-255) or {"index": int} — target colour, either
              as RGB triple (matched to theme palette via resolver) or palette index
       allow_container: bool (default False) — recolour a card of controls on purpose
+      selector: dict (optional) — recolour exactly this record (`_select_record`: wtype,
+                label, nth), for an object whose mode-7 boxes `patch.find_button_box` cannot
+                tell apart (card 872: the card box and an icon box, both wtype 4). The record
+                must carry a mode-7 fillA. Omitted, the box is `find_button_box`'s, as before.
+                The selector path has not run on a coach, so it compiles UNVERIFIED.
 
     Error codes:
-      BAD_PARAMS — color is not [r,g,b] list or {"index": n} dict
+      BAD_PARAMS — color is not [r,g,b] list or {"index": n} dict, or selector has a key
+                   other than wtype/label/nth, a non-int wtype, a non-str label, or a nth
+                   that is not a non-negative int
+      NO_SUCH_RECORD — no record matches selector (from `_select_record`)
       CONTAINER — the object is a card of controls (it attaches child objects and holds
                   two or more touch regions, like HOME's lights card 905), so its box is the
                   card's background, not one button's; offers=["acknowledge_container"] —
                   retry with allow_container=True to recolour the whole card
       NO_SUCH_COLOR — object has no button box, or resolver rejects the colour
-                      (PatchError, PaletteError, ValueError all mapped here)
+                      (PatchError, PaletteError, ValueError all mapped here), or the
+                      selected record has no mode-7 fillA
 
     Returns sealed image with box fill colour repointed and edits logged to context.
     """
@@ -632,6 +641,9 @@ class Recolor(Op):
                       "description": "[r, g, b] triple or {\"index\": n} palette index"},
             "allow_container": {"type": "boolean", "default": False,
                                 "description": "recolour a card of controls on purpose"},
+            "selector": {"type": "object",
+                         "description": "the record to recolour: wtype (int), label (str), "
+                                        "nth (int, default 0); omitted, the object's one box"},
         },
         "required": ["object", "color"],
     }
@@ -640,6 +652,18 @@ class Recolor(Op):
         self.object = self._param("object")
         self.color = self._param("color")
         self.allow_container = self._param("allow_container", False, kind=bool)
+        self.selector = self._param("selector", None)
+        if self.selector is not None:
+            sel = self.selector
+            nth = sel.get("nth", 0) if isinstance(sel, dict) else None
+            if (not isinstance(sel, dict) or set(sel) - {"wtype", "label", "nth"}
+                    or not isinstance(sel.get("wtype", 0), (int, type(None)))
+                    or isinstance(sel.get("wtype"), bool)
+                    or not isinstance(sel.get("label", ""), (str, type(None)))
+                    or not isinstance(nth, int) or isinstance(nth, bool) or nth < 0):
+                raise RecipeError("BAD_PARAMS", "selector wants {wtype: int, label: str, "
+                                  "nth: int >= 0}, got %r" % (sel,), op_id=self.spec.id)
+            self.hardware_verified = False      # the selector path has not run on a coach
         ok = (isinstance(self.color, list) and len(self.color) == 3) or \
              (isinstance(self.color, dict) and set(self.color) == {"index"})
         if not ok:
@@ -660,7 +684,7 @@ class Recolor(Op):
                     "every control on the card. Recolour one control's own object, or pass "
                     "allow_container=True" % (obj, touch), offers=["acknowledge_container"])
         try:
-            box = patch.find_button_box(data, obj)
+            box = self._box(data, obj)
             if isinstance(self.color, dict):
                 target = theme.resolve_fill_index(data, index=self.color["index"])
             else:
@@ -684,12 +708,23 @@ class Recolor(Op):
         # repointing the SAME box's fillA to a different cell after this op ran.
         h = ctx.handles[self.spec.id]
         obj, want = h["object"], h["index"]
-        box = patch.find_button_box(data, obj)
+        box = self._box(data, obj)
         fillA = next(c for c in box.colors if c[0] == "fillA")
         assert fillA[1] == 7 and fillA[2] == want, \
             "recolor: object %d fillA is mode %s index %s, wanted mode 7 index %d " \
             "(a later op repointed it)" % (obj, fillA[1], fillA[2], want)
         return "recolor: object %d -> %s (index %d)" % (obj, self.color, want)
+
+    def _box(self, data, obj):
+        """The record this op recolours: the selected one, or `find_button_box`'s."""
+        if self.selector is None:
+            return patch.find_button_box(data, obj)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if not any(c[0] == "fillA" and c[1] == 7 for c in rec.colors):
+            raise patch.PatchError("object %d's record selected by %r has no mode-7 fillA to "
+                                   "recolour" % (obj, self.selector))
+        return rec
 
 
 @op("remap_channel")
