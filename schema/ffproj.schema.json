@@ -78,6 +78,7 @@
             "add_alt_reboot",
             "add_batt_heat_battery_glyph",
             "add_button",
+            "add_button_status",
             "add_card_readouts",
             "add_corner_mark",
             "add_enum_label",
@@ -1139,6 +1140,50 @@
                   "channel",
                   "label",
                   "off_colour"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_button_status"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "buttons": {
+                    "type": "array",
+                    "description": "[{button: {ref}, source, compare: {bit|eq|ne|ge: v}, mask?, shift?, valid_max?, off_colour?, on_colour?}]"
+                  },
+                  "off_colour": {
+                    "type": "array",
+                    "default": [
+                      65,
+                      81,
+                      163
+                    ],
+                    "description": "[r, g, b] unlit body fill; a palette colour"
+                  },
+                  "on_colour": {
+                    "type": "array",
+                    "default": [
+                      0,
+                      174,
+                      239
+                    ],
+                    "description": "[r, g, b] lit body fill; a palette colour"
+                  }
+                },
+                "required": [
+                  "buttons"
                 ]
               }
             }
