@@ -66,6 +66,7 @@
             "remove_option_interlocks",
             "rename_label",
             "retarget_inverter_gear",
+            "set_binding_bytes",
             "set_font",
             "set_gesture",
             "set_icon",
@@ -373,6 +374,14 @@
                     "type": "integer",
                     "default": 0,
                     "description": "expected entry +5 (payload byte + mask selector)"
+                  },
+                  "from_instance": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "re-pin: the instance the entry currently compares (asserted); omitted, the entry must be an unpinned 0xFF one"
                   }
                 },
                 "required": [
@@ -633,6 +642,46 @@
                   }
                 },
                 "required": []
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "set_binding_bytes"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "group": {
+                    "type": "integer",
+                    "description": "command group id"
+                  },
+                  "dgn": {
+                    "type": "integer",
+                    "description": "expected DGN of every edited binding"
+                  },
+                  "bindings": {
+                    "description": "\"all\" or positions within the group",
+                    "default": "all"
+                  },
+                  "set": {
+                    "type": "object",
+                    "description": "wire byte -> {\"from\": v, \"to\": w}"
+                  }
+                },
+                "required": [
+                  "group",
+                  "dgn",
+                  "set"
+                ]
               }
             }
           }

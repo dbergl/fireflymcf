@@ -848,6 +848,95 @@ class RemapChannel(Op):
             " (indicator retargeted, status variables untouched — HARDWARE-UNVERIFIED)")
 
 
+@op("set_binding_bytes")
+class SetBindingBytes(Op):
+    """Rewrite chosen WIRE payload bytes of existing bindings in a command group
+    (`newbutton.set_binding_bytes`), a same-size edit.
+
+    The byte positions are the order `binding_wire_frame` and candump show, translated
+    through the binding word order (`newbutton.binding_payload`), never raw offsets. The
+    entry's DGN, variant and gesture mask are untouched, so a control keeps its
+    GuiCode-driven variants and step codes. Every `from` byte and the DGN are asserted
+    before the edit, so a project written against one build fails loudly on another.
+
+    Params:
+      group: int — the command group whose bindings are edited.
+      dgn: int — asserted on every binding edited (18-bit).
+      bindings: "all" | [int] — which of the group's bindings, by position in its run.
+      set: object — `{"<byte 0-7>": {"from": v, "to": w}}` on the wire payload.
+
+    Error codes:
+      BAD_PARAMS — a byte outside 0..7, a value outside 0..255, an empty `set`, or
+                   `bindings` neither "all" nor positions inside the group.
+      EXPECT_MISMATCH — a binding's DGN or a `from` byte differs; the message carries
+                        the binding's current wire payload.
+      NO_SUCH_GROUP — `group` is not in the group table.
+
+    Capability delta: when `dgn` is DC_DIMMER_COMMAND_2 and a change moves the channel
+    byte, the pairs moved are declared the way `remap_channel` does; otherwise none.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "group": {"type": "integer", "description": "command group id"},
+            "dgn": {"type": "integer", "description": "expected DGN of every edited binding"},
+            "bindings": {"description": '"all" or positions within the group',
+                         "default": "all"},
+            "set": {"type": "object",
+                    "description": 'wire byte -> {"from": v, "to": w}'},
+        },
+        "required": ["group", "dgn", "set"],
+    }
+
+    def validate(self):
+        self.group = self._param("group", kind=int)
+        self.dgn = self._param("dgn", kind=int)
+        self.bindings = self._param("bindings", "all")
+        raw = self._param("set", kind=dict)
+        self.changes = {}
+        try:
+            for k, v in raw.items():
+                self.changes[int(k)] = (int(v["from"]), int(v["to"]))
+        except (ValueError, TypeError, KeyError):
+            raise RecipeError("BAD_PARAMS", 'set_binding_bytes: set must map a byte '
+                              'position to {"from": v, "to": w}', op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        try:
+            data, e = newbutton.set_binding_bytes(
+                data, self.group, dgn=self.dgn, bindings=self.bindings,
+                changes=self.changes)
+        except newbutton.NewButtonError as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
+        ctx.edits.extend(e)
+        return data
+
+    def capability_delta(self, ctx):
+        if self.dgn != 0x1FEDB:
+            return set(), set()
+        try:
+            after, _ = newbutton.set_binding_bytes(
+                ctx.stock, self.group, dgn=self.dgn, bindings=self.bindings,
+                changes=self.changes)
+        except newbutton.NewButtonError:
+            return set(), set()
+        new = newbutton.group_command_pairs(after, self.group)
+        lost = newbutton.sole_produced_pairs(ctx.stock, self.group) - new
+        return lost, new - recipe.capabilities(ctx.stock)
+
+    def verify(self, data, ctx):
+        table = guidata.binding_table(data)
+        members = guidata.group_bindings(guidata.group_table(data), table, self.group)
+        chosen = (range(len(members)) if self.bindings == "all" else self.bindings)
+        for i in chosen:
+            wire = newbutton.binding_payload(members[i].raw)
+            for pos, (_frm, to) in self.changes.items():
+                assert wire[pos] == to, "binding %d payload byte %d is %#04x, not %#04x" % (
+                    members[i].index, pos, wire[pos], to)
+        return "binding bytes: group %d, %d binding(s), wire byte(s) %s (UNVERIFIED)" % (
+            self.group, len(list(chosen)), sorted(self.changes))
+
+
 @op("drop_from_master")
 class DropFromMaster(Op):
     """Remove one G12 channel from a master control, so its ON/OFF buttons no longer

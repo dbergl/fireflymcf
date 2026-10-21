@@ -47,6 +47,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
+| [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. | **no** |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
@@ -206,6 +207,7 @@ Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 | `instance` | integer | yes |  | RV-C instance to match, 0x00-0xFE |
 | `dgn` | integer\|null |  | null | expected DGN of the entry (asserted, not written) |
 | `compare` | integer |  | 0 | expected entry +5 (payload byte + mask selector) |
+| `from_instance` | integer\|null |  | null | re-pin: the instance the entry currently compares (asserted); omitted, the entry must be an unpinned 0xFF one |
 
 Error codes:
 
@@ -345,6 +347,27 @@ Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode 
 Error codes:
 
 - `RETARGET_REFUSED` — the leaf's stock bytes did not match (already retargeted, or a drifted build), the id's carrier set is not just object 1421, or the screen id does not fit the immediate. Refuses rather than corrupt.
+
+### set_binding_bytes
+
+Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value.
+
+- **Hardware status:** UNVERIFIED.
+- **Proof:** `newbutton.binding_payload`
+- **Implementation:** `recipe_ops.SetBindingBytes`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `group` | integer | yes |  | command group id |
+| `dgn` | integer | yes |  | expected DGN of every edited binding |
+| `bindings` | any |  | "all" | "all" or positions within the group |
+| `set` | object | yes |  | wire byte -> {"from": v, "to": w} |
+
+Error codes:
+
+- `BAD_PARAMS` — a byte outside 0..7, a value outside 0..255, an empty `set`, or `bindings` neither "all" nor positions inside the group.
+- `EXPECT_MISMATCH` — a binding's DGN or a `from` byte differs; the message carries the binding's current wire payload.
+- `NO_SUCH_GROUP` — `group` is not in the group table.
 
 ### set_font
 
