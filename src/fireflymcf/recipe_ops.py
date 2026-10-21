@@ -222,8 +222,8 @@ class MoveElement(Op):
 
     A record laid out from the frame the one before it left moves with it, so a move can shift
     records it never named. The compile reports them (`_side_shifts`, the op's own record and
-    everything drawn below it excluded): a manifest line per op and `CompileResult.shifts`, the
-    sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
+    everything drawn below it excluded) at the end of the op's manifest line, and in
+    `CompileResult.shifts`, the sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
     the op is the form that does.
     """
     PARAMS = {
@@ -2916,9 +2916,9 @@ class RemoveRecords(Op):
     op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved,
     or use `move_control`, which removes through the same `_remove_records` and compensates.
     The compile reports what moved (`_side_shifts`: every record of every page root reaching the
-    object, besides the removed ones and what they drew, whose box or inherited state changed):
-    a manifest line per op and `CompileResult.shifts`, the sidecar's `shifts`. It never refuses;
-    `assert_layout`'s `snapshot`/`unchanged_since` around the op is the form that does.
+    object, besides the removed ones and what they drew, whose box or inherited state changed)
+    at the end of the op's manifest line, and in `CompileResult.shifts`, the sidecar's `shifts`.
+    It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around the op is the form that does.
 
     Bindings and groups are untouched: a removed touch region stops this object reaching its
     group, and the group still runs from any other object that registers the same id. So
@@ -3302,7 +3302,7 @@ class AssertLayout(Op):
 # Report only: it changes no bytes and never refuses (`_report_shifts` swallows its own errors).
 # `assert_layout`'s `snapshot`/`unchanged_since` is the form that refuses instead.
 
-_SHIFT_CAP = 6     # items a manifest line names before "... and N more"
+_SHIFT_CAP = 6     # items the shift text names before "... and N more"
 
 
 def _side_shifts(before, after, obj, *, removed=None, own=None):
@@ -3378,12 +3378,12 @@ def _shift_item(e):
     return "%s %s" % (what, {"state": "restyled"}.get(e["kind"], e["kind"]))
 
 
-def _shift_line(op_id, entries, roots, cap=_SHIFT_CAP):
-    """The manifest line for one op's shift report: the shifted records by root, `cap` of them
+def _shift_line(entries, roots, cap=_SHIFT_CAP):
+    """One op's shift report as manifest text: the shifted records by root, `cap` of them
     named, or that nothing else moved."""
     if not entries:
-        return "%s: shifted nothing else (%s)" % (
-            op_id, "roots " + ", ".join(map(str, roots)) if roots
+        return "shifted nothing else (%s)" % (
+            "roots " + ", ".join(map(str, roots)) if roots
             else "no page root reaches the object")
     parts, root = [], None
     for e in entries[:cap]:
@@ -3394,25 +3394,25 @@ def _shift_line(op_id, entries, roots, cap=_SHIFT_CAP):
             parts.append(", ")
         parts.append(_shift_item(e))
     rest = len(entries) - cap
-    return "%s: shifted %d record(s) %s%s" % (op_id, len(entries), "".join(parts),
-                                              ", ... and %d more" % rest if rest > 0 else "")
+    return "shifted %d record(s) %s%s" % (len(entries), "".join(parts),
+                                          ", ... and %d more" % rest if rest > 0 else "")
 
 
 def shift_report(ops, ctx):
-    """`(shifts, lines)` over `ops` in order: `{op_id: entries}` for every op whose handle
-    carries a shift report, and one manifest line per op that ran one (a failed report says it
-    is unavailable and is not in `shifts`)."""
-    shifts, lines = {}, []
+    """`(shifts, texts)` over `ops` in order: `{op_id: entries}` for every op whose handle
+    carries a shift report, and `{op_id: manifest text}` for every op that ran one (a failed
+    report says it is unavailable and is not in `shifts`)."""
+    shifts, texts = {}, {}
     for o in ops:
         h = ctx.handles.get(o.spec.id)
         if not isinstance(h, dict):
             continue
         if "shifts_error" in h:
-            lines.append("%s: shift report unavailable: %s" % (o.spec.id, h["shifts_error"]))
+            texts[o.spec.id] = "shift report unavailable: %s" % h["shifts_error"]
         elif "shifts" in h:
             shifts[o.spec.id] = h["shifts"]
-            lines.append(_shift_line(o.spec.id, h["shifts"], h["shift_roots"]))
-    return shifts, lines
+            texts[o.spec.id] = _shift_line(h["shifts"], h["shift_roots"])
+    return shifts, texts
 
 
 _CANVAS_W, _CANVAS_H = 800, 480
