@@ -207,6 +207,16 @@ def hold_safe_groups(data: bytes, reserved=frozenset()) -> list[int]:
 
 
 @memo.content_cached
+def assignable_groups(data: bytes) -> list[int]:
+    """`free_group_slots` minus the groups GuiCode drives by number
+    (`guicode_selected_groups`): the slots an allocator may hand out at all. The finish gate
+    (`recipe._assert_no_guicode_selected_group_reused`) refuses any build that reuses a
+    GuiCode-driven group, so a pool that still offers 13.6's 136-139 turns "the pool ran out"
+    into an assertion at finish instead of a NO_FREE_GROUP from the op that ran out."""
+    selected = guicode_selected_groups(data)
+    return [g for g in free_group_slots(data) if g not in selected]
+
+
 def free_group_slots(data: bytes) -> list[int]:
     """Group-table indices safe to repurpose for a **config-shaped** group, ascending.
 

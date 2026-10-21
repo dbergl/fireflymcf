@@ -166,6 +166,34 @@ def test_move_element_battery(stock, stock_hash):
     assert r.ok, r.errors
     assert len(r.data) == len(stock)
 
+def test_move_element_negative_is_twos_complement(stock, stock_hash):
+    # Geometry is read signed (`layout._s16`): y -42 is stored as 0xFFD6, byte-for-byte the
+    # same as passing 65494, and an expect may name either spelling.
+    def move(y, **extra):
+        return compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="move_element", params={
+            "target": 902, "selector": {"label": "Chassis"}, "set": {"y": y}, **extra}))
+    neg, raw = move(-42), move(65494)
+    assert neg.ok, neg.errors
+    assert neg.data == raw.data
+    gs, tab = _gs_tab_t(neg.data)
+    rec = [r for r in records.object_records(neg.data, gs + tab[902])
+           if (getattr(r, "label", None) or "").strip() == "Chassis"][0]
+    assert rec.geom[1] == 0xFFD6
+    again = compile_ops(stock, stock_hash,
+                        recipe.OpSpec(id="a", type="move_element", params={
+                            "target": 902, "selector": {"label": "Chassis"},
+                            "set": {"y": -42}, "expect": {"y": 71}}),
+                        recipe.OpSpec(id="b", type="move_element", params={
+                            "target": 902, "selector": {"label": "Chassis"},
+                            "set": {"y": 65494}, "expect": {"y": -42}}))
+    assert again.ok, again.errors
+
+@pytest.mark.parametrize("y", [-32769, 65536, 1.5, "6", True])
+def test_move_element_out_of_range_is_bad_params(stock, stock_hash, y):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="move_element", params={
+        "target": 902, "selector": {"label": "Chassis"}, "set": {"y": y}}))
+    assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS", r.errors
+
 def test_move_element_expect_mismatch(stock, stock_hash):
     r = compile_ops(stock, stock_hash,
                     recipe.OpSpec(id="a", type="move_element",

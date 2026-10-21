@@ -138,11 +138,11 @@ def bindings(dgn: int, *, form: str, tap: bytes | None, hold: bytes | None,
 
 
 def allocate(data: bytes, *, pool: str, need: int = 1) -> list[int]:
-    """The first `need` group slots of `pool`: ``free`` (`newbutton.free_group_slots`) or
+    """The first `need` group slots of `pool`: ``free`` (`newbutton.assignable_groups`) or
     ``hold_safe`` (`newbutton.hold_safe_groups`, a group GuiCode does not drive). Never
     `levelcontrols.RESERVED_GROUPS`. Raises when the pool holds fewer than `need`."""
     if pool == "free":
-        slots = newbutton.free_group_slots(data)
+        slots = newbutton.assignable_groups(data)
     elif pool == "hold_safe":
         slots = newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
     else:
