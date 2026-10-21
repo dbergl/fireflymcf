@@ -6491,7 +6491,8 @@ starts a line's first bitmap at the pen. Under the glyph's `+0x0e` bit 0 the fir
 so this is left as is.
 
 Tests: `tests/test_metrics.py` (`test_a_wt0_unit_draws_centred_in_its_battery_capsule`, which
-fails under `pen + y`; the baseline, superscript and class tests), `tests/test_render_bytes.py`
+fails under `pen + y`; `test_a_wt0_percent_sits_just_under_its_tank_gauge`, the same against
+the tank gauge; the baseline, superscript and class tests), `tests/test_render_bytes.py`
 (`test_a_wt0_character_draws_where_the_firmware_puts_it`: every single-character wtype-0 record on
 HOME, ELECTRICAL, CLIMATE and SETTINGS renders at `pen + wt0_ink_offset`), `tests/test_rvc_button.py`
 (`test_the_glyph_draws_inside_its_button`, `test_a_control_character_glyph_draws`).

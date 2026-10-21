@@ -209,21 +209,42 @@ def test_a_wt0_unit_sits_on_its_values_baseline(mcf_136, unit, slot, pen_y):
     """`HOME.jpg` shows `12.4V` and the tank `%` set on the digits' own line, at the digits'
     height. Under the firmware rule (`FUN_002557C0`: cell top `pen_y - font[0x0b]` at
     `0x255810`/`0x255812`, the blitter adds `glyph[0x0c]` at `0x2510c0`) the unit and an `8` of
-    the same font drawn at the same pen share their top and bottom rows exactly. (A relation inside
-    one drawer: it checks the bearings, not the `font[0x0b]` term.)"""
+    the same font drawn at the same pen share their top and bottom rows exactly. That relation is
+    inside one drawer, so it checks the bearings, not the `font[0x0b]` term; the term is what puts
+    the shared baseline on the pen row: `font[0x0b]` rows below the cell top, where the digits'
+    last row sits. A rule that drew from the pen down (`dy` 0, or `pen + glyph.y`) puts the
+    digits' bottom below the pen."""
     assert _ink_top_bottom(mcf_136, slot, unit, pen_y) == \
         _ink_top_bottom(mcf_136, slot, "8", pen_y)
+    assert _ink_top_bottom(mcf_136, slot, "8", pen_y)[1] == pen_y
+
+
+def test_a_wt0_percent_sits_just_under_its_tank_gauge(mcf_136):
+    """`HOME.jpg` shows each tank's `0%` directly under its gauge, the gap far smaller than the
+    text. The gauge is obj 721's wtype-32 record 0 (y 76..161), drawn by another function, so
+    this relation tells the rules apart: the firmware rule inks the `%` (record 4, pen y 178)
+    rows 166..178, 5 px under the gauge; ink at the pen (`dy` 0) or at `pen + glyph.y` starts
+    17 or 21 px under it, further than the 13-px glyph is tall."""
+    from fireflymcf import pagewalk
+    recs = {r.index: r for r in pagewalk.walk_records(mcf_136, 4) if r.obj == 721}
+    gauge, unit = recs[0], recs[4]
+    assert gauge.wtype == 32 and unit.wtype == 0 and unit.label == "%"
+    top, bot = _ink_top_bottom(mcf_136, unit.font, "%", unit.box[1])
+    assert gauge.box[3] < top and top - gauge.box[3] < bot - top + 1
 
 
 @pytest.mark.parametrize("slot,pen_y", [(17, 409), (7, 142), (9, 203)])
 def test_a_wt0_degree_is_a_superscript(mcf_136, slot, pen_y):
     """HOME's `91°` (font 17) and CLIMATE's two temperatures (fonts 7 and 9): the photos show
     the degree sign at the top of the digits. By the firmware rule its ink starts within 3 px of
-    the digit top and ends in the upper half of the digit."""
+    the digit top and ends in the upper half of the digit. Both glyphs share one pen, so that
+    relation checks glyph data; the `font[0x0b]` term is checked by the baseline: the digits'
+    last row is the pen row, and the whole degree sign is above it."""
     deg_top, deg_bot = _ink_top_bottom(mcf_136, slot, "°", pen_y)
     dig_top, dig_bot = _ink_top_bottom(mcf_136, slot, "8", pen_y)
     assert abs(deg_top - dig_top) <= 3
     assert deg_bot < (dig_top + dig_bot) // 2
+    assert dig_bot == pen_y and deg_bot < pen_y
 
 
 def test_wt0_ink_offset_horizontal_follows_the_measuring_class(mcf_136):
