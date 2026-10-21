@@ -118,8 +118,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "pin_filter_instance": ("same-size",
         "Narrow a receive-filter entry from any device to one RV-C instance (one byte).",
         "Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that "
-        "already compares one instance to another) is UNVERIFIED. Bench check: the readouts follow "
-        "instance N's frames and ignore instance 0's (injected pair).", "`BUS-BASELINE.md` PC.46"),
+        "already compares one instance to another) is UNVERIFIED and compiles as unverified. "
+        "Bench check: the readouts follow instance N's frames and ignore instance 0's (injected "
+        "pair).", "`BUS-BASELINE.md` PC.46"),
     "remove_control": ("same-size",
         "Park a control off the 480 px canvas by rewriting its attach records' y. Bindings "
         "stay.",

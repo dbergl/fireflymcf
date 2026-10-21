@@ -3913,9 +3913,11 @@ class PinFilterInstance(Op):
                the mask; keeping it out of the edit is what holds this to one byte.
       from_instance: int|None (default None) — given, the op re-pins: the entry
                must currently compare exactly this instance, and `instance` replaces
-               it (an entry moves from one device to another).
+               it (an entry moves from one device to another). A re-pin compiles as
+               unverified: only the narrowing path has run on a coach.
 
     Error codes:
+      BAD_PARAMS     — `from_instance` is not an integer 0x00..0xFF (or null).
       FILTER_REFUSED — `statusbind.pin_filter_instance` raised: the entry is
                        already pinned, its DGN is not `dgn`, its `+5` is not
                        `compare`, its extraction mode is one the `tbb` skips (so
@@ -3949,6 +3951,15 @@ class PinFilterInstance(Op):
         self.dgn = self._param("dgn", None)
         self.compare = self._param("compare", 0, kind=int)
         self.from_instance = self._param("from_instance", None)
+        fi = self.from_instance
+        if fi is not None and not (isinstance(fi, int) and not isinstance(fi, bool)
+                                   and 0 <= fi <= 0xFF):
+            raise RecipeError("BAD_PARAMS", "from_instance must be an integer 0x00..0xFF or "
+                              "null, got %r" % (fi,), op_id=self.spec.id)
+        if fi is not None:
+            # narrowing an open entry is coach-proven (HARDWARE-VERIFIED.md); moving a live
+            # entry to another device is the first of its kind until the coach shows it
+            self.hardware_verified = False
 
     def apply(self, data, ctx):
         try:

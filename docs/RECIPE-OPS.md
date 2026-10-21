@@ -39,7 +39,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes |
 | [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes |
 | [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. | Flashed. | yes |
-| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
+| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
 | [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
 | [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. | Flashed. | yes |
 | [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
@@ -200,7 +200,7 @@ Error codes:
 
 Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 
-- **Hardware status:** Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair).
+- **Hardware status:** Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair).
 - **Proof:** `BUS-BASELINE.md` PC.46
 - **Implementation:** `recipe_ops.PinFilterInstance`
 
@@ -214,6 +214,7 @@ Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 
 Error codes:
 
+- `BAD_PARAMS` — `from_instance` is not an integer 0x00..0xFF (or null).
 - `FILTER_REFUSED` — `statusbind.pin_filter_instance` raised: the entry is already pinned, its DGN is not `dgn`, its `+5` is not `compare`, its extraction mode is one the `tbb` skips (so it paints nothing and narrowing it changes nothing), or `instance` is out of range.
 
 ### pin_switch_arm
