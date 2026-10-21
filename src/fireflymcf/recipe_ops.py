@@ -256,6 +256,7 @@ class MoveElement(Op):
                 if not isinstance(v, int) or isinstance(v, bool) or not -0x8000 <= v <= 0xFFFF:
                     raise RecipeError("BAD_PARAMS", "move_element %s[%r] = %r is not an int in "
                                       "-32768..65535" % (name, k, v), op_id=self.spec.id)
+        self.written = {"set": dict(self.set), "expect": dict(self.expect)}   # for messages
         self.set = {k: v & 0xFFFF for k, v in self.set.items()}       # signed -> stored u16
         self.expect = {k: v & 0xFFFF for k, v in self.expect.items()}
 
@@ -276,7 +277,8 @@ class MoveElement(Op):
                 if have != self.expect[key]:
                     raise RecipeError("EXPECT_MISMATCH",
                                       "object %d %s is %d, project expected %d"
-                                      % (obj, key, have, self.expect[key]))
+                                      % (obj, key, layout._s16(have),
+                                         self.written["expect"][key]))
             _put16(buf, off, val, ctx, "move_element obj %d %s -> %d" % (obj, key, val))
         out, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": obj}
@@ -291,8 +293,8 @@ class MoveElement(Op):
             if off is None and key in self.optional:
                 continue
             assert struct.unpack_from("<H", data, off)[0] == val, \
-                "move_element: obj %d %s != %d" % (obj, key, val)
-        return "move: object %d %s" % (obj, dict(self.set))
+                "move_element: obj %d %s != %d" % (obj, key, self.written["set"][key])
+        return "move: object %d %s" % (obj, self.written["set"])
 
 
 @op("move_attach")

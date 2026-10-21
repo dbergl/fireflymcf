@@ -188,6 +188,18 @@ def test_move_element_negative_is_twos_complement(stock, stock_hash):
                             "set": {"y": 65494}, "expect": {"y": -42}}))
     assert again.ok, again.errors
 
+def test_move_element_messages_show_the_value_written(stock, stock_hash):
+    # The stored u16 (65494) is not what the project says; the manifest and a mismatch quote
+    # the project's own spelling.
+    def move(**params):
+        return compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="move_element", params={
+            "target": 902, "selector": {"label": "Chassis"}, **params}))
+    r = move(set={"y": -42})
+    assert r.ok and r.manifest == ["move: object 902 {'y': -42}"], r.manifest
+    r = move(set={"y": 6}, expect={"y": -42})
+    assert not r.ok and r.errors[0]["code"] == "EXPECT_MISMATCH"
+    assert "project expected -42" in r.errors[0]["message"], r.errors
+
 @pytest.mark.parametrize("y", [-32769, 65536, 1.5, "6", True])
 def test_move_element_out_of_range_is_bad_params(stock, stock_hash, y):
     r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="move_element", params={
