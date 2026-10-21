@@ -32,7 +32,9 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
   [5] the glyph, a wtype-0 single character (`glyph_record`), and an empty record cancelling
       its offset so the touch region lands on the inner box again. The pen is placed so the
       bitmap is centred in the area above the caption: the panel draws it `font.top - y` rows
-      above the pen (`metrics.wt0_ink_offset`, GUICODE Finding 84);
+      above the pen (`metrics.wt0_ink_offset`, GUICODE Finding 84). Across, the pen is the
+      bitmap's left edge in measuring class 2 (proven given class 2; a page's class is not
+      checked, so `add_rvc_button` names a glyph's nonzero x bearing in its manifest);
   [6] the touch region 315[9], inner size, carrying the group id.
 
 `text`, `glyph`, `font` None and `fill_index` None give exactly the Batt Heat body.
@@ -184,7 +186,7 @@ def glyph_missing(data: bytes, slot: int, char: str) -> bool:
 
 def glyph_record(dx: int, dy: int, slot: int, char: str) -> bytes:
     """A wtype-0 single character `char` in font `slot` at `(dx, dy)` from the flow origin,
-    align 1 (left: the pen is the bitmap's left edge and the cell's baseline row, see
+    align 1 (left: the pen is the bitmap's left edge in class 2 and the cell's baseline row, see
     `metrics.wt0_ink_offset`). The shape of stock's single-character records (HOME's `:`:
     header, declared x/y, `01 <font> <len> <text> 00`) with base modes `[1,1,1,1]`; a wtype-0
     is drawn at the pen and needs no box (`cornermark.build_mark_record`'s docstring)."""
@@ -251,8 +253,8 @@ def button_records(donors: bytes, *, touch_id: int, w: int, h: int, text: str | 
             raise RvcButtonError(f"the {g.width} x {g.height} glyph does not fit the "
                                  f"{iw} x {area} area above the caption")
         # the panel draws a wtype-0 character's bitmap at the pen plus `wt0_ink_offset`: its
-        # x bearing cancelled, and `font.top - y` rows ABOVE the pen (GUICODE Finding 84), so
-        # the pen sits below the ink it centres
+        # x bearing cancelled (given measuring class 2, not checked here), and `font.top - y`
+        # rows ABOVE the pen (GUICODE Finding 84), so the pen sits below the ink it centres
         ink_dx, ink_dy = metrics.wt0_ink_offset(img, slot, char)
         gx = (iw - g.width) // 2 - ink_dx
         gy = (area - g.height) // 2 - ink_dy

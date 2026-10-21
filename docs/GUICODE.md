@@ -6381,19 +6381,23 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
-## Finding 84 — where a wtype-0 character lands: `pen_y − font[0x0b] + glyph.y` down, the pen across, and any byte draws — `proven-from-code`, checked against `HOME.jpg` and `CLIMATE.jpg`, 2026-10-21
+## Finding 84 — where a wtype-0 character lands: `pen_y − font[0x0b] + glyph.y` down, the pen across, and any byte draws — `proven-from-code` down; across, `proven-from-code` given measuring class 2 (the class on a given page is inferred); checked against `HOME.jpg` and `CLIMATE.jpg`, 2026-10-21
 
 **Question.** `add_rvc_button` placed an icon's wtype-0 record so that `pen = target − (glyph.x,
-glyph.y)`, as if the panel drew the bitmap at `pen + bearing`. On a built page the ring drew
+glyph.y)`, as if the panel drew the bitmap at `pen + bearing`. In the decoded renderer's output
+of such a build (rendered only; nothing here was flashed or seen on the coach), the ring drew
 47 px above its button, and a 53 × 56 glyph in icon font 25 did not draw at all. Where does the
-panel put a wtype-0 character relative to its pen?
+panel put a wtype-0 character relative to its pen? The corrected `rvcbutton` placement below has
+no hardware round-trip either.
 
 **The dispatch.** `FUN_00256C54`'s type switch (`tbh` at `0x256CD2`, Finding 38) sends type 0 to
 `0x256E10`. It draws nothing unless the content flag is set (`0x256E16` `ldrb r3,[r2,#0x704c]` /
 `beq 0x257ACC`). With render `+0x04` ≤ 0 (`0x256E1E` `ldrsh.w r3,[r2,#0x4]` / `bgt 0x256E5E`) it
 calls `FUN_002557C0` at `0x256E3A`, with the label length (`0x256E2E` `ldrh.w r1,[r5,#0x4a]`) and
 format entry 0 (`0x256E38` `movs r2,#0x0`). (The `+0x04 > 0` arm, `FUN_00255F44`, is not traced
-here. HOME's `V` and `°` behave as the main arm predicts, below.)
+here. HOME's `V` and `°` behave as the main arm predicts, below. `+0x04` is format entry 0's
+`+4` halfword, which the paint reset zeroes (`0x25870A` `strh r6,[r0,#4]`, beside the class reset
+at `0x258716`), so right after a reset the untraced arm is not taken.)
 
 **`FUN_002557C0`, the single-line drawer:**
 
@@ -6470,10 +6474,18 @@ the printable test. No stock wtype-0 label holds a control byte (11.23, 13.6 and
 so no stock render changes.
 
 **Not settled here.** (1) The `+0x04 > 0` arm (`FUN_00255F44`). (2) The class at a given moment
-is runtime state (Finding 78 leaves its writers open). Under class 1 a character with an x bearing
-starts `glyph.x` right of the pen. The renderer and `rvcbutton` both assume class 2. The ring has
-x bearing 0, and among stock's single-character wtype-0 records only the `:` of fonts 7 and 9
-has one (4). (3) `render.panel_text_images`
+is runtime state (Finding 78 leaves its writers open; the class writer at `0x253228` is any
+record whose header byte 4 has low bits set, and Finding 78 saw readouts drawn by this function
+run under more than one class). Under class 1, or class 3 for a digit or `+ - * / =`, a character
+with an x bearing starts `glyph.x` right of the pen. The renderer and `rvcbutton` both assume
+class 2, so the horizontal rule is proven only given class 2, and nothing checks the class on the
+page a button lands on. The vertical rule does not depend on the class. The exposure is what the
+op can place, which is any icon: on 13.6, 20 of icon font 24's 33 glyphs have a nonzero x bearing
+(`C` 11 px, `R` 17, `J` 13, `W` 12, `D`-`G` 5, …) and 8 of font 25's 52 (`\x01`/`\x02` 8, `\x04`
+2, `0`/`1` 22, `2` 8, `3`/`4` 24; its digits stay unflagged under class 3 as well). 11.23 has 17 and
+8, 14.7 20 and 7. Among stock's own single-character wtype-0 records only the `:` of fonts 7 and 9
+has one (4). The tests' 16 × 16 ring has x bearing 0. `add_rvc_button` names a nonzero
+bearing in its manifest line, with the class-2 assumption. (3) `render.panel_text_images`
 starts a line's first bitmap at the pen. Under the glyph's `+0x0e` bit 0 the firmware starts it
 `glyph.x − glyph[0]` from the pen instead. No stock single-character wtype-0 glyph sets the bit,
 so this is left as is.

@@ -632,6 +632,9 @@ glyph_top  = pen_y − font[0x0b] + glyph[0x0c]     ; ldrb r4,[r1,#0xb] / subs @
 glyph_left = pen_x                                 ; left-aligned, default measuring class
 ```
 
+(The vertical rule holds in every measuring class; the horizontal one is proven given class 2,
+and under class 1 a glyph with an x bearing lands that many px right of the pen.)
+
 so the pen is the cell's baseline: for icon fonts 24 and 25, its **last** row, not its top.
 Placing such a record by `pen = target − (x, y)` drew a ring 47 px (font 24's `font[0x0b]`)
 above its button. `metrics.wt0_ink_offset` gives the offset.
