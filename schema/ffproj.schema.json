@@ -1180,6 +1180,10 @@
                   "pitch": {
                     "type": "integer",
                     "default": 34
+                  },
+                  "parent": {
+                    "description": "object the readouts attach to: an object index or {ref: op_id}; default 829 (aes_card_layout's frame)",
+                    "default": 829
                   }
                 },
                 "required": [

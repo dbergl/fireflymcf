@@ -7002,7 +7002,8 @@ class AddCardReadouts(Op):
     card titles (`cardreadouts.attach`). Runs after `aes_card_layout`.
 
     Error codes:
-      WRONG_SHAPE     -- 829 is not aes_card_layout's frame, or a record failed its self-decode.
+      WRONG_SHAPE     -- 829 is not aes_card_layout's frame, `parent` (another object) has no
+                         wtype-5 attach template, or a record failed its self-decode.
       BAD_REF         -- a row's ref names no draw:false readout handle.
       REPLACE_REFUSED -- 829 could not be relocated.
     """
@@ -7020,6 +7021,9 @@ class AddCardReadouts(Op):
             "unit_x": {"type": "integer", "default": 763},
             "y0": {"type": "integer", "default": 78},
             "pitch": {"type": "integer", "default": 34},
+            "parent": {"description": "object the readouts attach to: an object index or "
+                                      "{ref: op_id}; default 829 (aes_card_layout's frame)",
+                       "default": 829},
         },
         "required": ["rows"],
     }
@@ -7039,8 +7043,10 @@ class AddCardReadouts(Op):
         self.geom = {k: self._param(k, d, kind=int) for k, d in
                      (("x_caption", 684), ("pen_x", 760), ("unit_x", 763), ("y0", 78),
                       ("pitch", 34))}
+        self.parent = self._param("parent", aescompact.ELECTRICAL_AES_BODY)
 
     def apply(self, data, ctx):
+        parent = resolve_target(ctx, self.parent)
         rows = []
         for r in self.rows:
             v = r["value"]
@@ -7058,13 +7064,17 @@ class AddCardReadouts(Op):
                                          int(fmt.get("places", 0)), r["unit"]))
         try:
             obj = cardreadouts.build_object(data, rows, **self.geom)
-            out, index = cardreadouts.attach(data, obj)
+            out, index = cardreadouts.attach(data, obj, parent)
+        except insert.InsertError as e:
+            if parent == aescompact.ELECTRICAL_AES_BODY:    # 829's refusals stay REPLACE_REFUSED
+                raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
+            raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
         except relocate.RelocationError as e:      # a ValueError subclass: catch it first
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         except (ValueError, readout.ReadoutError, insert.InsertError) as e:
             raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
         out, _ = patch.reseal(out)
-        ctx.handles[self.spec.id] = {"object": aescompact.ELECTRICAL_AES_BODY,
+        ctx.handles[self.spec.id] = {"object": parent,
                                      "readouts": index,
                                      "rows": [(x.caption, x.slot, x.unit) for x in rows]}
         return out
@@ -7076,16 +7086,20 @@ class AddCardReadouts(Op):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
         frame = records.object_records(data, gs + tab[h["object"]])
-        att = frame[cardreadouts.ATTACH_AT]
-        assert att.wtype == 5 and att.child_index == h["readouts"], \
-            "the readouts attach is not at 829[%d]" % cardreadouts.ATTACH_AT
+        if h["object"] == aescompact.ELECTRICAL_AES_BODY:
+            att = frame[cardreadouts.ATTACH_AT]
+            assert att.wtype == 5 and att.child_index == h["readouts"], \
+                "the readouts attach is not at 829[%d]" % cardreadouts.ATTACH_AT
+        else:
+            assert any(r.wtype == 5 and r.child_index == h["readouts"] for r in frame), \
+                "the readouts attach is not in object %d" % h["object"]
         recs = records.object_records(data, gs + tab[h["readouts"]])
         got = [(c.label, v.value_slot, u.label) for c, v, u in
                zip([r for r in recs if r.wtype == 11][0::2], [r for r in recs if r.wtype == 8],
                    [r for r in recs if r.wtype == 11][1::2])]
         assert got == [tuple(x) for x in h["rows"]], "rows read back as %s" % got
-        return ("add_card_readouts: %d rows %s in object %d, attached at 829[%d]"
-                % (len(got), [g[0] for g in got], h["readouts"], cardreadouts.ATTACH_AT))
+        return ("add_card_readouts: %d rows %s in object %d, attached to object %d"
+                % (len(got), [g[0] for g in got], h["readouts"], h["object"]))
 
 
 @op("add_aes_bms_button_status")
