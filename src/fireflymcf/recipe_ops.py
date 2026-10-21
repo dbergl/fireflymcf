@@ -7219,6 +7219,7 @@ class AddAesBmsButtonStatus(Op):
         except readout.ReadoutError as e:
             raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=self.spec.id)
         ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
         (cell,) = cells
         source = bitcombine.BitSource(register.status_slot_addr(sh["var_heat"]), self.mask, 1)
         try:
@@ -7253,10 +7254,10 @@ class AddAesBmsButtonStatus(Op):
         except theme.PaletteError as e:
             raise RecipeError("NO_BODY_COLOUR", str(e), op_id=self.spec.id)
         try:
-            out, info = aescompact.add_batt_heat_state_switch(
+            out, info = statelights.wrap_button(
                 out, object_index=aescompact.ELECTRICAL_AES_BODY, value_slot=cell.slot,
-                donors=ctx.stock, off_index=off_index, on_index=on_index,
-                w=bh["w"], h=bh["h"], text=bh["text"], arms=aescompact.BMS_BIT_STATE_ARMS)
+                donors=ctx.stock, arms=aescompact.BMS_BIT_STATE_ARMS, off_index=off_index,
+                on_index=on_index, w=bh["w"], h=bh["h"], text=bh["text"])
         except (ValueError, relocate.RelocationError) as e:
             raise RecipeError("INDICATOR_REFUSED", str(e), op_id=self.spec.id)
         out, _ = patch.reseal(out)
