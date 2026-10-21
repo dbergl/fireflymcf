@@ -963,32 +963,13 @@ def build_batt_heat_button(donors: bytes, *, touch_id: int,
     frame, so it reads as a pressable button like Pump Link / Low Volts, not a boxed label. Its
     fill is repointed off the live Low Volts cell (index 45) to a static colour, so it does not
     track any state.
+
+    The body is `rvcbutton.button_records`' with no glyph, the donor's caption font and the
+    static fill `BATT_HEAT_FILL_INDEX`; this builder keeps Batt Heat's defaults and its output.
     """
-    inset = PUMP_OUTLINE_INSET
-    # [0] absolute anchor + dark backing box: base-mode 0 on x and y (829[7] is the only absolute
-    # box donor), which both places the button and establishes the flow origin the capsule below
-    # inherits. Left-aligned so the donor's align-3 does not shift the column off its anchor.
-    box = _clone_with_geom(donors, PUMP_FRAME_DONOR, PUMP_BOX_REC, {0: x, 1: y, 2: w, 3: h})
-    _set_align(box, 1)
-    # [1] a flow anchor insetting the capsule a couple px inside the backing box.
-    anchor = _flow_anchor(inset, inset)
-    # [2] the solid capsule button (285[0]), widened, fill repointed off cell 45 to a static colour.
-    btn = _clone_with_geom(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_BOX_REC,
-                           {2: w - 2 * inset, 3: h - 2 * inset})
-    box_rec = _object_records(donors, PUMP_BUTTON_BODY_DONOR)[PUMP_BUTTON_BOX_REC]
-    fill_off = box_rec.color_off[0]
-    if fill_off is None:
-        raise ValueError("Low Volts box donor 285[0] has no inline fillA colour to repoint")
-    struct.pack_into("<H", btn, fill_off - box_rec.offset, BATT_HEAT_FILL_INDEX)
-    # [3] the caption, widened and relabelled ('Low\nVolts' -> 'Batt Heat', 9 over 9).
-    label = _clone_with_geom(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC,
-                             {2: w - 2 * inset, 3: h - 2 * inset})
-    label = _relabel(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC, text, label)
-    # [4] touch: 315[9] widened to the box, carrying the command-group id.
-    touch = _clone_with_geom(donors, CLUSTER_DONOR_OBJECT, PUMP_BUTTON_TOUCH_REC,
-                             {2: w - 2 * inset, 3: h - 2 * inset})
-    _set_touch_id(touch, touch_id)
-    return [bytes(box), anchor, bytes(btn), bytes(label), bytes(touch)]
+    from . import rvcbutton            # rvcbutton reads this module's donors: import it lazily
+    return rvcbutton.button_records(donors, touch_id=touch_id, w=w, h=h, text=text,
+                                    glyph=None, font=None, fill_index=None, x=x, y=y)
 
 
 def _red_glyph_record(dx: int, dy: int, w: int, h: int,
@@ -1038,31 +1019,12 @@ def build_state_arm(donors: bytes, *, fill_index: int, label_record: bytes, glyp
     v31 lost its caption on enable and kept a lit glyph on disable. The capsule is opaque and
     covers the full button, so drawing it first erases whatever the outgoing arm left, including
     the glyph. `<count>` + records, padded to 4.
+
+    The arm is `statelights.build_arm`'s with the caption as the body.
     """
-    inset = PUMP_OUTLINE_INSET
-    btn = _clone_with_geom(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_BOX_REC,
-                           {2: w - 2 * inset, 3: h - 2 * inset})
-    box_rec = _object_records(donors, PUMP_BUTTON_BODY_DONOR)[PUMP_BUTTON_BOX_REC]
-    fill_off = box_rec.color_off[0]
-    if fill_off is None:
-        raise ValueError("Low Volts box donor 285[0] has no inline fillA colour to repoint")
-    struct.pack_into("<H", btn, fill_off - box_rec.offset, fill_index)
-    parts = [bytes(btn), label_record]
-    if glyph:
-        dx = contactor_glyph_dx(w)
-        parts.append(_red_glyph_record(dx, CONTACTOR_GLYPH_DY,
-                                       CONTACTOR_GLYPH_W, CONTACTOR_GLYPH_H))
-        parts.append(cornermark.build_empty_record(-dx, -CONTACTOR_GLYPH_DY))
-    payload = cornermark._object(parts)
-    chk = records.object_records(payload, 0)
-    if not (len(chk) == len(parts) and chk[0].wtype == 33
-            and chk[0].colors[0] == ("fillA", 7, fill_index)
-            and chk[0].geom[2:4] == [w - 2 * inset, h - 2 * inset]
-            and chk[1].wtype == 11 and chk[1].label == text
-            and any(r.font == CONTACTOR_GLYPH_FONT_SLOT for r in chk) == glyph):
-        raise ValueError("Batt Heat state arm (fill %d, glyph %s) failed its self-decode"
-                         % (fill_index, glyph))
-    return payload
+    from . import statelights          # statelights reads this module's donors: import it lazily
+    return statelights.build_arm(donors, fill_index=fill_index, body=[label_record], w=w, h=h,
+                                 text=text, contactor=glyph)
 
 
 def _batt_heat_body_records(recs, object_index: int,
@@ -1109,42 +1071,13 @@ def add_batt_heat_state_switch(data: bytes, *, object_index: int, value_slot: in
     which is not in the flow gate, and the glyph cancels its own offset, so nothing else shifts
     either. The switch carries the redraw-enroll bit (header[4] & 0x20) inherited from the stock
     enable-pill switch donor, which is what makes the panel repaint the arm live.
+
+    The switch is `statelights.wrap_button`'s, the span found by `_batt_heat_body_records`.
     """
-    out = data
-    gs, tab = guidata.guidata_extent(out)[0], guidata.object_tables(out)[1]
-    recs = records.object_records(out, gs + tab[object_index])
-    _cap, lab = _batt_heat_body_records(recs, object_index, text)
-    lrec = recs[lab]
-    label_record = out[lrec.offset:lrec.offset + lrec.size]
-
-    arm_objects = [
-        build_state_arm(donors, fill_index=on_index if heater_on else off_index,
-                        label_record=label_record, glyph=contactor_on, w=w, h=h, text=text)
-        for _match, heater_on, contactor_on in arms
-    ]
-    if grow:
-        out, arms_base = switchbuild.append_arms(out, arm_objects, [m for m, _h, _c in arms])
-    else:
-        landed = []
-        for arm in arm_objects:
-            out, _e, i = insert._append_object(out, arm)
-            landed.append(i)
-        if landed != list(range(landed[0], landed[0] + len(arm_objects))):
-            raise ValueError("Batt Heat state arms did not land contiguously (%s)" % landed)
-        arms_base = landed[0]
-    switch = switchbuild.author_switch(out, value_slot=value_slot, arms_base=arms_base,
-                                       count=len(arms))
-
-    gs, tab = guidata.guidata_extent(out)[0], guidata.object_tables(out)[1]
-    recs = records.object_records(out, gs + tab[object_index])
-    cap, lab = _batt_heat_body_records(recs, object_index, text)
-    stream = [out[r.offset:r.offset + r.size] for r in recs]
-    stream[cap] = switch
-    del stream[lab]                                      # the caption now lives in every arm
-    out, _ = relocate.replace_object_records(out, object_index, cornermark._object(stream))
-    idxs = list(range(arms_base, arms_base + len(arm_objects)))
-    return out, {"arms_base": arms_base, "arm_objects": idxs, "value_slot": value_slot,
-                 "off_index": off_index, "on_index": on_index}
+    from . import statelights          # statelights reads this module's donors: import it lazily
+    return statelights.wrap_button(data, object_index=object_index, value_slot=value_slot,
+                                   donors=donors, arms=arms, off_index=off_index,
+                                   on_index=on_index, w=w, h=h, text=text, grow=grow)
 
 
 def build_link_arm(data: bytes, donor: int, text: str) -> bytes:

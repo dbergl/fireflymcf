@@ -55,6 +55,13 @@ def test_ands_reg_matches_the_image(code):
     assert thumb.ands_reg(2, 7) == code(0x240D98, 2)
 
 
+def test_ldr_literal_w_matches_the_image(code):
+    # `ldr.w r8, [pc, #0xa4]` at 0x00241C96 (pool word 0x00241D3C): bytes df f8 a4 80; and
+    # `ldr.w lr, [pc, #0x10c]` at 0x002429F2 (pool word 0x00242B00).
+    assert thumb.ldr_literal_w(8, 0x241C96, 0x241D3C) == code(0x241C96, 4)
+    assert thumb.ldr_literal_w(14, 0x2429F2, 0x242B00) == code(0x2429F2, 4)
+
+
 def test_ldrh_imm_matches_the_image(code):
     # `ldrh r0, [r6, #0x3e]` at 0x00240F3E: bytes f0 8f.
     assert thumb.ldrh_imm(0, 6, 0x3E) == code(0x240F3E, 2)
