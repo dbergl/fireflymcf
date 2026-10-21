@@ -16,7 +16,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from . import aescompact, cardlayout, guidata, insert, readout, records, relocate
+from . import aescompact, cardlayout, enumlabel, guidata, insert, readout, records, relocate
 
 CAPTION_FONT, CAPTION_H, CAPTION_W = 10, 17, 102    # font 10: full ASCII (5 lacks lowercase)
 VALUE_FONT = 12
@@ -83,6 +83,16 @@ def build_object(data: bytes, rows: list[Row], *, x_caption: int = 684, pen_x: i
     return payload
 
 
+def _with_record(obj_bytes: bytes, frag: bytes) -> bytes:
+    """`obj_bytes` (a `build_object` payload) with `frag` appended as its last record."""
+    recs = records.object_records(obj_bytes, 0)
+    payload = bytes([len(recs) + 1]) + obj_bytes[1:recs[-1].end] + frag
+    payload += b"\x00" * (-len(payload) % 4)
+    if len(records.object_records(payload, 0)) != len(recs) + 1:
+        raise CardReadoutsError("readouts object with its restore record failed its self-decode")
+    return payload
+
+
 def check_frame(data: bytes) -> None:
     """829 must be cardlayout's frame: four absolute cards, then the four titles."""
     gs, tab = _gs_tab(data)
@@ -98,8 +108,32 @@ def check_frame(data: bytes) -> None:
             "first" % aescompact.ELECTRICAL_AES_BODY)
 
 
-def attach(data: bytes, obj_bytes: bytes) -> tuple[bytes, int]:
-    """Append the object and insert a plain wtype-5 attach for it at 829[ATTACH_AT]."""
+def attach(data: bytes, obj_bytes: bytes, parent: int = aescompact.ELECTRICAL_AES_BODY,
+           at: tuple[int, int] | None = None) -> tuple[bytes, int]:
+    """Append the object and attach it. On the default parent (829, aes_card_layout's frame) a
+    plain wtype-5 attach goes in at 829[ATTACH_AT]; on any other parent `insert.insert_object`
+    clones one of that parent's own wtype-5 attach records (`at` positions it) as the parent's
+    last record, and the object is ended by an empty label that hands back the font and align
+    the walk carried in (`enumlabel.restore_state`, as `rvcbutton.place` does). Off 829 the
+    caller must still check the whole page (`enumlabel.foreign_deltas`): the restore covers
+    font and align, not the flow origin the rows leave. Raises `EnumLabelError` when the
+    entering state cannot be measured or written back."""
+    if parent != aescompact.ELECTRICAL_AES_BODY:
+        out, _edits = insert.insert_object(data, obj_bytes, parent, position=at)
+        index = len(guidata.object_tables(out)[1]) - 1
+        gs, tab = _gs_tab(out)
+        attach_at = len(records.object_records(out, gs + tab[parent])) - 1
+        leaving = enumlabel.leaving_state(out, parent, attach_at)
+        if len(leaving) != 1:
+            raise enumlabel.EnumLabelError(
+                "the pages reaching object %d leave the readouts with font/align states %s; "
+                "expected one" % (parent, sorted(leaving, key=str)))
+        restore = enumlabel.restore_state(out, parent, next(iter(leaving)))
+        if restore is not None:
+            out, _edits = insert.insert_object(
+                data, _with_record(obj_bytes, enumlabel.restore_record(*restore)), parent,
+                position=at)
+        return out, index
     check_frame(data)
     out, _edits, index = insert._append_object(data, obj_bytes)
     gs, tab = _gs_tab(out)

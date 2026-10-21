@@ -39,7 +39,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes |
 | [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes |
 | [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. | Flashed. | yes |
-| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. | yes |
+| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
 | [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
 | [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. | Flashed. | yes |
 | [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
@@ -47,6 +47,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
+| [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
@@ -58,11 +59,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
-| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. | yes |
+| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** |
+| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. Any `parent` other than 829 is UNVERIFIED and compiles as unverified; it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
+| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). | **no** |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
@@ -196,7 +200,7 @@ Error codes:
 
 Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 
-- **Hardware status:** Flashed (2026-09-04 onward). Motivated by PC.46.
+- **Hardware status:** Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair).
 - **Proof:** `BUS-BASELINE.md` PC.46
 - **Implementation:** `recipe_ops.PinFilterInstance`
 
@@ -206,9 +210,11 @@ Narrow a receive-filter entry from any device to one RV-C instance (one byte).
 | `instance` | integer | yes |  | RV-C instance to match, 0x00-0xFE |
 | `dgn` | integer\|null |  | null | expected DGN of the entry (asserted, not written) |
 | `compare` | integer |  | 0 | expected entry +5 (payload byte + mask selector) |
+| `from_instance` | integer\|null |  | null | re-pin: the instance the entry currently compares (asserted); omitted, the entry must be an unpinned 0xFF one |
 
 Error codes:
 
+- `BAD_PARAMS` — `from_instance` is not an integer 0x00..0xFF (or null).
 - `FILTER_REFUSED` — `statusbind.pin_filter_instance` raised: the entry is already pinned, its DGN is not `dgn`, its `+5` is not `compare`, its extraction mode is one the `tbb` skips (so it paints nothing and narrowing it changes nothing), or `instance` is out of range.
 
 ### pin_switch_arm
@@ -345,6 +351,27 @@ Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode 
 Error codes:
 
 - `RETARGET_REFUSED` — the leaf's stock bytes did not match (already retargeted, or a drifted build), the id's carrier set is not just object 1421, or the screen id does not fit the immediate. Refuses rather than corrupt.
+
+### set_binding_bytes
+
+Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value.
+
+- **Hardware status:** UNVERIFIED. Bench check: the arrows send instance N in both variants (candump).
+- **Proof:** `newbutton.binding_payload`
+- **Implementation:** `recipe_ops.SetBindingBytes`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `group` | integer | yes |  | command group id |
+| `dgn` | integer | yes |  | expected DGN of every edited binding |
+| `bindings` | any |  | "all" | "all" or positions within the group |
+| `set` | object | yes |  | wire byte -> {"from": v, "to": w} |
+
+Error codes:
+
+- `BAD_PARAMS` — a byte outside 0..7, a value outside 0..255, an empty `set`, or `bindings` neither "all" nor positions inside the group.
+- `EXPECT_MISMATCH` — a binding's DGN or a `from` byte differs; the message carries the binding's current wire payload.
+- `NO_SUCH_GROUP` — `group` is not in the group table.
 
 ### set_font
 
@@ -573,11 +600,35 @@ Error codes:
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
 
+### add_button_status
+
+Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).
+- **Proof:** `statelights.py`, `statusfold.py`
+- **Implementation:** `recipe_ops.AddButtonStatus`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `buttons` | array | yes |  | [{button: {ref}, source, compare: {bit\|eq\|ne\|ge: v}, mask?, shift?, valid_max?, off_colour?, on_colour?}] |
+| `off_colour` | array |  | [65, 81, 163] | [r, g, b] unlit body fill; a palette colour |
+| `on_colour` | array |  | [0, 174, 239] | [r, g, b] lit body fill; a palette colour |
+
+Error codes:
+
+- `BAD_PARAMS` — no entries, a malformed entry, no compare or two, an unknown compare, mask/shift/valid_max out of range, two entries naming one button, a button another op already lit (its handle has `status`), or `ge`/`ne` without `valid_max` on a whole-byte or u16 source.
+- `BAD_REF` — a button or source names no matching handle.
+- `NO_SUCH_REGISTER` — a source resolves to no variable-table entry, or to an inert one (an extraction mode outside `statusbind.LIVE_MODES` writes no slot, so the light would never change).
+- `NO_DISPLAY_CELL` — the cell table could not be grown.
+- `NO_BODY_COLOUR` — a colour is not in this build's palette.
+- `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, or a wrap changes any other record on a page reaching the button.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+
 ### add_card_readouts
 
 Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles.
 
-- **Hardware status:** Flashed 2026-10-15: the readouts are live on the coach.
+- **Hardware status:** Flashed 2026-10-15: the readouts are live on the coach. Any `parent` other than 829 is UNVERIFIED and compiles as unverified; it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED).
 - **Proof:** `cardreadouts.py`, `readout.py`
 - **Implementation:** `recipe_ops.AddCardReadouts`
 
@@ -589,10 +640,12 @@ Draw captioned live readouts (caption over a right-justified value and its unit)
 | `unit_x` | integer |  | 763 |  |
 | `y0` | integer |  | 78 |  |
 | `pitch` | integer |  | 34 |  |
+| `parent` | any |  | 829 | object the readouts attach to: an object index or {ref: op_id}; default 829 (aes_card_layout's frame) |
 
 Error codes:
 
-- `WRONG_SHAPE` — 829 is not aes_card_layout's frame, or a record failed its self-decode.
+- `WRONG_SHAPE` — 829 is not aes_card_layout's frame, `parent` (another object) has no wtype-5 attach template, or a record failed its self-decode.
+- `LAYOUT_REFUSED` — (another `parent`) the placement changes any other record on a page reaching `parent`, a pasted record would inherit a value slot, or the entering font/align cannot be measured or written back.
 - `BAD_REF` — a row's ref names no draw:false readout handle.
 - `REPLACE_REFUSED` — 829 could not be relocated.
 
@@ -623,6 +676,40 @@ Error codes:
 - `BAD_REF` — `gate` names an op that has not run, or a field that op's handle does not carry
 - `NO_GLYPH` — `font`/`char` resolves to the shared placeholder, i.e. no glyph is installed
 - `MARK_REFUSED` — `cornermark.add_mark` refused (a duplicate switch on the same cell, a bad object index, a record that failed its self-decode, or a relocate gate)
+
+### add_enum_label
+
+Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`.
+
+- **Hardware status:** UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).
+- **Proof:** `enumlabel.py`, `statusfold.py`
+- **Implementation:** `recipe_ops.AddEnumLabel`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `font` | integer | yes |  |  |
+| `align` | string |  | "left" | left \| centre \| right |
+| `colour` | array |  | [255, 255, 255] |  |
+| `background` | array\|null |  | null |  |
+| `source` | object | yes |  | {ref}\|{var}\|{dgn, instance\|selector}, + mask?, shift? |
+| `values` | object | yes |  | {"<int>": text}, 1-16 entries |
+| `default` | string |  | "--" |  |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: empty or >16 `values`, a non-integer or duplicate key, an empty text, an unknown align, mask/shift out of range, a source that is not exactly one form, or a non-positive box.
+- `BAD_REF` — a `parent` or `source` ref names no usable handle.
+- `NO_SUCH_REGISTER` — the source names no variable-table entry, or an inert one (an extraction mode outside `statusbind.LIVE_MODES` writes no slot, so the label would never change).
+- `NO_DISPLAY_CELL` — the cell table could not be grown.
+- `NO_COLOUR` — `colour` or `background` is not in this build's palette.
+- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); the placement changes any other record on a page reaching `parent`; or a pasted record would inherit a value slot (e.g. under 899, whose attaches carry value_slot 0).
+- `OFF_CANVAS` — the box leaves the 800x480 canvas.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
 
 ### add_glyph_button
 
@@ -716,6 +803,44 @@ Error codes:
 - `NO_LOW_VOLTS_TOUCH` — the donor has no wtype-12 region whose id is `touch_id` (129).
 - `NO_LOW_VOLTS_CHILD` — the donor has no wtype-5 record whose child draws the 'Low\nVolts' button face.
 - `INSERT_REFUSED` — `insert.insert_object` refused (bad parent, no attach template, or a correctness gate failed).
+
+### add_rvc_button
+
+Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo).
+- **Proof:** `rvcbutton.py`, `enumlabel.py`
+- **Implementation:** `recipe_ops.AddRvcButton`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `text` | string\|null |  | null | caption; \n makes two lines |
+| `glyph` | object\|null |  | null | {slot, char}: an installed glyph drawn above the caption |
+| `font` | integer\|null |  | null | caption font slot; null keeps the donor's |
+| `dgn` | integer | yes |  | 18-bit DGN every binding sends |
+| `tap` | object\|null |  | null | {payload}: 8-byte hex sent once per press |
+| `hold` | object\|null |  | null | {payload, seconds}: sent once after a hold of seconds (1-15) |
+| `toggle` | object\|null |  | null | {off_payload, on_payload}: 8-byte hex each; a later add_button_status must drive it |
+| `colour` | array |  | [65, 81, 163] | [r, g, b] body fill; a palette colour |
+| `group_pool` | string {"free", "hold_safe"} |  |  | where the group comes from (default hold_safe when hold or toggle is given, else free) |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle` with `tap` or `hold`, the `free` pool with a hold or a toggle, or a box too small for its glyph and caption.
+- `BAD_REF` — a `parent` ref names no earlier op's object.
+- `NO_FREE_GROUP` — the group pool is empty.
+- `NO_GLYPH` — the glyph falls back to the placeholder (or icon font 24's unused block).
+- `NO_BODY_COLOUR` — `colour` is not in this build's palette.
+- `TOUCH_OVERLAP` — the touch region meets an existing one on a page reaching `parent`.
+- `OFF_CANVAS` — a record leaves the 800x480 canvas.
+- `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
+- `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
+- `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 
 ### aes_card_layout
 

@@ -31,9 +31,13 @@ from fireflymcf import bitcombine
 from fireflymcf import cardlayout
 from fireflymcf import cardreadouts
 from fireflymcf import cornermark
+from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
+from fireflymcf import rvcbutton
+from fireflymcf import statelights
+from fireflymcf import statusfold
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
 from fireflymcf import variantgates
@@ -846,6 +850,95 @@ class RemapChannel(Op):
             " (status variable moved; the old channel's G12 OUTPUTS row now reports "
             "this one)" if self.move_display_list else
             " (indicator retargeted, status variables untouched — HARDWARE-UNVERIFIED)")
+
+
+@op("set_binding_bytes")
+class SetBindingBytes(Op):
+    """Rewrite chosen WIRE payload bytes of existing bindings in a command group
+    (`newbutton.set_binding_bytes`), a same-size edit.
+
+    The byte positions are the order `binding_wire_frame` and candump show, translated
+    through the binding word order (`newbutton.binding_payload`), never raw offsets. The
+    entry's DGN, variant and gesture mask are untouched, so a control keeps its
+    GuiCode-driven variants and step codes. Every `from` byte and the DGN are asserted
+    before the edit, so a project written against one build fails loudly on another.
+
+    Params:
+      group: int — the command group whose bindings are edited.
+      dgn: int — asserted on every binding edited (18-bit).
+      bindings: "all" | [int] — which of the group's bindings, by position in its run.
+      set: object — `{"<byte 0-7>": {"from": v, "to": w}}` on the wire payload.
+
+    Error codes:
+      BAD_PARAMS — a byte outside 0..7, a value outside 0..255, an empty `set`, or
+                   `bindings` neither "all" nor positions inside the group.
+      EXPECT_MISMATCH — a binding's DGN or a `from` byte differs; the message carries
+                        the binding's current wire payload.
+      NO_SUCH_GROUP — `group` is not in the group table.
+
+    Capability delta: when `dgn` is DC_DIMMER_COMMAND_2 and a change moves the channel
+    byte, the pairs moved are declared the way `remap_channel` does; otherwise none.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "group": {"type": "integer", "description": "command group id"},
+            "dgn": {"type": "integer", "description": "expected DGN of every edited binding"},
+            "bindings": {"description": '"all" or positions within the group',
+                         "default": "all"},
+            "set": {"type": "object",
+                    "description": 'wire byte -> {"from": v, "to": w}'},
+        },
+        "required": ["group", "dgn", "set"],
+    }
+
+    def validate(self):
+        self.group = self._param("group", kind=int)
+        self.dgn = self._param("dgn", kind=int)
+        self.bindings = self._param("bindings", "all")
+        raw = self._param("set", kind=dict)
+        self.changes = {}
+        try:
+            for k, v in raw.items():
+                self.changes[int(k)] = (int(v["from"]), int(v["to"]))
+        except (ValueError, TypeError, KeyError):
+            raise RecipeError("BAD_PARAMS", 'set_binding_bytes: set must map a byte '
+                              'position to {"from": v, "to": w}', op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        try:
+            data, e = newbutton.set_binding_bytes(
+                data, self.group, dgn=self.dgn, bindings=self.bindings,
+                changes=self.changes)
+        except newbutton.NewButtonError as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
+        ctx.edits.extend(e)
+        return data
+
+    def capability_delta(self, ctx):
+        if self.dgn != 0x1FEDB:
+            return set(), set()
+        try:
+            after, _ = newbutton.set_binding_bytes(
+                ctx.stock, self.group, dgn=self.dgn, bindings=self.bindings,
+                changes=self.changes)
+        except newbutton.NewButtonError:
+            return set(), set()
+        new = newbutton.group_command_pairs(after, self.group)
+        lost = newbutton.sole_produced_pairs(ctx.stock, self.group) - new
+        return lost, new - recipe.capabilities(ctx.stock)
+
+    def verify(self, data, ctx):
+        table = guidata.binding_table(data)
+        members = guidata.group_bindings(guidata.group_table(data), table, self.group)
+        chosen = (range(len(members)) if self.bindings == "all" else self.bindings)
+        for i in chosen:
+            wire = newbutton.binding_payload(members[i].raw)
+            for pos, (_frm, to) in self.changes.items():
+                assert wire[pos] == to, "binding %d payload byte %d is %#04x, not %#04x" % (
+                    members[i].index, pos, wire[pos], to)
+        return "binding bytes: group %d, %d binding(s), wire byte(s) %s (UNVERIFIED)" % (
+            self.group, len(list(chosen)), sorted(self.changes))
 
 
 @op("drop_from_master")
@@ -3239,6 +3332,47 @@ def _inherited_slot(by_key, r):
     return None
 
 
+def _pasted_inherited_slots(placed, parent, obj):
+    """`[(root, WalkRec, slot, attach WalkRec)]`: every record of the object `obj` just pasted
+    under `parent` (and of the arms of each wtype-6 switch in it) that has a value-slot field
+    by type (`absrecord.carries_value_slot`), none of its own, and so inherits one from a
+    wrapping wtype-5 attach (`_inherited_slot`), on any page root reaching `parent` in any
+    switch-arm set. Empty means every pasted record's effective value slot is its own.
+
+    The one rule the paste-path ops share (`add_rvc_button`, `add_enum_label`,
+    `add_card_readouts` off 829), and `move_control`'s: a pasted record must not inherit a
+    value slot (OBJECT-HIERARCHY.md 1a, `inferred-from-data`: obj 295's box and caption take
+    their live cell from the attach above them, which on a box is its on/off style flag,
+    MCF-FORMAT.md 6.0a). The attach is `insert.insert_object`'s byte clone of `parent`'s first
+    wtype-5 record, so a slot on it, or on any attach above `parent`, reaches the pasted
+    records; the walk itself models only a record's own field."""
+    gs, tab = _gs_tab(placed)
+    ours = {obj}
+    for sw in records.object_records(placed, gs + tab[obj]):
+        if sw.wtype == 6:
+            ours.update(range(sw.child_index, sw.child_index + sw.count))
+    roots = pagewalk.reaching_roots(placed, parent)
+    found, seen = [], set()
+    for values in pagewalk.switch_arm_sets(placed, roots):
+        for root in roots:
+            walk = pagewalk.walk_records(placed, root, switch_values=values or None)
+            by_key = {r.key: r for r in walk}
+            for r in walk:
+                if r.obj not in ours or not absrecord.carries_value_slot(r.wtype):
+                    continue
+                inherited = _inherited_slot(by_key, r)
+                if inherited is not None and (root, r.key) not in seen:
+                    seen.add((root, r.key))
+                    found.append((root, r) + inherited)
+    return found
+
+
+def _describe_inherited(found, limit=8):
+    return "\n".join("root %d: %s (wtype %d) inherits value_slot %d from attach %s"
+                     % (root, _fmt_walk_key(r.key), r.wtype, slot, _fmt_walk_key(att.key))
+                     for root, r, slot, att in found[:limit])
+
+
 def _overlaps(a, b):
     """Two boxes share a pixel. Inclusive edges: the hit test returns the id of a region
     containing the point (CONTROL-BEHAVIOR §1, `0x00258BB2`-`0x00258C26`); whether its edges
@@ -3249,6 +3383,26 @@ def _overlaps(a, b):
     bx0, bx1 = sorted((b[0], b[2]))
     by0, by1 = sorted((b[1], b[3]))
     return ax0 <= bx1 and bx0 <= ax1 and ay0 <= by1 and by0 <= ay1
+
+
+def _off_canvas(box) -> bool:
+    """A placed box leaves the 800x480 canvas (`move_control`'s and `add_rvc_button`'s
+    OFF_CANVAS)."""
+    return (min(box[0], box[2]) < 0 or max(box[0], box[2]) > _CANVAS_W
+            or min(box[1], box[3]) < 0 or max(box[1], box[3]) > _CANVAS_H)
+
+
+def _touch_overlap(touches, walk, skip=None):
+    """`(box, WalkRec)`: the first of `touches` meeting a wtype-12 region of `walk` that `skip`
+    does not exclude, and that region (`_overlaps`); None when none meets. `move_control`'s
+    and `add_rvc_button`'s TOUCH_OVERLAP."""
+    for t in walk:
+        if t.wtype != 12 or (skip is not None and skip(t)):
+            continue
+        hit = next((b for b in touches if _overlaps(b, t.box)), None)
+        if hit is not None:
+            return hit, t
+    return None
 
 
 @op("move_control")
@@ -3582,22 +3736,20 @@ class MoveControl(Op):
 
         for r in drawn:
             b = shifted(r.box)
-            if min(b[0], b[2]) < 0 or max(b[0], b[2]) > _CANVAS_W \
-                    or min(b[1], b[3]) < 0 or max(b[1], b[3]) > _CANVAS_H:
+            if _off_canvas(b):
                 raise RecipeError("OFF_CANVAS", "%s (wtype %d %r) would sit at (%d,%d,%d,%d), "
                                   "outside the %dx%d canvas" % (_fmt_walk_key(r.key), r.wtype,
                                                                 r.label, *b, _CANVAS_W,
                                                                 _CANVAS_H))
         touches = [shifted(r.box) for r in ref.values() if r.wtype == 12]
         for p in dst_pairs:
-            for t in before[self._pair_id(p)]:
-                if t.wtype != 12 or _moved_step(t.key, frm, removed) is not None:
-                    continue
-                hit = next((b for b in touches if _overlaps(b, t.box)), None)
-                if hit is not None:
-                    raise RecipeError("TOUCH_OVERLAP", "the moved touch region at (%d,%d,%d,%d) "
-                                      "meets root %d's %s at (%d,%d,%d,%d)"
-                                      % (*hit, p[0], _fmt_walk_key(t.key), *t.box))
+            met = _touch_overlap(touches, before[self._pair_id(p)],
+                                 lambda t: _moved_step(t.key, frm, removed) is not None)
+            if met is not None:
+                hit, t = met
+                raise RecipeError("TOUCH_OVERLAP", "the moved touch region at (%d,%d,%d,%d) "
+                                  "meets root %d's %s at (%d,%d,%d,%d)"
+                                  % (*hit, p[0], _fmt_walk_key(t.key), *t.box))
         payload = self._paste_bytes(data, recs, moved_idx, ref, {r.key: r for r in ref_walk},
                                     (ox, oy))
 
@@ -3800,8 +3952,13 @@ class PinFilterInstance(Op):
       compare: int (default 0) — the entry's existing `+5` byte, asserted, not
                written. Its low nibble picks the payload byte and its high nibble
                the mask; keeping it out of the edit is what holds this to one byte.
+      from_instance: int|None (default None) — given, the op re-pins: the entry
+               must currently compare exactly this instance, and `instance` replaces
+               it (an entry moves from one device to another). A re-pin compiles as
+               unverified: only the narrowing path has run on a coach.
 
     Error codes:
+      BAD_PARAMS     — `from_instance` is not an integer 0x00..0xFF (or null).
       FILTER_REFUSED — `statusbind.pin_filter_instance` raised: the entry is
                        already pinned, its DGN is not `dgn`, its `+5` is not
                        `compare`, its extraction mode is one the `tbb` skips (so
@@ -3821,6 +3978,10 @@ class PinFilterInstance(Op):
                     "description": "expected DGN of the entry (asserted, not written)"},
             "compare": {"type": "integer", "default": 0,
                         "description": "expected entry +5 (payload byte + mask selector)"},
+            "from_instance": {"type": ["integer", "null"], "default": None,
+                              "description": "re-pin: the instance the entry currently "
+                                             "compares (asserted); omitted, the entry "
+                                             "must be an unpinned 0xFF one"},
         },
         "required": ["var", "instance"],
     }
@@ -3830,12 +3991,23 @@ class PinFilterInstance(Op):
         self.instance = self._param("instance", kind=int)
         self.dgn = self._param("dgn", None)
         self.compare = self._param("compare", 0, kind=int)
+        self.from_instance = self._param("from_instance", None)
+        fi = self.from_instance
+        if fi is not None and not (isinstance(fi, int) and not isinstance(fi, bool)
+                                   and 0 <= fi <= 0xFF):
+            raise RecipeError("BAD_PARAMS", "from_instance must be an integer 0x00..0xFF or "
+                              "null, got %r" % (fi,), op_id=self.spec.id)
+        if fi is not None:
+            # narrowing an open entry is coach-proven (HARDWARE-VERIFIED.md); moving a live
+            # entry to another device is the first of its kind until the coach shows it
+            self.hardware_verified = False
 
     def apply(self, data, ctx):
         try:
             data, e = statusbind.pin_filter_instance(
                 data, self.var, self.instance,
-                expect_dgn=self.dgn, expect_compare=self.compare)
+                expect_dgn=self.dgn, expect_compare=self.compare,
+                from_instance=self.from_instance)
         except statusbind.StatusBindError as err:
             raise RecipeError("FILTER_REFUSED", str(err), op_id=self.spec.id)
         ctx.edits.extend(e)
@@ -5151,6 +5323,65 @@ def _resolve_register_spec(data, ctx, spec: dict, op_id: str) -> "register.Regis
         raise RecipeError("NO_SUCH_REGISTER", str(e), op_id=op_id)
 
 
+def _resolve_status_source(data, ctx, spec, op_id: str) -> tuple[int, int, int]:
+    """`(slot_addr, var_index, live_mode)` of a status source, from exactly one of:
+
+    - `{"ref": op_id}`: a `resolve_register` / `append_filter` handle (`_resolve_register_spec`),
+      or any other handle carrying a variable index (`var_index`, else `var`);
+    - `{"var": N}`: variable-table entry N outright;
+    - `{"dgn": D, "instance"|"selector": V}`: the one existing entry (`_resolve_register_spec`).
+
+    `slot_addr` is the receive slot the filter writes (`register.status_slot_addr`, index-split);
+    `live_mode` the entry's extraction mode (`raw[2] >> 4`, `statusbind.LIVE_MODES`), read as
+    `register.resolve_register` and `appendfilter.handle_for` decode it. Other keys (`mask`,
+    `shift`, a compare) are the caller's. Codes: BAD_PARAMS (not exactly one form), BAD_REF,
+    NO_SUCH_REGISTER (no such entry, or an inert one: a mode outside `LIVE_MODES` matches its
+    DGN and writes no slot, so a light or label on it would never change)."""
+    slot_addr, var, mode = _status_source_entry(data, ctx, spec, op_id)
+    if mode not in statusbind.LIVE_MODES:
+        raise RecipeError("NO_SUCH_REGISTER", "var %d's extraction mode %d is not one "
+                          "FUN_0021C760 dispatches (%s): the entry matches its DGN and writes no "
+                          "slot, so anything drawn from it would never change"
+                          % (var, mode, sorted(statusbind.LIVE_MODES)), op_id=op_id)
+    return slot_addr, var, mode
+
+
+def _status_source_entry(data, ctx, spec, op_id):
+    """`_resolve_status_source` before its live-mode check."""
+    if not isinstance(spec, dict):
+        raise RecipeError("BAD_PARAMS", "source must be an object, got %r" % (spec,), op_id=op_id)
+    forms = [k for k in ("ref", "var", "dgn") if spec.get(k) is not None]
+    if len(forms) != 1:
+        raise RecipeError("BAD_PARAMS", "source needs exactly one of 'ref', 'var' or 'dgn'; got "
+                          "%s (%r)" % (forms or "none", spec), op_id=op_id)
+    var = None
+    if forms == ["ref"]:
+        h = ctx.handles.get(spec["ref"])
+        if h is None:
+            raise RecipeError("BAD_REF", "ref %r names no prior op handle" % (spec["ref"],),
+                              op_id=op_id)
+        if all(k in h for k in _REGISTER_HANDLE_KEYS):
+            reg = _resolve_register_spec(data, ctx, {"ref": spec["ref"]}, op_id)
+            return reg.slot_addr, reg.var_index, reg.extract_mode
+        var = h.get("var_index", h.get("var"))
+        if not isinstance(var, int) or isinstance(var, bool):
+            raise RecipeError("BAD_REF", "ref %r carries no variable index" % (spec["ref"],),
+                              op_id=op_id)
+    elif forms == ["var"]:
+        var = spec["var"]
+        if not isinstance(var, int) or isinstance(var, bool):
+            raise RecipeError("BAD_PARAMS", "source var must be an integer, got %r" % (var,),
+                              op_id=op_id)
+    else:
+        reg = _resolve_register_spec(data, ctx, spec, op_id)
+        return reg.slot_addr, reg.var_index, reg.extract_mode
+    vt = guidata.variable_table(data)
+    if not 0 <= var < len(vt):
+        raise RecipeError("NO_SUCH_REGISTER", "var %d is not in the %d-entry variable table"
+                          % (var, len(vt)), op_id=op_id)
+    return register.status_slot_addr(var), var, vt[var].raw[2] >> 4
+
+
 @op("follow_register")
 class FollowRegister(Op):
     """Generic register-follower: watch ANY register for an edge and drive a channel, gated by
@@ -6293,9 +6524,10 @@ class AddAesBattHeat(Op):
             self.hardware_verified = False
 
     def apply(self, data, ctx):
-        gt = guidata.group_table(data)
         binding_start = len(guidata.binding_table(data))
 
+        # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
+        # this op never did; byte identity keeps the old list)
         free = (newbutton.free_group_slots(data) if self.group_pool == "free"
                 else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
         if not free:
@@ -6304,45 +6536,33 @@ class AddAesBattHeat(Op):
                               op_id=self.spec.id)
         group = free[0]
 
-        donor = gt[aescompact.BATT_HEAT_HOLD_DONOR_GROUP]
-        if donor.raw[0] >> 4 < 1:
-            raise RecipeError(
-                "GROW_REFUSED",
-                "hold-donor group %d has a 0-second hold nibble; a hold could not register"
-                % aescompact.BATT_HEAT_HOLD_DONOR_GROUP, op_id=self.spec.id)
-
-        enable = newbutton.binding_raw(aescompact.BATT_HEAT_DGN, self.enable_wire,
-                                       gesture_mask=aescompact.BATT_HEAT_ENABLE_MASK)
-        off = newbutton.binding_raw(aescompact.BATT_HEAT_DGN, self.off_wire,
-                                    gesture_mask=aescompact.BATT_HEAT_OFF_MASK)
-        entry = optionrow._clone_group_entry(donor.raw, binding_start, 2)
         try:
-            out, grow_edits = optionrow._grow_bindings(
-                data, bytes(enable) + bytes(off), [(group, entry)])
+            entry = rvcbutton.gesture_group(data, form="tap_hold", hold_seconds=None,
+                                            binding_start=binding_start, count=2)
+            blob = rvcbutton.bindings(aescompact.BATT_HEAT_DGN, form="tap_hold",
+                                      tap=self.off_wire, hold=self.enable_wire,
+                                      off=None, on=None)
+        except rvcbutton.RvcButtonError as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
+        try:
+            out, grow_edits = optionrow._grow_bindings(data, blob, [(group, entry)])
         except optionrow.OptionRowError as e:
             raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
         ctx.edits.extend(grow_edits)
 
-        # append the button's records to the (already-compact) object 829.
-        gs, _ = guidata.guidata_extent(out)
-        table = guidata.object_tables(out)[1]
-        obj_start = gs + table[aescompact.ELECTRICAL_AES_BODY]
-        recs = records.object_records(out, obj_start)
-        old_count = out[obj_start]
-        records_raw = bytes(out[obj_start + 1:recs[-1].end])
+        # donors are read from stock: object 829's own records are the rebuilt compact frame
+        # by now, so the stock all-in-one 829 is the only stable source for its box records.
         try:
-            # donors are read from stock: object 829's own records are the rebuilt compact frame
-            # by now, so the stock all-in-one 829 is the only stable source for its box records.
-            frags = aescompact.build_batt_heat_button(
-                ctx.stock, touch_id=group, x=self.x, y=self.y, w=self.w, h=self.h,
-                text=self.text)
+            frags = rvcbutton.button_records(
+                ctx.stock, touch_id=group, w=self.w, h=self.h, text=self.text, glyph=None,
+                font=None, fill_index=None, x=self.x, y=self.y)
         except ValueError as e:
             raise RecipeError("BUTTON_REFUSED", str(e), op_id=self.spec.id)
-        new_body = bytes([old_count + len(frags)]) + records_raw + b"".join(frags)
         try:
-            out, repl_edits = relocate.replace_object_records(
-                out, aescompact.ELECTRICAL_AES_BODY, new_body)
-        except relocate.RelocationError as e:
+            out, repl_edits, _ = rvcbutton.place(
+                out, parent=aescompact.ELECTRICAL_AES_BODY, x=self.x, y=self.y, frags=frags,
+                mode="append")
+        except rvcbutton.RvcButtonError as e:
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         ctx.edits.extend(repl_edits)
 
@@ -6354,6 +6574,8 @@ class AddAesBattHeat(Op):
             "binding_start": binding_start,
             "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
+            "glyph": None, "font": None, "parent": aescompact.ELECTRICAL_AES_BODY,
+            "placement": "append", "toggle": None,
         }
         return out
 
@@ -6716,6 +6938,8 @@ class AddAesBattHeatStatus(Op):
             "on_index": on_index,
             "w": bw, "h": bh_, "text": btext,
         }
+        if self.button is not None:                # one status op per button (add_button_status)
+            ctx.handles[self.button["ref"]]["status"] = self.spec.id
         return out
 
     def capability_delta(self, ctx):
@@ -6903,13 +7127,29 @@ class AddCardReadouts(Op):
     draws). One private object holds every row; its attach goes into 829 directly after the
     card titles (`cardreadouts.attach`). Runs after `aes_card_layout`.
 
+    Another `parent` takes the paste path instead (`insert.insert_object`, a clone of the
+    parent's first wtype-5 attach appended as its last record), the object ended by an empty
+    label that hands back the font and align the walk carried in (`enumlabel.restore_state`).
+    Every page root reaching `parent`, in every switch-arm set, is then walked before and after
+    (`enumlabel.foreign_deltas`), as `add_enum_label` and `add_rvc_button` do: the readouts
+    are absolute, but the flow origin they leave is not restored, so on some parents every
+    later control would move (on 199 every control after it on root 15, touch regions
+    included). Any change besides the readouts' own records refuses, and so does a caption
+    inheriting a value slot from a wtype-5 attach above it (`_pasted_inherited_slots`, the rule
+    `add_rvc_button` and `add_enum_label` apply). Only 829's path was flashed: any other
+    `parent` compiles as unverified.
+
     Error codes:
-      WRONG_SHAPE     -- 829 is not aes_card_layout's frame, or a record failed its self-decode.
+      WRONG_SHAPE     -- 829 is not aes_card_layout's frame, `parent` (another object) has no
+                         wtype-5 attach template, or a record failed its self-decode.
+      LAYOUT_REFUSED  -- (another `parent`) the placement changes any other record on a page
+                         reaching `parent`, a pasted record would inherit a value slot, or the
+                         entering font/align cannot be measured or written back.
       BAD_REF         -- a row's ref names no draw:false readout handle.
       REPLACE_REFUSED -- 829 could not be relocated.
     """
 
-    hardware_verified = True     # flashed 2026-10-15: readouts live on the coach
+    hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
 
     PARAMS = {
         "properties": {
@@ -6922,6 +7162,9 @@ class AddCardReadouts(Op):
             "unit_x": {"type": "integer", "default": 763},
             "y0": {"type": "integer", "default": 78},
             "pitch": {"type": "integer", "default": 34},
+            "parent": {"description": "object the readouts attach to: an object index or "
+                                      "{ref: op_id}; default 829 (aes_card_layout's frame)",
+                       "default": 829},
         },
         "required": ["rows"],
     }
@@ -6941,8 +7184,13 @@ class AddCardReadouts(Op):
         self.geom = {k: self._param(k, d, kind=int) for k, d in
                      (("x_caption", 684), ("pen_x", 760), ("unit_x", 763), ("y0", 78),
                       ("pitch", 34))}
+        self.parent = self._param("parent", aescompact.ELECTRICAL_AES_BODY)
+        if self.parent != aescompact.ELECTRICAL_AES_BODY:
+            # the coach verified the readouts in 829's frame; the paste path is unflashed
+            self.hardware_verified = False
 
     def apply(self, data, ctx):
+        parent = resolve_target(ctx, self.parent)
         rows = []
         for r in self.rows:
             v = r["value"]
@@ -6960,13 +7208,32 @@ class AddCardReadouts(Op):
                                          int(fmt.get("places", 0)), r["unit"]))
         try:
             obj = cardreadouts.build_object(data, rows, **self.geom)
-            out, index = cardreadouts.attach(data, obj)
+            out, index = cardreadouts.attach(data, obj, parent)
+            bad = ([] if parent == aescompact.ELECTRICAL_AES_BODY
+                   else enumlabel.foreign_deltas(data, out, parent, index))
+        except enumlabel.EnumLabelError as e:       # the paste path's font/align restore
+            raise RecipeError("LAYOUT_REFUSED", str(e), op_id=self.spec.id)
+        except insert.InsertError as e:
+            if parent == aescompact.ELECTRICAL_AES_BODY:    # 829's refusals stay REPLACE_REFUSED
+                raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
+            raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
         except relocate.RelocationError as e:      # a ValueError subclass: catch it first
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         except (ValueError, readout.ReadoutError, insert.InsertError) as e:
             raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
+        inherited = ([] if parent == aescompact.ELECTRICAL_AES_BODY
+                     else _pasted_inherited_slots(out, parent, index))
+        if inherited:
+            raise RecipeError("LAYOUT_REFUSED", "under object %d the readouts' records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=self.spec.id)
+        if bad:
+            raise RecipeError("LAYOUT_REFUSED", "attaching the readouts under object %d changes "
+                              "%d record(s) besides their own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])),
+                              op_id=self.spec.id)
         out, _ = patch.reseal(out)
-        ctx.handles[self.spec.id] = {"object": aescompact.ELECTRICAL_AES_BODY,
+        ctx.handles[self.spec.id] = {"object": parent,
                                      "readouts": index,
                                      "rows": [(x.caption, x.slot, x.unit) for x in rows]}
         return out
@@ -6978,16 +7245,20 @@ class AddCardReadouts(Op):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
         frame = records.object_records(data, gs + tab[h["object"]])
-        att = frame[cardreadouts.ATTACH_AT]
-        assert att.wtype == 5 and att.child_index == h["readouts"], \
-            "the readouts attach is not at 829[%d]" % cardreadouts.ATTACH_AT
+        if h["object"] == aescompact.ELECTRICAL_AES_BODY:
+            att = frame[cardreadouts.ATTACH_AT]
+            assert att.wtype == 5 and att.child_index == h["readouts"], \
+                "the readouts attach is not at 829[%d]" % cardreadouts.ATTACH_AT
+        else:
+            assert any(r.wtype == 5 and r.child_index == h["readouts"] for r in frame), \
+                "the readouts attach is not in object %d" % h["object"]
         recs = records.object_records(data, gs + tab[h["readouts"]])
+        labels = [r for r in recs if r.wtype == 11][:2 * len(h["rows"])]   # not the restore
         got = [(c.label, v.value_slot, u.label) for c, v, u in
-               zip([r for r in recs if r.wtype == 11][0::2], [r for r in recs if r.wtype == 8],
-                   [r for r in recs if r.wtype == 11][1::2])]
+               zip(labels[0::2], [r for r in recs if r.wtype == 8], labels[1::2])]
         assert got == [tuple(x) for x in h["rows"]], "rows read back as %s" % got
-        return ("add_card_readouts: %d rows %s in object %d, attached at 829[%d]"
-                % (len(got), [g[0] for g in got], h["readouts"], cardreadouts.ATTACH_AT))
+        return ("add_card_readouts: %d rows %s in object %d, attached to object %d"
+                % (len(got), [g[0] for g in got], h["readouts"], h["object"]))
 
 
 @op("add_aes_bms_button_status")
@@ -7045,6 +7316,7 @@ class AddAesBmsButtonStatus(Op):
         except readout.ReadoutError as e:
             raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=self.spec.id)
         ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
         (cell,) = cells
         source = bitcombine.BitSource(register.status_slot_addr(sh["var_heat"]), self.mask, 1)
         try:
@@ -7079,10 +7351,10 @@ class AddAesBmsButtonStatus(Op):
         except theme.PaletteError as e:
             raise RecipeError("NO_BODY_COLOUR", str(e), op_id=self.spec.id)
         try:
-            out, info = aescompact.add_batt_heat_state_switch(
+            out, info = statelights.wrap_button(
                 out, object_index=aescompact.ELECTRICAL_AES_BODY, value_slot=cell.slot,
-                donors=ctx.stock, off_index=off_index, on_index=on_index,
-                w=bh["w"], h=bh["h"], text=bh["text"], arms=aescompact.BMS_BIT_STATE_ARMS)
+                donors=ctx.stock, arms=aescompact.BMS_BIT_STATE_ARMS, off_index=off_index,
+                on_index=on_index, w=bh["w"], h=bh["h"], text=bh["text"])
         except (ValueError, relocate.RelocationError) as e:
             raise RecipeError("INDICATOR_REFUSED", str(e), op_id=self.spec.id)
         out, _ = patch.reseal(out)
@@ -7092,6 +7364,7 @@ class AddAesBmsButtonStatus(Op):
             "text": bh["text"], "w": bh["w"], "h": bh["h"],
             "off_index": off_index, "on_index": on_index,
         }
+        bh["status"] = self.spec.id         # one status op per button (add_button_status)
         return out
 
     def capability_delta(self, ctx):
@@ -7123,6 +7396,945 @@ class AddAesBmsButtonStatus(Op):
         return ("add_aes_bms_button_status: %r lit by var %d mask %d via cell %d (2-arm switch, "
                 "blue/cyan); UNVERIFIED on the coach" % (h["text"], h["var"], h["mask"],
                                                         h["slot"]))
+
+
+_COMPARE_KINDS = statusfold.KINDS            # "bit" | "eq" | "ne" | "ge"
+_BYTE_SOURCE_MODES = (1, 2)                  # `statusbind.LIVE_MODES`: whole byte, u16
+
+
+@op("add_button_status")
+class AddButtonStatus(Op):
+    """Light one or many buttons from receive slots: each button reads off (blue) or on (cyan).
+
+    ONE per-tick routine (`statusfold.Light` per entry, chained once on the per-tick hook) reads
+    each entry's slot, masks and shifts it, compares it, and writes 1 (lit) or 0 to the entry's
+    own display cell; a slot still stale, or above `valid_max`, reads off. Twelve buttons cost
+    one routine and one detour. Each button's static body (capsule, caption, glyph) is replaced
+    by ONE wtype-6 switch on its cell, enrolled for live redraw, over two whole-button arms
+    (`aescompact.BMS_BIT_STATE_ARMS`: the 0xFFFF default arm off at the base, 1 on); the body
+    records move into both arms byte for byte, so the touch region and everything after it stay
+    put (`statelights`). Every cell is freshly grown (`readout.allocate_fresh_cells`, recorded in
+    `ctx.authored_cells`). Every page reaching each button is walked before and after the wrap in
+    every switch-arm set: anything but the button's own records changing refuses
+    (`statelights.foreign_deltas`). A wrapped button's handle gains `status`. An entry naming
+    an `add_rvc_button` toggle also drives its variant: after writing the cell the routine calls
+    `setVariant(group, lit)` (`statusfold.Light.variant_group`), so the toggle sends "on" while
+    the entry reads off and "off" while it reads on (`docs/CONTROL-BEHAVIOR.md` §11).
+
+    Params:
+      buttons: 1+ entries, each {button: {ref}, source, compare, mask?, shift?, valid_max?,
+               off_colour?, on_colour?}:
+        button: an `add_rvc_button` handle, or a preset's (`add_aes_batt_heat`).
+        source: {var} | {ref} | {dgn, instance|selector}, resolved like `add_enum_label`'s.
+        mask (default 0xFFFF) ANDed with the slot, then shift (default 0) right.
+        compare: exactly one of {bit: m} (any bit of m set), {eq: v}, {ne: v}, {ge: v}.
+        valid_max: a field above it reads off; required for `ge`/`ne` on a whole-byte or u16
+                   source (RV-C sends 0xFF "not available"; 0xFA is the documented guard).
+      off_colour / on_colour: [r, g, b] for every entry (default [65, 81, 163] / [0, 174, 239]);
+                              an entry's own pair overrides. Each must be a palette colour.
+
+    Error codes:
+      BAD_PARAMS        -- no entries, a malformed entry, no compare or two, an unknown compare,
+                           mask/shift/valid_max out of range, two entries naming one button, a
+                           button another op already lit (its handle has `status`), or `ge`/`ne`
+                           without `valid_max` on a whole-byte or u16 source.
+      BAD_REF           -- a button or source names no matching handle.
+      NO_SUCH_REGISTER  -- a source resolves to no variable-table entry, or to an inert one
+                           (an extraction mode outside `statusbind.LIVE_MODES` writes no
+                           slot, so the light would never change).
+      NO_DISPLAY_CELL   -- the cell table could not be grown.
+      NO_BODY_COLOUR    -- a colour is not in this build's palette.
+      INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, or a wrap
+                           changes any other record on a page reaching the button.
+      DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "buttons": {"type": "array",
+                        "description": "[{button: {ref}, source, compare: {bit|eq|ne|ge: v}, "
+                                       "mask?, shift?, valid_max?, off_colour?, on_colour?}]"},
+            "off_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_OFF_RGB),
+                           "description": "[r, g, b] unlit body fill; a palette colour"},
+            "on_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_ON_RGB),
+                          "description": "[r, g, b] lit body fill; a palette colour"},
+        },
+        "required": ["buttons"],
+    }
+
+    _ENTRY_KEYS = {"button", "source", "compare", "mask", "shift", "valid_max", "off_colour",
+                   "on_colour"}
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 0xFF
+                        for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def _u16(self, name, v, low=0):
+        if not (isinstance(v, int) and not isinstance(v, bool) and low <= v <= 0xFFFF):
+            raise self._bad("%s must be an integer %d..0xFFFF, got %r" % (name, low, v))
+        return v
+
+    def validate(self):
+        self.off_colour = self._rgb("off_colour", self._param(
+            "off_colour", list(aescompact.BATT_HEAT_OFF_RGB)))
+        self.on_colour = self._rgb("on_colour", self._param(
+            "on_colour", list(aescompact.BATT_HEAT_ON_RGB)))
+        buttons = self._param("buttons", kind=list)
+        if not buttons:
+            raise self._bad("buttons needs at least one entry")
+        self.entries, refs = [], set()
+        for n, e in enumerate(buttons):
+            where = "buttons[%d]" % n
+            if not isinstance(e, dict):
+                raise self._bad("%s must be an object, got %r" % (where, e))
+            extra = set(e) - self._ENTRY_KEYS
+            if extra:
+                raise self._bad("%s has unknown keys %s" % (where, sorted(extra)))
+            button = e.get("button")
+            if not (isinstance(button, dict) and isinstance(button.get("ref"), str)):
+                raise self._bad("%s.button must be {ref: op id}, got %r" % (where, button))
+            if button["ref"] in refs:
+                raise self._bad("%s names button %r a second time" % (where, button["ref"]))
+            refs.add(button["ref"])
+            if not isinstance(e.get("source"), dict):
+                raise self._bad("%s.source must be an object, got %r" % (where, e.get("source")))
+            compare = e.get("compare")
+            if not (isinstance(compare, dict) and len(compare) == 1):
+                raise self._bad("%s.compare must hold exactly one of %s, got %r"
+                                % (where, list(_COMPARE_KINDS), compare))
+            ((kind, value),) = compare.items()
+            if kind not in _COMPARE_KINDS:
+                raise self._bad("%s.compare %r is not one of %s"
+                                % (where, kind, list(_COMPARE_KINDS)))
+            value = self._u16("%s.compare.%s" % (where, kind), value, 1 if kind == "bit" else 0)
+            mask = self._u16("%s.mask" % where, e.get("mask", 0xFFFF), 1)
+            shift = e.get("shift", 0)
+            if not (isinstance(shift, int) and not isinstance(shift, bool) and 0 <= shift <= 15):
+                raise self._bad("%s.shift must be 0..15, got %r" % (where, shift))
+            valid_max = e.get("valid_max")
+            if valid_max is not None:
+                valid_max = self._u16("%s.valid_max" % where, valid_max)
+            self.entries.append({
+                "ref": button["ref"], "source": e["source"], "kind": kind, "value": value,
+                "mask": mask, "shift": shift, "valid_max": valid_max,
+                "off_colour": (self.off_colour if e.get("off_colour") is None
+                               else self._rgb("%s.off_colour" % where, e["off_colour"])),
+                "on_colour": (self.on_colour if e.get("on_colour") is None
+                              else self._rgb("%s.on_colour" % where, e["on_colour"])),
+            })
+
+    def _button(self, ctx, ref):
+        h = ctx.handles.get(ref)
+        if h is None or not all(k in h for k in ("object", "group", "w", "h", "text")):
+            raise RecipeError("BAD_REF", "button ref %r is not an add_rvc_button (or preset) "
+                              "handle" % (ref,), op_id=self.spec.id)
+        if h.get("status") is not None:
+            raise self._bad("button %r is already lit by op %r; one status op per button"
+                            % (ref, h["status"]))
+        return h
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        plans = []
+        for e in self.entries:
+            bh = self._button(ctx, e["ref"])
+            slot_addr, var, live_mode = _resolve_status_source(data, ctx, e["source"], oid)
+            if (e["kind"] in ("ge", "ne") and e["valid_max"] is None
+                    and live_mode in _BYTE_SOURCE_MODES):
+                raise self._bad("button %r: a %r compare on a %s source needs valid_max (0xFA "
+                                "for RV-C, whose 0xFF 'not available' passes every threshold)"
+                                % (e["ref"], e["kind"], statusbind.LIVE_MODES[live_mode]))
+            try:
+                off = theme.resolve_fill_index(data, color=e["off_colour"])
+                on = theme.resolve_fill_index(data, color=e["on_colour"])
+            except theme.PaletteError as err:
+                raise RecipeError("NO_BODY_COLOUR", str(err), op_id=oid)
+            plans.append((e, bh, slot_addr, var, off, on))
+
+        # Always freshly grown cells (ruling R8): a reused stock index can alias another
+        # object's read (`recipe._assert_authored_cells_fresh`).
+        try:
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, readout._TYPE_FOR_WIDTH[2])] * len(plans))
+        except readout.ReadoutError as err:
+            raise RecipeError("NO_DISPLAY_CELL", str(err), op_id=oid)
+        ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
+        items = [statusfold.Light(slot_addr=slot_addr, mask=e["mask"], shift=e["shift"],
+                                  kind=e["kind"], value=e["value"], valid_max=e["valid_max"],
+                                  cell_addr=cell.addr,
+                                  variant_group=bh["group"] if bh.get("toggle") else None)
+                 for (e, bh, slot_addr, _v, _o, _n), cell in zip(plans, cells)]
+        try:
+            plan = statusfold.resolve(out, items)
+        except followchannel.FollowChannelError as err:
+            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
+        except statusfold.StatusFoldError as err:
+            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, oid)
+        try:
+            blob, _ = statusfold.build(plan, code_load_addr)
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except (statusfold.StatusFoldError, growsection.GrowSectionError) as err:
+            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(
+            gcs.offset + load_off, b"", blob, "GuiCode",
+            "button status: %s" % "; ".join(
+                "%s var %d mask %#x shift %d %s %d%s -> cell %d @ %#x"
+                % (e["ref"], var, e["mask"], e["shift"], e["kind"], e["value"],
+                   "" if e["valid_max"] is None else " (max %d)" % e["valid_max"],
+                   cell.slot, cell.addr)
+                for (e, _b, _s, var, _o, _n), cell in zip(plans, cells))))
+        try:
+            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
+        except followchannel.FollowChannelError as err:
+            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
+        file_off = gcs.offset + hook_at
+        if grown[file_off:file_off + 4] != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
+                              op_id=oid)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
+                         "button status: detour bl -> %#x" % code_load_addr))
+        out, _ = patch.reseal(bytes(buf))
+
+        lit = []
+        for (e, bh, slot_addr, var, off, on), cell in zip(plans, cells):
+            glyph = bh.get("glyph")
+            glyph = None if glyph is None else (glyph["slot"], glyph["char"])
+            try:
+                wrapped, info = statelights.wrap_button(
+                    out, object_index=bh["object"], value_slot=cell.slot, donors=ctx.stock,
+                    arms=aescompact.BMS_BIT_STATE_ARMS, off_index=off, on_index=on,
+                    w=bh["w"], h=bh["h"], text=bh["text"], glyph=glyph, font=bh.get("font"),
+                    touch_id=bh["group"])
+                bad = statelights.foreign_deltas(out, wrapped, bh["object"], info["span"])
+            except (ValueError, relocate.RelocationError) as err:
+                raise RecipeError("INDICATOR_REFUSED", "button %r: %s" % (e["ref"], err),
+                                  op_id=oid)
+            if bad:
+                raise RecipeError("INDICATOR_REFUSED", "lighting button %r changes %d "
+                                  "record(s) besides its own:\n%s"
+                                  % (e["ref"], len(bad), pagewalk.describe(bad[:20])),
+                                  op_id=oid)
+            out, _ = patch.reseal(wrapped)
+            lit.append({"ref": e["ref"], "object": bh["object"], "group": bh["group"],
+                        "slot": cell.slot, "cell_addr": cell.addr, "slot_addr": slot_addr,
+                        "var": var, "mask": e["mask"], "shift": e["shift"], "kind": e["kind"],
+                        "value": e["value"], "valid_max": e["valid_max"],
+                        "variant_group": bh["group"] if bh.get("toggle") else None,
+                        "arms_base": info["arms_base"], "w": bh["w"], "h": bh["h"],
+                        "text": bh["text"], "glyph": glyph, "off_index": off, "on_index": on})
+        for _e, bh, *_rest in plans:
+            bh["status"] = oid                      # one status op per button
+        ctx.handles[oid] = {"buttons": lit, "entry": code_load_addr + readout.ENTRY_OFF,
+                            "code_load_addr": code_load_addr, "plan": plan,
+                            "blob_len": len(blob)}
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        cells = status_map.cell_table(data)
+        inset = aescompact.PUMP_OUTLINE_INSET
+        for b in h["buttons"]:
+            recs = records.object_records(data, gs + tab[b["object"]])
+            sw = [r for r in recs if r.wtype == 6 and r.value_slot == b["slot"]]
+            assert len(sw) == 1 and sw[0].count == len(aescompact.BMS_BIT_STATE_ARMS), \
+                "button %r: expected one 2-arm switch on cell %d" % (b["ref"], b["slot"])
+            assert sw[0].header[4] & _ENROLL_BIT, "button %r: switch not enrolled" % b["ref"]
+            assert sw[0].child_index == b["arms_base"]
+            assert cells[b["slot"]] == b["cell_addr"]
+            cands = guidata.switch_candidates(data, sw[0], guidata.find_match_table(data))
+            assert [v for v, _o in cands] == [m for m, _l, _c in aescompact.BMS_BIT_STATE_ARMS], \
+                "button %r: arm matches %s" % (b["ref"], cands)
+            for (_m, on, _c), (_v, obj) in zip(aescompact.BMS_BIT_STATE_ARMS, cands):
+                arm = records.object_records(data, gs + tab[obj])
+                fill = b["on_index"] if on else b["off_index"]
+                assert arm[0].wtype == 33 and arm[0].colors[0] == ("fillA", 7, fill) \
+                    and arm[0].geom[2:4] == [b["w"] - 2 * inset, b["h"] - 2 * inset], \
+                    "button %r: arm %d does not draw the full button" % (b["ref"], obj)
+                assert [r.label for r in arm if r.wtype == 11 and r.label] == \
+                    ([] if b["text"] is None else [b["text"]]), \
+                    "button %r: arm %d lacks the caption" % (b["ref"], obj)
+                if b["glyph"] is not None:
+                    assert [(r.font, r.label) for r in arm if r.wtype == 0] == [b["glyph"]], \
+                        "button %r: arm %d lacks the glyph" % (b["ref"], obj)
+        assert h["entry"] in followchannel.chain_from_hook(data), \
+            "the per-tick chain does not reach the routine at %#x" % h["entry"]
+        # The routine, decoded back to its entries: rebuild it from each button's recorded
+        # fields (source address, mask, shift, compare, valid_max, cell, group) at the recorded
+        # load address and the hook state it chained on; the image must hold exactly that blob.
+        plan = h["plan"]
+        items = tuple(statusfold.Light(
+            slot_addr=b["slot_addr"], mask=b["mask"], shift=b["shift"], kind=b["kind"],
+            value=b["value"], valid_max=b["valid_max"], cell_addr=b["cell_addr"],
+            variant_group=b["variant_group"]) for b in h["buttons"])
+        assert items == plan.items, "the handle's entries differ from the plan the op built"
+        want, _ = statusfold.build(dataclasses.replace(plan, items=items), h["code_load_addr"])
+        gc = theme.guicode_section(data)
+        at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+        assert len(want) == h["blob_len"] and data[at:at + len(want)] == want, \
+            "the routine at %#x is not the one its %d entries build" % (h["code_load_addr"],
+                                                                     len(items))
+        return ("add_button_status: %s; one routine at %#x; UNVERIFIED on the coach"
+                % ("; ".join("%r lit by var %d (mask %#x, shift %d, %s %d%s) via fresh cell %d"
+                             % (b["text"], b["var"], b["mask"], b["shift"], b["kind"],
+                                b["value"], "" if b["valid_max"] is None
+                                else ", max %d" % b["valid_max"], b["slot"])
+                             for b in h["buttons"]), h["entry"]))
+
+
+@op("add_enum_label")
+class AddEnumLabel(Op):
+    """Show a value as text from a table, on any page: `{"0": "Off", "1": "Cool", ...}`.
+
+    A per-tick routine (`statusfold.Enum`, one per op, chained on the per-tick hook) reads the
+    source slot, masks and shifts it, and writes a display cell: the index 0..n-1 of the matching
+    key, or n for stale or any value not in `values`. The label is one wtype-6 switch on that
+    cell (enrolled for live redraw) with n+1 arms matched on 0..n, the last drawing `default`;
+    every value the routine writes is matched (`enumlabel`). Each arm is a wtype-11 label in a
+    declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
+    `background` fill when one is given. The switch is absolute at `x, y`, in a new object
+    attached under `parent` (`insert.insert_object`), ended by an empty label that hands back
+    the font and align the page walk carried in (`enumlabel.restore_record`). The cell is always
+    freshly grown (`readout.allocate_fresh_cells`, recorded in `ctx.authored_cells`). After
+    placement every page root reaching `parent`, in every switch-arm set, is walked before and
+    after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses, and
+    so does any arm record inheriting a value slot from a wtype-5 attach above it
+    (`_pasted_inherited_slots`, the rule `add_rvc_button` and `move_control` apply).
+
+    Params:
+      parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
+              attach record to clone).
+      x, y: absolute pen; w, h: the label box (inclusive); font: the font slot.
+      align: "left" | "centre" | "right" (default "left").
+      colour: [r, g, b] text colour (default white); background: [r, g, b] | null (default
+              null), the arm's fill. Both must be palette colours.
+      source: {ref} | {var} | {dgn, instance|selector}, with optional mask (default 0xFFFF) and
+              shift (default 0) applied to the slot before the lookup.
+      values: {"<int>": text}, 1-16 entries; default: text for stale and unlisted values ("--").
+
+    Error codes:
+      BAD_PARAMS       -- a malformed param: empty or >16 `values`, a non-integer or duplicate
+                          key, an empty text, an unknown align, mask/shift out of range, a
+                          source that is not exactly one form, or a non-positive box.
+      BAD_REF          -- a `parent` or `source` ref names no usable handle.
+      NO_SUCH_REGISTER -- the source names no variable-table entry, or an inert one (an
+                          extraction mode outside `statusbind.LIVE_MODES` writes no slot, so
+                          the label would never change).
+      NO_DISPLAY_CELL  -- the cell table could not be grown.
+      NO_COLOUR        -- `colour` or `background` is not in this build's palette.
+      LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed; the
+                          entering font/align cannot be measured or written back (no page
+                          reaches `parent`, pages disagree, no font yet, align 0); the
+                          placement changes any other record on a page reaching `parent`; or
+                          a pasted record would inherit a value slot (e.g. under 899, whose
+                          attaches carry value_slot 0).
+      OFF_CANVAS       -- the box leaves the 800x480 canvas.
+      DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "font": {"type": "integer"},
+            "align": {"type": "string", "default": "left",
+                      "description": "left | centre | right"},
+            "colour": {"type": "array", "default": [255, 255, 255]},
+            "background": {"type": ["array", "null"], "default": None},
+            "source": {"type": "object",
+                       "description": "{ref}|{var}|{dgn, instance|selector}, + mask?, shift?"},
+            "values": {"type": "object", "description": "{\"<int>\": text}, 1-16 entries"},
+            "default": {"type": "string", "default": "--"},
+        },
+        "required": ["parent", "x", "y", "w", "h", "font", "source", "values"],
+    }
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if v is None:
+            return None
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def validate(self):
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h, self.font = (
+            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
+        if not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
+        align = self._param("align", "left", kind=str)
+        if align not in enumlabel.ALIGNS:
+            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
+        self.align = enumlabel.ALIGNS[align]
+        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
+        self.background = self._rgb("background", self._param("background", None))
+        self.source = self._param("source", kind=dict)
+        self.mask = self.source.get("mask", 0xFFFF)
+        self.shift = self.source.get("shift", 0)
+        if not (isinstance(self.mask, int) and 1 <= self.mask <= 0xFFFF):
+            raise self._bad("source mask must be 1..0xFFFF, got %r" % (self.mask,))
+        if not (isinstance(self.shift, int) and 0 <= self.shift <= 15):
+            raise self._bad("source shift must be 0..15, got %r" % (self.shift,))
+        values = self._param("values", kind=dict)
+        if not 1 <= len(values) <= statusfold.MAX_KEYS:
+            raise self._bad("values takes 1-%d entries, got %d" % (statusfold.MAX_KEYS,
+                                                                  len(values)))
+        table = {}
+        for k, text in values.items():
+            if not (isinstance(k, str) and k.isdigit() and str(int(k)) == k
+                    and int(k) <= 0xFFFF):
+                raise self._bad("values key %r is not a decimal integer 0..65535" % (k,))
+            if not isinstance(text, str) or not text:
+                raise self._bad("values[%r] must be a non-empty string, got %r" % (k, text))
+            table[int(k)] = text
+        self.keys = tuple(sorted(table))
+        self.texts = [table[k] for k in self.keys]
+        self.default = self._param("default", "--", kind=str)
+        if not self.default:
+            raise self._bad("default must be a non-empty string")
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
+                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
+                                 _CANVAS_H), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        slot_addr, var, live_mode = _resolve_status_source(data, ctx, self.source, oid)
+        try:
+            colour = theme.resolve_fill_index(data, color=self.colour)
+            bg = (None if self.background is None
+                  else theme.resolve_fill_index(data, color=self.background))
+        except theme.PaletteError as e:
+            raise RecipeError("NO_COLOUR", str(e), op_id=oid)
+        try:
+            arms = [enumlabel.build_arm(data, text=t, font=self.font, w=self.w, h=self.h,
+                                        align=self.align, colour_index=colour, bg_index=bg)
+                    for t in self.texts + [self.default]]
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        # Always a freshly grown cell (ruling R8): a reused stock index can alias another
+        # object's read (on stock, `scan_display_cell`'s cell 211 is object 444's gauge level).
+        try:
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, readout._TYPE_FOR_WIDTH[2])])
+        except readout.ReadoutError as e:
+            raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=oid)
+        ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
+        ((slot, cell_addr),) = [(c.slot, c.addr) for c in cells]
+        item = statusfold.Enum(slot_addr=slot_addr, mask=self.mask, shift=self.shift,
+                               keys=self.keys, cell_addr=cell_addr)
+        try:
+            plan = statusfold.resolve(out, [item])
+        except followchannel.FollowChannelError as e:
+            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
+        except statusfold.StatusFoldError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, oid)
+        try:
+            blob, _ = statusfold.build(plan, code_load_addr)
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except (statusfold.StatusFoldError, growsection.GrowSectionError) as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(
+            gcs.offset + load_off, b"", blob, "GuiCode",
+            "enum label: var %d mask %#x shift %d keys %s -> cell %d @ %#x"
+            % (var, self.mask, self.shift, list(self.keys), slot, cell_addr)))
+        try:
+            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
+        except followchannel.FollowChannelError as e:
+            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
+        file_off = gcs.offset + hook_at
+        if grown[file_off:file_off + 4] != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
+                              op_id=oid)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
+                         "enum label: detour bl -> %#x" % code_load_addr))
+        out, _ = patch.reseal(bytes(buf))
+        try:
+            placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
+                                                    arms=arms, value_slot=slot)
+            restore = self._restore(placed, parent)
+            if restore is not None:
+                placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
+                                                        arms=arms, value_slot=slot,
+                                                        restore=restore)
+            bad = enumlabel.foreign_deltas(out, placed, parent, index)
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        inherited = _pasted_inherited_slots(placed, parent, index)
+        if inherited:
+            raise RecipeError("LABEL_REFUSED", "under object %d the label's records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=oid)
+        if bad:
+            raise RecipeError("LABEL_REFUSED", "placing the label under object %d changes %d "
+                              "record(s) besides its own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
+        out, _ = patch.reseal(placed)
+        gs, tab = _gs_tab(out)
+        sw = records.object_records(out, gs + tab[index])[0]
+        ctx.handles[oid] = {
+            "object": index, "parent": parent, "slot": slot, "cell_addr": cell_addr,
+            "arms_base": sw.child_index, "var": var, "slot_addr": slot_addr,
+            "live_mode": live_mode, "mask": self.mask, "shift": self.shift,
+            "values": dict(zip(self.keys, self.texts)), "default": self.default,
+        }
+        return out
+
+    def _restore(self, placed, parent):
+        """The `(font, align)` to write back after the label (`enumlabel.place`'s `restore`), or
+        None when the walk already carries the label's own state past it. Raises
+        `EnumLabelError` when the entering state cannot be determined or written back: no page
+        reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored) or the
+        align is 0 (the decoder never stores a 0 align)."""
+        return enumlabel.restore_state(placed, parent, (self.font, pd.ALIGN_NO_SHIFT))
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        parent = records.object_records(data, gs + tab[h["parent"]])
+        assert any(r.wtype == 5 and r.child_index == h["object"] for r in parent), \
+            "the label object %d is not attached under %d" % (h["object"], h["parent"])
+        sw = records.object_records(data, gs + tab[h["object"]])[0]
+        n = len(h["values"])
+        assert sw.wtype == 6 and sw.value_slot == h["slot"] and sw.count == n + 1, \
+            "expected one %d-arm switch on cell %d" % (n + 1, h["slot"])
+        assert sw.header[4] & _ENROLL_BIT, "switch not enrolled for live redraw"
+        cands = guidata.switch_candidates(data, sw, guidata.find_match_table(data))
+        by_value = dict(cands)
+        assert sorted(by_value) == list(range(n + 1)) and len(cands) == n + 1, \
+            "match values %s" % cands
+        want = [h["values"][k] for k in sorted(h["values"])] + [h["default"]]
+        got = []
+        for k in range(n + 1):
+            arm = records.object_records(data, gs + tab[by_value[k]])
+            lab = [r for r in arm if r.wtype == 11]
+            assert len(lab) == 1 and lab[0].geom[2] and lab[0].geom[3], \
+                "arm %d needs one label with a declared box" % k
+            got.append(lab[0].label)
+        assert got == want, "arm texts %s, expected %s" % (got, want)
+        assert status_map.cell_table(data)[h["slot"]] == h["cell_addr"]
+        gc = theme.guicode_section(data)
+        code = data[gc.offset:gc.offset + gc.length]
+        assert struct.pack("<II", h["slot_addr"], h["cell_addr"]) in code, \
+            "no routine maps var %d into cell %#x" % (h["var"], h["cell_addr"])
+        return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
+                "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
+                % (h["var"], h["mask"], h["shift"], h["slot"], n + 1, got[:-1],
+                   h["default"], h["object"], h["parent"]))
+
+
+@op("add_rvc_button")
+class AddRvcButton(Op):
+    """Add a button that sends RV-C frames, on any page: a tap, a hold, both, or a toggle.
+
+    Every binding sends `dgn` with a fixed 8-byte payload; the panel stamps priority 6 and
+    source address 0x9F (`newbutton.binding_wire_frame`). The gesture is one of the coach-proven
+    shapes (`rvcbutton`): `tap` alone is the LEVEL stepper's group prefix `10 00 00 00` and one
+    binding on mask 0x06 (one frame per press of any length); `hold` alone is `add_alt_reboot`'s
+    group-17 clone with the hold nibble at `seconds` and one binding on 0x04; `tap` + `hold` is
+    Batt Heat's group-17 clone with the hold nibble at `seconds`, the hold binding (0x04) first
+    and the tap (0x02) after. The group is the pool's first slot, never 68/69; a hold on a
+    GuiCode-driven group is dead (v45), so a hold takes the `hold_safe` pool.
+
+    The records are Batt Heat's body (`rvcbutton.button_records`): a filled box at `x, y` `w` x
+    `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
+    and a wtype-12 touch region whose id is the group. They are pasted as one new object under a
+    clone of `parent`'s first wtype-5 attach (`rvcbutton.place`, `move_control`'s paste path),
+    ended by an empty label that hands back the font and align the walk carried in. Every page
+    root reaching `parent`, in every switch-arm set, is walked before and after: the new touch
+    region must meet no existing one, no new record may leave the canvas, nothing else may
+    change (`enumlabel.foreign_deltas`), and no pasted record may inherit a value slot from a
+    wtype-5 attach above it, the cloned one or one wrapping `parent`
+    (`_pasted_inherited_slots`, `move_control`'s rule): the capsule and caption carry none of
+    their own, and one inherited would be their live cell and on/off flag (OBJECT-HIERARCHY.md
+    1a). HOME's Climate parent 899 refuses this way (its attaches carry value_slot 0).
+
+    The toggle form (`toggle`) is one group with byte 1 `0x80` (its variant is not cycled on
+    release) and byte 0's low nibble 1 (the setter refuses a variant above it), and two bindings on `dgn`, both on mask 0x06: variant 0 sends `on_payload`,
+    variant 1 sends `off_payload`. The op writes no routine: a LATER `add_button_status` entry
+    naming this button drives the variant every tick (`setVariant(group, lit)`,
+    `docs/CONTROL-BEHAVIOR.md` §11), so the button sends "on" while its status reads off and
+    "off" while it reads on. Compile refuses a toggle no later enabled status op drives
+    (`recipe._check_toggles_driven`): its variant would sit at 0 and it would only send "on".
+    A toggle's group comes from the `hold_safe` pool only (never a GuiCode-driven group).
+
+    Params:
+      parent: object index | {ref} -- the object the button is drawn on (it needs a wtype-5
+              attach record to clone).
+      x, y, w, h: the absolute box on the 800x480 canvas.
+      text: caption (`\\n` makes two lines), or null. glyph: {slot, char} or null; font: the
+            caption's font slot, or null for the donor's.
+      dgn: the 18-bit DGN every binding sends. tap: {payload}; hold: {payload, seconds 1-15};
+           toggle: {off_payload, on_payload} (alone: no tap or hold).
+      colour: [r, g, b] body fill (default [65, 81, 163]); must be a palette colour.
+      group_pool: "free" | "hold_safe" (default "hold_safe" with a hold or a toggle, else
+                  "free").
+
+    Error codes:
+      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle` with `tap` or
+                        `hold`, the `free` pool with a hold or a toggle, or a box too small for
+                        its glyph and caption.
+      BAD_REF        -- a `parent` ref names no earlier op's object.
+      NO_FREE_GROUP  -- the group pool is empty.
+      NO_GLYPH       -- the glyph falls back to the placeholder (or icon font 24's unused block).
+      NO_BODY_COLOUR -- `colour` is not in this build's palette.
+      TOUCH_OVERLAP  -- the touch region meets an existing one on a page reaching `parent`.
+      OFF_CANVAS     -- a record leaves the 800x480 canvas.
+      GROW_REFUSED   -- the gesture donor groups or the binding table (arena, gates) refused.
+      INSERT_REFUSED -- the attach could not be cloned or inserted, the walk's font/align state
+                        cannot be handed back, a pasted record would inherit a value slot, or
+                        the placement changes another record.
+      TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "text": {"type": ["string", "null"], "default": None,
+                     "description": "caption; \\n makes two lines"},
+            "glyph": {"type": ["object", "null"], "default": None,
+                      "description": "{slot, char}: an installed glyph drawn above the caption"},
+            "font": {"type": ["integer", "null"], "default": None,
+                     "description": "caption font slot; null keeps the donor's"},
+            "dgn": {"type": "integer", "description": "18-bit DGN every binding sends"},
+            "tap": {"type": ["object", "null"], "default": None,
+                    "description": "{payload}: 8-byte hex sent once per press"},
+            "hold": {"type": ["object", "null"], "default": None,
+                     "description": "{payload, seconds}: sent once after a hold of seconds (1-15)"},
+            "toggle": {"type": ["object", "null"], "default": None,
+                       "description": "{off_payload, on_payload}: 8-byte hex each; a later "
+                                      "add_button_status must drive it"},
+            "colour": {"type": "array", "default": [0x41, 0x51, 0xA3],
+                       "description": "[r, g, b] body fill; a palette colour"},
+            "group_pool": {"type": "string", "enum": list(rvcbutton.POOLS),
+                           "description": "where the group comes from (default hold_safe "
+                                          "when hold or toggle is given, else free)"},
+        },
+        "required": ["parent", "x", "y", "w", "h", "dgn"],
+    }
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _int(self, name, default=...):
+        v = self._param(name, default)
+        if v is None and default is None:
+            return None
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise self._bad("%s must be an integer, got %r" % (name, v))
+        return v
+
+    def _payload(self, name, spec, keys, field="payload"):
+        if not isinstance(spec, dict) or set(spec) != set(keys):
+            raise self._bad("%s must be an object with exactly %s, got %r"
+                            % (name, sorted(keys), spec))
+        raw = spec[field]
+        try:
+            wire = bytes.fromhex(raw) if isinstance(raw, str) else b""
+        except ValueError:
+            wire = b""
+        if len(wire) != 8:
+            raise self._bad("%s payload must be 8 bytes of hex, got %r" % (name, raw))
+        return wire
+
+    def validate(self):
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h = (self._int(k) for k in ("x", "y", "w", "h"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the button box must be positive, got %dx%d" % (self.w, self.h))
+        self.text = self._param("text", None)
+        if self.text is not None and not (isinstance(self.text, str) and self.text
+                                          and self.text.isascii() and len(self.text) <= 0xFE):
+            raise self._bad("text must be a non-empty ASCII string of at most 254 characters, "
+                            "got %r" % (self.text,))
+        glyph = self._param("glyph", None)
+        if glyph is not None:
+            if not (isinstance(glyph, dict) and set(glyph) == {"slot", "char"}
+                    and isinstance(glyph["slot"], int) and not isinstance(glyph["slot"], bool)
+                    and 0 <= glyph["slot"] <= 0xFE and isinstance(glyph["char"], str)
+                    and len(glyph["char"]) == 1 and ord(glyph["char"]) <= 0xFF):
+                raise self._bad("glyph must be {slot: 0..254, char: one latin-1 character}, "
+                                "got %r" % (glyph,))
+            glyph = (glyph["slot"], glyph["char"])
+        self.glyph = glyph
+        self.font = self._int("font", None)
+        if self.font is not None and not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..254, got %d" % self.font)
+        self.dgn = self._int("dgn")
+        if not 0 <= self.dgn <= 0x3FFFF:
+            raise self._bad("dgn %#x is not an 18-bit value" % self.dgn)
+        tap, hold = self._param("tap", None), self._param("hold", None)
+        toggle = self._param("toggle", None)
+        self.off = self.on = None
+        if toggle is not None:
+            if tap is not None or hold is not None:
+                raise self._bad("toggle takes no tap or hold: its two bindings are the gesture")
+            keys = ("off_payload", "on_payload")
+            self.off = self._payload("toggle", toggle, keys, "off_payload")
+            self.on = self._payload("toggle", toggle, keys, "on_payload")
+        self.tap = None if tap is None else self._payload("tap", tap, ("payload",))
+        self.hold = None if hold is None else self._payload("hold", hold, ("payload", "seconds"))
+        self.seconds = None
+        if hold is not None:
+            s = hold["seconds"]
+            if not (isinstance(s, int) and not isinstance(s, bool)
+                    and 1 <= s <= rvcbutton.MAX_HOLD_SECONDS):
+                raise self._bad("hold seconds must be 1..%d, got %r"
+                                % (rvcbutton.MAX_HOLD_SECONDS, s))
+            self.seconds = s
+        if self.tap is None and self.hold is None and toggle is None:
+            raise self._bad("a button needs a gesture: tap, hold, both, or toggle")
+        self.form = ("toggle" if toggle is not None
+                     else "tap_hold" if self.tap is not None and self.hold is not None
+                     else "tap" if self.tap is not None else "hold")
+        colour = self._param("colour", [0x41, 0x51, 0xA3])
+        if not (isinstance(colour, list) and len(colour) == 3
+                and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 0xFF
+                        for c in colour)):
+            raise self._bad("colour must be [r, g, b] of 0..255, got %r" % (colour,))
+        self.colour = tuple(colour)
+        self.group_pool = self._param("group_pool", "hold_safe" if self.hold or toggle
+                                      else "free")
+        if self.group_pool not in rvcbutton.POOLS:
+            raise self._bad("group_pool must be one of %s, got %r"
+                            % (list(rvcbutton.POOLS), self.group_pool))
+        if self.hold is not None and self.group_pool == "free":
+            raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
+                            "is dead (v45)")
+        if toggle is not None and self.group_pool == "free":
+            raise self._bad("a toggle needs the hold_safe pool: GuiCode drives its own groups' "
+                            "variants, and would fight the status op's setVariant")
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the button box (%d,%d,%d,%d) leaves the %dx%d "
+                              "canvas" % (self.x, self.y, self.x + self.w, self.y + self.h,
+                                          _CANVAS_W, _CANVAS_H), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        gs, tab = _gs_tab(data)
+        if not 0 <= parent < len(tab):
+            raise self._bad("parent object %d is out of range" % parent)
+        try:
+            fill = theme.resolve_fill_index(data, color=self.colour)
+        except theme.PaletteError as e:
+            raise RecipeError("NO_BODY_COLOUR", str(e), op_id=oid)
+        if self.glyph is not None and rvcbutton.glyph_missing(data, *self.glyph):
+            raise RecipeError("NO_GLYPH", "font slot %d has no glyph for %r (it falls back to a "
+                              "placeholder); run install_glyph for this (font, char) earlier in "
+                              "the project" % self.glyph, op_id=oid)
+        try:
+            slots = rvcbutton.allocate(data, pool=self.group_pool)
+        except rvcbutton.RvcButtonError as e:
+            raise RecipeError("NO_FREE_GROUP", str(e), op_id=oid)
+        if not slots:
+            raise RecipeError("NO_FREE_GROUP", "the %r group pool is empty" % self.group_pool,
+                              op_id=oid)
+        group = slots[0]
+
+        # 1. the group and its bindings
+        binding_start = len(guidata.binding_table(data))
+        try:
+            payload = rvcbutton.bindings(self.dgn, form=self.form, tap=self.tap, hold=self.hold,
+                                         off=self.off, on=self.on)
+            entry = rvcbutton.gesture_group(data, form=self.form, hold_seconds=self.seconds,
+                                            binding_start=binding_start,
+                                            count=len(payload) // 12)
+            out, grow_edits = optionrow._grow_bindings(data, payload, [(group, entry)])
+        except (rvcbutton.RvcButtonError, optionrow.OptionRowError) as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=oid)
+
+        # 2. the records, pasted under parent
+        try:
+            frags = rvcbutton.button_records(
+                ctx.stock, touch_id=group, w=self.w, h=self.h, text=self.text, glyph=self.glyph,
+                font=self.font, fill_index=fill, x=self.x, y=self.y, glyph_image=out)
+        except ValueError as e:                  # RvcButtonError: a box its content cannot fit
+            raise self._bad(str(e))
+        try:
+            placed, place_edits, index = rvcbutton.place(out, parent=parent, x=self.x, y=self.y,
+                                                         frags=frags, mode="attach")
+        except (rvcbutton.RvcButtonError, enumlabel.EnumLabelError) as e:
+            raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
+        inherited = _pasted_inherited_slots(placed, parent, index)
+        if inherited:
+            raise RecipeError("INSERT_REFUSED", "under object %d the button's records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=oid)
+
+        # 3. the whole-page gates
+        roots = pagewalk.reaching_roots(out, parent)
+        for values in pagewalk.switch_arm_sets(out, roots):
+            for root in roots:
+                after = pagewalk.walk_records(placed, root, switch_values=values)
+                mine = [r for r in after if r.obj == index]
+                for r in mine:
+                    if r.wtype not in _CONTAINERS and _off_canvas(r.box):
+                        raise RecipeError("OFF_CANVAS", "%s (wtype %d %r) sits at (%d,%d,%d,%d), "
+                                          "outside the %dx%d canvas"
+                                          % (_fmt_walk_key(r.key), r.wtype, r.label, *r.box,
+                                             _CANVAS_W, _CANVAS_H), op_id=oid)
+                met = _touch_overlap([r.box for r in mine if r.wtype == 12],
+                                     pagewalk.walk_records(out, root, switch_values=values))
+                if met is not None:
+                    hit, t = met
+                    raise RecipeError("TOUCH_OVERLAP", "the button's touch region at "
+                                      "(%d,%d,%d,%d) meets root %d's %s at (%d,%d,%d,%d)"
+                                      % (*hit, root, _fmt_walk_key(t.key), *t.box), op_id=oid)
+        bad = enumlabel.foreign_deltas(out, placed, parent, index)
+        if bad:
+            raise RecipeError("INSERT_REFUSED", "placing the button under object %d changes %d "
+                              "record(s) besides its own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
+        ctx.edits.extend(grow_edits)
+        ctx.edits.extend(place_edits)
+        out, _ = patch.reseal(placed)
+        ctx.handles[oid] = {
+            "object": index, "group": group, "touch_id": group, "binding_start": binding_start,
+            "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
+            "glyph": None if self.glyph is None else {"slot": self.glyph[0],
+                                                      "char": self.glyph[1]},
+            "font": self.font, "colour": list(self.colour),
+            "toggle": (None if self.form != "toggle"
+                       else {"off_payload": self.off, "on_payload": self.on}),
+            "parent": parent, "placement": "attach",
+            "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
+            "tap": self.tap, "hold": self.hold,
+        }
+        return out
+
+    def capability_delta(self, ctx):
+        # A binding on DC_DIMMER_COMMAND_2 names a G12 channel (`guidata.Binding.channel`);
+        # any other DGN is outside `recipe.capabilities`.
+        h = ctx.handles.get(self.spec.id)
+        if h is None:
+            return set(), set()
+        raws = _rvc_button_bindings(h)
+        mine = set()
+        for i in range(0, len(raws), 12):
+            b = guidata.Binding(index=0, offset=0, dgn_low=raws[i] | (raws[i + 1] << 8),
+                                raw=raws[i:i + 12])
+            if b.channel is not None:
+                mine.add((b.channel, b.raw[4]))
+        return set(), mine - recipe.capabilities(ctx.stock)
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        parent = records.object_records(data, gs + tab[h["parent"]])
+        assert any(r.wtype == 5 and r.child_index == h["object"] for r in parent), \
+            "the button object %d is not attached under %d" % (h["object"], h["parent"])
+        recs = records.object_records(data, gs + tab[h["object"]])
+        ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
+        assert ids == [h["group"]], "touch ids %s, expected [%d]" % (ids, h["group"])
+        if h.get("status") is not None:
+            # lit by `add_button_status`: the body lives in its switch's arms; check the base arm
+            (sw,) = [r for r in recs if r.wtype == 6]
+            recs = records.object_records(data, gs + tab[sw.child_index])
+        if h["text"] is not None:
+            assert [r.label for r in recs if r.wtype == 11 and r.label] == [h["text"]], \
+                "caption %r missing" % h["text"]
+        if h["glyph"] is not None:
+            assert [(r.font, r.label) for r in recs if r.wtype == 0] == \
+                [(h["glyph"]["slot"], h["glyph"]["char"])], "glyph missing"
+
+        # the gesture: group prefix, then every binding's frame, mask and variant
+        g = guidata.group_table(data)[h["group"]]
+        bt = guidata.binding_table(data)
+        want = _rvc_button_bindings(h)
+        assert (g.start, g.count) == (h["binding_start"], len(want) // 12), \
+            "group %d slices %d+%d" % (h["group"], g.start, g.count)
+        if h["form"] == "tap":
+            assert bytes(g.raw[:4]) == bytes.fromhex("10000000"), "tap prefix %s" % g.raw[:4].hex()
+        elif h["form"] == "toggle":
+            assert bytes(g.raw[:4]) == bytes.fromhex("11800000"), \
+                "toggle prefix %s" % g.raw[:4].hex()
+            # Against stock: the finished image's status routine is itself a setVariant
+            # caller of this group, which the scan rightly reports.
+            assert h["group"] not in newbutton.guicode_selected_groups(ctx.stock), \
+                "toggle group %d is driven by stock GuiCode" % h["group"]
+        else:
+            assert g.raw[0] >> 4 == h["seconds"], "hold nibble %d" % (g.raw[0] >> 4)
+        can_id = (6 << 26) | (h["dgn"] << 8) | 0x9F
+        frames = []
+        for k in range(g.count):
+            raw = bt[g.start + k].raw
+            assert raw == want[12 * k:12 * k + 12], "binding %d differs" % (g.start + k)
+            cid, pay = newbutton.binding_wire_frame(raw)
+            assert cid == can_id, "binding %d sends %08X, expected %08X" % (g.start + k, cid,
+                                                                             can_id)
+            frames.append("%08X#%s mask %#x variant %d" % (cid, pay.hex(), raw[3], raw[2] >> 4))
+
+        # the box lands where asked on every page reaching the parent, in every switch-arm set
+        # (as apply's gates walk them: a parent may be reached only through a non-base arm)
+        want_box = (h["x"], h["y"], h["x"] + h["w"], h["y"] + h["h"])
+        roots = pagewalk.reaching_roots(data, h["parent"])
+        drawn = 0
+        for values in pagewalk.switch_arm_sets(data, roots):
+            for root in roots:
+                walk = pagewalk.walk_records(data, root, switch_values=values or None)
+                boxes = [r.box for r in walk if r.obj == h["object"]]
+                if boxes:
+                    drawn += 1
+                    assert boxes[0] == want_box, \
+                        "root %d (arms %s) draws the box at %s" % (root, values, boxes[0])
+        assert drawn, "no walk of roots %s reaches the button object %d" % (roots, h["object"])
+        return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
+                "UNVERIFIED on the coach"
+                % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
+
+
+def _rvc_button_bindings(h):
+    """The bindings an `add_rvc_button` handle `h` was built with (`rvcbutton.bindings`)."""
+    t = h.get("toggle") or {}
+    return rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
+                              off=t.get("off_payload"), on=t.get("on_payload"))
 
 
 @op("add_batt_heat_battery_glyph")

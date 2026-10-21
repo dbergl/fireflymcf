@@ -155,6 +155,20 @@ def ldr_literal(rt: int, at: int, target: int) -> bytes:
     return struct.pack("<H", 0x4800 | (rt << 8) | (off >> 2))
 
 
+def ldr_literal_w(rt: int, at: int, target: int) -> bytes:
+    """`ldr.w rT,[pc,#+-imm12]` — T2 literal (pool) load, 4 bytes, +-4095 from `(at + 4) & ~3`.
+
+    The wide sibling of `ldr_literal`, for a routine long enough that its pool sits past T1's
+    1020-byte reach. `rT` of 13/15 writes sp/pc and is refused."""
+    if not 0 <= rt <= 12 and rt != 14:
+        raise ValueError(f"ldr.w (literal) needs r0-r12 or lr, got r{rt}")
+    off = target - ((at + 4) & ~3)
+    if not -0xFFF <= off <= 0xFFF:
+        raise ValueError(f"ldr.w (literal) displacement out of range: {off}")
+    u = 1 if off >= 0 else 0
+    return struct.pack("<HH", 0xF85F | (u << 7), (rt << 12) | abs(off))
+
+
 def ldr_imm(rt: int, rn: int, imm: int) -> bytes:
     """`ldr rT,[rN,#imm]` — T1, 2 bytes, low registers; `imm` is a byte offset (0..124, /4)."""
     for r in (rt, rn):
@@ -375,6 +389,81 @@ def pop_w_reglist(regs) -> bytes:
     if (mask & (1 << 14)) and (mask & (1 << 15)):
         raise ValueError("pop.w cannot restore both lr and pc")
     return struct.pack("<HH", 0xE8BD, mask)
+
+
+class Routine:
+    """An authored routine as a stream of sized instructions, labels and a literal pool.
+
+    `emit(size, fn)` appends one instruction: `fn(here, sym)` returns `(bytes, text)`, where
+    `sym(name)` is a label's or pool word's absolute address. `assemble` fixes every label in a
+    size pass, places the pool 4-aligned after the code, encodes, and verifies the code with
+    `assert_disassembles_to` before returning `(blob, disassembly)`. `pool` maps each pool word's
+    name to its value, in pool order.
+    """
+
+    def __init__(self, pool: dict, *, wide_literals: bool = False, error=ValueError):
+        self.pool = dict(pool)
+        self.wide_literals = wide_literals
+        self.error = error
+        self.stream: list = []
+
+    def emit(self, size: int, fn) -> None:
+        self.stream.append(("ins", size, fn))
+
+    def label(self, name: str) -> None:
+        self.stream.append(("lbl", name))
+
+    def ldr_lit(self, rt: int, name: str) -> None:
+        """`ldr rT, =pool[name]`: T1 (2 bytes), or T2 `ldr.w` (4) when `wide_literals`."""
+        if self.wide_literals:
+            def fn(h, s):
+                off = s(name) - ((h + 4) & ~3)
+                text = f"ldr.w r{rt}, [pc, #{off:#x}]" if off >= 0 else \
+                    f"ldr.w r{rt}, [pc, #-{-off:#x}]"
+                return ldr_literal_w(rt, h, s(name)), text
+            self.emit(4, fn)
+        else:
+            def fn(h, s):
+                off = s(name) - ((h + 4) & ~3)
+                text = f"ldr r{rt}, [pc, #{off:#x}]" if off else f"ldr r{rt}, [pc]"
+                return ldr_literal(rt, h, s(name)), text
+            self.emit(2, fn)
+
+    def assemble(self, code_load_addr: int, entry_off: int = 0) -> tuple[bytes, list]:
+        labels: dict = {}
+        code_len = 0
+        for item in self.stream:
+            if item[0] == "lbl":
+                labels[item[1]] = code_len
+            else:
+                code_len += item[1]
+        entry = code_load_addr + entry_off
+        pool_off = (entry_off + code_len + 3) & ~3
+        pool_abs = {n: code_load_addr + pool_off + i * 4 for i, n in enumerate(self.pool)}
+
+        def sym(name):
+            return entry + labels[name] if name in labels else pool_abs[name]
+
+        code = bytearray()
+        expected: list = []
+        for item in self.stream:
+            if item[0] == "lbl":
+                continue
+            _k, size, fn = item
+            raw, text = fn(entry + len(code), sym)
+            if len(raw) != size:
+                raise self.error(f"size mismatch at {entry + len(code):#x}: {text!r}")
+            code += raw
+            expected.append(text)
+        assert_disassembles_to(bytes(code), entry, expected)
+
+        blob = bytearray(entry_off) + code
+        while len(blob) < pool_off:
+            blob += b"\x00"
+        for n in self.pool:
+            blob += struct.pack("<I", self.pool[n])
+        assert len(blob) % 4 == 0
+        return bytes(blob), disassemble(bytes(code), entry)
 
 
 def disassemble(code: bytes, at: int) -> list:

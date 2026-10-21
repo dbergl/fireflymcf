@@ -498,6 +498,101 @@ def set_binding_dgn(data: bytes, binding_index: int, dgn: int, *,
     return resealed, edits
 
 
+class NewButtonError(ValueError):
+    """A refused binding edit. `code` is the recipe error code the op reports."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def set_binding_bytes(data: bytes, group: int, *, dgn: int, bindings: "str | list[int]",
+                      changes: dict[int, tuple[int, int]]) -> tuple[bytes, list]:
+    """Rewrite chosen WIRE payload bytes of existing bindings in `group` -- a same-size edit.
+
+    `changes` maps wire byte position (0-7, the order `binding_wire_frame` and candump show)
+    to `(from, to)`. The position is translated through `_PAYLOAD_ORDER`, the same word order
+    `binding_payload` / `binding_raw` use, never a raw offset. `bindings` is `"all"` or the
+    positions within the group's run of bindings. Every edited binding must carry `dgn` and
+    every `from` byte must match its current value, so a project written against one build
+    fails loudly on another. Bytes 0-3 of the entry (DGN, variant, gesture mask) are untouched.
+
+    Returns `(sealed, edits)`. Raises `NewButtonError` with code `NO_SUCH_GROUP`, `BAD_PARAMS`
+    or `EXPECT_MISMATCH`.
+    """
+    groups = guidata.group_table(data)
+    table = guidata.binding_table(data)
+    if not 0 <= group < len(groups):
+        raise NewButtonError("NO_SUCH_GROUP", f"group {group} out of range [0, {len(groups)})")
+    if not changes:
+        raise NewButtonError("BAD_PARAMS", "no payload bytes to change")
+    for pos, (frm, to) in changes.items():
+        if not 0 <= pos <= 7:
+            raise NewButtonError("BAD_PARAMS", f"payload byte {pos} outside 0..7")
+        if not (0 <= frm <= 0xFF and 0 <= to <= 0xFF):
+            raise NewButtonError("BAD_PARAMS", f"byte {pos}: from/to must be 0..255")
+    members = guidata.group_bindings(groups, table, group)
+    if bindings == "all":
+        chosen = list(range(len(members)))
+    elif isinstance(bindings, list) and all(isinstance(i, int) for i in bindings):
+        bad = [i for i in bindings if not 0 <= i < len(members)]
+        if bad or not bindings:
+            raise NewButtonError(
+                "BAD_PARAMS", f"binding position(s) {bad or bindings} outside group {group}'s "
+                f"{len(members)} binding(s)")
+        chosen = sorted(set(bindings))
+    else:
+        raise NewButtonError("BAD_PARAMS", 'bindings must be "all" or a list of positions')
+    if not chosen:
+        raise NewButtonError("BAD_PARAMS", f"group {group} has no bindings")
+
+    gs, _ = guidata.guidata_extent(data)
+    out = bytearray(data)
+    edits = []
+    for i in chosen:
+        entry = members[i]
+        raw = entry.raw
+        have = raw[0] | (raw[1] << 8) | ((raw[2] & 0x03) << 16)
+        if have != dgn:
+            raise NewButtonError(
+                "EXPECT_MISMATCH", f"binding {entry.index} (group {group} position {i}) carries "
+                f"DGN {have:#07x}, not {dgn:#07x}; payload {binding_payload(raw).hex()}")
+        new = bytearray(raw)
+        for pos, (frm, to) in changes.items():
+            cur = raw[_PAYLOAD_ORDER[pos]]
+            if cur != frm:
+                raise NewButtonError(
+                    "EXPECT_MISMATCH", f"binding {entry.index} payload byte {pos} is "
+                    f"{cur:#04x}, not {frm:#04x}; payload {binding_payload(raw).hex()}")
+            new[_PAYLOAD_ORDER[pos]] = to
+        off = gs + entry.offset
+        out[off:off + 12] = new
+        edits.append(relocate.Edit(
+            off, bytes(raw), bytes(new), "binding-bytes",
+            f"binding {entry.index} (group {group}): wire {binding_payload(raw).hex()} -> "
+            f"{binding_payload(bytes(new)).hex()}"))
+    if len(out) != len(data):
+        raise NewButtonError("BAD_PARAMS", "set_binding_bytes must be same-size")
+
+    checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(out))}
+    resealed, changed_labels = patch.reseal(bytes(out))
+    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    if changed_labels != expected:
+        raise ValueError(f"reseal changed {changed_labels}, expected exactly {expected}")
+    for label in changed_labels:
+        pos = checksum_positions[label]
+        edits.append(relocate.Edit(pos, bytes(out)[pos:pos + 2], resealed[pos:pos + 2],
+                                   "checksum", f"resealed {label}"))
+    after = guidata.binding_table(resealed)
+    for i in chosen:
+        wire = binding_payload(after[members[i].index].raw)
+        for pos, (_frm, to) in changes.items():
+            if wire[pos] != to:
+                raise NewButtonError("BAD_PARAMS", f"binding {members[i].index} byte {pos} "
+                                     f"reads {wire[pos]:#04x} after the edit, not {to:#04x}")
+    return resealed, edits
+
+
 def object_group(data: bytes, obj_index: int) -> int:
     """The command-group id object `obj_index` references, read the same way
     `_object_referenced_groups`/`guidata.find_control_groups` do: the trailing

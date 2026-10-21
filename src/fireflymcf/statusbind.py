@@ -326,7 +326,8 @@ def retarget_filter(data: bytes, var: int, dgn: int, mode: int, payload_byte: in
 
 
 def pin_filter_instance(data: bytes, var: int, instance: int, *,
-                        expect_dgn: int | None = None, expect_compare: int = 0x00) -> tuple:
+                        expect_dgn: int | None = None, expect_compare: int = 0x00,
+                        from_instance: int | None = None) -> tuple:
     """Switch ON receive-filter entry `var`'s masked payload compare -- ONE byte at entry `+4`.
 
     `0xFF` there is the sentinel `FUN_0021C760` tests at `0x0021C93E`; it skips the compare
@@ -343,6 +344,11 @@ def pin_filter_instance(data: bytes, var: int, instance: int, *,
     `+5` is NOT written: keeping this to one byte is what makes it reviewable, and every entry
     worth pinning already carries the byte selector it needs. If `+5` has to change too, that is a
     `retarget_filter` call, not this.
+
+    With `from_instance` given this is a re-pin instead: it moves an entry from one device to
+    another. The entry must currently compare against exactly `from_instance` (else it raises,
+    naming the current value), the disabled-sentinel refusal is skipped, and `instance` is
+    written. Without it the behaviour is as above.
 
     The obvious failure mode is worth stating: a pinned entry whose device changes instance goes
     **silent**, where the unpinned one would have shown the wrong device. That is the better
@@ -362,7 +368,12 @@ def pin_filter_instance(data: bytes, var: int, instance: int, *,
     if expect_dgn is not None and dgn != expect_dgn:
         raise StatusBindError(
             f"var {var} subscribes to {dgn:#07x}, not the expected {expect_dgn:#07x}")
-    if old[FILTER_INSTANCE_FIELD] != FILTER_DISABLED:
+    if from_instance is not None:
+        if old[FILTER_INSTANCE_FIELD] != from_instance:
+            raise StatusBindError(
+                f"var {var} compares against {old[FILTER_INSTANCE_FIELD]:#04x}, not the "
+                f"expected from_instance {from_instance:#04x}")
+    elif old[FILTER_INSTANCE_FIELD] != FILTER_DISABLED:
         raise StatusBindError(
             f"var {var} already compares against {old[FILTER_INSTANCE_FIELD]:#04x}; this op "
             f"exists to ENABLE a disabled filter, so re-pointing a live one must be explicit")
@@ -384,7 +395,7 @@ def pin_filter_instance(data: bytes, var: int, instance: int, *,
     edits = [relocate.Edit(off, old[FILTER_INSTANCE_FIELD:FILTER_INSTANCE_FIELD + 1],
                            bytes([instance]), "filter-instance",
                            f"variable-table entry {var} ({dgn:#07x}) +{FILTER_INSTANCE_FIELD}: "
-                           f"any instance -> payload[{old[FILTER_COMPARE_FIELD] & 0xF}] == "
+                           f"{'any instance' if from_instance is None else f'{from_instance:#04x}'} -> payload[{old[FILTER_COMPARE_FIELD] & 0xF}] == "
                            f"{instance:#04x}")]
     return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
 

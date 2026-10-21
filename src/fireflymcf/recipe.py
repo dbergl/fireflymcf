@@ -306,6 +306,38 @@ def _build_ops(specs: list) -> tuple:
     return ops, errors
 
 
+def _check_toggles_driven(specs: list) -> list:
+    """`TOGGLE_UNDRIVEN` for every enabled `add_rvc_button` with `toggle` that no enabled
+    `add_button_status` LATER in `specs` lights (an entry whose `button.ref` is its id). A toggle
+    sends by its variant, which only that op's routine sets (`setVariant(group, lit)`); undriven,
+    the variant sits at 0 and the button only ever sends "on". A disabled spec drives nothing,
+    and a status op before the button cannot name it. Static: no op is constructed or applied,
+    so a malformed status op simply drives nothing (its own validation reports it)."""
+    errors = []
+    for i, spec in enumerate(specs):
+        if not (spec.enabled and spec.type == "add_rvc_button"
+                and isinstance(spec.params, dict) and spec.params.get("toggle") is not None):
+            continue
+        driven = False
+        for later in specs[i + 1:]:
+            if not (later.enabled and later.type == "add_button_status"
+                    and isinstance(later.params, dict)):
+                continue
+            entries = later.params.get("buttons")
+            if not isinstance(entries, list):
+                continue
+            if any(isinstance(e, dict) and isinstance(e.get("button"), dict)
+                   and e["button"].get("ref") == spec.id for e in entries):
+                driven = True
+                break
+        if not driven:
+            errors.append(RecipeError(
+                "TOGGLE_UNDRIVEN", "toggle button %r is driven by no later add_button_status: "
+                "its variant would stay 0 and it would only ever send its on_payload" % spec.id,
+                op_id=spec.id))
+    return errors
+
+
 def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
            ops: list) -> CompileResult:
     """The one finishing path shared by compile_project and compile_cached: reseal,
@@ -362,6 +394,7 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
     enabled = [s for s in project.ops if s.enabled]
 
     ops, errors = _build_ops(enabled)
+    errors += _check_toggles_driven(enabled)
     if errors:
         return CompileResult(False, None, [e.to_json() for e in errors], [], [])
 
@@ -425,6 +458,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
              handles=copy.deepcopy(snap[2]))
 
     ops, errors = _build_ops(enabled)
+    errors += _check_toggles_driven(enabled)
     if errors:
         return CompileResult(False, None, [e.to_json() for e in errors], [], [])
 

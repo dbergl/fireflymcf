@@ -862,3 +862,48 @@ Flashed 2026-10-20 in the LV-mc proof build (LV-hold plus `move_control`, the ge
 AES card draws as LV-move's, nothing else moved, and Low Volts on the AES settings page arms and
 disarms on its 3 s hold and repaints with its status. The generic re-encoding and the automatic
 compensation have now run on a coach, so `hardware_verified` is True.
+
+## 11. Status-driven toggle groups — `add_rvc_button` `toggle`; the setter `proven-from-code` (§5a), the toggle UNVERIFIED on the coach
+
+A toggle that sends "on" or "off" by the state the panel shows needs no new mechanism: it is a
+`0x80` group (§5a) whose variant something outside the screen sets. The group carries two
+bindings on one DGN, both on mask `0x06` (§3): **variant 0 sends the "on" payload, variant 1 the
+"off" payload**. Byte 1 `0x80` stops the press from cycling the counter (`0x21BC5E`, `0x21BCFA`),
+and makes the setter `FUN_0021B5E8(index, variant)` accept it (its gate at
+`0x21B5FE`-`0x21B604`). The setter is reached through the function pointer at **`0x20039908`**.
+**Byte 0's low nibble must be at least 1.** The setter writes only while the variant is at most
+that nibble (`and r3,r3,#0xf` / `cmp r3,r4` / `blo` past the store, `0x21B60A`-`0x21B610`).
+The tap prefix's nibble is 0, which would refuse `setVariant(group, 1)`, so the toggle would send
+"on" forever. Stock's setter-driven two-variant groups carry 1: 129 (the Low Volts toggle,
+`11 80 0c 80`), 143 and 146. The toggle's prefix is `11 80 00 00`.
+
+`add_button_status` drives it. When an entry names a toggle button, its per-tick routine
+(`statusfold.Light.variant_group`) writes the lit cell and then calls `setVariant(group, lit)`
+through `0x20039908`. A status reading off (or stale, or above `valid_max`) gives variant 0, so the
+button sends "on". A status reading on gives variant 1, so it sends "off". The send follows the
+last tick's status, not the press count.
+
+One toggle has one driver. A second `add_button_status` naming a button another status op
+already lights is refused `BAD_PARAMS` ("already lit by op ...; one status op per button",
+`AddButtonStatus._button`), as is a second entry for one button within one op, so two routines
+never call `setVariant` on one group.
+
+**Stock does the same for Climate.** `fireflymcf bus-map --dgn 1FFE2 --detail` on 13.6 shows
+GuiCode reading var 13 (THERMOSTAT_STATUS_1, instance 0) and calling `[0x20039908]` with
+`r0 = 0x8C`, `0x8D` and `0x8F`-`0x92` (`@0x24AB7E`, `0x24AB92`, `0x24ABBA`, `0x24AC14`,
+`0x24AC2C`, `0x24AC44`, `0x24AE60`, `0x24AEE2`). The same routine sets `0x8E` from another
+entry (`@0x24ABA6`, `0x24AE48`, `0x24AE54`). Groups 140-146 are therefore GuiCode-driven.
+`newbutton.guicode_selected_groups` lists them with 130-139, and a toggle never takes one. It
+takes its group from `newbutton.hold_safe_groups` only. The Low Volts bridge
+(`followchannel.build_display_bridge`, group 129) is the coach-proven precedent for an authored
+routine driving a variant every tick.
+
+Two consequences:
+
+* **An undriven toggle sends only "on"**: the state table is BSS-zeroed (§5a), so its counter
+  reads 0 from power-on until a setter moves it. Compile refuses a toggle that no LATER enabled
+  `add_button_status` entry names (`TOGGLE_UNDRIVEN`, `recipe._check_toggles_driven`).
+* **The finished image's scan reports the group as GuiCode-driven**, because the appended
+  routine is itself a `movs r0,#group` / `blx` caller of `0x20039908`. The allocation check
+  is made against the image before the routine. `add_rvc_button`'s verify checks the group
+  against stock.
