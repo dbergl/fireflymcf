@@ -49,3 +49,18 @@ def test_repin_rooms_and_setpoint(stock, var, dgn):
     r = _compile(stock, var=var, instance=3, dgn=dgn, compare=0, from_instance=0)
     assert r.ok, r.errors
     assert guidata.variable_table(r.data)[var].raw[4] == 3
+
+
+def test_repin_is_unverified(stock):
+    """Narrowing an open entry was flashed; re-pinning a live one (`from_instance`) was not."""
+    r = _compile(stock, var=13, instance=3, dgn=0x1FFE2, compare=0, from_instance=0)
+    assert r.ok, r.errors
+    assert r.unverified == ["pin"]
+
+
+@pytest.mark.parametrize("bad", ["0", 1.0, True, -1, 0x100])
+def test_from_instance_must_be_a_byte(stock, bad):
+    """A string or other non-byte `from_instance` is BAD_PARAMS, not a crash at compile."""
+    r = _compile(stock, var=13, instance=3, dgn=0x1FFE2, compare=0, from_instance=bad)
+    assert not r.ok
+    assert r.errors[0]["code"] == "BAD_PARAMS", r.errors
