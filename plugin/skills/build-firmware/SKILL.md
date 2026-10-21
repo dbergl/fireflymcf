@@ -128,7 +128,9 @@ from `add_rvc_button`, `add_button_status` and `add_enum_label` rather than a on
   without it). An RV-C byte reads 0xFF or 0xFE when not available, which both would read as on;
   set `valid_max` to 0xFA so those read off.
 - **Show a value as a word** with `add_enum_label` (a table of values and words).
-- All three are unverified: compile needs `--allow-unverified` and the owner's agreement to be
+- **Put static text on a page** (a caption, a heading) with `add_text_label`; `\n` starts a
+  second line.
+- All four are unverified: compile needs `--allow-unverified` and the owner's agreement to be
   first on the coach.
 
 ## Author, validate, compile

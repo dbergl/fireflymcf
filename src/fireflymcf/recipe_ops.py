@@ -7823,8 +7823,57 @@ class AddButtonStatus(Op):
                              for b in h["buttons"]), h["entry"]))
 
 
+class _LabelBox:
+    """The boxed-label params and checks `add_enum_label` and `add_text_label` share."""
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if v is None:
+            return None
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def _validate_box(self):
+        """The label-box params `add_enum_label` and `add_text_label` share: parent, x, y, w, h,
+        font, align, colour, background."""
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h, self.font = (
+            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
+        if not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
+        align = self._param("align", "left", kind=str)
+        if align not in enumlabel.ALIGNS:
+            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
+        self.align = enumlabel.ALIGNS[align]
+        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
+        self.background = self._rgb("background", self._param("background", None))
+
+    def _refuse_off_canvas(self):
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
+                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
+                                 _CANVAS_H), op_id=self.spec.id)
+
+    def _resolve_colours(self, data):
+        """`(colour index, background index or None)` in this build's palette, or NO_COLOUR."""
+        try:
+            colour = theme.resolve_fill_index(data, color=self.colour)
+            bg = (None if self.background is None
+                  else theme.resolve_fill_index(data, color=self.background))
+        except theme.PaletteError as e:
+            raise RecipeError("NO_COLOUR", str(e), op_id=self.spec.id)
+        return colour, bg
+
+
 @op("add_enum_label")
-class AddEnumLabel(Op):
+class AddEnumLabel(_LabelBox, Op):
     """Show a value as text from a table, on any page: `{"0": "Off", "1": "Cool", ...}`.
 
     A per-tick routine (`statusfold.Enum`, one per op, chained on the per-tick hook) reads the
@@ -7895,31 +7944,8 @@ class AddEnumLabel(Op):
         "required": ["parent", "x", "y", "w", "h", "font", "source", "values"],
     }
 
-    def _bad(self, msg):
-        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
-
-    def _rgb(self, name, v):
-        if v is None:
-            return None
-        if not (isinstance(v, list) and len(v) == 3
-                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
-            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
-        return tuple(v)
-
     def validate(self):
-        self.parent = self._param("parent")
-        self.x, self.y, self.w, self.h, self.font = (
-            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
-        if self.w <= 0 or self.h <= 0:
-            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
-        if not 0 <= self.font <= 0xFE:
-            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
-        align = self._param("align", "left", kind=str)
-        if align not in enumlabel.ALIGNS:
-            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
-        self.align = enumlabel.ALIGNS[align]
-        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
-        self.background = self._rgb("background", self._param("background", None))
+        self._validate_box()
         self.source = self._param("source", kind=dict)
         self.mask = self.source.get("mask", 0xFFFF)
         self.shift = self.source.get("shift", 0)
@@ -7944,22 +7970,13 @@ class AddEnumLabel(Op):
         self.default = self._param("default", "--", kind=str)
         if not self.default:
             raise self._bad("default must be a non-empty string")
-        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
-                or self.y + self.h > _CANVAS_H):
-            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
-                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
-                                 _CANVAS_H), op_id=self.spec.id)
+        self._refuse_off_canvas()
 
     def apply(self, data, ctx):
         oid = self.spec.id
         parent = resolve_target(ctx, self.parent)
         slot_addr, var, live_mode = _resolve_status_source(data, ctx, self.source, oid)
-        try:
-            colour = theme.resolve_fill_index(data, color=self.colour)
-            bg = (None if self.background is None
-                  else theme.resolve_fill_index(data, color=self.background))
-        except theme.PaletteError as e:
-            raise RecipeError("NO_COLOUR", str(e), op_id=oid)
+        colour, bg = self._resolve_colours(data)
         try:
             arms = [enumlabel.build_arm(data, text=t, font=self.font, w=self.w, h=self.h,
                                         align=self.align, colour_index=colour, bg_index=bg)
@@ -8095,6 +8112,161 @@ class AddEnumLabel(Op):
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
                 % (h["var"], h["mask"], h["shift"], h["slot"], n + 2, got[:-1],
                    h["default"], h["object"], h["parent"]))
+
+
+@op("add_text_label")
+class AddTextLabel(_LabelBox, Op):
+    """Static text on any page: `add_enum_label` without the switch and the per-tick routine.
+
+    A new object attached under `parent` (`insert.insert_object`, a byte clone of the parent's
+    first wtype-5 attach, the paste path `add_enum_label` and `move_control` use) holds an
+    optional `background` fill (wtype 33, radius 1), ONE wtype-11 label in a declared `w` x `h`
+    box (the panel clips text to it, `GUICODE.md` Findings 69-70), both absolute at `x, y`
+    (`enumlabel.label_records(at=...)`, pagedraw's form), and, when the label leaves a font or
+    align other than the one the page walk carried in, the empty label that writes it back
+    (`enumlabel.restore_record`). A `'\\n'` starts a second line; a multi-line label carries
+    stock's cell-height pitch (line height 0, adds-font 1, as 'Go Power!\\nSettings' does), so
+    the lines must fit `h` one font cell each. After placement every page root reaching
+    `parent`, in every switch-arm set, is walked before and after (`enumlabel.foreign_deltas`):
+    any change besides the label's own records refuses, and so does a record inheriting a value
+    slot from a wtype-5 attach above it (`_pasted_inherited_slots`).
+
+    Every character but the space is checked against the font (`rvcbutton.glyph_missing`): a
+    label is free text in any font, so an ASCII character is not assumed present (unlike
+    `add_card_readouts`, whose ASCII captions are what every flashed readout drew); the space is
+    exempt because a blank glyph reads as missing.
+
+    Params:
+      parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
+              attach record to clone).
+      x, y: absolute pen; w, h: the label box (inclusive); font: the font slot.
+      text: the text, latin-1 (a label byte indexes the font); '\\n' starts a new line.
+      align: "left" | "centre" | "right" (default "left").
+      colour: [r, g, b] text colour (default white); background: [r, g, b] | null (default
+              null), a fill behind the box. Both must be palette colours.
+
+    Error codes:
+      BAD_PARAMS     -- a malformed param: an empty, non-latin-1 or over-254-byte text, an
+                        unknown align, a non-positive box, or text that does not fit the box
+                        (the message names the line too wide, or the lines too tall).
+      BAD_REF        -- a `parent` ref names no usable handle.
+      NO_GLYPH       -- a character (other than the space) the font cannot draw.
+      NO_COLOUR      -- `colour` or `background` is not in this build's palette.
+      OFF_CANVAS     -- the box leaves the 800x480 canvas.
+      LAYOUT_REFUSED -- the placement changes any other record on a page reaching `parent`; a
+                        pasted record would inherit a value slot (e.g. under 899); the entering
+                        font/align cannot be measured or written back (no page reaches
+                        `parent`, pages disagree, no font yet, align 0); or a record could not
+                        be built or attached.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "font": {"type": "integer"},
+            "text": {"type": "string", "description": "latin-1; '\\n' starts a new line"},
+            "align": {"type": "string", "default": "left",
+                      "description": "left | centre | right"},
+            "colour": {"type": "array", "default": [255, 255, 255]},
+            "background": {"type": ["array", "null"], "default": None},
+        },
+        "required": ["parent", "x", "y", "w", "h", "font", "text"],
+    }
+
+    def validate(self):
+        self._validate_box()
+        self.text = self._param("text", kind=str)
+        if not self.text:
+            raise self._bad("text must be non-empty")
+        try:
+            raw = self.text.encode("latin-1")
+        except UnicodeEncodeError:
+            raise self._bad("text %r has a character outside latin-1 (a label byte indexes "
+                            "the font)" % (self.text,))
+        if len(raw) > 254:
+            raise self._bad("text is %d bytes; a label holds at most 254" % len(raw))
+        self._refuse_off_canvas()
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        bad = [c for c in self.text if c not in " \n"
+               and rvcbutton.glyph_missing(data, self.font, c)]
+        if bad:
+            raise RecipeError("NO_GLYPH", "font %d has no glyph for %r in %r (it would draw a "
+                              "fallback)" % (self.font, bad[0], self.text), op_id=oid)
+        misfit = pd.label_misfit(data, self.text, self.font, self.w, self.h)
+        if misfit:
+            raise self._bad("the text does not fit the %dx%d box: %s" % (self.w, self.h, misfit))
+        colour, bg = self._resolve_colours(data)
+        try:
+            parts = enumlabel.label_records(
+                data, text=self.text, font=self.font, w=self.w, h=self.h, align=self.align,
+                colour_index=colour, bg_index=bg, at=(self.x, self.y), multiline=True)
+            # the fill and the label both write header align 1; the label writes its font
+            placed, _edits, index, restore = enumlabel.place_static(
+                data, parent=parent, parts=parts, leaving=(self.font, pd.ALIGN_NO_SHIFT))
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LAYOUT_REFUSED", str(e), op_id=oid)
+        _paste_gates(data, placed, parent, index, code="LAYOUT_REFUSED", whose="the label's",
+                     action="placing the label", op_id=oid)
+        out, _ = patch.reseal(placed)
+        ctx.handles[oid] = {
+            "object": index, "parent": parent, "text": self.text, "x": self.x, "y": self.y,
+            "w": self.w, "h": self.h, "font": self.font, "align": self.align,
+            "colour_index": colour, "bg_index": bg, "restore": restore,
+        }
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        attaches = [i for i, r in enumerate(records.object_records(data, gs + tab[h["parent"]]))
+                    if r.wtype == 5 and r.child_index == h["object"]]
+        assert len(attaches) == 1, "the label object %d is not attached once under %d" % (
+            h["object"], h["parent"])
+        recs = records.object_records(data, gs + tab[h["object"]])
+        lead = [] if h["bg_index"] is None else [33]
+        tail = [] if h["restore"] is None else [11]
+        assert [r.wtype for r in recs] == lead + [11] + tail, \
+            "the label object holds wtypes %s, not its records" % [r.wtype for r in recs]
+        box = [h["x"], h["y"], h["w"], h["h"]]
+        if lead:
+            f = recs[0]
+            assert (f.geom[:4] == box and f.base_modes[:4] == [0, 0, 1, 1]
+                    and f.colors[0] == ("fillA", 7, h["bg_index"])), \
+                "the fill does not draw as built"
+        lab = recs[len(lead)]
+        multi = "\n" in h["text"]
+        assert (lab.label == h["text"] and lab.font == h["font"] and lab.h_align == h["align"]
+                and lab.geom[:4] == box and lab.base_modes[:4] == [0, 0, 1, 1]
+                and lab.value_slot is None and ("fillA", 7, h["colour_index"]) in lab.colors
+                and (lab.line_height, lab.line_height_adds_font) == (
+                    pd.MULTILINE_PITCH if multi else (0x14, 0))), \
+            "the label does not draw %r in its %dx%d box at (%d, %d), font %d, ink %d as built" \
+            % (h["text"], h["w"], h["h"], h["x"], h["y"], h["font"], h["colour_index"])
+        if tail:
+            font, align = h["restore"]
+            r = recs[-1]
+            assert not r.label and r.font == font and r.align == align, \
+                "the label object does not end with the (font %r, align %d) restore" % (font,
+                                                                                        align)
+        # the walk leaves the object in the state it entered with, on every page reaching it
+        entering = enumlabel.entering_state(data, h["parent"], attaches[0])
+        leaving = enumlabel.leaving_state(data, h["parent"], attaches[0])
+        assert entering and entering == leaving, \
+            "the label object enters with font/align %s and leaves with %s" % (
+                sorted(entering, key=str), sorted(leaving, key=str))
+        return ("add_text_label: %r in font %d at (%d, %d) %dx%d, object %d under %d; "
+                "UNVERIFIED on the coach" % (h["text"], h["font"], h["x"], h["y"], h["w"],
+                                            h["h"], h["object"], h["parent"]))
 
 
 @op("add_rvc_button")

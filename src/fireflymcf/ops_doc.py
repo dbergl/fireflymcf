@@ -258,6 +258,15 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
         "`parent`. A preview without slot values (Studio, `render`) draws that blank arm.",
         "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
+    "add_text_label": ("structural",
+        "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
+        "at the font's cell pitch), optionally on a fill, absolute at x, y in a new object "
+        "attached under `parent`, ended by a restore record that hands back the font and align "
+        "the page walk carried in; refused if anything else on the page would change.",
+        "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
+        "two-line label spaces its lines by the font's cell, and every other control on the "
+        "page draws as before, its text in its own font (photo against stock).",
+        "`enumlabel.py`, `pagedraw.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
         "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
