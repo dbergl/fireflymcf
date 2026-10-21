@@ -37,8 +37,9 @@ CLASSES = [
 ]
 
 # name -> (class, purpose, hardware status, where the proof is)
-_SHIFT_NOTE = ("The build reports what else it shifted (its manifest line ends `; shifted N "
-               "record(s) ...` or `; shifted nothing else`, and the sidecar has `shifts`); for a recipe that should refuse "
+_SHIFT_NOTE = ("The build reports what else it changed on the page (its manifest line ends "
+               "`; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar "
+               "has `shifts`); for a recipe that should refuse "
                "instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).")
 
 OP_NOTES: dict[str, tuple[str, str, str, str]] = {

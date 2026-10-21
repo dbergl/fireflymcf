@@ -196,7 +196,7 @@ def test_move_element_messages_show_the_value_written(stock, stock_hash):
             "target": 902, "selector": {"label": "Chassis"}, **params}))
     r = move(set={"y": -42})
     assert r.ok and len(r.manifest) == 1, r.manifest
-    assert r.manifest[0].startswith("move: object 902 {'y': -42}; shifted "), r.manifest
+    assert r.manifest[0].startswith("move: object 902 {'y': -42}; moved "), r.manifest
     r = move(set={"y": 6}, expect={"y": -42})
     assert not r.ok and r.errors[0]["code"] == "EXPECT_MISMATCH"
     assert "project expected -42" in r.errors[0]["message"], r.errors
