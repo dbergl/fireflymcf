@@ -7297,9 +7297,11 @@ class AddEnumLabel(Op):
     every value the routine writes is matched (`enumlabel`). Each arm is a wtype-11 label in a
     declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
     `background` fill when one is given. The switch is absolute at `x, y`, in a new object
-    attached under `parent` (`insert.insert_object`). The cell is a spare, GuiCode-unreferenced
-    one (`followchannel.scan_display_cell`), else a freshly grown one
-    (`readout.allocate_fresh_cells`).
+    attached under `parent` (`insert.insert_object`), ended by an empty label that hands back
+    the font and align the page walk carried in (`enumlabel.restore_record`). The cell is always
+    freshly grown (`readout.allocate_fresh_cells`, recorded in `ctx.authored_cells`). After
+    placement every page root reaching `parent`, in every switch-arm set, is walked before and
+    after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses.
 
     Params:
       parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
@@ -7318,9 +7320,12 @@ class AddEnumLabel(Op):
                           source that is not exactly one form, or a non-positive box.
       BAD_REF          -- a `parent` or `source` ref names no usable handle.
       NO_SUCH_REGISTER -- the source names no variable-table entry.
-      NO_DISPLAY_CELL  -- no spare cell and the cell table could not be grown.
+      NO_DISPLAY_CELL  -- the cell table could not be grown.
       NO_COLOUR        -- `colour` or `background` is not in this build's palette.
-      LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed.
+      LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed; the
+                          entering font/align cannot be measured or written back (no page
+                          reaches `parent`, pages disagree, no font yet, align 0); or the
+                          placement changes any other record on a page reaching `parent`.
       OFF_CANVAS       -- the box leaves the 800x480 canvas.
       DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
     """
@@ -7416,20 +7421,16 @@ class AddEnumLabel(Op):
                     for t in self.texts + [self.default]]
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
-        # The cell is chosen from THIS image, before the routine's pool names it.
-        out, tier = data, 2
+        # Always a freshly grown cell (ruling R8): a reused stock index can alias another
+        # object's read (on stock, `scan_display_cell`'s cell 211 is object 444's gauge level).
         try:
-            slot, cell_addr = followchannel.scan_display_cell(data)
-        except followchannel.FollowChannelError:
-            try:
-                out, cells, cell_edits = readout.allocate_fresh_cells(
-                    data, [(2, readout._TYPE_FOR_WIDTH[2])])
-            except readout.ReadoutError as e:
-                raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=oid)
-            ctx.edits.extend(cell_edits)
-            ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
-            (cell,) = cells
-            slot, cell_addr, tier = cell.slot, cell.addr, 3
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, readout._TYPE_FOR_WIDTH[2])])
+        except readout.ReadoutError as e:
+            raise RecipeError("NO_DISPLAY_CELL", str(e), op_id=oid)
+        ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
+        ((slot, cell_addr),) = [(c.slot, c.addr) for c in cells]
         item = statusfold.Enum(slot_addr=slot_addr, mask=self.mask, shift=self.shift,
                                keys=self.keys, cell_addr=cell_addr)
         try:
@@ -7473,14 +7474,19 @@ class AddEnumLabel(Op):
                 placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
                                                         arms=arms, value_slot=slot,
                                                         restore=restore)
+            bad = enumlabel.foreign_deltas(out, placed, parent, index)
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        if bad:
+            raise RecipeError("LABEL_REFUSED", "placing the label under object %d changes %d "
+                              "record(s) besides its own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
         out, _ = patch.reseal(placed)
         gs, tab = _gs_tab(out)
         sw = records.object_records(out, gs + tab[index])[0]
         ctx.handles[oid] = {
             "object": index, "parent": parent, "slot": slot, "cell_addr": cell_addr,
-            "cell_tier": tier, "arms_base": sw.child_index, "var": var, "slot_addr": slot_addr,
+            "arms_base": sw.child_index, "var": var, "slot_addr": slot_addr,
             "live_mode": live_mode, "mask": self.mask, "shift": self.shift,
             "values": dict(zip(self.keys, self.texts)), "default": self.default,
         }
@@ -7488,7 +7494,10 @@ class AddEnumLabel(Op):
 
     def _restore(self, placed, parent):
         """The `(font, align)` to write back after the label (`enumlabel.place`'s `restore`), or
-        None when the walk already carries the label's own state past it (or reaches no page)."""
+        None when the walk already carries the label's own state past it. Raises
+        `EnumLabelError` when the entering state cannot be determined or written back: no page
+        reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored) or the
+        align is 0 (the decoder never stores a 0 align)."""
         gs, tab = _gs_tab(placed)
         attach = len(records.object_records(placed, gs + tab[parent])) - 1
         states = enumlabel.entering_state(placed, parent, attach)
@@ -7497,10 +7506,17 @@ class AddEnumLabel(Op):
                 "the pages reaching object %d enter it with different font/align states %s; "
                 "one label cannot restore them all" % (parent, sorted(states, key=str)))
         if not states:
-            return None
+            raise enumlabel.EnumLabelError(
+                "no page root reaches object %d, so the font/align the label must hand back "
+                "cannot be measured" % parent)
         ((font, align),) = states
-        font = font if font not in (None, self.font) else None
-        align = align if align not in (0, pd.ALIGN_NO_SHIFT) else 0
+        if font is None or align == 0:
+            raise enumlabel.EnumLabelError(
+                "the walk enters object %d with font %r / align %d; the label's font %d / align "
+                "%d cannot be written back to that" % (parent, font, align, self.font,
+                                                       pd.ALIGN_NO_SHIFT))
+        font = None if font == self.font else font
+        align = 0 if align == pd.ALIGN_NO_SHIFT else align
         return None if font is None and not align else (font, align)
 
     def capability_delta(self, ctx):
@@ -7535,9 +7551,9 @@ class AddEnumLabel(Op):
         code = data[gc.offset:gc.offset + gc.length]
         assert struct.pack("<II", h["slot_addr"], h["cell_addr"]) in code, \
             "no routine maps var %d into cell %#x" % (h["var"], h["cell_addr"])
-        return ("add_enum_label: var %d (mask %#x, shift %d) -> cell %d (tier %d) -> %d-arm "
+        return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
-                % (h["var"], h["mask"], h["shift"], h["slot"], h["cell_tier"], n + 1, got[:-1],
+                % (h["var"], h["mask"], h["shift"], h["slot"], n + 1, got[:-1],
                    h["default"], h["object"], h["parent"]))
 
 

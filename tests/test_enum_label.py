@@ -230,3 +230,56 @@ def test_each_cell_value_draws_its_text(built, value, text):
     drawn = [r for r in walk if r.wtype == 11 and r.label
              and sw.child_index <= r.obj < sw.child_index + sw.count]
     assert [(r.label, r.box[:2]) for r in drawn] == [(text, (88, 372))]
+
+
+# --- fix round 1: fresh cell (ruling R8) and the whole-page layout gate ----------------------
+
+from fireflymcf import enumlabel, readout, recipe_ops
+
+
+def test_cell_is_freshly_grown(built):
+    """Never a reused stock index: the gate `recipe._assert_authored_cells_fresh` sees it."""
+    _obj, sw = _label_switch(built)
+    _base, _types, stock_rows = readout.resolve_cell_tables(_stock())
+    assert sw.value_slot >= stock_rows
+    assert status_map.cell_table(built)[sw.value_slot] not in status_map.cell_table(_stock())
+
+
+def test_cell_is_recorded_for_the_aliasing_gate(monkeypatch):
+    seen = {}
+    real = recipe_ops.AddEnumLabel.apply
+
+    def spy(self, data, ctx):
+        out = real(self, data, ctx)
+        seen["cells"] = set(ctx.authored_cells)
+        seen["slot"] = ctx.handles[self.spec.id]["slot"]
+        return out
+    monkeypatch.setattr(recipe_ops.AddEnumLabel, "apply", spy)
+    res = _compile([_op()])
+    assert res.ok, res.errors
+    assert seen["slot"] in seen["cells"]
+
+
+@pytest.mark.parametrize("states,why", [
+    (set(), "no page root reaches"),
+    ({(None, 1)}, "cannot be written back"),
+    ({(23, 0)}, "cannot be written back"),
+    ({(23, 1), (14, 1)}, "different font/align"),
+])
+def test_refused_when_the_entering_state_is_unknown(monkeypatch, states, why):
+    monkeypatch.setattr(enumlabel, "entering_state", lambda *_a: set(states))
+    err = _errors(_op())
+    assert "LABEL_REFUSED" in err and why in err, err
+
+
+def test_layout_gate_refuses_a_leak(monkeypatch):
+    """Without the restore record the label's font reaches HOME's next switch: refused."""
+    monkeypatch.setattr(recipe_ops.AddEnumLabel, "_restore", lambda self, placed, parent: None)
+    err = _errors(_op())
+    assert "LABEL_REFUSED" in err and "besides its own" in err and "4:9" in err, err
+
+
+def test_home_placement_passes_the_gate(built):
+    stock = _stock()
+    obj, _sw = _label_switch(built)
+    assert enumlabel.foreign_deltas(stock, built, CLIMATE_PARENT, obj) == []

@@ -677,9 +677,9 @@ Error codes:
 - `BAD_PARAMS` — a malformed param: empty or >16 `values`, a non-integer or duplicate key, an empty text, an unknown align, mask/shift out of range, a source that is not exactly one form, or a non-positive box.
 - `BAD_REF` — a `parent` or `source` ref names no usable handle.
 - `NO_SUCH_REGISTER` — the source names no variable-table entry.
-- `NO_DISPLAY_CELL` — no spare cell and the cell table could not be grown.
+- `NO_DISPLAY_CELL` — the cell table could not be grown.
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
-- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed.
+- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or the placement changes any other record on a page reaching `parent`.
 - `OFF_CANVAS` — the box leaves the 800x480 canvas.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
 
