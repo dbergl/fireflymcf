@@ -165,16 +165,65 @@ def test_bad_ref():
     assert code == "BAD_REF"
 
 
-def test_no_glyph():
-    """Every character but the space is checked (a label is free text in any font); the space
-    is exempt because a blank glyph reads as missing (`rvcbutton.glyph_missing`)."""
-    code, msg = _errors(_op(text="FAN\x8dSPEED"))
-    assert code == "NO_GLYPH" and "'\\x8d'" in msg, msg
+# font 21 covers only '0'-'5' (no space: a space draws the font's fallback); font 25 covers the
+# space with its solid 72x72 "unused" block, shared by characters 5-47
+ICON_DIGITS = {"font": 21, "w": 200, "h": 70, "y": 150}
 
 
-def test_space_is_not_a_missing_glyph(built14):
+@pytest.mark.parametrize("over,char", [
+    ({"text": "1A2", **ICON_DIGITS}, "'A'"),
+    ({"text": "1 2", **ICON_DIGITS}, "' '"),
+    ({"text": " ", "font": 25, "w": 100, "h": 80, "y": 150}, "' '"),
+])
+def test_no_glyph(over, char):
+    """A character the font does not draw as a glyph or as a blank: outside its range, or a
+    shared solid block. A space is checked like any other character."""
+    code, msg = _errors(_op(**over))
+    assert code == "NO_GLYPH" and char in msg, msg
+
+
+@pytest.mark.parametrize("text", ["FAN SPEED", "FAN\xa0SPEED", "FAN\x8dSPEED"])
+def test_blank_glyphs_are_allowed(text):
+    """In font 14 the space, NBSP and the C1 characters 0x8d etc. are blank glyphs (they
+    declare height 0, so the blitter draws nothing): they are spaces, not fallbacks."""
     from fireflymcf import rvcbutton
-    assert rvcbutton.glyph_missing(_stock(), 14, " "), "the rule this exemption is for"
+    assert all(rvcbutton.glyph_blank(_stock(), 14, c) for c in " \xa0\x8d")
+    res = _compile([_op(text=text)])
+    assert res.ok, res.errors
+    _obj, recs = _label_object(res.data)
+    assert recs[0].label == text
+
+
+def test_glyph_blank_is_per_font():
+    from fireflymcf import rvcbutton
+    stock = _stock()
+    assert rvcbutton.glyph_blank(stock, 14, " ")
+    assert not rvcbutton.glyph_blank(stock, 14, "A")       # inked
+    assert not rvcbutton.glyph_blank(stock, 21, " ")       # not covered
+    assert not rvcbutton.glyph_blank(stock, 25, " ")       # a solid block
+    assert not rvcbutton.glyph_blank(stock, 0xFE, " ")     # no font
+
+
+@pytest.mark.parametrize("over,code,why", [
+    ({"text": " "}, "BAD_PARAMS", "no visible character"),
+    ({"text": "\xa0 \x8d"}, "BAD_PARAMS", "no visible character"),
+    ({"text": " ", "font": 0xFE}, "NO_GLYPH", "no font"),
+    ({"text": "FAN", "font": 0x30}, "NO_GLYPH", "no font"),
+])
+def test_invisible_text_or_missing_font(over, code, why):
+    got, msg = _errors(_op(**over))
+    assert got == code and why in msg, msg
+
+
+@pytest.mark.parametrize("text", ["\n", "FAN\n", "\nFAN", "FAN\n\nSPEED"])
+def test_empty_line_refused(text):
+    code, msg = _errors(_op(text=text, h=80))
+    assert code == "BAD_PARAMS" and "empty line" in msg, msg
+
+
+def test_text_over_254_bytes_refused():
+    code, msg = _errors(_op(text="F" * 255))
+    assert code == "BAD_PARAMS" and "at most 254" in msg, msg
 
 
 def test_off_canvas():
@@ -253,7 +302,6 @@ def test_verify_catches_tampering(monkeypatch):
         tamper(bad)
         with pytest.raises(AssertionError):
             op.verify(bytes(bad), ctx)
-        assert name
 
 
 def test_verify_catches_a_leaked_state(monkeypatch):
@@ -275,3 +323,44 @@ def test_verify_catches_a_leaked_state(monkeypatch):
             op.verify(bytes(bad), ctx)
     finally:
         h["restore"] = restore
+
+
+def test_verify_reads_every_field_apply_placed(monkeypatch):
+    """v-align, the transparent background, the fill's radius and second ink, and the attach's
+    own geometry: each corrupted after apply is caught."""
+    seen = _spy_apply(monkeypatch)
+    res = _compile([_op(background=[65, 81, 163])])
+    assert res.ok, res.errors
+    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    op.verify(data, ctx)
+    gs, tab = _gs_tab(data)
+    obj, recs = _label_object(data)
+    fill, lab = recs[0], recs[1]
+    attach = records.object_records(data, gs + tab[CLIMATE_ROOT])[-1]
+    assert attach.child_index == obj
+    r49 = data.index(bytes([1, 14, 0xFF, 1, 2, 0x14, 0]), lab.offset) + 4     # v_align
+    other = theme.resolve_fill_index(data, color=(254, 197, 45))
+
+    def vbyte(b):
+        b[r49] = 1
+
+    def opaque(b):                       # fillB mode 5 (transparent) -> 0 (no inline either)
+        b[lab.offset + 3] &= ~(7 << 3)
+
+    def radius(b):
+        struct.pack_into("<h", b, fill.geom_off[4], 3)
+
+    def ink2(b):
+        frag = recipe_ops.pd._set_mode(bytes(data[fill.offset:fill.end]), "fillA2", 7,
+                                       struct.pack("<H", other))
+        assert len(frag) == fill.size
+        b[fill.offset:fill.end] = frag
+
+    def attach_geom(b):                  # base modes [0,0,1,1] -> [1,1,1,1]
+        b[attach.offset + 1] = 0x55
+    for name, tamper in (("v_align", vbyte), ("fillB", opaque), ("radius", radius),
+                         ("fillA2", ink2), ("attach", attach_geom)):
+        bad = bytearray(data)
+        tamper(bad)
+        with pytest.raises(AssertionError):
+            op.verify(bytes(bad), ctx)

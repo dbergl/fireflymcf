@@ -184,6 +184,24 @@ def glyph_missing(data: bytes, slot: int, char: str) -> bool:
                for c in range(font.first, font.first + font.count) if c != ord(char))
 
 
+def glyph_blank(data: bytes, slot: int, char: str) -> bool:
+    """`char` in font `slot` is a blank glyph: the font covers it and its glyph declares height
+    0, so the blitter (`FUN_002510C0`, `glyphs.decode_glyph`) draws no rows and the text
+    advances by its width. In 13.6 that is the space in fonts 0-20 and the latin-1 blanks that
+    share its shape (NBSP, 0x8d, 0x8f, 0x90, 0x9d in fonts 10-17). `glyph_missing` reports
+    these as missing (a decode error); a text label treats them as spaces. False when the slot
+    has no font, the font does not cover `char` (a fallback), or the glyph has rows (font 25's
+    space is its solid 72x72 block)."""
+    try:
+        font = glyphs.font_for_slot(data, slot)
+    except glyphs.GlyphError:
+        return False
+    if not font.covers(ord(char)):
+        return False
+    offset, _extent = glyphs.glyph_extent(data, font.glyph_index(ord(char)))
+    return data[offset + glyphs.OFF_WIDTH] >= 1 and data[offset + glyphs.OFF_HEIGHT] == 0
+
+
 def glyph_record(dx: int, dy: int, slot: int, char: str) -> bytes:
     """A wtype-0 single character `char` in font `slot` at `(dx, dy)` from the flow origin,
     align 1 (left: the pen is the bitmap's left edge in class 2 and the cell's baseline row, see
