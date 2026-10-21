@@ -248,6 +248,21 @@ def test_a_control_character_glyph_draws():
     assert y + inset <= gy0 and gy1 <= y + h - inset
 
 
+def test_a_glyph_with_an_x_bearing_says_it_assumes_class_2():
+    """Font 24's `C` has an 11-px x bearing. Its horizontal placement holds only while the page
+    measures in class 2 (GUICODE Finding 84; under class 1 the ink lands 11 px right), and
+    nothing checks the page's class, so the manifest says so."""
+    res = _ok([_glyph_op(text=None, glyph={"slot": 24, "char": "C"})])
+    (line,) = [m for m in res.manifest if m.startswith("add_rvc_button")]
+    assert "x bearing 11 px" in line and "measuring class 2" in line, line
+
+
+def test_a_glyph_without_an_x_bearing_makes_no_class_claim():
+    res = _ok([GLYPH_OP, _glyph_op(text=None)])
+    (line,) = [m for m in res.manifest if m.startswith("add_rvc_button")]
+    assert "class" not in line, line
+
+
 def test_glyph_too_big_for_the_box():
     assert "BAD_PARAMS" in _errors([GLYPH_OP, _glyph_op(text="Pump", h=40)])
 

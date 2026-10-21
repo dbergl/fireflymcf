@@ -6696,7 +6696,8 @@ class AddAesBattHeat(Op):
             "binding_start": binding_start,
             "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
-            "glyph": None, "font": None, "parent": aescompact.ELECTRICAL_AES_BODY,
+            "glyph": None, "glyph_x_bearing": 0, "font": None,
+            "parent": aescompact.ELECTRICAL_AES_BODY,
             "placement": "append", "toggle": None,
             # the keys an `add_rvc_button` handle carries, with the values this preset builds:
             # the static fill index's colour (None when this build's palette does not resolve
@@ -8327,6 +8328,12 @@ class AddRvcButton(Op):
                 font=self.font, fill_index=fill, x=self.x, y=self.y, glyph_image=out)
         except ValueError as e:                  # RvcButtonError: a box its content cannot fit
             raise self._bad(str(e))
+        # The glyph's pen is placed by the class-2 horizontal rule (`metrics.wt0_ink_offset`);
+        # under class 1 the ink lands this many px further right. Nothing checks the page's
+        # class, so a nonzero shift is named in the manifest.
+        x_bearing = 0 if self.glyph is None else (
+            metrics.wt0_ink_offset(out, *self.glyph, char_class=1)[0]
+            - metrics.wt0_ink_offset(out, *self.glyph)[0])
         try:
             placed, place_edits, index = rvcbutton.place(out, parent=parent, x=self.x, y=self.y,
                                                          frags=frags, mode="attach")
@@ -8369,7 +8376,7 @@ class AddRvcButton(Op):
                        else {"off_payload": self.off, "on_payload": self.on}),
             "parent": parent, "placement": "attach",
             "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
-            "tap": self.tap, "hold": self.hold,
+            "tap": self.tap, "hold": self.hold, "glyph_x_bearing": x_bearing,
         }
         return out
 
@@ -8449,9 +8456,14 @@ class AddRvcButton(Op):
                     assert boxes[0] == want_box, \
                         "root %d (arms %s) draws the box at %s" % (root, values, boxes[0])
         assert drawn, "no walk of roots %s reaches the button object %d" % (roots, h["object"])
-        return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
+        line = ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
                 "UNVERIFIED on the coach"
                 % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
+        if h.get("glyph_x_bearing"):
+            line += ("; the glyph has an x bearing %d px: its horizontal placement assumes the "
+                     "page draws it in measuring class 2 (in class 1 it lands %d px right; "
+                     "GUICODE Finding 84)" % (h["glyph_x_bearing"], h["glyph_x_bearing"]))
+        return line
 
 
 def _palette_rgb(data, index):

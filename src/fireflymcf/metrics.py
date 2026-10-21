@@ -186,19 +186,24 @@ def class_flags_char(char_class: int, char: str) -> bool:
 def wt0_ink_offset(data: bytes, slot: int, char: str, *, char_class: int = 2,
                    table: "glyphs.GlyphTable | None" = None) -> tuple[int, int]:
     """`(dx, dy)` from a wtype-0 record's pen to the top-left pixel of its one character's
-    bitmap, left-aligned (persistent align 0/1). `proven-from-code`, GUICODE Finding 84:
+    bitmap, left-aligned (persistent align 0/1). GUICODE Finding 84:
 
-    * vertical: `FUN_002557C0` takes the cell top as `pen_y - font[0x0b]` (`0x255810`
-      `ldrb r4,[r1,#0xb]`, `0x255812` `subs r3,r3,r4`) and the blitter `FUN_002510C0` adds the
-      glyph's `+0x0c` bearing, so `dy = glyph.y - font.top`. The pen is `font.top` rows below
-      the cell's top (the baseline; the last row of an icon font's cell), not the top;
-    * horizontal: the blitter adds the glyph's `+0x0a` bearing to the pen offset
+    * vertical, `proven-from-code` in every class: `FUN_002557C0` takes the cell top as
+      `pen_y - font[0x0b]` (`0x255810` `ldrb r4,[r1,#0xb]`, `0x255812` `subs r3,r3,r4`) and the
+      blitter `FUN_002510C0` adds the glyph's `+0x0c` bearing, so `dy = glyph.y - font.top`.
+      The pen is `font.top` rows below the cell's top (the baseline; the last row of an icon
+      font's cell), not the top;
+    * horizontal, `proven-from-code` given the class (`char_class`; which class a given page
+      draws in is inferred): the blitter adds the glyph's `+0x0a` bearing to the pen offset
       `FUN_002518F8` seeds for the first character, which is `-glyph[0x0a]` (`-glyph[0]` under
       the glyph's `+0x0e` bit 0) when `FUN_00251AA0` flagged it and 0 otherwise. So `dx` is 0
       (`x - left[0]` under the bit) for a flagged character and `glyph.x` for an unflagged one.
 
     The measuring class is runtime render state (`+0x0A`, reset to 2 at every screen paint and
-    rewritten by a record whose header byte 4 has low bits set; Finding 78); 2 is the default.
+    rewritten by a record whose header byte 4 has low bits set; Finding 78); 2 is the default,
+    and nothing here checks that a page is in it. The exposure is a glyph with a nonzero x
+    bearing, which lands that many px right under class 1: on 13.6, 20 of icon font 24's 33
+    glyphs and 8 of font 25's 52 (Finding 84 lists them).
     Centre and right align (2/3) further shift the pen by the measured width (`aligned_x0`).
     """
     font = glyphs.font_for_slot(data, slot, table=table)
