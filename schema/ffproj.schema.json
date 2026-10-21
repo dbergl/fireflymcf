@@ -1900,7 +1900,7 @@
                   "refresh": {
                     "type": "integer",
                     "default": 3,
-                    "description": "staleness class 0..3"
+                    "description": "staleness class: 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never expires. Use 1 or 2 for a live status"
                   },
                   "instance": {
                     "type": "integer",

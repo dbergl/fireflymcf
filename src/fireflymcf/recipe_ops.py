@@ -5350,6 +5350,16 @@ class AppendFilter(Op):
     A new var is NOT drawable by naming its index as a widget `value_slot` (that indexes the
     display-cell table); feed a cell from its slot with `add_register_readout`.
 
+    `refresh` is the entry's staleness class (`MCF-FORMAT.md` §5.4a, `ubfx sl,r0,#2,#2`
+    @`0x0021C9B6`): 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never. When the class's time passes with
+    no matching frame, `FUN_0021C374` defaults the slot to 0xFFFF and what it feeds reads "no
+    data" (an `add_button_status` arm draws off). The default, 3, never expires: the slot keeps
+    the last value it received until the panel reboots. That suits a value that is sent only
+    when it changes. For a live status from a device that can go silent, pass 1 or 2 (stock's
+    thermostat and temperature entries are class 2). On hardware, a class-3 append of a
+    thermostat's fan speed kept its buttons lit after the publisher stopped, while the stock
+    class-2 temperature readouts on the same page went back to their no-data text.
+
     Error codes:
       APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
     """
@@ -5364,7 +5374,9 @@ class AppendFilter(Op):
             "dgn": {"type": "integer", "description": "18-bit DGN to receive"},
             "mode": {"type": "integer", "description": "extraction mode (statusbind.LIVE_MODES)"},
             "payload_byte": {"type": "integer", "description": "payload byte the mode reads"},
-            "refresh": {"type": "integer", "default": 3, "description": "staleness class 0..3"},
+            "refresh": {"type": "integer", "default": 3,
+                        "description": "staleness class: 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never "
+                                       "expires. Use 1 or 2 for a live status"},
             "instance": {"type": "integer", "default": 255,
                         "description": "filter value for +4; 255 = no filter"},
             "compare_byte": {"type": "integer", "default": 255,
