@@ -116,7 +116,8 @@ countdown, not a touch gesture.)*
 | What you want | How | The choices you have | Status |
 |---|---|---|---|
 | Make a labelled control command a **different** G12 output channel | [`remap_channel`](RECIPE-OPS.md#remap_channel) | Give the control label and the destination channel. `move_display_list` (coach-proven) moves the status variable too; the plain indicator retarget is **unverified**. | Proven with `move_display_list` |
-| Narrow a receive filter so a readout listens to just **one** RV-C instance | [`pin_filter_instance`](RECIPE-OPS.md#pin_filter_instance) | Give the variable-table entry and the instance to match. Useful when two publishers collide and the last frame wins. | Proven |
+| Narrow a receive filter so a readout listens to just **one** RV-C instance | [`pin_filter_instance`](RECIPE-OPS.md#pin_filter_instance) | Give the variable-table entry and the instance to match; `from_instance` re-pins an entry that already compares one instance to another device's. Useful when two publishers collide and the last frame wins. | Proven |
+| Re-point a stock control's bindings at another instance (e.g. the arrows of a setpoint), keeping its variants and step codes | [`set_binding_bytes`](RECIPE-OPS.md#set_binding_bytes) | Give the command group, the DGN (asserted), which of its bindings (`all` or positions) and, per wire payload byte 0-7, the expected old value and the new one. Every old value is checked, so a project written against one build fails loudly on another. | Unverified |
 
 ## Whole-page reworks (build-specific)
 

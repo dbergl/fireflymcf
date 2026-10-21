@@ -62,6 +62,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Flashed with `move_display_list` (PC.13-16). The default indicator retarget is "
         "UNVERIFIED.",
         "`BUS-BASELINE.md` PC.13-PC.16; `CompileResult.unverified`"),
+    "set_binding_bytes": ("same-size",
+        "Rewrite chosen wire payload bytes of a command group's existing bindings, asserting "
+        "each old value.",
+        "UNVERIFIED.", "`newbutton.binding_payload`"),
     "tank_heater_names": ("same-size",
         "Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. "
         "Trade: SY loses Grey, WT loses Black.",
