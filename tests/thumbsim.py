@@ -13,6 +13,8 @@ class _Unsupported(Exception):
 class Sim:
     STATE_BASE = 0x20050000        # r4 on entry: the GuiCode state pointer
     STACK_TOP = 0x2007F000
+    SETTER_PTR = 0x20039908        # GuiCode's &(fn-ptr to setVariant), followchannel.VARIANT_SETTER
+    SETTER_FN = 0x00500001         # a fake Thumb fn address seeded there; `blx` to it is recorded
 
     def __init__(self, blob, code_load, disasm):
         self.mem = bytearray(0x100000)          # 0x20000000-0x200FFFFF, byte addressable
@@ -23,6 +25,8 @@ class Sim:
         self.code = {a: t for a, t in disasm}
         self.entry = disasm[0][0]
         self.sent = []
+        self.calls = []                         # (r0, r1) of every setVariant call, in order
+        self.wr(self.SETTER_PTR, self.SETTER_FN, 4)
         self.clock = 0
         self.regs = [0] * 16
         self.steps = 0
@@ -87,17 +91,22 @@ class Sim:
             if m:
                 pc = int(m.group(1), 16)
                 continue
-            m = re.fullmatch(r"b(eq|ne|lo|hs|ls) #(0x[0-9a-f]+)", t)
+            m = re.fullmatch(r"b(eq|ne|lo|hs|ls|hi) #(0x[0-9a-f]+)", t)
             if m:
                 # ls == "unsigned lower or same" == C clear OR Z set
                 cond = {"eq": z, "ne": not z, "lo": not c, "hs": c,
-                        "ls": (not c) or z}[m.group(1)]
+                        "ls": (not c) or z, "hi": c and not z}[m.group(1)]
                 pc = int(m.group(2), 16) if cond else nxt
                 continue
             m = re.fullmatch(r"ldr r(\d), \[pc(?:, #(0x[0-9a-f]+))?\]", t)
             if m:
                 off = int(m.group(2), 16) if m.group(2) else 0
                 r[int(m.group(1))] = self.rd(((pc + 4) & ~3) + off, 4)
+                pc = nxt
+                continue
+            m = re.fullmatch(r"ldr\.w r(\d+), \[pc, #(-?0x[0-9a-f]+|-?\d+)\]", t)
+            if m:
+                r[int(m.group(1))] = self.rd(((pc + 4) & ~3) + int(m.group(2), 0), 4)
                 pc = nxt
                 continue
             m = re.fullmatch(r"(ldr|ldrh|ldrb|ldr\.w) r(\d), \[r(\d)(?:, #(0x[0-9a-f]+|\d+))?\]", t)
@@ -199,6 +208,14 @@ class Sim:
                 for i in (0, 1, 2, 3):
                     r[i] = 0xDEADBEEF                 # AAPCS: the callee may clobber r0-r3
                 r[14] = 0xDEADBEEF
+                pc = nxt
+                continue
+            if t == "blx r3":
+                if r[3] != self.SETTER_FN:
+                    raise _Unsupported(f"blx r3 to {r[3]:#x}, not the seeded setter")
+                self.calls.append((r[0], r[1]))
+                for i in (0, 1, 2, 3, 12, 14):
+                    r[i] = 0xDEADBEEF                 # AAPCS: the callee may clobber these
                 pc = nxt
                 continue
             raise _Unsupported(f"unsupported instruction {t!r} at {pc:#x}")

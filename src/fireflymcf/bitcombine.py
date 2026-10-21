@@ -27,7 +27,6 @@ it authored, exactly as `readout.build` and `followchannel.build` do.
 """
 from __future__ import annotations
 
-import struct
 from dataclasses import dataclass
 
 from . import followchannel, readout, theme, thumb
@@ -96,8 +95,8 @@ def resolve(data: bytes, *, sources, cell: readout.DisplayCell) -> CombinePlan:
 def build(plan: CombinePlan, code_load_addr: int) -> tuple[bytes, list]:
     """The per-tick fold: `cell = sum(weight for each live source whose masked field is set)`.
 
-    Same stream/label/pool builder as `readout.build`; the blob is verified instruction for
-    instruction by `thumb.assert_disassembles_to` before it is returned.
+    Same stream/label/pool shape as `readout.build`, assembled by `thumb.Routine`; the blob is
+    verified instruction for instruction by `thumb.assert_disassembles_to` before it is returned.
     """
     if code_load_addr % 4:
         raise BitCombineError(f"code_load_addr {code_load_addr:#x} is not 4-aligned")
@@ -105,26 +104,16 @@ def build(plan: CombinePlan, code_load_addr: int) -> tuple[bytes, list]:
     def imm(v: int) -> str:
         return f"{v:#x}" if v >= 10 else str(v)
 
-    pool_order = ["slot%d" % i for i in range(len(plan.sources))] + ["cell"]
-    pool_val = {"slot%d" % i: s.slot_addr for i, s in enumerate(plan.sources)}
-    pool_val["cell"] = plan.cell.addr
-    stream: list = []
-
-    def emit(size, fn):
-        stream.append(("ins", size, fn))
-
-    def label(name):
-        stream.append(("lbl", name))
-
-    def ldrlit_text(rt, here, target):
-        off = target - ((here + 4) & ~3)
-        return f"ldr r{rt}, [pc, #{off:#x}]" if off else f"ldr r{rt}, [pc]"
+    pool = {"slot%d" % i: s.slot_addr for i, s in enumerate(plan.sources)}
+    pool["cell"] = plan.cell.addr
+    r = thumb.Routine(pool, error=BitCombineError)
+    emit = r.emit
 
     emit(2, lambda h, s: (thumb.push_reglist([0, 1, 2, 3, 14]), "push {r0, r1, r2, r3, lr}"))
     emit(2, lambda h, s: (thumb.movs_imm(1, 0), "movs r1, #0"))
     for i, src in enumerate(plan.sources):
-        nxt, pool = "next%d" % i, "slot%d" % i
-        emit(2, lambda h, s, p=pool: (thumb.ldr_literal(0, h, s(p)), ldrlit_text(0, h, s(p))))
+        nxt = "next%d" % i
+        r.ldr_lit(0, "slot%d" % i)
         emit(2, lambda h, s: (thumb.ldrh_imm(3, 0, 0), "ldrh r3, [r0]"))
         emit(4, lambda h, s: (thumb.movw(2, followchannel.STALE_SENTINEL),
                               f"movw r2, #{followchannel.STALE_SENTINEL:#x}"))
@@ -135,46 +124,12 @@ def build(plan: CombinePlan, code_load_addr: int) -> tuple[bytes, list]:
         emit(2, lambda h, s: (thumb.ands_reg(3, 2), "ands r3, r2"))
         emit(2, lambda h, s, n=nxt: (thumb.bcc_n(h, s(n), "eq"), f"beq #{s(n):#x}"))
         emit(2, lambda h, s, w=src.weight: (thumb.adds_imm8(1, w), f"adds r1, #{imm(w)}"))
-        label(nxt)
-    emit(2, lambda h, s: (thumb.ldr_literal(0, h, s("cell")), ldrlit_text(0, h, s("cell"))))
+        r.label(nxt)
+    r.ldr_lit(0, "cell")
     emit(2, lambda h, s: (thumb.strh_imm(1, 0, 0), "strh r1, [r0]"))
     emit(4, lambda h, s: (thumb.pop_w_reglist([0, 1, 2, 3, 14]), "pop.w {r0, r1, r2, r3, lr}"))
     emit(4, lambda h, s: (thumb.b_w(h, plan.tail_target), f"b.w #{plan.tail_target:#x}"))
-
-    labels: dict = {}
-    code_len = 0
-    for item in stream:
-        if item[0] == "lbl":
-            labels[item[1]] = code_len
-        else:
-            code_len += item[1]
-    entry = code_load_addr + readout.ENTRY_OFF
-    pool_off = (readout.ENTRY_OFF + code_len + 3) & ~3
-    pool_abs = {n: code_load_addr + pool_off + i * 4 for i, n in enumerate(pool_order)}
-
-    def sym(name):
-        return entry + labels[name] if name in labels else pool_abs[name]
-
-    code = bytearray()
-    expected: list = []
-    for item in stream:
-        if item[0] == "lbl":
-            continue
-        _k, size, fn = item
-        raw, text = fn(entry + len(code), sym)
-        if len(raw) != size:
-            raise BitCombineError(f"size mismatch at {entry + len(code):#x}: {text!r}")
-        code += raw
-        expected.append(text)
-    thumb.assert_disassembles_to(bytes(code), entry, expected)
-
-    blob = bytearray(code)
-    while len(blob) < pool_off:
-        blob += b"\x00"
-    for n in pool_order:
-        blob += struct.pack("<I", pool_val[n])
-    assert len(blob) % 4 == 0
-    return bytes(blob), thumb.disassemble(bytes(code), entry)
+    return r.assemble(code_load_addr, readout.ENTRY_OFF)
 
 
 def detour_edit(plan: CombinePlan, code_load_addr: int) -> tuple[int, bytes, bytes]:
