@@ -155,8 +155,11 @@ def glyph_missing(data: bytes, slot: int, char: str) -> bool:
     fallback glyph, `glyphs.Font.glyph_index`), resolves to the shared placeholder
     (`glyphs.decode_glyph` raises, `AddCornerMark`'s check), or to a solid full-coverage block
     another character shares (icon font 24 marks its unused characters that way,
-    `InstallGlyph._unused_block`)."""
-    font = glyphs.font_for_slot(data, slot)
+    `InstallGlyph._unused_block`), or the slot has no font at all."""
+    try:
+        font = glyphs.font_for_slot(data, slot)
+    except glyphs.GlyphError:             # no font descriptor for the slot: nothing to draw
+        return True
     if not font.covers(ord(char)):
         return True
     gi = font.glyph_index(ord(char))

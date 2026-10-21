@@ -215,7 +215,8 @@ def test_glyph_too_big_for_the_box():
     ([_op(tap={"payload": "07f6ffffffffff"})], "BAD_PARAMS"),
     ([_op(hold={"payload": HOLD, "seconds": 3}, group_pool="free")], "BAD_PARAMS"),
     ([_op(glyph={"slot": 27, "char": "E"})], "NO_GLYPH"),
-    ([_glyph_op()], "NO_GLYPH"),                                 # icon font 24's unused block
+    ([_glyph_op()], "NO_GLYPH"),
+    ([_glyph_op(glyph={"slot": 200, "char": "A"})], "NO_GLYPH"),  # no font descriptor                                 # icon font 24's unused block
     ([_op(colour=[1, 2, 3])], "NO_BODY_COLOUR"),
     ([_op(x=102, y=281)], "TOUCH_OVERLAP"),                      # HOME's Fresh tank button
     ([_op(x=760)], "OFF_CANVAS"),
