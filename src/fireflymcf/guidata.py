@@ -731,7 +731,7 @@ def _object_tables(data: bytes, min_run: int) -> list[list[int]]:
             if len(run) >= min_run]
 
 
-def object_table_offset(data: bytes, index: int) -> int:
+def object_table_offset(data: bytes, index: int, table: list[int] | None = None) -> int:
     """Section-relative offset of object-pointer table `index` (the position of the table
     itself, not of the objects it names).
 
@@ -743,9 +743,11 @@ def object_table_offset(data: bytes, index: int) -> int:
 
     Located the same way `object_tables` locates the runs -- by matching the table's first
     entries as consecutive `0x900XXXXX` words -- so it follows the table wherever it moved.
+    `table`, when given, is `object_tables(data)[index]` already in hand (not rescanned).
     """
     section_start, section_end = guidata_extent(data)
-    table = object_tables(data)[index]
+    if table is None:
+        table = object_tables(data)[index]
     if not table:
         raise ValueError("table %d is empty" % index)
     want = struct.pack("<%dI" % min(4, len(table)),
@@ -1739,7 +1741,8 @@ def find_match_table(data: bytes) -> int:
     a score of at least `MATCH_TABLE_MIN_SCORE`.
     """
     gs, ge = guidata_extent(data)
-    n = len(object_tables(data)[1])
+    table1 = object_tables(data)[1]
+    n = len(table1)
     m = (ge - gs) // 2
     if n == 0 or m < n:
         raise MatchTableNotFound(
@@ -1758,7 +1761,7 @@ def find_match_table(data: bytes) -> int:
     run_csum = np.concatenate(([0], np.cumsum(run_start)))
 
     try:
-        end = object_table_offset(data, 1) // 2
+        end = object_table_offset(data, 1, table1) // 2
     except (ValueError, IndexError):
         end = None
     if end is not None and 0 < end <= m:
