@@ -65,7 +65,7 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "set_binding_bytes": ("same-size",
         "Rewrite chosen wire payload bytes of a command group's existing bindings, asserting "
         "each old value.",
-        "UNVERIFIED.", "`newbutton.binding_payload`"),
+        "UNVERIFIED. Bench check: the arrows send instance N in both variants (candump).", "`newbutton.binding_payload`"),
     "tank_heater_names": ("same-size",
         "Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. "
         "Trade: SY loses Grey, WT loses Black.",
@@ -117,7 +117,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "`gestures.py`, `CONTROL-BEHAVIOR.md`"),
     "pin_filter_instance": ("same-size",
         "Narrow a receive-filter entry from any device to one RV-C instance (one byte).",
-        "Flashed (2026-09-04 onward). Motivated by PC.46.", "`BUS-BASELINE.md` PC.46"),
+        "Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that "
+        "already compares one instance to another) is UNVERIFIED. Bench check: the readouts follow "
+        "instance N's frames and ignore instance 0's (injected pair).", "`BUS-BASELINE.md` PC.46"),
     "remove_control": ("same-size",
         "Park a control off the 480 px canvas by rewriting its attach records' y. Bindings "
         "stay.",
@@ -240,14 +242,15 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Draw captioned live readouts (caption over a right-justified value and its unit) inside an "
         "aes_card_layout card; each value names a draw:false add_register_readout cell or an "
         "existing display slot. Attached to 829 directly after the card titles.",
-        "Flashed 2026-10-15: the readouts are live on the coach.",
+        "Flashed 2026-10-15: the readouts are live on the coach. The `parent` param (any page "
+        "object, default 829) is UNVERIFIED.",
         "`cardreadouts.py`, `readout.py`"),
     "add_enum_label": ("structural",
         "Show a received value as text from a table (1-16 entries plus a default for stale and "
         "unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted "
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
         "(optionally on a fill) attached under `parent`.",
-        "UNVERIFIED.", "`enumlabel.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
         "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
@@ -255,14 +258,14 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, "
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
-        "UNVERIFIED.", "`rvcbutton.py`, `enumlabel.py`"),
+        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo).", "`rvcbutton.py`, `enumlabel.py`"),
     "add_button_status": ("structural",
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
         "above valid_max reads off) into its own fresh cell, and each button's static body "
         "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); "
         "a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.",
-        "UNVERIFIED.", "`statelights.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).", "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "

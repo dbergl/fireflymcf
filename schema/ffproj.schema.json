@@ -1762,7 +1762,7 @@
                       "free",
                       "hold_safe"
                     ],
-                    "description": "where the group comes from (default hold_safe with a hold, else free)"
+                    "description": "where the group comes from (default hold_safe when hold or toggle is given, else free)"
                   }
                 },
                 "required": [

@@ -7937,8 +7937,8 @@ class AddRvcButton(Op):
             "colour": {"type": "array", "default": [0x41, 0x51, 0xA3],
                        "description": "[r, g, b] body fill; a palette colour"},
             "group_pool": {"type": "string", "enum": list(rvcbutton.POOLS),
-                           "description": "where the group comes from (default hold_safe with a "
-                                          "hold, else free)"},
+                           "description": "where the group comes from (default hold_safe "
+                                          "when hold or toggle is given, else free)"},
         },
         "required": ["parent", "x", "y", "w", "h", "dgn"],
     }
