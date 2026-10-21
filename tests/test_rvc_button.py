@@ -320,6 +320,23 @@ def test_parent_reached_only_through_a_switch_arm():
     assert any("under 904" in m for m in res.manifest), res.manifest
 
 
+def test_batt_heat_free_pool_never_takes_a_guicode_driven_group(monkeypatch):
+    """`add_aes_batt_heat`'s `free` pool is `assignable_groups`, not `free_group_slots`: with
+    only GuiCode-driven slots left (13.6's 136-139), the op runs dry as NO_FREE_GROUP rather
+    than handing out 136 for the finish gate to refuse."""
+    data = STOCK.read_bytes()
+    driven = sorted({136, 137, 138, 139} & set(newbutton.guicode_selected_groups(data)))
+    assert driven == [136, 137, 138, 139]
+    monkeypatch.setattr(newbutton, "free_group_slots", lambda _data: list(driven))
+    res = _compile([{"id": "aesswap", "type": "swap_aes_electrical", "enabled": True,
+                     "params": {}},
+                    {"id": "battheat", "type": "add_aes_batt_heat", "enabled": True,
+                     "params": {}}])
+    assert not res.ok
+    assert (res.errors[0]["code"], res.errors[0]["op_id"]) == ("NO_FREE_GROUP", "battheat"), \
+        res.errors
+
+
 def test_free_pool_never_offers_a_guicode_driven_group():
     """The `free` pool used to hand out 13.6's 136-139 once the lower slots were taken, and the
     finish gate (`recipe._assert_no_guicode_selected_group_reused`) then failed the whole build
