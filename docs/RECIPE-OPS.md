@@ -870,9 +870,9 @@ Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more
 
 Error codes:
 
-- `BAD_PARAMS` — a malformed param: an empty, non-latin-1 or over-254-byte text, an unknown align, a non-positive box, or text that does not fit the box (the message names the line too wide, or the lines too tall).
+- `BAD_PARAMS` — a malformed param: an empty, non-latin-1 or over-254-byte text, an empty line (a leading, trailing or doubled '\n'), a text with no visible character (only blank glyphs), an unknown align, a non-positive box, or text that does not fit the box (the message names the line too wide, or the lines too tall).
 - `BAD_REF` — a `parent` ref names no usable handle.
-- `NO_GLYPH` — a character (other than the space) the font cannot draw.
+- `NO_GLYPH` — the font slot has no font, or a character the font draws neither as a glyph nor as a blank (it would draw a fallback).
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
 - `OFF_CANVAS` — the box leaves the 800x480 canvas.
 - `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.

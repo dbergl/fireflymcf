@@ -8131,10 +8131,13 @@ class AddTextLabel(_LabelBox, Op):
     any change besides the label's own records refuses, and so does a record inheriting a value
     slot from a wtype-5 attach above it (`_pasted_inherited_slots`).
 
-    Every character but the space is checked against the font (`rvcbutton.glyph_missing`): a
-    label is free text in any font, so an ASCII character is not assumed present (unlike
-    `add_card_readouts`, whose ASCII captions are what every flashed readout drew); the space is
-    exempt because a blank glyph reads as missing.
+    Every character is checked against the font: a label is free text in any font, so an ASCII
+    character is not assumed present (unlike `add_card_readouts`, whose ASCII captions are what
+    every flashed readout drew). A blank glyph (`rvcbutton.glyph_blank`: covered, declaring
+    height 0, so nothing is drawn; the space in fonts 0-20, NBSP and the C1 blanks sharing its
+    shape) draws as a space; anything else `rvcbutton.glyph_missing` reports draws a fallback
+    and is refused, the space included where the font lacks one (fonts 21-24, 26-28) or draws
+    it as a block (font 25). A text must draw at least one visible character.
 
     Params:
       parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
@@ -8147,10 +8150,13 @@ class AddTextLabel(_LabelBox, Op):
 
     Error codes:
       BAD_PARAMS     -- a malformed param: an empty, non-latin-1 or over-254-byte text, an
-                        unknown align, a non-positive box, or text that does not fit the box
-                        (the message names the line too wide, or the lines too tall).
+                        empty line (a leading, trailing or doubled '\\n'), a text with no
+                        visible character (only blank glyphs), an unknown align, a
+                        non-positive box, or text that does not fit the box (the message names
+                        the line too wide, or the lines too tall).
       BAD_REF        -- a `parent` ref names no usable handle.
-      NO_GLYPH       -- a character (other than the space) the font cannot draw.
+      NO_GLYPH       -- the font slot has no font, or a character the font draws neither as a
+                        glyph nor as a blank (it would draw a fallback).
       NO_COLOUR      -- `colour` or `background` is not in this build's palette.
       OFF_CANVAS     -- the box leaves the 800x480 canvas.
       LAYOUT_REFUSED -- the placement changes any other record on a page reaching `parent`; a
@@ -8189,16 +8195,28 @@ class AddTextLabel(_LabelBox, Op):
                             "the font)" % (self.text,))
         if len(raw) > 254:
             raise self._bad("text is %d bytes; a label holds at most 254" % len(raw))
+        if "" in self.text.split("\n"):
+            raise self._bad("text %r has an empty line (a leading, trailing or doubled '\\n')"
+                            % (self.text,))
         self._refuse_off_canvas()
 
     def apply(self, data, ctx):
         oid = self.spec.id
         parent = resolve_target(ctx, self.parent)
-        bad = [c for c in self.text if c not in " \n"
-               and rvcbutton.glyph_missing(data, self.font, c)]
+        try:
+            glyphs.font_for_slot(data, self.font)
+        except glyphs.GlyphError:
+            raise RecipeError("NO_GLYPH", "font slot %d has no font in this build"
+                              % self.font, op_id=oid)
+        chars = [c for c in self.text if c != "\n"]
+        blank = {c for c in chars if rvcbutton.glyph_blank(data, self.font, c)}
+        bad = [c for c in chars if c not in blank and rvcbutton.glyph_missing(data, self.font, c)]
         if bad:
             raise RecipeError("NO_GLYPH", "font %d has no glyph for %r in %r (it would draw a "
                               "fallback)" % (self.font, bad[0], self.text), op_id=oid)
+        if all(c in blank for c in chars):
+            raise self._bad("text %r has no visible character in font %d (every glyph is "
+                            "blank)" % (self.text, self.font))
         misfit = pd.label_misfit(data, self.text, self.font, self.w, self.h)
         if misfit:
             raise self._bad("the text does not fit the %dx%d box: %s" % (self.w, self.h, misfit))
@@ -8215,10 +8233,15 @@ class AddTextLabel(_LabelBox, Op):
         _paste_gates(data, placed, parent, index, code="LAYOUT_REFUSED", whose="the label's",
                      action="placing the label", op_id=oid)
         out, _ = patch.reseal(placed)
+        gs, tab = _gs_tab(out)
+        attach = [r for r in records.object_records(out, gs + tab[parent])
+                  if r.wtype == 5 and r.child_index == index][0]
         ctx.handles[oid] = {
             "object": index, "parent": parent, "text": self.text, "x": self.x, "y": self.y,
             "w": self.w, "h": self.h, "font": self.font, "align": self.align,
             "colour_index": colour, "bg_index": bg, "restore": restore,
+            # the attach as pasted (a clone of the parent's first wtype-5): its own pen
+            "attach_geom": list(attach.geom), "attach_modes": list(attach.base_modes),
         }
         return out
 
@@ -8228,10 +8251,15 @@ class AddTextLabel(_LabelBox, Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
-        attaches = [i for i, r in enumerate(records.object_records(data, gs + tab[h["parent"]]))
+        parent_recs = records.object_records(data, gs + tab[h["parent"]])
+        attaches = [i for i, r in enumerate(parent_recs)
                     if r.wtype == 5 and r.child_index == h["object"]]
         assert len(attaches) == 1, "the label object %d is not attached once under %d" % (
             h["object"], h["parent"])
+        att = parent_recs[attaches[0]]
+        assert (list(att.geom) == h["attach_geom"]
+                and list(att.base_modes) == h["attach_modes"]), \
+            "the attach under %d does not carry the geometry it was pasted with" % h["parent"]
         recs = records.object_records(data, gs + tab[h["object"]])
         lead = [] if h["bg_index"] is None else [33]
         tail = [] if h["restore"] is None else [11]
@@ -8240,14 +8268,20 @@ class AddTextLabel(_LabelBox, Op):
         box = [h["x"], h["y"], h["w"], h["h"]]
         if lead:
             f = recs[0]
-            assert (f.geom[:4] == box and f.base_modes[:4] == [0, 0, 1, 1]
-                    and f.colors[0] == ("fillA", 7, h["bg_index"])), \
+            assert (f.geom[:5] == box + [enumlabel.FILL_RADIUS]
+                    and f.base_modes[:4] == [0, 0, 1, 1]
+                    and f.colors[:2] == [("fillA", 7, h["bg_index"]),
+                                         ("fillA2", 7, h["bg_index"])]), \
                 "the fill does not draw as built"
         lab = recs[len(lead)]
         multi = "\n" in h["text"]
         assert (lab.label == h["text"] and lab.font == h["font"] and lab.h_align == h["align"]
                 and lab.geom[:4] == box and lab.base_modes[:4] == [0, 0, 1, 1]
-                and lab.value_slot is None and ("fillA", 7, h["colour_index"]) in lab.colors
+                and lab.v_align == 2 and lab.value_slot is None
+                and [c for c in lab.colors if c[0] in ("fillA", "fillA2")] == [
+                    ("fillA", 7, h["colour_index"]), ("fillA2", 7, h["colour_index"])]
+                and [c for c in lab.colors if c[0] in ("fillB", "fillB2")] == [
+                    ("fillB", 5, None), ("fillB2", 5, None)]          # transparent
                 and (lab.line_height, lab.line_height_adds_font) == (
                     pd.MULTILINE_PITCH if multi else (0x14, 0))), \
             "the label does not draw %r in its %dx%d box at (%d, %d), font %d, ink %d as built" \
