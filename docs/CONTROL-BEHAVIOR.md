@@ -883,6 +883,9 @@ through `0x20039908`. A status reading off (or stale, or above `valid_max`) give
 button sends "on". A status reading on gives variant 1, so it sends "off". The send follows the
 last tick's status, not the press count.
 
+Two status ops driving one toggle both call `setVariant` each tick, so the last in chain order
+wins; do not drive one toggle from two status ops.
+
 **Stock does the same for Climate.** `fireflymcf bus-map --dgn 1FFE2 --detail` on 13.6 shows
 GuiCode reading var 13 (THERMOSTAT_STATUS_1, instance 0) and calling `[0x20039908]` with
 `r0 = 0x8C`, `0x8D` and `0x8F`-`0x92` (`@0x24AB7E`, `0x24AB92`, `0x24ABBA`, `0x24AC14`,

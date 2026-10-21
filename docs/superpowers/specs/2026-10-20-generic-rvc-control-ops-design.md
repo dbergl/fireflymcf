@@ -153,7 +153,10 @@ it is not a public parameter.
 
 **Toggle form.** One group with byte 1 `0x80` (no cycle on release). It has two bindings on
 `dgn`: variant 0 sends `on_payload`, and variant 1 sends `off_payload`. Both use the tap mask
-`0x06`. The op writes no routine. The variant is driven every tick by the `add_button_status`
+`0x06`. The group entry's byte 0 low nibble is 1 (the variant maximum), giving the header
+`11 80 00 00`: `FUN_0021B5E8` stores a variant only while it is at most that nibble (gate at
+0x21B5FC needs byte 1 & 0xC0 == 0x80; bound at 0x21B60A-0x21B610), so nibble 0 would refuse
+`setVariant(g, 1)`. Stock groups 129/143/146 carry `11 80 ...`. The op writes no routine. The variant is driven every tick by the `add_button_status`
 entry that lights this button, which calls `setVariant(group, lit ? 1 : 0)`. So the button sends
 "on" while its status reads off, and "off" while it reads on.
 
