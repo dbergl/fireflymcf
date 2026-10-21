@@ -3388,7 +3388,10 @@ def _refuse_foreign(before, placed, parent, index, *, code, action, own="its", o
     """The paste path's whole-page gate (`enumlabel.foreign_deltas`): raise `code` when placing
     the object `index` under `parent` changes any record on a page reaching `parent` besides
     `own` ("its" / "their") records. `action` opens the message ("placing the label")."""
-    bad = enumlabel.foreign_deltas(before, placed, parent, index)
+    try:
+        bad = enumlabel.foreign_deltas(before, placed, parent, index)
+    except guidata.MatchTableNotFound as e:
+        raise RecipeError(code, "%s under object %d: %s" % (action, parent, e), op_id=op_id)
     if bad:
         raise RecipeError(code, "%s under object %d changes %d record(s) besides %s own:\n%s"
                           % (action, parent, len(bad), own, pagewalk.describe(bad[:20])),
@@ -7260,6 +7263,7 @@ class AddCardReadouts(Op):
                 raise RecipeError("BAD_PARAMS", "row %r needs caption, unit and value "
                                   "{ref} or {slot}" % (r,), op_id=self.spec.id)
         self.rows = rows
+        self._verified_on_829 = self.hardware_verified    # before any parent narrowing
         self.geom = {k: self._param(k, d, kind=int) for k, d in
                      (("x_caption", 684), ("pen_x", 760), ("unit_x", 763), ("y0", 78),
                       ("pitch", 34))}
@@ -7316,8 +7320,10 @@ class AddCardReadouts(Op):
         h = ctx.handles[self.spec.id]
         # The status follows the RESOLVED parent, so a ref to 829 is 829's flashed path. Set
         # here, not in apply: a cache-resumed compile (`recipe.compile_cached`) skips apply but
-        # always verifies, and `recipe._finish` reads the flag after verify.
-        self.hardware_verified = h["object"] == aescompact.ELECTRICAL_AES_BODY
+        # always verifies, and `recipe._finish` reads the flag after verify. It narrows what
+        # validate() left before the parent was known; it never widens it.
+        self.hardware_verified = (self._verified_on_829
+                                  and h["object"] == aescompact.ELECTRICAL_AES_BODY)
         gs, tab = _gs_tab(data)
         frame = records.object_records(data, gs + tab[h["object"]])
         if h["object"] == aescompact.ELECTRICAL_AES_BODY:
@@ -8017,7 +8023,7 @@ class AddEnumLabel(Op):
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
-                % (h["var"], h["mask"], h["shift"], h["slot"], n + 1, got[:-1],
+                % (h["var"], h["mask"], h["shift"], h["slot"], n + 2, got[:-1],
                    h["default"], h["object"], h["parent"]))
 
 
