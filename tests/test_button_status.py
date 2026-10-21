@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from fireflymcf import (followchannel, guidata, recipe, records, register, status_map, theme,
-                        thumb)
+from fireflymcf import (followchannel, guidata, recipe, recipe_ops, records, register,
+                        status_map, theme, thumb)
 from tests.thumbsim import Sim
 
 REPO = Path(__file__).resolve().parents[1]
@@ -178,13 +178,49 @@ def test_routine_names_each_slot_cell_pair(base, built):
         assert struct.pack("<I", cell) in code
 
 
-def test_cells_are_freshly_grown(built):
-    stock_len = len(status_map.cell_table(_stock()))
-    gs, tab = _gs_tab(built)
-    n = len(tab)
-    slots = [r.value_slot for o in range(n - 6, n)
-             for r in records.object_records(built, gs + tab[o]) if r.wtype == 6]
-    assert all(s >= stock_len for s in slots)
+def test_cells_are_freshly_grown(base, built):
+    """Every switch reads a freshly grown cell index, never a reused stock one."""
+    stock = _stock()
+    stock_rows = len(status_map.cell_table(stock))
+    slots = [_switch(built, o).value_slot for o in _button_objects(base)]
+    assert len(slots) == 3
+    assert all(s >= stock_rows for s in slots), (slots, stock_rows)
+    assert not set(status_map.cell_table(built)[s] for s in slots) & set(
+        status_map.cell_table(stock))
+
+
+def _spy_apply(monkeypatch):
+    seen = {}
+    real = recipe_ops.AddButtonStatus.apply
+
+    def spy(self, data, ctx):
+        out = real(self, data, ctx)
+        seen.update(op=self, ctx=ctx, cells=set(ctx.authored_cells))
+        return out
+    monkeypatch.setattr(recipe_ops.AddButtonStatus, "apply", spy)
+    return seen
+
+
+def test_cells_are_recorded_for_the_aliasing_gate(monkeypatch):
+    seen = _spy_apply(monkeypatch)
+    _ok(BASE + [_status()])
+    slots = [b["slot"] for b in seen["ctx"].handles["st"]["buttons"]]
+    assert len(slots) == 3 and set(slots) <= seen["cells"]
+
+
+def test_verify_catches_a_tampered_routine(monkeypatch):
+    seen = _spy_apply(monkeypatch)
+    data = _ok(BASE + [_status()])
+    op, ctx = seen["op"], seen["ctx"]
+    op.verify(data, ctx)                                   # the untouched image passes
+    h = ctx.handles["st"]
+    gc = theme.guicode_section(data)
+    at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+    for k in (h["blob_len"] // 2, h["blob_len"] - 1):      # an instruction byte, a pool byte
+        bad = bytearray(data)
+        bad[at + k] ^= 0x01
+        with pytest.raises(AssertionError, match="is not the one its 3 entries build"):
+            op.verify(bytes(bad), ctx)
 
 
 def test_double_wrap_refuses():

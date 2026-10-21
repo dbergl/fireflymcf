@@ -7537,7 +7537,9 @@ class AddButtonStatus(Op):
                         "text": bh["text"], "glyph": glyph, "off_index": off, "on_index": on})
         for _e, bh, *_rest in plans:
             bh["status"] = oid                      # one status op per button
-        ctx.handles[oid] = {"buttons": lit, "entry": code_load_addr + readout.ENTRY_OFF}
+        ctx.handles[oid] = {"buttons": lit, "entry": code_load_addr + readout.ENTRY_OFF,
+                            "code_load_addr": code_load_addr, "plan": plan,
+                            "blob_len": len(blob)}
         return out
 
     def capability_delta(self, ctx):
@@ -7573,12 +7575,21 @@ class AddButtonStatus(Op):
                         "button %r: arm %d lacks the glyph" % (b["ref"], obj)
         assert h["entry"] in followchannel.chain_from_hook(data), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
+        # The routine, decoded back to its entries: rebuild it from each button's recorded
+        # fields (source address, mask, shift, compare, valid_max, cell, group) at the recorded
+        # load address and the hook state it chained on; the image must hold exactly that blob.
+        plan = h["plan"]
+        items = tuple(statusfold.Light(
+            slot_addr=b["slot_addr"], mask=b["mask"], shift=b["shift"], kind=b["kind"],
+            value=b["value"], valid_max=b["valid_max"], cell_addr=b["cell_addr"],
+            variant_group=b["variant_group"]) for b in h["buttons"])
+        assert items == plan.items, "the handle's entries differ from the plan the op built"
+        want, _ = statusfold.build(dataclasses.replace(plan, items=items), h["code_load_addr"])
         gc = theme.guicode_section(data)
-        code = data[gc.offset:gc.offset + gc.length]
-        for b in h["buttons"]:
-            assert struct.pack("<I", b["slot_addr"]) in code \
-                and struct.pack("<I", b["cell_addr"]) in code, \
-                "no routine maps var %d into cell %#x" % (b["var"], b["cell_addr"])
+        at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+        assert len(want) == h["blob_len"] and data[at:at + len(want)] == want, \
+            "the routine at %#x is not the one its %d entries build" % (h["code_load_addr"],
+                                                                     len(items))
         return ("add_button_status: %s; one routine at %#x; UNVERIFIED on the coach"
                 % ("; ".join("%r lit by var %d (mask %#x, shift %d, %s %d%s) via fresh cell %d"
                              % (b["text"], b["var"], b["mask"], b["shift"], b["kind"],
