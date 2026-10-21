@@ -7720,8 +7720,10 @@ class AddEnumLabel(Op):
     A per-tick routine (`statusfold.Enum`, one per op, chained on the per-tick hook) reads the
     source slot, masks and shifts it, and writes a display cell: the index 0..n-1 of the matching
     key, or n for stale or any value not in `values`. The label is one wtype-6 switch on that
-    cell (enrolled for live redraw) with n+1 arms matched on 0..n, the last drawing `default`;
-    every value the routine writes is matched (`enumlabel`). Each arm is a wtype-11 label in a
+    cell (enrolled for live redraw) with n+2 arms: the 0xFFFF default at the band's base, which
+    draws no text (only the `background` fill, when given), then n+1 arms matched on 0..n, the
+    last drawing `default`. Every value the routine writes is matched; the blank default is for
+    a value it never wrote (`enumlabel`). Each arm is a wtype-11 label in a
     declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
     `background` fill when one is given. The switch is absolute at `x, y`, in a new object
     attached under `parent` (`insert.insert_object`), ended by an empty label that hands back
@@ -7852,6 +7854,7 @@ class AddEnumLabel(Op):
             arms = [enumlabel.build_arm(data, text=t, font=self.font, w=self.w, h=self.h,
                                         align=self.align, colour_index=colour, bg_index=bg)
                     for t in self.texts + [self.default]]
+            blank = enumlabel.blank_arm(data, w=self.w, h=self.h, bg_index=bg)
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
         # Always a freshly grown cell (ruling R8): a reused stock index can alias another
@@ -7901,12 +7904,12 @@ class AddEnumLabel(Op):
         out, _ = patch.reseal(bytes(buf))
         try:
             placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
-                                                    arms=arms, value_slot=slot)
+                                                    arms=arms, default=blank, value_slot=slot)
             restore = self._restore(placed, parent)
             if restore is not None:
                 placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
-                                                        arms=arms, value_slot=slot,
-                                                        restore=restore)
+                                                        arms=arms, default=blank,
+                                                        value_slot=slot, restore=restore)
             bad = enumlabel.foreign_deltas(out, placed, parent, index)
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
@@ -7949,13 +7952,16 @@ class AddEnumLabel(Op):
             "the label object %d is not attached under %d" % (h["object"], h["parent"])
         sw = records.object_records(data, gs + tab[h["object"]])[0]
         n = len(h["values"])
-        assert sw.wtype == 6 and sw.value_slot == h["slot"] and sw.count == n + 1, \
-            "expected one %d-arm switch on cell %d" % (n + 1, h["slot"])
+        assert sw.wtype == 6 and sw.value_slot == h["slot"] and sw.count == n + 2, \
+            "expected one %d-arm switch on cell %d" % (n + 2, h["slot"])
         assert sw.header[4] & _ENROLL_BIT, "switch not enrolled for live redraw"
         cands = guidata.switch_candidates(data, sw, guidata.find_match_table(data))
         by_value = dict(cands)
-        assert sorted(by_value) == list(range(n + 1)) and len(cands) == n + 1, \
+        assert cands[0] == (0xFFFF, sw.child_index), "no 0xFFFF default at the base: %s" % cands
+        assert sorted(by_value) == list(range(n + 1)) + [0xFFFF] and len(cands) == n + 2, \
             "match values %s" % cands
+        blank = records.object_records(data, gs + tab[sw.child_index])
+        assert not any(r.wtype == 11 and r.label for r in blank), "the default arm draws text"
         want = [h["values"][k] for k in sorted(h["values"])] + [h["default"]]
         got = []
         for k in range(n + 1):

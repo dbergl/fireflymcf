@@ -252,7 +252,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Show a received value as text from a table (1-16 entries plus a default for stale and "
         "unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted "
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
-        "(optionally on a fill) attached under `parent`.",
+        "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
+        "`parent`.",
         "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "

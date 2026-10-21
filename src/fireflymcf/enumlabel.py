@@ -2,10 +2,13 @@
 
 `add_enum_label` draws one word per value. `statusfold` maps the received value to an index
 (0..n-1 for the table's keys, n for stale or anything else) in a display cell every tick; this
-module draws that cell as ONE wtype-6 switch with n+1 arms matched on 0..n, the last arm drawing
-the default text. Every value the routine writes is matched, so the switch never meets a value
-its match table lacks (the renderer's no-match fallback, `layout.Screen._switch_child`, is not
-relied on).
+module draws that cell as ONE wtype-6 switch with n+2 arms: the `0xFFFF` default at the band's
+base (`blank_arm`, which draws no text), then the n+1 text arms matched on 0..n, the last drawing
+the default text. Every value the routine writes is matched. A value it never writes (the cell
+before the routine's first tick, inference: SRAM above `0x2000AD98` is not initialised,
+`raminit.py`) meets no text arm, and `FUN_00256C54` then renders the base only because its match
+is `0xFFFF` (`layout.Screen._switch_child`, GUICODE Finding 16): the blank arm, which wipes the
+box when a `background` is given. The default-at-the-base shape is `cornermark`'s, the stock one.
 
 **An arm** (`build_arm`) is flow-relative to the switch: every record has base modes `[1,1,1,1]`
 (header byte 1 `0x55`) and geometry `(0, 0, w, h)`, so it is placed at the flow origin the
@@ -22,6 +25,10 @@ Colours are mode-7 palette indices (`theme.resolve_fill_index`, resolved by the 
 over `pagedraw`'s mode-3 inline colour with `pagedraw._set_mode`; the ON pair (fillA2) equals the
 OFF pair, as `pagedraw` writes every record.
 
+**The blank arm** (`blank_arm`) is the optional fill and one empty flow-relative wtype-11
+(`cornermark.build_empty_record()`, the empty arm stock's mark switches use): it sets no font and
+no align, so the walk leaves it in the state it entered with.
+
 **Placement** (`place`): the arms are appended as one band (`switchbuild.append_arms`), the
 switch is authored absolute at `(x, y)` (`switchbuild.author_switch(at=...)`, which keeps the
 donor's live-redraw enroll bit), and a one-record object holding it is attached under `parent`
@@ -29,7 +36,7 @@ by `insert.insert_object` (a byte clone of the parent's first wtype-5 attach, as
 pastes). The attach draws nothing; the switch is absolute, so the attach's own pen does not
 place it.
 
-**The band is laid out in descending match order** (`n, n-1, ..., 0`). The renderer scans the
+**The band is laid out in descending match order** (`0xFFFF` at the base, then `n, n-1, ..., 0`). The renderer scans the
 whole band for the value (`FUN_00256C54` at `0x00257B3E`), so order inside it does not change
 what draws. It matters to `guidata.find_match_table`, which locates the table by counting
 literal `0, 1, 2` runs: while `relocate.grow_match_table` has grown the table past the object
@@ -109,6 +116,23 @@ def build_arm(data: bytes, *, text: str, font: int, w: int, h: int, align: int,
         raise EnumLabelError(str(e)) from e
 
 
+def blank_arm(data: bytes, *, w: int, h: int, bg_index: int | None) -> bytes:
+    """The `0xFFFF` default arm (`<count>` + records, padded to 4): the `w` x `h` fill in
+    `bg_index` when one is given, then an empty flow-relative wtype-11
+    (`cornermark.build_empty_record()`), which draws nothing and sets no font or align."""
+    try:
+        parts = []
+        if bg_index is not None:
+            fill = pd.capsule(data, 0, 0, w, h, FILL_RADIUS, _PLACEHOLDER)
+            fill = _index_colour(_flow_relative(fill), ("fillA", "fillA2"), bg_index)
+            _check(fill, 33, w, h, ("fillA", 7, bg_index))
+            parts.append(fill)
+        parts.append(cornermark.build_empty_record())
+        return cornermark._object(parts)
+    except (pd.PageDrawError, cornermark.CornerMarkError) as e:
+        raise EnumLabelError(str(e)) from e
+
+
 def restore_record(font: int | None, align: int) -> bytes:
     """An empty wtype-11 label (`cornermark.build_empty_record(0, 0)`: draws nothing, leaves the
     flow origin where the arm left it) that writes the persistent font `font` (None: leave it)
@@ -152,22 +176,25 @@ def entering_state(data: bytes, parent: int, attach_index: int) -> set:
     return found
 
 
-def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes],
+def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes], default: bytes,
           value_slot: int, restore: "tuple[int | None, int] | None" = None
           ) -> tuple[bytes, list, int]:
-    """`(image, edits, object_index)`: `arms[i]` appended matched on `i` (the band in descending
-    match order), a
-    `len(arms)`-arm switch on display cell `value_slot` at absolute `(x, y)`, held in a new
+    """`(image, edits, object_index)`: `default` (`blank_arm`) appended at the band's base
+    matched on `0xFFFF`, then `arms[i]` matched on `i` (in descending match order), a
+    `len(arms) + 1`-arm switch on display cell `value_slot` at absolute `(x, y)`, held in a new
     object attached under `parent`. `edits` are `insert.insert_object`'s (attach step).
     `restore=(font, align)` follows the switch with `restore_record(font, align)`, so the arm's
     label does not hand its font and align to whatever the walk reaches after the object."""
     if not arms:
         raise EnumLabelError("an enum label needs at least one arm")
+    count = len(arms) + 1
     try:
-        # Descending (see the module docstring): arm `i` is matched on `i`, wherever it sits.
-        out, base = switchbuild.append_arms(data, arms[::-1], list(range(len(arms)))[::-1])
+        # The 0xFFFF default first, at the base (`switchbuild.append_arms`); then descending
+        # (see the module docstring): arm `i` is matched on `i`, wherever it sits.
+        out, base = switchbuild.append_arms(data, [default] + arms[::-1],
+                                            [0xFFFF] + list(range(len(arms)))[::-1])
         switch = switchbuild.author_switch(out, value_slot=value_slot, arms_base=base,
-                                           count=len(arms), at=(x, y))
+                                           count=count, at=(x, y))
         parts = [switch] + ([] if restore is None else [restore_record(*restore)])
         out, edits = insert.insert_object(out, cornermark._object(parts), parent)
     except (ValueError, cornermark.CornerMarkError) as e:   # RelocationError/InsertError too
@@ -176,7 +203,7 @@ def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes],
     gs, _ = guidata.guidata_extent(out)
     recs = records.object_records(out, gs + guidata.object_tables(out)[1][index])
     if not (len(recs) == len(parts) and recs[0].wtype == 6 and recs[0].child_index == base
-            and recs[0].count == len(arms) and recs[0].value_slot == value_slot):
+            and recs[0].count == count and recs[0].value_slot == value_slot):
         raise EnumLabelError(f"the label object {index} does not hold the authored switch")
     return out, edits, index
 
@@ -241,17 +268,27 @@ def foreign_deltas(before: bytes, after: bytes, parent: int, label_object: int) 
     placed object's own records appearing: the attach (the parent's last record), the object's
     records and the arms of every wtype-6 switch in it. Empty means nothing else on any page
     moved or changed state, the check `move_control` and `assert_layout` make. Shared by
-    `add_enum_label` (one switch) and `add_rvc_button` (no switch)."""
+    `add_enum_label` (one switch) and `add_rvc_button` (no switch).
+
+    The placed object's own switches are walked too, one set per non-base arm: the image before
+    has no such switch, so its arm sets would only ever walk their base arm, and under
+    `add_enum_label` that is the blank default, which sets no font. A text arm's leaked font
+    is caught only by walking that arm."""
     gs, _ = guidata.guidata_extent(after)
     tab = guidata.object_tables(after)[1]
     attach = len(records.object_records(after, gs + tab[parent])) - 1
     ours = {label_object}
+    own_sets = []
+    match_off = guidata.find_match_table(after)
     for sw in records.object_records(after, gs + tab[label_object]):
         if sw.wtype == 6:
             ours.update(range(sw.child_index, sw.child_index + sw.count))
+            own_sets += [{sw.child_index: v}
+                         for v, o in guidata.switch_candidates(after, sw, match_off)
+                         if o != sw.child_index]
     roots = pagewalk.reaching_roots(after, parent)
     bad = []
-    for values in pagewalk.switch_arm_sets(before, roots):
+    for values in pagewalk.switch_arm_sets(before, roots) + own_sets:
         for root in roots:
             for d in pagewalk.diff(pagewalk.walk_records(before, root, switch_values=values),
                                    pagewalk.walk_records(after, root, switch_values=values)):
