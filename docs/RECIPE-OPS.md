@@ -38,7 +38,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14: the coach bath light (ch25) no longer follows Light Master. | yes |
 | [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes |
 | [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes |
-| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it shifted (a manifest line `ID: shifted N record(s) ...` and the sidecar's `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed. | yes |
+| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it shifted (its manifest line ends `; shifted N record(s) ...` or `; shifted nothing else`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed. | yes |
 | [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
 | [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
 | [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. | Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, repaints). | yes |
@@ -72,7 +72,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
-| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it shifted (a manifest line `ID: shifted N record(s) ...` and the sidecar's `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
+| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it shifted (its manifest line ends `; shifted N record(s) ...` or `; shifted nothing else`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
 | [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
@@ -176,7 +176,7 @@ Error codes:
 
 ### move_element
 
-Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it shifted (a manifest line `ID: shifted N record(s) ...` and the sidecar's `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).
+Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it shifted (its manifest line ends `; shifted N record(s) ...` or `; shifted nothing else`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).
 
 - **Hardware status:** Flashed.
 - **Proof:** `docs/HARDWARE-VERIFIED.md`
@@ -981,7 +981,7 @@ Error codes:
 
 ### remove_records
 
-Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it shifted (a manifest line `ID: shifted N record(s) ...` and the sidecar's `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).
+Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it shifted (its manifest line ends `; shifted N record(s) ...` or `; shifted nothing else`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).
 
 - **Hardware status:** Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.
 - **Proof:** `relocate.replace_object_records`

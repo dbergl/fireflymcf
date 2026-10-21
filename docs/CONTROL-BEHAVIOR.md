@@ -849,7 +849,7 @@ drawn record left, and inherits font, align and colours from its predecessors.
 `move_control` does the whole move as one recipe op and measures it with `pagewalk` (the layout
 replay, every record keyed by its `(object, record)` path from the page root, every switch arm
 walked). `remove_records` and `move_element` on their own do not compensate, but the compile
-reports what each moved besides its own records (a manifest line `ID: shifted N record(s) ...`,
+reports what each moved besides its own records (the op's manifest line ends `; shifted N record(s) ...`,
 and `shifts` in the compile sidecar), walked the same way:
 
 * **Source.** It removes the records (`remove_records`' removal), then re-walks the page and

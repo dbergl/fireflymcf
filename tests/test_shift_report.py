@@ -1,7 +1,8 @@
 """The shift report: what `remove_records` and `move_element` moved besides their own records.
 
-Report only: the compile carries `CompileResult.shifts` (`{op_id: [entry, ...]}`), one manifest
-line per op, and the CLI sidecar's `shifts` key; the bytes and the refusals are unchanged.
+Report only: the compile carries `CompileResult.shifts` (`{op_id: [entry, ...]}`), its text at
+the end of the op's own manifest line (still one entry per op), and the CLI sidecar's `shifts`
+key; the bytes and the refusals are unchanged.
 
 The page is the compact AES card `swap_aes_electrical` builds after the Water Pump feature
 (`_pump_feature_ops`): object 1425, drawn on ELECTRICAL roots 5 and 39. Its record 8 is the Low
@@ -53,10 +54,13 @@ def _by(entries, root):
     return {(e["object"], e["record"]): e for e in entries if e["root"] == root}
 
 
-def _line(r, oid):
-    lines = [m for m in r.manifest if m.startswith(oid + ": ")]
-    assert len(lines) == 1, r.manifest
-    return lines[0]
+def _line(r, n=1):
+    """The shift text of the n-th op after the Water Pump feature: its manifest entry (one per
+    op) after the op's own verify() line."""
+    assert len(r.manifest) == len(_pump_feature_ops()) + n, r.manifest
+    head, sep, tail = r.manifest[-1].partition("; shift")
+    assert sep, r.manifest[-1]
+    return "shift" + tail
 
 
 def test_remove_records_reports_the_gear_it_lifted(stock):
@@ -77,8 +81,9 @@ def test_remove_records_reports_the_gear_it_lifted(stock):
         assert got[(CARD, 8)]["key"] == "%d:5/829:5/1425:8" % root
     # the removed attach, its child and its touch region are the op's own: not listed
     assert all(e["kind"] == "moved" for e in entries)
-    line = _line(r, "rr")
-    assert line.startswith("rr: shifted 8 record(s)"), line
+    line = _line(r)
+    assert r.manifest[-1].startswith("remove_records: object 1425 lost 2 record(s)")
+    assert line.startswith("shifted 8 record(s)"), line
     assert "on root 5:" in line and "'  AES' (-59,-29)" in line
 
 
@@ -87,7 +92,7 @@ def test_move_element_of_a_last_record_shifts_nothing_else(stock):
     says so explicitly."""
     r = _compile(stock, _move("mv", {"wtype": 11, "label": "L"}, {"x": 3}))
     assert r.shifts["mv"] == []
-    assert _line(r, "mv") == "mv: shifted nothing else (roots 5, 39)"
+    assert _line(r) == "shifted nothing else (roots 5, 39)"
 
 
 def test_move_element_reports_the_siblings_that_follow(stock):
@@ -98,7 +103,7 @@ def test_move_element_reports_the_siblings_that_follow(stock):
         got = _by(r.shifts["gear"], root)
         assert set(got) == {(CARD, 11), (CARD, 12), (CARD, 13)}, r.shifts["gear"]
         assert {(e["dx"], e["dy"]) for e in got.values()} == {(9, -124)}
-    assert _line(r, "gear").startswith("gear: shifted 6 record(s)")
+    assert _line(r).startswith("shifted 6 record(s)")
 
 
 def test_the_report_changes_no_bytes(stock, monkeypatch):
@@ -106,8 +111,10 @@ def test_the_report_changes_no_bytes(stock, monkeypatch):
     monkeypatch.setattr(recipe_ops, "_side_shifts", lambda *a, **k: ([], []))
     without = _compile(stock, _rr(), _move("mv", {"wtype": 11, "label": "L"}, {"x": 3}))
     assert with_report.data == without.data
-    n = len(_pump_feature_ops()) + 2          # every op's own verify() line is unchanged
-    assert with_report.manifest[:n] == without.manifest[:n]
+    # one entry per op either way, and each op's own verify() line is unchanged before "; "
+    assert len(with_report.manifest) == len(without.manifest) == len(_pump_feature_ops()) + 2
+    assert ([m.split("; shift")[0] for m in with_report.manifest]
+            == [m.split("; shift")[0] for m in without.manifest])
     assert with_report.unverified == without.unverified
 
 
@@ -117,14 +124,14 @@ def test_a_failing_report_never_refuses(stock, monkeypatch):
     monkeypatch.setattr(recipe_ops, "_side_shifts", boom)
     r = _compile(stock, _rr())
     assert "rr" not in r.shifts
-    assert "rr: shift report unavailable: ValueError: walk failed" in r.manifest
+    assert r.manifest[-1].endswith("; shift report unavailable: ValueError: walk failed")
 
 
 def test_the_shift_line_is_capped():
     entries = [{"root": 5, "kind": "moved", "label": "r%d" % i, "wtype": 11, "dx": 0,
                 "dy": -1} for i in range(12)]
-    line = recipe_ops._shift_line("x", entries, [5])
-    assert line.startswith("x: shifted 12 record(s) on root 5: 'r0' (0,-1), ")
+    line = recipe_ops._shift_line(entries, [5])
+    assert line.startswith("shifted 12 record(s) on root 5: 'r0' (0,-1), ")
     assert line.endswith("... and 6 more")
 
 
@@ -139,7 +146,7 @@ def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
     out = tmp_path / "mcf-test.bin"
     assert main(["compile", str(proj), STOCK, "-o", str(out)]) == 0
     printed = capsys.readouterr().out
-    assert "  rr: shifted 8 record(s)" in printed
+    assert "now 12; shifted 8 record(s) on root 5:" in printed
     side = json.loads((tmp_path / "mcf-test.bin.json").read_text())
     assert len(side["shifts"]["rr"]) == 8
     assert side["shifts"]["rr"][0]["dy"] == -29
