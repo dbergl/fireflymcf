@@ -963,32 +963,13 @@ def build_batt_heat_button(donors: bytes, *, touch_id: int,
     frame, so it reads as a pressable button like Pump Link / Low Volts, not a boxed label. Its
     fill is repointed off the live Low Volts cell (index 45) to a static colour, so it does not
     track any state.
+
+    The body is `rvcbutton.button_records`' with no glyph, the donor's caption font and the
+    static fill `BATT_HEAT_FILL_INDEX`; this builder keeps Batt Heat's defaults and its output.
     """
-    inset = PUMP_OUTLINE_INSET
-    # [0] absolute anchor + dark backing box: base-mode 0 on x and y (829[7] is the only absolute
-    # box donor), which both places the button and establishes the flow origin the capsule below
-    # inherits. Left-aligned so the donor's align-3 does not shift the column off its anchor.
-    box = _clone_with_geom(donors, PUMP_FRAME_DONOR, PUMP_BOX_REC, {0: x, 1: y, 2: w, 3: h})
-    _set_align(box, 1)
-    # [1] a flow anchor insetting the capsule a couple px inside the backing box.
-    anchor = _flow_anchor(inset, inset)
-    # [2] the solid capsule button (285[0]), widened, fill repointed off cell 45 to a static colour.
-    btn = _clone_with_geom(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_BOX_REC,
-                           {2: w - 2 * inset, 3: h - 2 * inset})
-    box_rec = _object_records(donors, PUMP_BUTTON_BODY_DONOR)[PUMP_BUTTON_BOX_REC]
-    fill_off = box_rec.color_off[0]
-    if fill_off is None:
-        raise ValueError("Low Volts box donor 285[0] has no inline fillA colour to repoint")
-    struct.pack_into("<H", btn, fill_off - box_rec.offset, BATT_HEAT_FILL_INDEX)
-    # [3] the caption, widened and relabelled ('Low\nVolts' -> 'Batt Heat', 9 over 9).
-    label = _clone_with_geom(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC,
-                             {2: w - 2 * inset, 3: h - 2 * inset})
-    label = _relabel(donors, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC, text, label)
-    # [4] touch: 315[9] widened to the box, carrying the command-group id.
-    touch = _clone_with_geom(donors, CLUSTER_DONOR_OBJECT, PUMP_BUTTON_TOUCH_REC,
-                             {2: w - 2 * inset, 3: h - 2 * inset})
-    _set_touch_id(touch, touch_id)
-    return [bytes(box), anchor, bytes(btn), bytes(label), bytes(touch)]
+    from . import rvcbutton            # rvcbutton reads this module's donors: import it lazily
+    return rvcbutton.button_records(donors, touch_id=touch_id, w=w, h=h, text=text,
+                                    glyph=None, font=None, fill_index=None, x=x, y=y)
 
 
 def _red_glyph_record(dx: int, dy: int, w: int, h: int,

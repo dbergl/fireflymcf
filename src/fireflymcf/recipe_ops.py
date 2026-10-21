@@ -35,6 +35,7 @@ from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
+from fireflymcf import rvcbutton
 from fireflymcf import statusfold
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
@@ -3342,6 +3343,26 @@ def _overlaps(a, b):
     return ax0 <= bx1 and bx0 <= ax1 and ay0 <= by1 and by0 <= ay1
 
 
+def _off_canvas(box) -> bool:
+    """A placed box leaves the 800x480 canvas (`move_control`'s and `add_rvc_button`'s
+    OFF_CANVAS)."""
+    return (min(box[0], box[2]) < 0 or max(box[0], box[2]) > _CANVAS_W
+            or min(box[1], box[3]) < 0 or max(box[1], box[3]) > _CANVAS_H)
+
+
+def _touch_overlap(touches, walk, skip=None):
+    """`(box, WalkRec)`: the first of `touches` meeting a wtype-12 region of `walk` that `skip`
+    does not exclude, and that region (`_overlaps`); None when none meets. `move_control`'s
+    and `add_rvc_button`'s TOUCH_OVERLAP."""
+    for t in walk:
+        if t.wtype != 12 or (skip is not None and skip(t)):
+            continue
+        hit = next((b for b in touches if _overlaps(b, t.box)), None)
+        if hit is not None:
+            return hit, t
+    return None
+
+
 @op("move_control")
 class MoveControl(Op):
     """Move a control (its draw, touch and box records) from one object to another, put back
@@ -3673,22 +3694,20 @@ class MoveControl(Op):
 
         for r in drawn:
             b = shifted(r.box)
-            if min(b[0], b[2]) < 0 or max(b[0], b[2]) > _CANVAS_W \
-                    or min(b[1], b[3]) < 0 or max(b[1], b[3]) > _CANVAS_H:
+            if _off_canvas(b):
                 raise RecipeError("OFF_CANVAS", "%s (wtype %d %r) would sit at (%d,%d,%d,%d), "
                                   "outside the %dx%d canvas" % (_fmt_walk_key(r.key), r.wtype,
                                                                 r.label, *b, _CANVAS_W,
                                                                 _CANVAS_H))
         touches = [shifted(r.box) for r in ref.values() if r.wtype == 12]
         for p in dst_pairs:
-            for t in before[self._pair_id(p)]:
-                if t.wtype != 12 or _moved_step(t.key, frm, removed) is not None:
-                    continue
-                hit = next((b for b in touches if _overlaps(b, t.box)), None)
-                if hit is not None:
-                    raise RecipeError("TOUCH_OVERLAP", "the moved touch region at (%d,%d,%d,%d) "
-                                      "meets root %d's %s at (%d,%d,%d,%d)"
-                                      % (*hit, p[0], _fmt_walk_key(t.key), *t.box))
+            met = _touch_overlap(touches, before[self._pair_id(p)],
+                                 lambda t: _moved_step(t.key, frm, removed) is not None)
+            if met is not None:
+                hit, t = met
+                raise RecipeError("TOUCH_OVERLAP", "the moved touch region at (%d,%d,%d,%d) "
+                                  "meets root %d's %s at (%d,%d,%d,%d)"
+                                  % (*hit, p[0], _fmt_walk_key(t.key), *t.box))
         payload = self._paste_bytes(data, recs, moved_idx, ref, {r.key: r for r in ref_walk},
                                     (ox, oy))
 
@@ -7498,26 +7517,7 @@ class AddEnumLabel(Op):
         `EnumLabelError` when the entering state cannot be determined or written back: no page
         reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored) or the
         align is 0 (the decoder never stores a 0 align)."""
-        gs, tab = _gs_tab(placed)
-        attach = len(records.object_records(placed, gs + tab[parent])) - 1
-        states = enumlabel.entering_state(placed, parent, attach)
-        if len(states) > 1:
-            raise enumlabel.EnumLabelError(
-                "the pages reaching object %d enter it with different font/align states %s; "
-                "one label cannot restore them all" % (parent, sorted(states, key=str)))
-        if not states:
-            raise enumlabel.EnumLabelError(
-                "no page root reaches object %d, so the font/align the label must hand back "
-                "cannot be measured" % parent)
-        ((font, align),) = states
-        if font is None or align == 0:
-            raise enumlabel.EnumLabelError(
-                "the walk enters object %d with font %r / align %d; the label's font %d / align "
-                "%d cannot be written back to that" % (parent, font, align, self.font,
-                                                       pd.ALIGN_NO_SHIFT))
-        font = None if font == self.font else font
-        align = 0 if align == pd.ALIGN_NO_SHIFT else align
-        return None if font is None and not align else (font, align)
+        return enumlabel.restore_state(placed, parent, (self.font, pd.ALIGN_NO_SHIFT))
 
     def capability_delta(self, ctx):
         return set(), set()
@@ -7555,6 +7555,329 @@ class AddEnumLabel(Op):
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
                 % (h["var"], h["mask"], h["shift"], h["slot"], n + 1, got[:-1],
                    h["default"], h["object"], h["parent"]))
+
+
+@op("add_rvc_button")
+class AddRvcButton(Op):
+    """Add a button that sends RV-C frames, on any page: a tap, a hold, or both.
+
+    Every binding sends `dgn` with a fixed 8-byte payload; the panel stamps priority 6 and
+    source address 0x9F (`newbutton.binding_wire_frame`). The gesture is one of the coach-proven
+    shapes (`rvcbutton`): `tap` alone is the LEVEL stepper's group prefix `10 00 00 00` and one
+    binding on mask 0x06 (one frame per press of any length); `hold` alone is `add_alt_reboot`'s
+    group-17 clone with the hold nibble at `seconds` and one binding on 0x04; `tap` + `hold` is
+    Batt Heat's group-17 clone with the hold nibble at `seconds`, the hold binding (0x04) first
+    and the tap (0x02) after. The group is the pool's first slot, never 68/69; a hold on a
+    GuiCode-driven group is dead (v45), so a hold takes the `hold_safe` pool.
+
+    The records are Batt Heat's body (`rvcbutton.button_records`): a filled box at `x, y` `w` x
+    `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
+    and a wtype-12 touch region whose id is the group. They are pasted as one new object under a
+    clone of `parent`'s first wtype-5 attach (`rvcbutton.place`, `move_control`'s paste path),
+    ended by an empty label that hands back the font and align the walk carried in. Every page
+    root reaching `parent`, in every switch-arm set, is walked before and after: the new touch
+    region must meet no existing one, no new record may leave the canvas, and nothing else may
+    change (`enumlabel.foreign_deltas`).
+
+    The toggle form (`toggle`) is not built yet and is refused.
+
+    Params:
+      parent: object index | {ref} -- the object the button is drawn on (it needs a wtype-5
+              attach record to clone).
+      x, y, w, h: the absolute box on the 800x480 canvas.
+      text: caption (`\\n` makes two lines), or null. glyph: {slot, char} or null; font: the
+            caption's font slot, or null for the donor's.
+      dgn: the 18-bit DGN every binding sends. tap: {payload}; hold: {payload, seconds 1-15}.
+      colour: [r, g, b] body fill (default [65, 81, 163]); must be a palette colour.
+      group_pool: "free" | "hold_safe" (default "hold_safe" with a hold, else "free").
+
+    Error codes:
+      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle`, the `free` pool with
+                        a hold, or a box too small for its glyph and caption.
+      BAD_REF        -- a `parent` ref names no earlier op's object.
+      NO_FREE_GROUP  -- the group pool is empty.
+      NO_GLYPH       -- the glyph falls back to the placeholder (or icon font 24's unused block).
+      NO_BODY_COLOUR -- `colour` is not in this build's palette.
+      TOUCH_OVERLAP  -- the touch region meets an existing one on a page reaching `parent`.
+      OFF_CANVAS     -- a record leaves the 800x480 canvas.
+      GROW_REFUSED   -- the gesture donor groups or the binding table (arena, gates) refused.
+      INSERT_REFUSED -- the attach could not be cloned or inserted, the walk's font/align state
+                        cannot be handed back, or the placement changes another record.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "text": {"type": ["string", "null"], "default": None,
+                     "description": "caption; \\n makes two lines"},
+            "glyph": {"type": ["object", "null"], "default": None,
+                      "description": "{slot, char}: an installed glyph drawn above the caption"},
+            "font": {"type": ["integer", "null"], "default": None,
+                     "description": "caption font slot; null keeps the donor's"},
+            "dgn": {"type": "integer", "description": "18-bit DGN every binding sends"},
+            "tap": {"type": ["object", "null"], "default": None,
+                    "description": "{payload}: 8-byte hex sent once per press"},
+            "hold": {"type": ["object", "null"], "default": None,
+                     "description": "{payload, seconds}: sent once after a hold of seconds (1-15)"},
+            "toggle": {"type": ["object", "null"], "default": None,
+                       "description": "{off_payload, on_payload}: not supported yet (refused)"},
+            "colour": {"type": "array", "default": [0x41, 0x51, 0xA3],
+                       "description": "[r, g, b] body fill; a palette colour"},
+            "group_pool": {"type": "string", "enum": list(rvcbutton.POOLS),
+                           "description": "where the group comes from (default hold_safe with a "
+                                          "hold, else free)"},
+        },
+        "required": ["parent", "x", "y", "w", "h", "dgn"],
+    }
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _int(self, name, default=...):
+        v = self._param(name, default)
+        if v is None and default is None:
+            return None
+        if not isinstance(v, int) or isinstance(v, bool):
+            raise self._bad("%s must be an integer, got %r" % (name, v))
+        return v
+
+    def _payload(self, name, spec, keys):
+        if not isinstance(spec, dict) or set(spec) != set(keys):
+            raise self._bad("%s must be an object with exactly %s, got %r"
+                            % (name, sorted(keys), spec))
+        raw = spec["payload"]
+        try:
+            wire = bytes.fromhex(raw) if isinstance(raw, str) else b""
+        except ValueError:
+            wire = b""
+        if len(wire) != 8:
+            raise self._bad("%s payload must be 8 bytes of hex, got %r" % (name, raw))
+        return wire
+
+    def validate(self):
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h = (self._int(k) for k in ("x", "y", "w", "h"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the button box must be positive, got %dx%d" % (self.w, self.h))
+        self.text = self._param("text", None)
+        if self.text is not None and not (isinstance(self.text, str) and self.text
+                                          and self.text.isascii() and len(self.text) <= 0xFE):
+            raise self._bad("text must be a non-empty ASCII string of at most 254 characters, "
+                            "got %r" % (self.text,))
+        glyph = self._param("glyph", None)
+        if glyph is not None:
+            if not (isinstance(glyph, dict) and set(glyph) == {"slot", "char"}
+                    and isinstance(glyph["slot"], int) and not isinstance(glyph["slot"], bool)
+                    and 0 <= glyph["slot"] <= 0xFE and isinstance(glyph["char"], str)
+                    and len(glyph["char"]) == 1 and ord(glyph["char"]) <= 0xFF):
+                raise self._bad("glyph must be {slot: 0..254, char: one latin-1 character}, "
+                                "got %r" % (glyph,))
+            glyph = (glyph["slot"], glyph["char"])
+        self.glyph = glyph
+        self.font = self._int("font", None)
+        if self.font is not None and not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..254, got %d" % self.font)
+        self.dgn = self._int("dgn")
+        if not 0 <= self.dgn <= 0x3FFFF:
+            raise self._bad("dgn %#x is not an 18-bit value" % self.dgn)
+        tap, hold = self._param("tap", None), self._param("hold", None)
+        if self._param("toggle", None) is not None:
+            raise self._bad("the toggle form is not supported yet")
+        self.tap = None if tap is None else self._payload("tap", tap, ("payload",))
+        self.hold = None if hold is None else self._payload("hold", hold, ("payload", "seconds"))
+        self.seconds = None
+        if hold is not None:
+            s = hold["seconds"]
+            if not (isinstance(s, int) and not isinstance(s, bool)
+                    and 1 <= s <= rvcbutton.MAX_HOLD_SECONDS):
+                raise self._bad("hold seconds must be 1..%d, got %r"
+                                % (rvcbutton.MAX_HOLD_SECONDS, s))
+            self.seconds = s
+        if self.tap is None and self.hold is None:
+            raise self._bad("a button needs a gesture: tap, hold or both")
+        self.form = ("tap_hold" if self.tap is not None and self.hold is not None
+                     else "tap" if self.tap is not None else "hold")
+        colour = self._param("colour", [0x41, 0x51, 0xA3])
+        if not (isinstance(colour, list) and len(colour) == 3
+                and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 0xFF
+                        for c in colour)):
+            raise self._bad("colour must be [r, g, b] of 0..255, got %r" % (colour,))
+        self.colour = tuple(colour)
+        self.group_pool = self._param("group_pool", "hold_safe" if self.hold else "free")
+        if self.group_pool not in rvcbutton.POOLS:
+            raise self._bad("group_pool must be one of %s, got %r"
+                            % (list(rvcbutton.POOLS), self.group_pool))
+        if self.hold is not None and self.group_pool == "free":
+            raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
+                            "is dead (v45)")
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the button box (%d,%d,%d,%d) leaves the %dx%d "
+                              "canvas" % (self.x, self.y, self.x + self.w, self.y + self.h,
+                                          _CANVAS_W, _CANVAS_H), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        gs, tab = _gs_tab(data)
+        if not 0 <= parent < len(tab):
+            raise self._bad("parent object %d is out of range" % parent)
+        try:
+            fill = theme.resolve_fill_index(data, color=self.colour)
+        except theme.PaletteError as e:
+            raise RecipeError("NO_BODY_COLOUR", str(e), op_id=oid)
+        if self.glyph is not None and rvcbutton.glyph_missing(data, *self.glyph):
+            raise RecipeError("NO_GLYPH", "font slot %d has no glyph for %r (it falls back to a "
+                              "placeholder); run install_glyph for this (font, char) earlier in "
+                              "the project" % self.glyph, op_id=oid)
+        try:
+            slots = rvcbutton.allocate(data, pool=self.group_pool)
+        except rvcbutton.RvcButtonError as e:
+            raise RecipeError("NO_FREE_GROUP", str(e), op_id=oid)
+        if not slots:
+            raise RecipeError("NO_FREE_GROUP", "the %r group pool is empty" % self.group_pool,
+                              op_id=oid)
+        group = slots[0]
+
+        # 1. the group and its bindings
+        binding_start = len(guidata.binding_table(data))
+        try:
+            payload = rvcbutton.bindings(self.dgn, form=self.form, tap=self.tap, hold=self.hold,
+                                         off=None, on=None)
+            entry = rvcbutton.gesture_group(data, form=self.form, hold_seconds=self.seconds,
+                                            binding_start=binding_start,
+                                            count=len(payload) // 12)
+            out, grow_edits = optionrow._grow_bindings(data, payload, [(group, entry)])
+        except (rvcbutton.RvcButtonError, optionrow.OptionRowError) as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=oid)
+
+        # 2. the records, pasted under parent
+        try:
+            frags = rvcbutton.button_records(
+                ctx.stock, touch_id=group, w=self.w, h=self.h, text=self.text, glyph=self.glyph,
+                font=self.font, fill_index=fill, x=self.x, y=self.y, glyph_image=out)
+        except ValueError as e:                  # RvcButtonError: a box its content cannot fit
+            raise self._bad(str(e))
+        parent_recs = records.object_records(data, gs + tab[parent])
+        try:
+            _, template = insert._container_template(data, parent_recs, False)
+        except insert.InsertError as e:
+            raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
+        if template.value_slot is not None:
+            raise RecipeError("INSERT_REFUSED", "the attach cloned onto object %d (its record "
+                              "%d) carries value_slot %d, which the button would inherit"
+                              % (parent, parent_recs.index(template), template.value_slot),
+                              op_id=oid)
+        try:
+            placed, place_edits, index = rvcbutton.place(out, parent=parent, x=self.x, y=self.y,
+                                                         frags=frags, mode="attach")
+        except (rvcbutton.RvcButtonError, enumlabel.EnumLabelError) as e:
+            raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
+
+        # 3. the whole-page gates
+        roots = pagewalk.reaching_roots(out, parent)
+        for values in pagewalk.switch_arm_sets(out, roots):
+            for root in roots:
+                after = pagewalk.walk_records(placed, root, switch_values=values)
+                mine = [r for r in after if r.obj == index]
+                for r in mine:
+                    if r.wtype not in _CONTAINERS and _off_canvas(r.box):
+                        raise RecipeError("OFF_CANVAS", "%s (wtype %d %r) sits at (%d,%d,%d,%d), "
+                                          "outside the %dx%d canvas"
+                                          % (_fmt_walk_key(r.key), r.wtype, r.label, *r.box,
+                                             _CANVAS_W, _CANVAS_H), op_id=oid)
+                met = _touch_overlap([r.box for r in mine if r.wtype == 12],
+                                     pagewalk.walk_records(out, root, switch_values=values))
+                if met is not None:
+                    hit, t = met
+                    raise RecipeError("TOUCH_OVERLAP", "the button's touch region at "
+                                      "(%d,%d,%d,%d) meets root %d's %s at (%d,%d,%d,%d)"
+                                      % (*hit, root, _fmt_walk_key(t.key), *t.box), op_id=oid)
+        bad = enumlabel.foreign_deltas(out, placed, parent, index)
+        if bad:
+            raise RecipeError("INSERT_REFUSED", "placing the button under object %d changes %d "
+                              "record(s) besides its own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
+        ctx.edits.extend(grow_edits)
+        ctx.edits.extend(place_edits)
+        out, _ = patch.reseal(placed)
+        ctx.handles[oid] = {
+            "object": index, "group": group, "touch_id": group, "binding_start": binding_start,
+            "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
+            "glyph": None if self.glyph is None else {"slot": self.glyph[0],
+                                                      "char": self.glyph[1]},
+            "font": self.font, "colour": list(self.colour), "toggle": None,
+            "parent": parent, "placement": "attach",
+            "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
+            "tap": self.tap, "hold": self.hold,
+        }
+        return out
+
+    def capability_delta(self, ctx):
+        # A binding on DC_DIMMER_COMMAND_2 names a G12 channel (`guidata.Binding.channel`);
+        # any other DGN is outside `recipe.capabilities`.
+        h = ctx.handles.get(self.spec.id)
+        if h is None:
+            return set(), set()
+        raws = rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
+                                  off=None, on=None)
+        mine = set()
+        for i in range(0, len(raws), 12):
+            b = guidata.Binding(index=0, offset=0, dgn_low=raws[i] | (raws[i + 1] << 8),
+                                raw=raws[i:i + 12])
+            if b.channel is not None:
+                mine.add((b.channel, b.raw[4]))
+        return set(), mine - recipe.capabilities(ctx.stock)
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        parent = records.object_records(data, gs + tab[h["parent"]])
+        assert any(r.wtype == 5 and r.child_index == h["object"] for r in parent), \
+            "the button object %d is not attached under %d" % (h["object"], h["parent"])
+        recs = records.object_records(data, gs + tab[h["object"]])
+        ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
+        assert ids == [h["group"]], "touch ids %s, expected [%d]" % (ids, h["group"])
+        if h["text"] is not None:
+            assert [r.label for r in recs if r.wtype == 11 and r.label] == [h["text"]], \
+                "caption %r missing" % h["text"]
+        if h["glyph"] is not None:
+            assert [(r.font, r.label) for r in recs if r.wtype == 0] == \
+                [(h["glyph"]["slot"], h["glyph"]["char"])], "glyph missing"
+
+        # the gesture: group prefix, then every binding's frame, mask and variant
+        g = guidata.group_table(data)[h["group"]]
+        bt = guidata.binding_table(data)
+        want = rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
+                                  off=None, on=None)
+        assert (g.start, g.count) == (h["binding_start"], len(want) // 12), \
+            "group %d slices %d+%d" % (h["group"], g.start, g.count)
+        if h["form"] == "tap":
+            assert bytes(g.raw[:4]) == bytes.fromhex("10000000"), "tap prefix %s" % g.raw[:4].hex()
+        else:
+            assert g.raw[0] >> 4 == h["seconds"], "hold nibble %d" % (g.raw[0] >> 4)
+        can_id = (6 << 26) | (h["dgn"] << 8) | 0x9F
+        frames = []
+        for k in range(g.count):
+            raw = bt[g.start + k].raw
+            assert raw == want[12 * k:12 * k + 12], "binding %d differs" % (g.start + k)
+            cid, pay = newbutton.binding_wire_frame(raw)
+            assert cid == can_id, "binding %d sends %08X, expected %08X" % (g.start + k, cid,
+                                                                             can_id)
+            frames.append("%08X#%s mask %#x variant %d" % (cid, pay.hex(), raw[3], raw[2] >> 4))
+
+        # the box lands where asked on every page reaching the parent
+        for root in pagewalk.reaching_roots(data, h["parent"]):
+            box = [r.box for r in pagewalk.walk_records(data, root) if r.obj == h["object"]][0]
+            assert box == (h["x"], h["y"], h["x"] + h["w"], h["y"] + h["h"]), \
+                "root %d draws the box at %s" % (root, box)
+        return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
+                "UNVERIFIED on the coach"
+                % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
 
 
 @op("add_batt_heat_battery_glyph")

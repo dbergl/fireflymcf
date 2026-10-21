@@ -84,6 +84,7 @@
             "add_glyph_button",
             "add_level_page",
             "add_low_volts_control",
+            "add_rvc_button",
             "aes_card_layout",
             "append_filter",
             "install_glyph",
@@ -1616,6 +1617,117 @@
                   }
                 },
                 "required": []
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_rvc_button"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "parent": {
+                    "description": "object index or {ref: op_id}"
+                  },
+                  "x": {
+                    "type": "integer"
+                  },
+                  "y": {
+                    "type": "integer"
+                  },
+                  "w": {
+                    "type": "integer"
+                  },
+                  "h": {
+                    "type": "integer"
+                  },
+                  "text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "caption; \\n makes two lines"
+                  },
+                  "glyph": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{slot, char}: an installed glyph drawn above the caption"
+                  },
+                  "font": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "caption font slot; null keeps the donor's"
+                  },
+                  "dgn": {
+                    "type": "integer",
+                    "description": "18-bit DGN every binding sends"
+                  },
+                  "tap": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{payload}: 8-byte hex sent once per press"
+                  },
+                  "hold": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{payload, seconds}: sent once after a hold of seconds (1-15)"
+                  },
+                  "toggle": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{off_payload, on_payload}: not supported yet (refused)"
+                  },
+                  "colour": {
+                    "type": "array",
+                    "default": [
+                      65,
+                      81,
+                      163
+                    ],
+                    "description": "[r, g, b] body fill; a palette colour"
+                  },
+                  "group_pool": {
+                    "type": "string",
+                    "enum": [
+                      "free",
+                      "hold_safe"
+                    ],
+                    "description": "where the group comes from (default hold_safe with a hold, else free)"
+                  }
+                },
+                "required": [
+                  "parent",
+                  "x",
+                  "y",
+                  "w",
+                  "h",
+                  "dgn"
+                ]
               }
             }
           }

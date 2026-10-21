@@ -181,17 +181,50 @@ def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes],
     return out, edits, index
 
 
+def restore_state(placed: bytes, parent: int, leaving: "tuple[int | None, int]"
+                  ) -> "tuple[int | None, int] | None":
+    """The `(font, align)` a restore record (`restore_record`) must write after an object just
+    attached as `parent`'s last record, or None when the object already leaves `leaving` equal
+    to the state the walk carried in (`entering_state`). Shared by `add_enum_label` (which
+    leaves its own font and `ALIGN_NO_SHIFT`) and `rvcbutton.place` (which measures it).
+    Raises `EnumLabelError` when the entering state cannot be measured or written back: no page
+    reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored) or the align
+    is 0 (the decoder never stores a 0 align)."""
+    gs, _ = guidata.guidata_extent(placed)
+    attach = len(records.object_records(placed, gs + guidata.object_tables(placed)[1][parent])) - 1
+    states = entering_state(placed, parent, attach)
+    if len(states) > 1:
+        raise EnumLabelError(
+            "the pages reaching object %d enter it with different font/align states %s; "
+            "one object cannot restore them all" % (parent, sorted(states, key=str)))
+    if not states:
+        raise EnumLabelError(
+            "no page root reaches object %d, so the font/align the object must hand back "
+            "cannot be measured" % parent)
+    ((font, align),) = states
+    if font is None or align == 0:
+        raise EnumLabelError(
+            "the walk enters object %d with font %r / align %d; the placed object's font %r / "
+            "align %d cannot be written back to that" % (parent, font, align, *leaving))
+    font = None if font == leaving[0] else font
+    align = 0 if align == leaving[1] else align
+    return None if font is None and not align else (font, align)
+
+
 def foreign_deltas(before: bytes, after: bytes, parent: int, label_object: int) -> list:
     """Every `pagewalk.diff` delta, over each page root reaching `parent` and each of its
     switch-arm sets (`pagewalk.switch_arm_sets` of the image before), that is NOT one of the
-    label's own records appearing: the attach (the parent's last record), the label object's
-    records and its arms' records. Empty means nothing else on any page moved or changed state,
-    the check `move_control` and `assert_layout` make."""
+    placed object's own records appearing: the attach (the parent's last record), the object's
+    records and the arms of every wtype-6 switch in it. Empty means nothing else on any page
+    moved or changed state, the check `move_control` and `assert_layout` make. Shared by
+    `add_enum_label` (one switch) and `add_rvc_button` (no switch)."""
     gs, _ = guidata.guidata_extent(after)
     tab = guidata.object_tables(after)[1]
     attach = len(records.object_records(after, gs + tab[parent])) - 1
-    sw = records.object_records(after, gs + tab[label_object])[0]
-    ours = {label_object, *range(sw.child_index, sw.child_index + sw.count)}
+    ours = {label_object}
+    for sw in records.object_records(after, gs + tab[label_object]):
+        if sw.wtype == 6:
+            ours.update(range(sw.child_index, sw.child_index + sw.count))
     roots = pagewalk.reaching_roots(after, parent)
     bad = []
     for values in pagewalk.switch_arm_sets(before, roots):
