@@ -319,3 +319,10 @@ def test_heater_switch_unchanged():
     assert hashlib.sha256(heater).hexdigest() == HEATER_SHA
     bms = _ok(ALARMS_BASE + [ALARMS_STATUS], "bms-button-test")
     assert hashlib.sha256(bms).hexdigest() == BMS_SHA
+
+
+def test_inert_source_refuses():
+    """Var 185's extraction mode is 0: it matches its DGN and writes no slot
+    (`statusbind.LIVE_MODES`), so a light on it would never change."""
+    msg = _errors(BASE + [_status([_entry("b1", 1, source={"var": 185})])])
+    assert "NO_SUCH_REGISTER" in msg and "mode 0" in msg
