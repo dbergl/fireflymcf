@@ -3373,6 +3373,78 @@ def _describe_inherited(found, limit=8):
                      for root, r, slot, att in found[:limit])
 
 
+def _refuse_inherited(placed, parent, index, *, code, whose, op_id):
+    """The paste path's value-slot gate (`_pasted_inherited_slots`): raise `code` when a record
+    of the object `index` just attached under `parent` would inherit a value slot. `whose` names
+    the records in the message ("the label's")."""
+    inherited = _pasted_inherited_slots(placed, parent, index)
+    if inherited:
+        raise RecipeError(code, "under object %d %s records would inherit a value slot they "
+                          "were not built for:\n%s" % (parent, whose, _describe_inherited(inherited)),
+                          op_id=op_id)
+
+
+def _refuse_foreign(before, placed, parent, index, *, code, action, own="its", op_id):
+    """The paste path's whole-page gate (`enumlabel.foreign_deltas`): raise `code` when placing
+    the object `index` under `parent` changes any record on a page reaching `parent` besides
+    `own` ("its" / "their") records. `action` opens the message ("placing the label")."""
+    bad = enumlabel.foreign_deltas(before, placed, parent, index)
+    if bad:
+        raise RecipeError(code, "%s under object %d changes %d record(s) besides %s own:\n%s"
+                          % (action, parent, len(bad), own, pagewalk.describe(bad[:20])),
+                          op_id=op_id)
+
+
+def _paste_gates(before, placed, parent, index, *, code, whose, action, own="its", op_id):
+    """Both paste-path gates, the value-slot one first: `add_enum_label` and
+    `add_card_readouts` (off 829) run them back to back; `add_rvc_button` runs its canvas and
+    touch gates between them, so it calls the two halves itself."""
+    _refuse_inherited(placed, parent, index, code=code, whose=whose, op_id=op_id)
+    _refuse_foreign(before, placed, parent, index, code=code, action=action, own=own,
+                    op_id=op_id)
+
+
+def _append_statusfold(out, items, ctx, op_id, *, refused, what, describe):
+    """Resolve, build and append ONE `statusfold` routine over `items` on the per-tick hook:
+    the routine at the GuiCode append point (`growsection.grow_section`), then the hook's `bl`
+    detoured to it. Both edits go on `ctx.edits` ("<what>: <describe>", "<what>: detour bl ->
+    ..."). Returns `(image, plan, code_load_addr, blob)`. A refused hook or detour raises
+    DETOUR_REFUSED; a routine that cannot be built or appended raises `refused`. Shared by
+    `add_button_status` and `add_enum_label`."""
+    try:
+        plan = statusfold.resolve(out, items)
+    except followchannel.FollowChannelError as err:
+        raise RecipeError("DETOUR_REFUSED", str(err), op_id=op_id)
+    except statusfold.StatusFoldError as err:
+        raise RecipeError(refused, str(err), op_id=op_id)
+    gc = theme.guicode_section(out)
+    code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+    _check_append_point(code_load_addr, op_id)
+    try:
+        blob, _ = statusfold.build(plan, code_load_addr)
+        grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+    except (statusfold.StatusFoldError, growsection.GrowSectionError) as err:
+        raise RecipeError(refused, str(err), op_id=op_id)
+    gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+    ctx.edits.append(relocate.Edit(gcs.offset + load_off, b"", blob, "GuiCode",
+                                   "%s: %s" % (what, describe)))
+    try:
+        hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
+    except followchannel.FollowChannelError as err:
+        raise RecipeError("DETOUR_REFUSED", str(err), op_id=op_id)
+    file_off = gcs.offset + hook_at
+    if grown[file_off:file_off + 4] != hook_old:
+        raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                          % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
+                          op_id=op_id)
+    buf = bytearray(grown)
+    buf[file_off:file_off + 4] = hook_new
+    ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
+                     "%s: detour bl -> %#x" % (what, code_load_addr)))
+    out, _ = patch.reseal(bytes(buf))
+    return out, plan, code_load_addr, blob
+
+
 def _overlaps(a, b):
     """Two boxes share a pixel. Inclusive edges: the hit test returns the id of a region
     containing the point (CONTROL-BEHAVIOR §1, `0x00258BB2`-`0x00258C26`); whether its edges
@@ -7217,8 +7289,6 @@ class AddCardReadouts(Op):
         try:
             obj = cardreadouts.build_object(data, rows, **self.geom)
             out, index = cardreadouts.attach(data, obj, parent)
-            bad = ([] if parent == aescompact.ELECTRICAL_AES_BODY
-                   else enumlabel.foreign_deltas(data, out, parent, index))
         except enumlabel.EnumLabelError as e:       # the paste path's font/align restore
             raise RecipeError("LAYOUT_REFUSED", str(e), op_id=self.spec.id)
         except insert.InsertError as e:
@@ -7229,17 +7299,10 @@ class AddCardReadouts(Op):
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         except (ValueError, readout.ReadoutError, insert.InsertError) as e:
             raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
-        inherited = ([] if parent == aescompact.ELECTRICAL_AES_BODY
-                     else _pasted_inherited_slots(out, parent, index))
-        if inherited:
-            raise RecipeError("LAYOUT_REFUSED", "under object %d the readouts' records would "
-                              "inherit a value slot they were not built for:\n%s"
-                              % (parent, _describe_inherited(inherited)), op_id=self.spec.id)
-        if bad:
-            raise RecipeError("LAYOUT_REFUSED", "attaching the readouts under object %d changes "
-                              "%d record(s) besides their own:\n%s"
-                              % (parent, len(bad), pagewalk.describe(bad[:20])),
-                              op_id=self.spec.id)
+        if parent != aescompact.ELECTRICAL_AES_BODY:        # 829's path is the frame check
+            _paste_gates(data, out, parent, index, code="LAYOUT_REFUSED",
+                         whose="the readouts'", action="attaching the readouts", own="their",
+                         op_id=self.spec.id)
         out, _ = patch.reseal(out)
         ctx.handles[self.spec.id] = {"object": parent,
                                      "readouts": index,
@@ -7585,43 +7648,14 @@ class AddButtonStatus(Op):
                                   cell_addr=cell.addr,
                                   variant_group=bh["group"] if bh.get("toggle") else None)
                  for (e, bh, slot_addr, _v, _o, _n), cell in zip(plans, cells)]
-        try:
-            plan = statusfold.resolve(out, items)
-        except followchannel.FollowChannelError as err:
-            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
-        except statusfold.StatusFoldError as err:
-            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
-        gc = theme.guicode_section(out)
-        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, oid)
-        try:
-            blob, _ = statusfold.build(plan, code_load_addr)
-            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
-        except (statusfold.StatusFoldError, growsection.GrowSectionError) as err:
-            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
-        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
-        ctx.edits.append(relocate.Edit(
-            gcs.offset + load_off, b"", blob, "GuiCode",
-            "button status: %s" % "; ".join(
+        out, plan, code_load_addr, blob = _append_statusfold(
+            out, items, ctx, oid, refused="INDICATOR_REFUSED", what="button status",
+            describe="; ".join(
                 "%s var %d mask %#x shift %d %s %d%s -> cell %d @ %#x"
                 % (e["ref"], var, e["mask"], e["shift"], e["kind"], e["value"],
                    "" if e["valid_max"] is None else " (max %d)" % e["valid_max"],
                    cell.slot, cell.addr)
-                for (e, _b, _s, var, _o, _n), cell in zip(plans, cells))))
-        try:
-            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
-        except followchannel.FollowChannelError as err:
-            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
-        file_off = gcs.offset + hook_at
-        if grown[file_off:file_off + 4] != hook_old:
-            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
-                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
-                              op_id=oid)
-        buf = bytearray(grown)
-        buf[file_off:file_off + 4] = hook_new
-        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
-                         "button status: detour bl -> %#x" % code_load_addr))
-        out, _ = patch.reseal(bytes(buf))
+                for (e, _b, _s, var, _o, _n), cell in zip(plans, cells)))
 
         lit = []
         for (e, bh, slot_addr, var, off, on), cell in zip(plans, cells):
@@ -7869,39 +7903,10 @@ class AddEnumLabel(Op):
         ((slot, cell_addr),) = [(c.slot, c.addr) for c in cells]
         item = statusfold.Enum(slot_addr=slot_addr, mask=self.mask, shift=self.shift,
                                keys=self.keys, cell_addr=cell_addr)
-        try:
-            plan = statusfold.resolve(out, [item])
-        except followchannel.FollowChannelError as e:
-            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
-        except statusfold.StatusFoldError as e:
-            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
-        gc = theme.guicode_section(out)
-        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, oid)
-        try:
-            blob, _ = statusfold.build(plan, code_load_addr)
-            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
-        except (statusfold.StatusFoldError, growsection.GrowSectionError) as e:
-            raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
-        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
-        ctx.edits.append(relocate.Edit(
-            gcs.offset + load_off, b"", blob, "GuiCode",
-            "enum label: var %d mask %#x shift %d keys %s -> cell %d @ %#x"
-            % (var, self.mask, self.shift, list(self.keys), slot, cell_addr)))
-        try:
-            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
-        except followchannel.FollowChannelError as e:
-            raise RecipeError("DETOUR_REFUSED", str(e), op_id=oid)
-        file_off = gcs.offset + hook_at
-        if grown[file_off:file_off + 4] != hook_old:
-            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
-                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
-                              op_id=oid)
-        buf = bytearray(grown)
-        buf[file_off:file_off + 4] = hook_new
-        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
-                         "enum label: detour bl -> %#x" % code_load_addr))
-        out, _ = patch.reseal(bytes(buf))
+        out, plan, code_load_addr, blob = _append_statusfold(
+            out, [item], ctx, oid, refused="LABEL_REFUSED", what="enum label",
+            describe="var %d mask %#x shift %d keys %s -> cell %d @ %#x"
+                     % (var, self.mask, self.shift, list(self.keys), slot, cell_addr))
         try:
             placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
                                                     arms=arms, default=blank, value_slot=slot)
@@ -7910,18 +7915,10 @@ class AddEnumLabel(Op):
                 placed, _edits, index = enumlabel.place(out, parent=parent, x=self.x, y=self.y,
                                                         arms=arms, default=blank,
                                                         value_slot=slot, restore=restore)
-            bad = enumlabel.foreign_deltas(out, placed, parent, index)
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
-        inherited = _pasted_inherited_slots(placed, parent, index)
-        if inherited:
-            raise RecipeError("LABEL_REFUSED", "under object %d the label's records would "
-                              "inherit a value slot they were not built for:\n%s"
-                              % (parent, _describe_inherited(inherited)), op_id=oid)
-        if bad:
-            raise RecipeError("LABEL_REFUSED", "placing the label under object %d changes %d "
-                              "record(s) besides its own:\n%s"
-                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
+        _paste_gates(out, placed, parent, index, code="LABEL_REFUSED", whose="the label's",
+                     action="placing the label", op_id=oid)
         out, _ = patch.reseal(placed)
         gs, tab = _gs_tab(out)
         sw = records.object_records(out, gs + tab[index])[0]
@@ -8262,11 +8259,8 @@ class AddRvcButton(Op):
                                                          frags=frags, mode="attach")
         except (rvcbutton.RvcButtonError, enumlabel.EnumLabelError) as e:
             raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
-        inherited = _pasted_inherited_slots(placed, parent, index)
-        if inherited:
-            raise RecipeError("INSERT_REFUSED", "under object %d the button's records would "
-                              "inherit a value slot they were not built for:\n%s"
-                              % (parent, _describe_inherited(inherited)), op_id=oid)
+        _refuse_inherited(placed, parent, index, code="INSERT_REFUSED", whose="the button's",
+                          op_id=oid)
 
         # 3. the whole-page gates
         roots = pagewalk.reaching_roots(out, parent)
@@ -8287,11 +8281,8 @@ class AddRvcButton(Op):
                     raise RecipeError("TOUCH_OVERLAP", "the button's touch region at "
                                       "(%d,%d,%d,%d) meets root %d's %s at (%d,%d,%d,%d)"
                                       % (*hit, root, _fmt_walk_key(t.key), *t.box), op_id=oid)
-        bad = enumlabel.foreign_deltas(out, placed, parent, index)
-        if bad:
-            raise RecipeError("INSERT_REFUSED", "placing the button under object %d changes %d "
-                              "record(s) besides its own:\n%s"
-                              % (parent, len(bad), pagewalk.describe(bad[:20])), op_id=oid)
+        _refuse_foreign(out, placed, parent, index, code="INSERT_REFUSED",
+                        action="placing the button", op_id=oid)
         ctx.edits.extend(grow_edits)
         ctx.edits.extend(place_edits)
         out, _ = patch.reseal(placed)
