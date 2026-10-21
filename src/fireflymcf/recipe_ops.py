@@ -282,6 +282,9 @@ class MoveElement(Op):
             _put16(buf, off, val, ctx, "move_element obj %d %s -> %d" % (obj, key, val))
         out, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": obj}
+        index = next(i for i, r in enumerate(records.object_records(data, gs + tab[obj]))
+                     if r.offset == rec.offset)
+        _report_shifts(ctx, self.spec.id, data, out, obj, own=(obj, index))
         return out
 
     def verify(self, data, ctx):
@@ -2953,11 +2956,15 @@ class RemoveRecords(Op):
 
     def apply(self, data, ctx):
         obj = resolve_target(ctx, self.target)
+        gs_before, tab_before = _gs_tab(data)
         out, doomed = _remove_records(data, ctx, obj, self.records, self.spec.id)
         gs, tab = _gs_tab(out)
         ctx.handles[self.spec.id] = {
             "obj": obj, "count": len(records.object_records(out, gs + tab[obj])),
             "gone": [(d.wtype, d.child_index, _touch_id(data, d)) for d in doomed]}
+        recs = records.object_records(data, gs_before + tab_before[obj])
+        removed = {i for i, r in enumerate(recs) if r.offset in {d.offset for d in doomed}}
+        _report_shifts(ctx, self.spec.id, data, out, obj, removed=removed)
         return out
 
     def verify(self, data, ctx):
@@ -3279,6 +3286,123 @@ class AssertLayout(Op):
             return "assert_layout: root %d, %d record(s) where expected" % (h["root"],
                                                                            h["count"])
         return "assert_layout: root %d unchanged since %r" % (h["root"], h["since"])
+
+
+# The shift report: what `remove_records` and `move_element` moved besides their own records.
+# Report only: it changes no bytes and never refuses (`_report_shifts` swallows its own errors).
+# `assert_layout`'s `snapshot`/`unchanged_since` is the form that refuses instead.
+
+_SHIFT_CAP = 6     # items a manifest line names before "... and N more"
+
+
+def _side_shifts(before, after, obj, *, removed=None, own=None):
+    """`(roots, entries)`: every page root reaching `obj` in `before`
+    (`pagewalk.reaching_roots`), and every record of their walks whose placement changed from
+    `before` to `after` other than the op's own, as JSON-ready dicts.
+
+    Each root is walked as `assert_layout` walks it (`pagewalk.walk_records`, compared by
+    `pagewalk.diff`), at its base and under each switch-arm set an edit inside `obj` can show a
+    different shift under (`pagewalk.switch_arm_sets(..., touching=obj)`). The op's own records
+    are `removed` (indices of `obj` the op deleted: their keys, and every key below them, drop
+    out through `pagewalk.remap_after_removal`) or `own` (an `(obj, index)` step: any key passing
+    through it is the record itself or drawn below it). A record reported under several arm sets
+    with the same change is listed once, under the first."""
+    roots = pagewalk.reaching_roots(before, obj)
+    gs_b, tab_b = _gs_tab(before)
+    gs_a, tab_a = _gs_tab(after)
+    offsets: dict = {}
+
+    def offset(img, gs, tab, o, i):
+        k = (img is after, o, i)
+        if k not in offsets:
+            offsets[k] = records.object_records(img, gs + tab[o])[i].offset
+        return offsets[k]
+
+    entries, seen = [], set()
+    for root in roots:
+        try:
+            arm_sets = pagewalk.switch_arm_sets(before, [root], touching=obj)
+        except guidata.MatchTableNotFound:
+            arm_sets = [{}]
+        for values in arm_sets:
+            b = pagewalk.walk_records(before, root, switch_values=values or None)
+            a = pagewalk.walk_records(after, root, switch_values=values or None)
+            remap = ({r.key: pagewalk.remap_after_removal(r.key, obj, removed) for r in b}
+                     if removed else None)
+            for d in pagewalk.diff(b, a, remap):
+                if own is not None and own in d.key:
+                    continue
+                rec = d.after if d.after is not None else d.before
+                img, gs, tab = ((after, gs_a, tab_a) if d.after is not None
+                                else (before, gs_b, tab_b))
+                old = list(d.before.box[:2]) if d.before is not None else None
+                new = list(d.after.box[:2]) if d.after is not None else None
+                ident = (root, d.key, d.kind, d.dx, d.dy, tuple(old or ()), tuple(new or ()))
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                entries.append({
+                    "root": root, "kind": d.kind, "key": _fmt_walk_key(rec.key),
+                    "object": rec.obj, "record": rec.index,
+                    "offset": offset(img, gs, tab, rec.obj, rec.index),
+                    "wtype": d.wtype, "label": d.label, "old": old, "new": new,
+                    "dx": d.dx, "dy": d.dy,
+                    "switch_values": {str(k): v for k, v in values.items()}})
+    return roots, entries
+
+
+def _report_shifts(ctx, op_id, before, after, obj, **kw):
+    """Put `_side_shifts`' report on the op's handle (`shifts`, `shift_roots`), or, if it fails,
+    the failure (`shifts_error`): the report must never refuse a build."""
+    h = ctx.handles[op_id]
+    try:
+        h["shift_roots"], h["shifts"] = _side_shifts(before, after, obj, **kw)
+    except Exception as e:      # noqa: BLE001 -- report only, never a refusal
+        h["shifts_error"] = "%s: %s" % (type(e).__name__, e)
+
+
+def _shift_item(e):
+    what = repr(e["label"]) if e.get("label") else "wtype %d" % e["wtype"]
+    if e["kind"] == "moved":
+        return "%s (%d,%d)" % (what, e["dx"], e["dy"])
+    return "%s %s" % (what, {"state": "restyled"}.get(e["kind"], e["kind"]))
+
+
+def _shift_line(op_id, entries, roots, cap=_SHIFT_CAP):
+    """The manifest line for one op's shift report: the shifted records by root, `cap` of them
+    named, or that nothing else moved."""
+    if not entries:
+        return "%s: shifted nothing else (%s)" % (
+            op_id, "roots " + ", ".join(map(str, roots)) if roots
+            else "no page root reaches the object")
+    parts, root = [], None
+    for e in entries[:cap]:
+        if e["root"] != root:
+            root = e["root"]
+            parts.append("%son root %d: " % ("; " if parts else "", root))
+        elif not parts[-1].endswith(": "):
+            parts.append(", ")
+        parts.append(_shift_item(e))
+    rest = len(entries) - cap
+    return "%s: shifted %d record(s) %s%s" % (op_id, len(entries), "".join(parts),
+                                              ", ... and %d more" % rest if rest > 0 else "")
+
+
+def shift_report(ops, ctx):
+    """`(shifts, lines)` over `ops` in order: `{op_id: entries}` for every op whose handle
+    carries a shift report, and one manifest line per op that ran one (a failed report says it
+    is unavailable and is not in `shifts`)."""
+    shifts, lines = {}, []
+    for o in ops:
+        h = ctx.handles.get(o.spec.id)
+        if not isinstance(h, dict):
+            continue
+        if "shifts_error" in h:
+            lines.append("%s: shift report unavailable: %s" % (o.spec.id, h["shifts_error"]))
+        elif "shifts" in h:
+            shifts[o.spec.id] = h["shifts"]
+            lines.append(_shift_line(o.spec.id, h["shifts"], h["shift_roots"]))
+    return shifts, lines
 
 
 _CANVAS_W, _CANVAS_H = 800, 480
