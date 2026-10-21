@@ -650,6 +650,8 @@ Error codes:
 - `LAYOUT_REFUSED` — (another `parent`) the placement changes any other record on a page reaching `parent`, a pasted record would inherit a value slot, or the entering font/align cannot be measured or written back.
 - `BAD_REF` — a row's ref names no draw:false readout handle.
 - `REPLACE_REFUSED` — 829 could not be relocated.
+- `BAD_PARAMS` — a row lacks caption, unit or value, or its caption or unit has a character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
+- `NO_GLYPH` — a non-ASCII caption or unit character the row's font has no glyph for (captions font 10, units font 12; both carry '°').
 
 ### add_corner_mark
 
