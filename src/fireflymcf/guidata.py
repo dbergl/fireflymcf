@@ -1724,6 +1724,17 @@ def find_match_table(data: bytes) -> int:
     width is retried downward by up to `MATCH_TABLE_MAX_APPENDED` so the shorter table still
     locates (see that constant).
 
+    Anchored first: the table ENDS where object table 1 begins (`object_table_offset(data, 1)`;
+    `relocate.grow_match_table` inserts there and an appended object never moves it, so it holds
+    on every build), and the u16 before the table's first entry is half of a variable-table SRAM
+    pointer (`0x2003` on all three corpus files) that fails the hard filter. Walking back from
+    that end while entries pass the filter gives the table exactly, however many objects were
+    appended since it was last grown: the width scan below gives up after
+    `MATCH_TABLE_MAX_APPENDED` (a 58-op build appended more). The walk is bounded at `n + 2`
+    entries (the table is at most one 4-alignment pad wider than the object count) and must
+    score at least `MATCH_TABLE_MIN_SCORE`; a file where it does not hold falls back to the
+    width scan.
+
     Raises `MatchTableNotFound` if no window at any tried width satisfies the hard filter with
     a score of at least `MATCH_TABLE_MIN_SCORE`.
     """
@@ -1745,6 +1756,18 @@ def find_match_table(data: bytes) -> int:
     if m >= 3:
         run_start[:-2] = (arr[:-2] == 0) & (arr[1:-1] == 1) & (arr[2:] == 2)
     run_csum = np.concatenate(([0], np.cumsum(run_start)))
+
+    try:
+        end = object_table_offset(data, 1) // 2
+    except (ValueError, IndexError):
+        end = None
+    if end is not None and 0 < end <= m:
+        lo = max(0, end - (n + 2))
+        k = end
+        while k > lo and ok[k - 1]:
+            k -= 1
+        if k > lo and end > k and run_csum[end] - run_csum[k] >= MATCH_TABLE_MIN_SCORE:
+            return k * 2
 
     # Try the exact object count first (unchanged behaviour for un-patched files), then fall
     # back to narrower widths so a build with objects appended by `insert.py` -- which grows
