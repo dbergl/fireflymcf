@@ -243,8 +243,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Draw captioned live readouts (caption over a right-justified value and its unit) inside an "
         "aes_card_layout card; each value names a draw:false add_register_readout cell or an "
         "existing display slot. Attached to 829 directly after the card titles.",
-        "Flashed 2026-10-15: the readouts are live on the coach. Any `parent` other than 829 "
-        "is UNVERIFIED and compiles as unverified; it is refused when the paste moves any "
+        "Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any "
+        "object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to "
+        "829 is verified); it is refused when the paste moves any "
         "other record or a caption would inherit a value slot (LAYOUT_REFUSED).",
         "`cardreadouts.py`, `readout.py`"),
     "add_enum_label": ("structural",

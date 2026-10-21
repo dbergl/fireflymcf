@@ -7136,8 +7136,8 @@ class AddCardReadouts(Op):
     later control would move (on 199 every control after it on root 15, touch regions
     included). Any change besides the readouts' own records refuses, and so does a caption
     inheriting a value slot from a wtype-5 attach above it (`_pasted_inherited_slots`, the rule
-    `add_rvc_button` and `add_enum_label` apply). Only 829's path was flashed: any other
-    `parent` compiles as unverified.
+    `add_rvc_button` and `add_enum_label` apply). Only 829's path was flashed: a `parent` that
+    resolves to any other object compiles as unverified (a ref resolving to 829 is verified).
 
     Error codes:
       WRONG_SHAPE     -- 829 is not aes_card_layout's frame, `parent` (another object) has no
@@ -7186,7 +7186,8 @@ class AddCardReadouts(Op):
                       ("pitch", 34))}
         self.parent = self._param("parent", aescompact.ELECTRICAL_AES_BODY)
         if self.parent != aescompact.ELECTRICAL_AES_BODY:
-            # the coach verified the readouts in 829's frame; the paste path is unflashed
+            # the coach verified the readouts in 829's frame; the paste path is unflashed. A ref
+            # is unknown until it resolves: `verify` settles it from the resolved parent.
             self.hardware_verified = False
 
     def apply(self, data, ctx):
@@ -7243,6 +7244,10 @@ class AddCardReadouts(Op):
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
+        # The status follows the RESOLVED parent, so a ref to 829 is 829's flashed path. Set
+        # here, not in apply: a cache-resumed compile (`recipe.compile_cached`) skips apply but
+        # always verifies, and `recipe._finish` reads the flag after verify.
+        self.hardware_verified = h["object"] == aescompact.ELECTRICAL_AES_BODY
         gs, tab = _gs_tab(data)
         frame = records.object_records(data, gs + tab[h["object"]])
         if h["object"] == aescompact.ELECTRICAL_AES_BODY:
