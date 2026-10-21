@@ -1,7 +1,9 @@
 """`add_enum_label`: a value shown as text from a table, on any page.
 
-Corpus-reading: compiles against stock 13.6 and places a thermostat-mode label inside HOME's
-CLIMATE box (object 539, attached under its parent 899; the box is (82, 346)-(192, 466)).
+Corpus-reading: compiles against stock 13.6 and draws a thermostat-mode label inside HOME's
+CLIMATE box (object 539, (82, 346)-(192, 466)). The label is attached under HOME (object 4)
+itself, not under the box's parent 899: 899's attaches carry value_slot 0, which the label's
+records would inherit (`recipe_ops._pasted_inherited_slots`), so 899 refuses.
 """
 import json
 import struct
@@ -17,14 +19,16 @@ REPO = Path(__file__).resolve().parents[1]
 STOCK = REPO / "firefly-13.6/mcf.bin"
 SHA = "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382"
 HOME_ROOT = 4
-CLIMATE_PARENT = 899
+LABEL_PARENT = HOME_ROOT
+CLIMATE_PARENT = 899             # refuses: its attaches carry value_slot 0
+LEAK_PARENT = 924                # root 18: without the restore record the font leaks
 VALUES = {"0": "Off", "1": "Cool", "3": "Auto", "4": "Fan", "6": "Dry"}
 TEXTS = ["Off", "Cool", "Auto", "Fan", "Dry", "--"]
 STALE = followchannel.STALE_SENTINEL
 
 
 def _op(**over):
-    params = {"parent": CLIMATE_PARENT, "x": 88, "y": 372, "w": 98, "h": 16, "font": 11,
+    params = {"parent": LABEL_PARENT, "x": 88, "y": 372, "w": 98, "h": 16, "font": 11,
               "align": "centre", "source": {"var": 13, "mask": 0x0F}, "values": VALUES,
               "default": "--"}
     params.update(over)
@@ -80,8 +84,8 @@ def _arms(data, sw):
 def test_mode_label_on_home(built):
     gs, tab = _gs_tab(built)
     obj, sw = _label_switch(built)
-    parent = records.object_records(built, gs + tab[CLIMATE_PARENT])
-    assert any(r.wtype == 5 and r.child_index == obj for r in parent), "not attached to 899"
+    parent = records.object_records(built, gs + tab[LABEL_PARENT])
+    assert any(r.wtype == 5 and r.child_index == obj for r in parent), "not attached to HOME"
     assert sw.count == 6
     assert sw.header[4] & 0x20, "switch not enrolled for live redraw"
     assert sw.base_modes[:4] == [0, 0, 1, 1] and sw.geom[:2] == [88, 372]
@@ -197,11 +201,11 @@ def test_layout_unchanged_elsewhere(built):
     before = pagewalk.walk_records(_stock(), HOME_ROOT)
     after = pagewalk.walk_records(built, HOME_ROOT)
     obj, sw = _label_switch(built)
-    ours = {CLIMATE_PARENT, obj, *range(sw.child_index, sw.child_index + sw.count)}
+    ours = {LABEL_PARENT, obj, *range(sw.child_index, sw.child_index + sw.count)}
     deltas = pagewalk.diff(before, after)
     assert all(d.kind == "appeared" for d in deltas), pagewalk.describe(deltas)
     new = [d.after for d in deltas]
-    assert [(r.wtype, r.obj) for r in new][:2] == [(5, CLIMATE_PARENT), (6, obj)]
+    assert [(r.wtype, r.obj) for r in new][:2] == [(5, LABEL_PARENT), (6, obj)]
     assert all(r.obj in ours for r in new), pagewalk.describe(deltas)
     # the attach, the switch, the band's base arm (the descending band starts at "--") and the
     # empty label that hands the walk back the font and align it carried in
@@ -214,8 +218,8 @@ def test_restore_hands_back_the_entering_state(built):
     """The empty label writes back the font/align the walk carried into the attach point."""
     stock = _stock()
     walk = pagewalk.walk_records(stock, HOME_ROOT)
-    last = max(i for i, r in enumerate(walk) if r.obj == CLIMATE_PARENT or
-               any(o == CLIMATE_PARENT for o, _i in r.key[:-1]))
+    last = max(i for i, r in enumerate(walk) if r.obj == LABEL_PARENT or
+               any(o == LABEL_PARENT for o, _i in r.key[:-1]))
     after = pagewalk.walk_records(built, HOME_ROOT)
     obj, _sw = _label_switch(built)
     restore = [r for r in after if r.obj == obj][-1]
@@ -273,16 +277,25 @@ def test_refused_when_the_entering_state_is_unknown(monkeypatch, states, why):
 
 
 def test_layout_gate_refuses_a_leak(monkeypatch):
-    """Without the restore record the label's font reaches HOME's next switch: refused."""
+    """Under 924 (root 18) the label's font reaches the next switch (`18:5/1088:3`) unless the
+    restore record hands it back: with it the placement passes, without it it is refused."""
+    assert _compile([_op(parent=LEAK_PARENT)]).ok
     monkeypatch.setattr(recipe_ops.AddEnumLabel, "_restore", lambda self, placed, parent: None)
-    err = _errors(_op())
-    assert "LABEL_REFUSED" in err and "besides its own" in err and "4:9" in err, err
+    err = _errors(_op(parent=LEAK_PARENT))
+    assert "LABEL_REFUSED" in err and "besides its own" in err and "18:5/1088" in err, err
+
+
+def test_climate_parent_refuses_the_inherited_slot():
+    """899's first wtype-5 attach (the clone `insert.insert_object` makes) carries value_slot 0;
+    every arm label would inherit it (`_effective_slot`'s rule), so the paste is refused."""
+    err = _errors(_op(parent=CLIMATE_PARENT))
+    assert "LABEL_REFUSED" in err and "inherits value_slot 0" in err, err
 
 
 def test_home_placement_passes_the_gate(built):
     stock = _stock()
     obj, _sw = _label_switch(built)
-    assert enumlabel.foreign_deltas(stock, built, CLIMATE_PARENT, obj) == []
+    assert enumlabel.foreign_deltas(stock, built, LABEL_PARENT, obj) == []
 
 
 def test_inert_source_refuses():

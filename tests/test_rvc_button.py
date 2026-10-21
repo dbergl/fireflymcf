@@ -237,3 +237,18 @@ def test_batt_heat_records_unchanged():
     frags = aescompact.build_batt_heat_button(stock, touch_id=200, x=10, y=20, w=90, h=60,
                                               text="Two\nLines")
     assert hashlib.sha256(b"".join(frags)).hexdigest() == BATT_HEAT_FRAGS_ALT_SHA
+
+
+@pytest.mark.parametrize("parent,via", [
+    (899, "4:8/899:4"),          # HOME's Climate parent: its first wtype-5 attach carries slot 0
+    (905, "4:5/907:0"),          # a slot-free attach of its own, under HOME's slot-0 907 attach
+])
+def test_parent_with_an_inherited_slot_refuses(parent, via):
+    """The capsule (wtype 33) and caption (wtype 11) carry no value slot of their own, so under
+    a wtype-5 attach that carries one they would inherit it (`_effective_slot`'s rule, the
+    rule `move_control` refuses on); the paste is refused, whether the slot is on the cloned
+    attach (899) or on an attach above the parent (905)."""
+    err = _errors([_op(parent=parent)])
+    assert "INSERT_REFUSED" in err and "inherits value_slot 0 from attach " + via in err, err
+    assert "(wtype 33) inherits" in err and "(wtype 11) inherits" in err, err
+

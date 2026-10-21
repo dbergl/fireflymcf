@@ -181,6 +181,30 @@ def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes],
     return out, edits, index
 
 
+def leaving_state(data: bytes, parent: int, attach_index: int) -> set:
+    """The `(font, align)` each walk of a page reaching `parent` carries out of record
+    `attach_index`'s subtree (the state after its last record). `rvcbutton.place` and
+    `cardreadouts.attach` measure what their object leaves with it, for `restore_state`.
+
+    Base arms first; only when no base walk passes the record are the switch-arm sets
+    (`pagewalk.switch_arm_sets`) walked, as `entering_state` does (a parent that only a switch
+    arm reaches, e.g. HOME's 902)."""
+    step = (parent, attach_index)
+    roots = pagewalk.reaching_roots(data, parent)
+    found: set = set()
+    for sets in ([{}], pagewalk.switch_arm_sets(data, roots)):
+        for root in roots:
+            for values in sets:
+                walk = pagewalk.walk_records(data, root, switch_values=values or None)
+                for i, r in enumerate(walk):
+                    inside = step in r.key
+                    if inside and (i + 1 == len(walk) or step not in walk[i + 1].key):
+                        found.add((r.font, r.align))
+        if found:
+            break
+    return found
+
+
 def restore_state(placed: bytes, parent: int, leaving: "tuple[int | None, int]"
                   ) -> "tuple[int | None, int] | None":
     """The `(font, align)` a restore record (`restore_record`) must write after an object just

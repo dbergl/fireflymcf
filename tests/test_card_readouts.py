@@ -68,20 +68,65 @@ def test_parent_default_is_byte_identical(monkeypatch):
     assert msgs[0] == msgs[1] and "aes_card_layout" in msgs[0]
 
 
+PASTE_PARENT = 793     # roots 5, 16, 39, 45: a slot-free attach, and the restore is needed
+
+
 def test_parent_other_object():
     from fireflymcf import records
-    res = _with_readouts({"parent": 902})
+    res = _with_readouts({"parent": PASTE_PARENT})
     assert res.ok, res.errors
     gs, tab = guidata.guidata_extent(res.data)[0], guidata.object_tables(res.data)[1]
     new = len(tab) - 1
     assert any(r.wtype == 5 and r.child_index == new
-               for r in records.object_records(res.data, gs + tab[902]))
-    labels = [r.label for r in records.object_records(res.data, gs + tab[new])
-              if r.wtype == 11]
-    assert labels == ["DC Amps", "A"]
+               for r in records.object_records(res.data, gs + tab[PASTE_PARENT]))
+    recs = records.object_records(res.data, gs + tab[new])
+    assert [r.label for r in recs if r.wtype == 11] == ["DC Amps", "A", ""]
+    assert recs[-1].wtype == 11 and not recs[-1].label      # the font/align restore
+    assert "cr" in res.unverified
+
+
+def test_paste_needs_the_restore(monkeypatch):
+    """Without the restore record the rows' font and align reach every later record on the
+    pages reaching 793 (538 deltas): the whole-page gate refuses it."""
+    from fireflymcf import enumlabel
+    monkeypatch.setattr(enumlabel, "restore_state", lambda *a, **k: None)
+    res = _with_readouts({"parent": PASTE_PARENT})
+    assert not res.ok
+    assert res.errors[0]["code"] == "LAYOUT_REFUSED" and "changes" in res.errors[0]["message"]
+
+
+def test_parent_whose_attach_carries_a_slot_refuses():
+    """902's first wtype-5 attach carries value_slot 205: the captions would inherit it."""
+    res = _with_readouts({"parent": 902})
+    assert not res.ok
+    assert res.errors[0]["code"] == "LAYOUT_REFUSED"
+    assert "inherits value_slot 205" in res.errors[0]["message"]
 
 
 def test_parent_without_template_refuses():
     res = _with_readouts({"parent": 13})
     assert not res.ok
     assert res.errors[0]["code"] == "WRONG_SHAPE"
+
+
+def test_parent_that_moves_other_controls_refuses():
+    """Attached under 199 (root 15), the readouts' flow shifted every later control on the page,
+    touch regions included (`15:5/846:4 wtype 12 moved (453,-295)`). The whole-page gate
+    (`enumlabel.foreign_deltas`) refuses it."""
+    res = _with_readouts({"parent": 199})
+    assert not res.ok
+    assert res.errors[0]["code"] == "LAYOUT_REFUSED", res.errors
+    assert "changes" in res.errors[0]["message"]
+
+
+def test_parent_other_than_829_is_unverified():
+    """Only 829's path was flashed; any other parent, an index or a ref, compiles unverified."""
+    from fireflymcf import recipe_ops
+    from fireflymcf.recipe import OpSpec
+    def made(extra):
+        return recipe_ops.AddCardReadouts(OpSpec(id="cr", type="add_card_readouts",
+                                                 params={"rows": _rows(), **extra}))
+    assert made({}).hardware_verified is True
+    assert made({"parent": 829}).hardware_verified is True
+    assert made({"parent": 902}).hardware_verified is False
+    assert made({"parent": {"ref": "x"}}).hardware_verified is False

@@ -60,7 +60,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
 | [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** |
-| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. The `parent` param (any page object, default 829) is UNVERIFIED. | yes |
+| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. Any `parent` other than 829 is UNVERIFIED and compiles as unverified; it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
 | [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). | **no** |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
@@ -628,7 +628,7 @@ Error codes:
 
 Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles.
 
-- **Hardware status:** Flashed 2026-10-15: the readouts are live on the coach. The `parent` param (any page object, default 829) is UNVERIFIED.
+- **Hardware status:** Flashed 2026-10-15: the readouts are live on the coach. Any `parent` other than 829 is UNVERIFIED and compiles as unverified; it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED).
 - **Proof:** `cardreadouts.py`, `readout.py`
 - **Implementation:** `recipe_ops.AddCardReadouts`
 
@@ -645,6 +645,7 @@ Draw captioned live readouts (caption over a right-justified value and its unit)
 Error codes:
 
 - `WRONG_SHAPE` — 829 is not aes_card_layout's frame, `parent` (another object) has no wtype-5 attach template, or a record failed its self-decode.
+- `LAYOUT_REFUSED` — (another `parent`) the placement changes any other record on a page reaching `parent`, a pasted record would inherit a value slot, or the entering font/align cannot be measured or written back.
 - `BAD_REF` — a row's ref names no draw:false readout handle.
 - `REPLACE_REFUSED` — 829 could not be relocated.
 
@@ -706,7 +707,7 @@ Error codes:
 - `NO_SUCH_REGISTER` — the source names no variable-table entry, or an inert one (an extraction mode outside `statusbind.LIVE_MODES` writes no slot, so the label would never change).
 - `NO_DISPLAY_CELL` — the cell table could not be grown.
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
-- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or the placement changes any other record on a page reaching `parent`.
+- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); the placement changes any other record on a page reaching `parent`; or a pasted record would inherit a value slot (e.g. under 899, whose attaches carry value_slot 0).
 - `OFF_CANVAS` — the box leaves the 800x480 canvas.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
 
@@ -838,7 +839,7 @@ Error codes:
 - `TOUCH_OVERLAP` — the touch region meets an existing one on a page reaching `parent`.
 - `OFF_CANVAS` — a record leaves the 800x480 canvas.
 - `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
-- `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, or the placement changes another record.
+- `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 
 ### aes_card_layout

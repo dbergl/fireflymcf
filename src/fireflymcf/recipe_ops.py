@@ -3332,6 +3332,47 @@ def _inherited_slot(by_key, r):
     return None
 
 
+def _pasted_inherited_slots(placed, parent, obj):
+    """`[(root, WalkRec, slot, attach WalkRec)]`: every record of the object `obj` just pasted
+    under `parent` (and of the arms of each wtype-6 switch in it) that has a value-slot field
+    by type (`absrecord.carries_value_slot`), none of its own, and so inherits one from a
+    wrapping wtype-5 attach (`_inherited_slot`), on any page root reaching `parent` in any
+    switch-arm set. Empty means every pasted record's effective value slot is its own.
+
+    The one rule the paste-path ops share (`add_rvc_button`, `add_enum_label`,
+    `add_card_readouts` off 829), and `move_control`'s: a pasted record must not inherit a
+    value slot (OBJECT-HIERARCHY.md 1a, `inferred-from-data`: obj 295's box and caption take
+    their live cell from the attach above them, which on a box is its on/off style flag,
+    MCF-FORMAT.md 6.0a). The attach is `insert.insert_object`'s byte clone of `parent`'s first
+    wtype-5 record, so a slot on it, or on any attach above `parent`, reaches the pasted
+    records; the walk itself models only a record's own field."""
+    gs, tab = _gs_tab(placed)
+    ours = {obj}
+    for sw in records.object_records(placed, gs + tab[obj]):
+        if sw.wtype == 6:
+            ours.update(range(sw.child_index, sw.child_index + sw.count))
+    roots = pagewalk.reaching_roots(placed, parent)
+    found, seen = [], set()
+    for values in pagewalk.switch_arm_sets(placed, roots):
+        for root in roots:
+            walk = pagewalk.walk_records(placed, root, switch_values=values or None)
+            by_key = {r.key: r for r in walk}
+            for r in walk:
+                if r.obj not in ours or not absrecord.carries_value_slot(r.wtype):
+                    continue
+                inherited = _inherited_slot(by_key, r)
+                if inherited is not None and (root, r.key) not in seen:
+                    seen.add((root, r.key))
+                    found.append((root, r) + inherited)
+    return found
+
+
+def _describe_inherited(found, limit=8):
+    return "\n".join("root %d: %s (wtype %d) inherits value_slot %d from attach %s"
+                     % (root, _fmt_walk_key(r.key), r.wtype, slot, _fmt_walk_key(att.key))
+                     for root, r, slot, att in found[:limit])
+
+
 def _overlaps(a, b):
     """Two boxes share a pixel. Inclusive edges: the hit test returns the id of a region
     containing the point (CONTROL-BEHAVIOR §1, `0x00258BB2`-`0x00258C26`); whether its edges
@@ -7086,14 +7127,29 @@ class AddCardReadouts(Op):
     draws). One private object holds every row; its attach goes into 829 directly after the
     card titles (`cardreadouts.attach`). Runs after `aes_card_layout`.
 
+    Another `parent` takes the paste path instead (`insert.insert_object`, a clone of the
+    parent's first wtype-5 attach appended as its last record), the object ended by an empty
+    label that hands back the font and align the walk carried in (`enumlabel.restore_state`).
+    Every page root reaching `parent`, in every switch-arm set, is then walked before and after
+    (`enumlabel.foreign_deltas`), as `add_enum_label` and `add_rvc_button` do: the readouts
+    are absolute, but the flow origin they leave is not restored, so on some parents every
+    later control would move (on 199 every control after it on root 15, touch regions
+    included). Any change besides the readouts' own records refuses, and so does a caption
+    inheriting a value slot from a wtype-5 attach above it (`_pasted_inherited_slots`, the rule
+    `add_rvc_button` and `add_enum_label` apply). Only 829's path was flashed: any other
+    `parent` compiles as unverified.
+
     Error codes:
       WRONG_SHAPE     -- 829 is not aes_card_layout's frame, `parent` (another object) has no
                          wtype-5 attach template, or a record failed its self-decode.
+      LAYOUT_REFUSED  -- (another `parent`) the placement changes any other record on a page
+                         reaching `parent`, a pasted record would inherit a value slot, or the
+                         entering font/align cannot be measured or written back.
       BAD_REF         -- a row's ref names no draw:false readout handle.
       REPLACE_REFUSED -- 829 could not be relocated.
     """
 
-    hardware_verified = True     # flashed 2026-10-15: readouts live on the coach
+    hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
 
     PARAMS = {
         "properties": {
@@ -7129,6 +7185,9 @@ class AddCardReadouts(Op):
                      (("x_caption", 684), ("pen_x", 760), ("unit_x", 763), ("y0", 78),
                       ("pitch", 34))}
         self.parent = self._param("parent", aescompact.ELECTRICAL_AES_BODY)
+        if self.parent != aescompact.ELECTRICAL_AES_BODY:
+            # the coach verified the readouts in 829's frame; the paste path is unflashed
+            self.hardware_verified = False
 
     def apply(self, data, ctx):
         parent = resolve_target(ctx, self.parent)
@@ -7150,6 +7209,10 @@ class AddCardReadouts(Op):
         try:
             obj = cardreadouts.build_object(data, rows, **self.geom)
             out, index = cardreadouts.attach(data, obj, parent)
+            bad = ([] if parent == aescompact.ELECTRICAL_AES_BODY
+                   else enumlabel.foreign_deltas(data, out, parent, index))
+        except enumlabel.EnumLabelError as e:       # the paste path's font/align restore
+            raise RecipeError("LAYOUT_REFUSED", str(e), op_id=self.spec.id)
         except insert.InsertError as e:
             if parent == aescompact.ELECTRICAL_AES_BODY:    # 829's refusals stay REPLACE_REFUSED
                 raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
@@ -7158,6 +7221,17 @@ class AddCardReadouts(Op):
             raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
         except (ValueError, readout.ReadoutError, insert.InsertError) as e:
             raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
+        inherited = ([] if parent == aescompact.ELECTRICAL_AES_BODY
+                     else _pasted_inherited_slots(out, parent, index))
+        if inherited:
+            raise RecipeError("LAYOUT_REFUSED", "under object %d the readouts' records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=self.spec.id)
+        if bad:
+            raise RecipeError("LAYOUT_REFUSED", "attaching the readouts under object %d changes "
+                              "%d record(s) besides their own:\n%s"
+                              % (parent, len(bad), pagewalk.describe(bad[:20])),
+                              op_id=self.spec.id)
         out, _ = patch.reseal(out)
         ctx.handles[self.spec.id] = {"object": parent,
                                      "readouts": index,
@@ -7179,9 +7253,9 @@ class AddCardReadouts(Op):
             assert any(r.wtype == 5 and r.child_index == h["readouts"] for r in frame), \
                 "the readouts attach is not in object %d" % h["object"]
         recs = records.object_records(data, gs + tab[h["readouts"]])
+        labels = [r for r in recs if r.wtype == 11][:2 * len(h["rows"])]   # not the restore
         got = [(c.label, v.value_slot, u.label) for c, v, u in
-               zip([r for r in recs if r.wtype == 11][0::2], [r for r in recs if r.wtype == 8],
-                   [r for r in recs if r.wtype == 11][1::2])]
+               zip(labels[0::2], [r for r in recs if r.wtype == 8], labels[1::2])]
         assert got == [tuple(x) for x in h["rows"]], "rows read back as %s" % got
         return ("add_card_readouts: %d rows %s in object %d, attached to object %d"
                 % (len(got), [g[0] for g in got], h["readouts"], h["object"]))
@@ -7642,7 +7716,9 @@ class AddEnumLabel(Op):
     the font and align the page walk carried in (`enumlabel.restore_record`). The cell is always
     freshly grown (`readout.allocate_fresh_cells`, recorded in `ctx.authored_cells`). After
     placement every page root reaching `parent`, in every switch-arm set, is walked before and
-    after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses.
+    after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses, and
+    so does any arm record inheriting a value slot from a wtype-5 attach above it
+    (`_pasted_inherited_slots`, the rule `add_rvc_button` and `move_control` apply).
 
     Params:
       parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
@@ -7667,8 +7743,10 @@ class AddEnumLabel(Op):
       NO_COLOUR        -- `colour` or `background` is not in this build's palette.
       LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed; the
                           entering font/align cannot be measured or written back (no page
-                          reaches `parent`, pages disagree, no font yet, align 0); or the
-                          placement changes any other record on a page reaching `parent`.
+                          reaches `parent`, pages disagree, no font yet, align 0); the
+                          placement changes any other record on a page reaching `parent`; or
+                          a pasted record would inherit a value slot (e.g. under 899, whose
+                          attaches carry value_slot 0).
       OFF_CANVAS       -- the box leaves the 800x480 canvas.
       DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
     """
@@ -7820,6 +7898,11 @@ class AddEnumLabel(Op):
             bad = enumlabel.foreign_deltas(out, placed, parent, index)
         except enumlabel.EnumLabelError as e:
             raise RecipeError("LABEL_REFUSED", str(e), op_id=oid)
+        inherited = _pasted_inherited_slots(placed, parent, index)
+        if inherited:
+            raise RecipeError("LABEL_REFUSED", "under object %d the label's records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=oid)
         if bad:
             raise RecipeError("LABEL_REFUSED", "placing the label under object %d changes %d "
                               "record(s) besides its own:\n%s"
@@ -7900,8 +7983,12 @@ class AddRvcButton(Op):
     clone of `parent`'s first wtype-5 attach (`rvcbutton.place`, `move_control`'s paste path),
     ended by an empty label that hands back the font and align the walk carried in. Every page
     root reaching `parent`, in every switch-arm set, is walked before and after: the new touch
-    region must meet no existing one, no new record may leave the canvas, and nothing else may
-    change (`enumlabel.foreign_deltas`).
+    region must meet no existing one, no new record may leave the canvas, nothing else may
+    change (`enumlabel.foreign_deltas`), and no pasted record may inherit a value slot from a
+    wtype-5 attach above it, the cloned one or one wrapping `parent`
+    (`_pasted_inherited_slots`, `move_control`'s rule): the capsule and caption carry none of
+    their own, and one inherited would be their live cell and on/off flag (OBJECT-HIERARCHY.md
+    1a). HOME's Climate parent 899 refuses this way (its attaches carry value_slot 0).
 
     The toggle form (`toggle`) is one group with byte 1 `0x80` (its variant is not cycled on
     release) and byte 0's low nibble 1 (the setter refuses a variant above it), and two bindings on `dgn`, both on mask 0x06: variant 0 sends `on_payload`,
@@ -7936,7 +8023,8 @@ class AddRvcButton(Op):
       OFF_CANVAS     -- a record leaves the 800x480 canvas.
       GROW_REFUSED   -- the gesture donor groups or the binding table (arena, gates) refused.
       INSERT_REFUSED -- the attach could not be cloned or inserted, the walk's font/align state
-                        cannot be handed back, or the placement changes another record.
+                        cannot be handed back, a pasted record would inherit a value slot, or
+                        the placement changes another record.
       TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
     """
 
@@ -8109,21 +8197,16 @@ class AddRvcButton(Op):
                 font=self.font, fill_index=fill, x=self.x, y=self.y, glyph_image=out)
         except ValueError as e:                  # RvcButtonError: a box its content cannot fit
             raise self._bad(str(e))
-        parent_recs = records.object_records(data, gs + tab[parent])
-        try:
-            _, template = insert._container_template(data, parent_recs, False)
-        except insert.InsertError as e:
-            raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
-        if template.value_slot is not None:
-            raise RecipeError("INSERT_REFUSED", "the attach cloned onto object %d (its record "
-                              "%d) carries value_slot %d, which the button would inherit"
-                              % (parent, parent_recs.index(template), template.value_slot),
-                              op_id=oid)
         try:
             placed, place_edits, index = rvcbutton.place(out, parent=parent, x=self.x, y=self.y,
                                                          frags=frags, mode="attach")
         except (rvcbutton.RvcButtonError, enumlabel.EnumLabelError) as e:
             raise RecipeError("INSERT_REFUSED", str(e), op_id=oid)
+        inherited = _pasted_inherited_slots(placed, parent, index)
+        if inherited:
+            raise RecipeError("INSERT_REFUSED", "under object %d the button's records would "
+                              "inherit a value slot they were not built for:\n%s"
+                              % (parent, _describe_inherited(inherited)), op_id=oid)
 
         # 3. the whole-page gates
         roots = pagewalk.reaching_roots(out, parent)
