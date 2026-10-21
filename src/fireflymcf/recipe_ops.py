@@ -5462,6 +5462,10 @@ class ResolveRegister(Op):
             h["dgn_low"], h["value"], h["var_index"], h["slot_addr"])
 
 
+# A variable-table entry's staleness class (`appendfilter.NewFilter.refresh`, +3 bits 2-3)
+_REFRESH_TIMEOUT = ("2 s", "10 s", "30 s", "never expires")
+
+
 @op("append_filter")
 class AppendFilter(Op):
     """Subscribe the panel to a DGN by APPENDING a new variable-table entry, instead of
@@ -5542,10 +5546,11 @@ class AppendFilter(Op):
         gc_count = struct.unpack_from("<H", data, gc.offset + appendfilter.GUICODE_VAR_COUNT_FIELD)[0]
         assert gc_count == len(vt), "GuiCode count %d != table %d" % (gc_count, len(vt))
         assert len(statusbind.registered_dgns(data)) <= statusbind.REGISTRY_CAP
-        return ("append_filter: var %d receives DGN %#07x mode %d payload[%d] -> slot %#x; "
-                "table %d entries (GuiCode +0x20 matches); COACH-VERIFIED 2026-09-22"
+        return ("append_filter: var %d receives DGN %#07x mode %d payload[%d] -> slot %#x, "
+                "refresh %d (%s); table %d entries (GuiCode +0x20 matches)"
                 % (h["var_index"], self.filter.dgn, self.filter.mode, self.filter.payload_byte,
-                   h["slot_addr"], len(vt)))
+                   h["slot_addr"], self.filter.refresh, _REFRESH_TIMEOUT[self.filter.refresh],
+                   len(vt)))
 
 
 _REGISTER_HANDLE_KEYS = ("var_index", "slot_addr", "dgn_low", "value", "extract_mode",

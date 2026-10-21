@@ -4,6 +4,7 @@ Pins the four things the boot loader checks and the one thing it would silently 
 reads back at the table's end, the descriptor count/size and GuiCode header +0x20 agree, nothing
 at or after the image container moves, and the registry cap is enforced.
 """
+import hashlib
 import json
 import struct
 
@@ -106,3 +107,19 @@ def test_op_hands_a_register_ref_to_add_register_readout():
     gc = appendfilter._guicode_section(res.data)
     code = res.data[gc.offset:gc.offset + gc.length]
     assert struct.pack("<I", register.status_slot_addr(298)) in code
+
+
+@pytest.mark.parametrize("refresh, timeout", [(0, "2 s"), (1, "10 s"), (2, "30 s"),
+                                              (3, "never expires")])
+def test_manifest_line_names_the_refresh_class_not_a_date(refresh, timeout):
+    """The line describes this entry: its staleness class and timeout. The op's own first
+    flash belongs in its hardware status (`fireflymcf ops`), not in every build's line."""
+    proj = recipe.Project(base_sha256=hashlib.sha256(_stock()).hexdigest(), build_name=None,
+                          ops=[recipe.OpSpec(id="f", type="append_filter",
+                                             params={"dgn": 0x1FEA0, "mode": 1,
+                                                     "payload_byte": 0, "refresh": refresh})])
+    res = recipe.compile_project(proj, _stock())
+    assert res.ok, res.errors
+    line = res.manifest[0]
+    assert "refresh %d (%s)" % (refresh, timeout) in line, line
+    assert "COACH-VERIFIED" not in line and "2026" not in line, line
