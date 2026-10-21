@@ -8311,11 +8311,20 @@ class AddRvcButton(Op):
                                                                              can_id)
             frames.append("%08X#%s mask %#x variant %d" % (cid, pay.hex(), raw[3], raw[2] >> 4))
 
-        # the box lands where asked on every page reaching the parent
-        for root in pagewalk.reaching_roots(data, h["parent"]):
-            box = [r.box for r in pagewalk.walk_records(data, root) if r.obj == h["object"]][0]
-            assert box == (h["x"], h["y"], h["x"] + h["w"], h["y"] + h["h"]), \
-                "root %d draws the box at %s" % (root, box)
+        # the box lands where asked on every page reaching the parent, in every switch-arm set
+        # (as apply's gates walk them: a parent may be reached only through a non-base arm)
+        want_box = (h["x"], h["y"], h["x"] + h["w"], h["y"] + h["h"])
+        roots = pagewalk.reaching_roots(data, h["parent"])
+        drawn = 0
+        for values in pagewalk.switch_arm_sets(data, roots):
+            for root in roots:
+                walk = pagewalk.walk_records(data, root, switch_values=values or None)
+                boxes = [r.box for r in walk if r.obj == h["object"]]
+                if boxes:
+                    drawn += 1
+                    assert boxes[0] == want_box, \
+                        "root %d (arms %s) draws the box at %s" % (root, values, boxes[0])
+        assert drawn, "no walk of roots %s reaches the button object %d" % (roots, h["object"])
         return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
                 "UNVERIFIED on the coach"
                 % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))

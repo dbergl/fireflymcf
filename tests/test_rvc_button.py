@@ -252,3 +252,12 @@ def test_parent_with_an_inherited_slot_refuses(parent, via):
     assert "INSERT_REFUSED" in err and "inherits value_slot 0 from attach " + via in err, err
     assert "(wtype 33) inherits" in err and "(wtype 11) inherits" in err, err
 
+
+def test_parent_reached_only_through_a_switch_arm():
+    """HOME's 904 is a non-base arm of the slot-6 switch: no base walk reaches it. Apply's
+    gates walk every arm set, so verify must too (it took `[0]` over base walks, IndexError)."""
+    from fireflymcf import pagewalk
+    stock = _stock()
+    assert not any(r.obj == 904 for r in pagewalk.walk_records(stock, HOME))
+    res = _ok([_op(parent=904, x=700, y=420)])
+    assert any("under 904" in m for m in res.manifest), res.manifest
