@@ -98,8 +98,14 @@ def check_frame(data: bytes) -> None:
             "first" % aescompact.ELECTRICAL_AES_BODY)
 
 
-def attach(data: bytes, obj_bytes: bytes) -> tuple[bytes, int]:
-    """Append the object and insert a plain wtype-5 attach for it at 829[ATTACH_AT]."""
+def attach(data: bytes, obj_bytes: bytes, parent: int = aescompact.ELECTRICAL_AES_BODY,
+           at: tuple[int, int] | None = None) -> tuple[bytes, int]:
+    """Append the object and attach it. On the default parent (829, aes_card_layout's frame) a
+    plain wtype-5 attach goes in at 829[ATTACH_AT]; on any other parent `insert.insert_object`
+    clones one of that parent's own wtype-5 attach records (`at` positions it)."""
+    if parent != aescompact.ELECTRICAL_AES_BODY:
+        out, _edits = insert.insert_object(data, obj_bytes, parent, position=at)
+        return out, len(guidata.object_tables(out)[1]) - 1
     check_frame(data)
     out, _edits, index = insert._append_object(data, obj_bytes)
     gs, tab = _gs_tab(out)

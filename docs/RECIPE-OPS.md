@@ -612,10 +612,11 @@ Draw captioned live readouts (caption over a right-justified value and its unit)
 | `unit_x` | integer |  | 763 |  |
 | `y0` | integer |  | 78 |  |
 | `pitch` | integer |  | 34 |  |
+| `parent` | any |  | 829 | object the readouts attach to: an object index or {ref: op_id}; default 829 (aes_card_layout's frame) |
 
 Error codes:
 
-- `WRONG_SHAPE` — 829 is not aes_card_layout's frame, or a record failed its self-decode.
+- `WRONG_SHAPE` — 829 is not aes_card_layout's frame, `parent` (another object) has no wtype-5 attach template, or a record failed its self-decode.
 - `BAD_REF` — a row's ref names no draw:false readout handle.
 - `REPLACE_REFUSED` — 829 could not be relocated.
 
