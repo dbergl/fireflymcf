@@ -779,3 +779,34 @@ def test_the_pointer_gate_refuses_a_moved_guicode_section(_mid_case, monkeypatch
     monkeypatch.setattr(theme, "guicode_section", moved)
     ok, msg = _pointer_gate(before, after, _MID_AT, _MID_DELTA)
     assert not ok and "GuiCode moved or resized" in msg
+
+
+def test_find_match_table_survives_more_appends_than_the_width_scan_tries(monkeypatch):
+    """A 58-op build appended more objects than `MATCH_TABLE_MAX_APPENDED` without growing the
+    match table, and the width scan stopped finding it (INSERT_REFUSED on the 15th button). The
+    anchored walk (the table ends where object table 1 begins) still returns the stock offset,
+    and a grow afterwards lands its values on the next object indices."""
+    import struct
+    from fireflymcf import guidata, insert, relocate
+    data = open("firefly-13.6/mcf.bin", "rb").read()
+    stock_mt = guidata.find_match_table(data)
+    extra = guidata.MATCH_TABLE_MAX_APPENDED + 4
+    out = data
+    for _ in range(extra):
+        out, _e, _idx = insert._append_object(out, insert.clone_object(data, 173))
+    n = len(guidata.object_tables(out)[1])
+    assert n == len(guidata.object_tables(data)[1]) + extra
+    assert guidata.find_match_table(out) == stock_mt
+
+    grown, _ = relocate.grow_match_table(out, [0, 1])
+    gs, _ = guidata.guidata_extent(grown)
+    assert guidata.find_match_table(grown) == stock_mt
+    assert [struct.unpack_from("<H", grown, gs + stock_mt + i * 2)[0] for i in (n, n + 1)] \
+        == [0, 1]
+
+    # without the anchor, the width scan alone gives up on this image
+    def unanchored(*a, **k):
+        raise ValueError("anchor disabled")
+    monkeypatch.setattr(guidata, "object_table_offset", unanchored)
+    with pytest.raises(guidata.MatchTableNotFound):
+        guidata.find_match_table(out)
