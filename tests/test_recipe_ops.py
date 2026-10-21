@@ -308,6 +308,56 @@ def test_recolor_verify_catches_later_repoint(stock, stock_hash):
     with pytest.raises(AssertionError, match="a later op repointed it"):
         recipe.compile_project(p, stock)
 
+def _fillA(data, obj, i):
+    gs, tab = _gs_tab_t(data)
+    rec = records.object_records(data, gs + tab[obj])[i]
+    return next(c for c in rec.colors if c[0] == "fillA")
+
+def test_recolor_selector_picks_one_of_two_boxes(stock, stock_hash):
+    # Object 872 (a card) holds two mode-7 wtype-4 boxes: record 0, the card box (fillA 7/3),
+    # and record 19 (fillA 7/15). Without a selector find_button_box refuses the ambiguity;
+    # {"wtype": 4, "nth": 0} recolours the card box and nothing else.
+    from fireflymcf import theme
+    def recolor(**extra):
+        return compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+            "object": 872, "color": {"index": 8}, "allow_container": True, **extra}))
+    r = recolor()
+    assert not r.ok and r.errors[0]["code"] == "NO_SUCH_COLOR"
+    assert "candidate" in r.errors[0]["message"]
+    r = recolor(selector={"wtype": 4, "nth": 0})
+    assert r.ok, r.errors
+    want = theme.resolve_fill_index(stock, index=8)
+    assert _fillA(r.data, 872, 0) == ("fillA", 7, want)
+    assert _fillA(r.data, 872, 19) == ("fillA", 7, 15)
+    assert "a" in r.unverified          # the selector path has not run on a coach
+    gs, tab = _gs_tab_t(stock)
+    rec0 = records.object_records(stock, gs + tab[872])[0]
+    off = records.color_offset(stock, rec0, "fillA")
+    diff = [i for i, (x, y) in enumerate(zip(stock, r.data)) if x != y]
+    assert all(off <= i < off + 2 or not guidata.guidata_extent(stock)[0] <= i
+               < guidata.guidata_extent(stock)[1] - 4 for i in diff), \
+        "GuiData changed outside record 0's fillA"
+
+def test_recolor_selector_without_a_mode7_fill_is_no_such_color(stock, stock_hash):
+    # 872's second wtype-4 record (record 16) fills with mode 6: nothing to repoint.
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 872, "color": {"index": 8}, "allow_container": True,
+        "selector": {"wtype": 4, "nth": 1}}))
+    assert not r.ok and r.errors[0]["code"] == "NO_SUCH_COLOR"
+
+@pytest.mark.parametrize("selector", [{"wtyp": 4}, {"nth": -1}, {"nth": "0"}, {"wtype": "4"},
+                                      {"label": 3}, []])
+def test_recolor_bad_selector_is_bad_params(stock, stock_hash, selector):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 279, "color": [65, 81, 163], "selector": selector}))
+    assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS", r.errors
+
+def test_recolor_without_selector_stays_verified(stock, stock_hash):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor",
+                                                     params={"object": 279,
+                                                             "color": [65, 81, 163]}))
+    assert r.ok and "a" not in r.unverified
+
 def test_set_icon_slot_and_char(stock, stock_hash):
     # Object 247 (Bath Fan template): icon is font 24 char 'E'. Change the char.
     r = compile_ops(stock, stock_hash,

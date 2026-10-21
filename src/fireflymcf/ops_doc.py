@@ -55,8 +55,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Repoint an icon record's font slot and/or character; optionally blank the caption.",
         "Flashed (the Starlink button).", "`docs/HARDWARE-VERIFIED.md`"),
     "recolor": ("same-size",
-        "Repoint a button box's fill index to another colour in the firmware palette.",
-        "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
+        "Repoint a button box's fill index to another colour in the firmware palette. A "
+        "`selector` (`move_element`'s wtype/label/nth) names the record when an object holds "
+        "more than one mode-7 box.",
+        "Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, "
+        "repaints).", "`docs/HARDWARE-VERIFIED.md`"),
     "remap_channel": ("same-size",
         "Make a labelled control command a different G12 output channel.",
         "Flashed with `move_display_list` (PC.13-16). The default indicator retarget is "
