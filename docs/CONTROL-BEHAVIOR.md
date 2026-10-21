@@ -646,7 +646,9 @@ whole time, and two rounds were spent calibrating instead of deriving.
   tap still sends, but a hold never registers: v45's Track + (136) did not repeat and its
   hold-only reboot (137) sent nothing, while identical controls on 96/126/127 worked. The mechanism
   is not traced (the setter refuses a byte-1 `0x00` group, so it is not its write). Allocate holds
-  from `newbutton.hold_safe_groups`; `recipe._assert_no_guicode_selected_group_reused` gates reuse.
+  from `newbutton.hold_safe_groups` and taps from `newbutton.assignable_groups` (which drops
+  every GuiCode-driven group, 13.6's 136-139, 184, 231 and 232);
+  `recipe._assert_no_guicode_selected_group_reused` gates reuse.
 
 ### Hold-to-toggle — `gestures.make_hold_to_toggle`, CONFIRMED ON HARDWARE 2026-08-19
 

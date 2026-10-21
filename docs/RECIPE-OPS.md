@@ -191,7 +191,7 @@ Set one record's geometry fields (x, y, width, height) inside an object.
 
 Error codes:
 
-- `BAD_PARAMS` — a set/expect key is not x/y/w/h, set is empty, or an expect key is not also in set
+- `BAD_PARAMS` — a set/expect key is not x/y/w/h, set is empty, an expect key is not also in set, or a value is not an int in -32768..65535
 - `NO_SUCH_RECORD` — no record matches selector (from `_select_record`)
 - `NO_FIELD` — a requested `set` key has no geometry field on the matched record and is not listed in `optional`
 - `EXPECT_MISMATCH` — an `expect` value differs from the field's current value

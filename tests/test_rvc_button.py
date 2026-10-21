@@ -261,3 +261,21 @@ def test_parent_reached_only_through_a_switch_arm():
     assert not any(r.obj == 904 for r in pagewalk.walk_records(stock, HOME))
     res = _ok([_op(parent=904, x=700, y=420)])
     assert any("under 904" in m for m in res.manifest), res.manifest
+
+
+def test_free_pool_never_offers_a_guicode_driven_group():
+    """The `free` pool used to hand out 13.6's 136-139 once the lower slots were taken, and the
+    finish gate (`recipe._assert_no_guicode_selected_group_reused`) then failed the whole build
+    with an assertion. The pool now skips every GuiCode-driven group, so running it dry is the
+    op's own NO_FREE_GROUP."""
+    from fireflymcf import levelcontrols, rvcbutton
+    data = STOCK.read_bytes()
+    driven = newbutton.guicode_selected_groups(data)
+    assert {136, 137, 138, 139} <= set(driven)
+    assert {136, 137, 138, 139} <= set(newbutton.free_group_slots(data))     # the old pool
+    pool = [g for g in newbutton.assignable_groups(data)
+            if g not in levelcontrols.RESERVED_GROUPS]
+    got = rvcbutton.allocate(data, pool="free", need=len(pool))
+    assert got == pool and not set(got) & set(driven)
+    with pytest.raises(rvcbutton.RvcButtonError, match="holds %d slot" % len(pool)):
+        rvcbutton.allocate(data, pool="free", need=len(pool) + 1)

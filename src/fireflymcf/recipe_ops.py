@@ -200,7 +200,9 @@ class MoveElement(Op):
       selector: dict — record selector: wtype (int|None), label (str|None),
                 nth (int, default 0); resolved via `_select_record`
       set: dict — geometry fields to write, keys from x/y/w/h -> new int value; must
-           be non-empty
+           be non-empty. A value is -32768..65535: the layout engine reads geometry signed
+           (`layout._s16`), so a negative relative offset is stored as its two's complement
+           (-42 and 65494 are the same edit). `expect` takes either spelling too.
       expect: dict (default {}) — prior values to validate before writing; every key
               here must also be a key in `set` (an expect on a field never written is
               a silently-inert assertion)
@@ -208,8 +210,8 @@ class MoveElement(Op):
                 matched record (skipped rather than refused)
 
     Error codes:
-      BAD_PARAMS — a set/expect key is not x/y/w/h, set is empty, or an expect key is
-                   not also in set
+      BAD_PARAMS — a set/expect key is not x/y/w/h, set is empty, an expect key is
+                   not also in set, or a value is not an int in -32768..65535
       NO_SUCH_RECORD — no record matches selector (from `_select_record`)
       NO_FIELD — a requested `set` key has no geometry field on the matched record and
                 is not listed in `optional`
@@ -249,6 +251,13 @@ class MoveElement(Op):
                 "non-empty, and every expect key must also be in set (an expect on a "
                 "key never written is a silently-inert assertion); got bad=%r "
                 "stray_expect=%r" % (bad, stray_expect), op_id=self.spec.id)
+        for name, d in (("set", self.set), ("expect", self.expect)):
+            for k, v in d.items():
+                if not isinstance(v, int) or isinstance(v, bool) or not -0x8000 <= v <= 0xFFFF:
+                    raise RecipeError("BAD_PARAMS", "move_element %s[%r] = %r is not an int in "
+                                      "-32768..65535" % (name, k, v), op_id=self.spec.id)
+        self.set = {k: v & 0xFFFF for k, v in self.set.items()}       # signed -> stored u16
+        self.expect = {k: v & 0xFFFF for k, v in self.expect.items()}
 
     def apply(self, data, ctx):
         obj = resolve_target(ctx, self.target)
@@ -6637,8 +6646,9 @@ class AddAesBattHeat(Op):
         binding_start = len(guidata.binding_table(data))
 
         # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
-        # this op never did; byte identity keeps the old list)
-        free = (newbutton.free_group_slots(data) if self.group_pool == "free"
+        # this op never did; byte identity keeps the old list). The free pool skips the groups
+        # GuiCode drives (`newbutton.assignable_groups`): the finish gate refuses those anyway.
+        free = (newbutton.assignable_groups(data) if self.group_pool == "free"
                 else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
         if not free:
             raise RecipeError("NO_FREE_GROUP",
