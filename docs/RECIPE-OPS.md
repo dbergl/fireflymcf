@@ -67,6 +67,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
+| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
@@ -845,6 +846,36 @@ Error codes:
 - `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
+
+### add_text_label
+
+Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock).
+- **Proof:** `enumlabel.py`, `pagedraw.py`
+- **Implementation:** `recipe_ops.AddTextLabel`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `font` | integer | yes |  |  |
+| `text` | string | yes |  | latin-1; '\n' starts a new line |
+| `align` | string |  | "left" | left \| centre \| right |
+| `colour` | array |  | [255, 255, 255] |  |
+| `background` | array\|null |  | null |  |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: an empty, non-latin-1 or over-254-byte text, an unknown align, a non-positive box, or text that does not fit the box (the message names the line too wide, or the lines too tall).
+- `BAD_REF` — a `parent` ref names no usable handle.
+- `NO_GLYPH` — a character (other than the space) the font cannot draw.
+- `NO_COLOUR` — `colour` or `background` is not in this build's palette.
+- `OFF_CANVAS` — the box leaves the 800x480 canvas.
+- `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.
 
 ### aes_card_layout
 
