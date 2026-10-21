@@ -241,3 +241,28 @@ def test_preview_does_not_change_the_compile_prefix_key(stock_hash):
                        preview={"floorplan": "WT", "options": ["AGS"]})
     key = lambda p: recipe._prefix_key(p.base_sha256, [o for o in p.ops if o.enabled])
     assert key(a) == key(b)
+
+
+def test_cache_resume_keeps_the_authored_cells_gate(stock, stock_hash):
+    """A resumed compile must see the display cells the cached prefix's ops minted: the
+    cell-aliasing gate (`_assert_authored_cells_fresh`) reads `ctx.authored_cells`, so a
+    snapshot that drops the set lets a reused stock cell through on every warm compile."""
+    @recipe.op("test_reused_cell")
+    class ReusedCell(recipe.Op):
+        def apply(self, data, ctx):
+            ctx.authored_cells.add(256)          # a stock index: the gate must refuse it
+            return data
+
+        def verify(self, data, ctx):
+            return "reused"
+    try:
+        p = recipe.Project(base_sha256=stock_hash, build_name=None,
+                           ops=[recipe.OpSpec(id="a", type="test_reused_cell", params={})])
+        cache = {}
+        with pytest.raises(AssertionError, match="below the stock cell-table row count"):
+            recipe.compile_cached(p, stock, cache)
+        assert recipe._prefix_key(stock_hash, p.ops) in cache
+        with pytest.raises(AssertionError, match="below the stock cell-table row count"):
+            recipe.compile_cached(p, stock, cache)      # resumed from the cached prefix
+    finally:
+        del recipe.REGISTRY["test_reused_cell"]

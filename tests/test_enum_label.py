@@ -75,10 +75,20 @@ def _label_switch(data):
 
 
 def _arms(data, sw):
-    """The arms in match-value order (the band itself is laid out descending)."""
+    """The text arms in match-value order 0..n (the band itself is laid out descending, after
+    the 0xFFFF default at its base)."""
     gs, tab = _gs_tab(data)
     cands = dict(guidata.switch_candidates(data, sw, guidata.find_match_table(data)))
-    return [records.object_records(data, gs + tab[cands[v]]) for v in sorted(cands)]
+    return [records.object_records(data, gs + tab[cands[v]]) for v in sorted(cands)
+            if v != 0xFFFF]
+
+
+def _default_arm(data, sw):
+    """The arm at the band's base, matched on 0xFFFF: what an unmatched value draws."""
+    gs, tab = _gs_tab(data)
+    cands = guidata.switch_candidates(data, sw, guidata.find_match_table(data))
+    assert cands[0] == (0xFFFF, sw.child_index), cands
+    return records.object_records(data, gs + tab[sw.child_index])
 
 
 def test_mode_label_on_home(built):
@@ -86,12 +96,13 @@ def test_mode_label_on_home(built):
     obj, sw = _label_switch(built)
     parent = records.object_records(built, gs + tab[LABEL_PARENT])
     assert any(r.wtype == 5 and r.child_index == obj for r in parent), "not attached to HOME"
-    assert sw.count == 6
+    assert sw.count == 7
     assert sw.header[4] & 0x20, "switch not enrolled for live redraw"
     assert sw.base_modes[:4] == [0, 0, 1, 1] and sw.geom[:2] == [88, 372]
     cands = guidata.switch_candidates(built, sw, guidata.find_match_table(built))
-    assert sorted(v for v, _o in cands) == [0, 1, 2, 3, 4, 5]
-    assert [v for v, _o in cands] == [5, 4, 3, 2, 1, 0], "the band is laid out descending"
+    assert sorted(v for v, _o in cands) == [0, 1, 2, 3, 4, 5, 0xFFFF]
+    assert [v for v, _o in cands] == [0xFFFF, 5, 4, 3, 2, 1, 0], \
+        "the 0xFFFF default at the base, then the band descending"
     labels = []
     for arm in _arms(built, sw):
         lab = [r for r in arm if r.wtype == 11]
@@ -143,10 +154,28 @@ def test_hook_reaches_the_routine(built):
 def test_background_arm(with_bg):
     _obj, sw = _label_switch(with_bg)
     bg = theme.resolve_fill_index(with_bg, color=(65, 81, 163))
-    for arm in _arms(with_bg, sw):
+    for arm in _arms(with_bg, sw) + [_default_arm(with_bg, sw)]:
         assert [r.wtype for r in arm] == [33, 11]
         assert arm[0].geom[2:4] == [98, 16]
         assert arm[0].colors[0] == ("fillA", 7, bg)
+    assert not _default_arm(with_bg, sw)[1].label, "the default arm draws only the fill"
+
+
+def test_default_arm_draws_nothing(built):
+    """The 0xFFFF default at the band's base (`cornermark`'s stock shape) is one empty,
+    flow-relative wtype-11: an unmatched value (one the routine never writes) draws no text."""
+    _obj, sw = _label_switch(built)
+    arm = _default_arm(built, sw)
+    assert [(r.wtype, r.label or "", r.font) for r in arm] == [(11, "", None)]
+    assert arm[0].base_modes[:4] == [1, 1, 1, 1] and arm[0].geom[:2] == [0, 0]
+
+
+@pytest.mark.parametrize("value", [99, 0xFFFF, 0xAAAA])
+def test_unmatched_value_draws_blank(built, value):
+    _obj, sw = _label_switch(built)
+    walk = pagewalk.walk_records(built, HOME_ROOT, slot_values={sw.value_slot: value})
+    drawn = [r for r in walk if sw.child_index <= r.obj < sw.child_index + sw.count]
+    assert [(r.wtype, r.label or "") for r in drawn] == [(11, "")]
 
 
 def _errors(op):
@@ -207,10 +236,10 @@ def test_layout_unchanged_elsewhere(built):
     new = [d.after for d in deltas]
     assert [(r.wtype, r.obj) for r in new][:2] == [(5, LABEL_PARENT), (6, obj)]
     assert all(r.obj in ours for r in new), pagewalk.describe(deltas)
-    # the attach, the switch, the band's base arm (the descending band starts at "--") and the
-    # empty label that hands the walk back the font and align it carried in
-    assert [(r.wtype, r.label or "") for r in new] == [(5, ""), (6, ""), (11, "--"), (11, "")]
-    assert new[2].box == (88, 372, 186, 388) and new[2].font == 11
+    # the attach, the switch, the band's base arm (the 0xFFFF default, which draws nothing) and
+    # the empty label that hands the walk back the font and align it carried in
+    assert [(r.wtype, r.label or "") for r in new] == [(5, ""), (6, ""), (11, ""), (11, "")]
+    assert new[2].obj == sw.child_index and new[2].box[:2] == (88, 372)
     assert new[3].obj == obj
 
 
@@ -304,3 +333,58 @@ def test_inert_source_refuses():
     assert not res.ok
     assert res.errors[0]["code"] == "NO_SUCH_REGISTER", res.errors
     assert "mode 0" in res.errors[0]["message"]
+
+
+# --- verify rebuilds what apply placed ----------------------------------------------------------
+
+def _spy_apply(monkeypatch):
+    seen = {}
+    real = recipe_ops.AddEnumLabel.apply
+
+    def spy(self, data, ctx):
+        out = real(self, data, ctx)
+        seen.update(op=self, ctx=ctx)
+        return out
+    monkeypatch.setattr(recipe_ops.AddEnumLabel, "apply", spy)
+    return seen
+
+
+def test_verify_catches_a_tampered_routine(monkeypatch):
+    seen = _spy_apply(monkeypatch)
+    res = _compile([_op()])
+    assert res.ok, res.errors
+    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    op.verify(data, ctx)                                   # the untouched image passes
+    h = ctx.handles["mode"]
+    gc = theme.guicode_section(data)
+    at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+    for k in (h["blob_len"] // 2, h["blob_len"] - 9):     # an instruction byte, a pool byte
+        bad = bytearray(data)
+        bad[at + k] ^= 0x01
+        with pytest.raises(AssertionError, match="is not the one its source and 5 keys build"):
+            op.verify(bytes(bad), ctx)
+
+
+def test_verify_catches_a_tampered_arm(monkeypatch):
+    """An arm's label recoloured, or its box shrunk, after apply: verify reads the records."""
+    seen = _spy_apply(monkeypatch)
+    res = _compile([_op()])
+    assert res.ok, res.errors
+    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    _obj, sw = _label_switch(data)
+    gs, tab = _gs_tab(data)
+    arm = sw.child_index + 1                               # the band's first text arm
+    lab = [r for r in records.object_records(data, gs + tab[arm]) if r.wtype == 11][0]
+    end = lab.offset + lab.size
+    for field in ("ink", "box"):
+        bad = bytearray(data)
+        if field == "ink":
+            new = theme.resolve_fill_index(data, color=(65, 81, 163))
+            buf = recipe_ops.pd._set_mode(bytes(data[lab.offset:end]), "fillA", 7,
+                                          struct.pack("<H", new))
+            assert len(buf) == lab.size and ("fillA", 7, new) not in lab.colors
+            bad[lab.offset:end] = buf
+        else:
+            struct.pack_into("<h", bad, lab.geom_off[2], 50)      # the box width
+        with pytest.raises(AssertionError, match="does not draw"):
+            op.verify(bytes(bad), ctx)
