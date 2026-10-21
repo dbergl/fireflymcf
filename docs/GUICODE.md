@@ -6381,6 +6381,109 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 84 — where a wtype-0 character lands: `pen_y − font[0x0b] + glyph.y` down, the pen across, and any byte draws — `proven-from-code`, checked against `HOME.jpg` and `CLIMATE.jpg`, 2026-10-21
+
+**Question.** `add_rvc_button` placed an icon's wtype-0 record so that `pen = target − (glyph.x,
+glyph.y)`, as if the panel drew the bitmap at `pen + bearing`. On a built page the ring drew
+47 px above its button, and a 53 × 56 glyph in icon font 25 did not draw at all. Where does the
+panel put a wtype-0 character relative to its pen?
+
+**The dispatch.** `FUN_00256C54`'s type switch (`tbh` at `0x256CD2`, Finding 38) sends type 0 to
+`0x256E10`. It draws nothing unless the content flag is set (`0x256E16` `ldrb r3,[r2,#0x704c]` /
+`beq 0x257ACC`). With render `+0x04` ≤ 0 (`0x256E1E` `ldrsh.w r3,[r2,#0x4]` / `bgt 0x256E5E`) it
+calls `FUN_002557C0` at `0x256E3A`, with the label length (`0x256E2E` `ldrh.w r1,[r5,#0x4a]`) and
+format entry 0 (`0x256E38` `movs r2,#0x0`). (The `+0x04 > 0` arm, `FUN_00255F44`, is not traced
+here. HOME's `V` and `°` behave as the main arm predicts, below.)
+
+**`FUN_002557C0`, the single-line drawer:**
+
+```
+0x2557D2  bl     0x251AA0           ; glyph pointer per byte -> +0x865C.., class flag -> +0x6C20..
+0x2557F6  bl     0x2518F8           ; width W, and per-character pen offsets at [sp+0x1c]
+0x2557FA  ldrsh.w r8,[r5,#0x2a]     ; pen x
+0x2557FE  ldrb   r3,[r4,#0x9]       ; persistent align (Finding 24)
+0x2558CE  sub.w  r8,r8,r3,asr #1    ;   align 2: x -= W/2 (rounded toward zero, 0x2558D8)
+0x2558DC  sub.w  r8,r8,r0           ;   align 3: x -= W ...
+0x2558E0  add.w  r8,r8,#0x1         ;            ... + 1
+0x25580A  ldrh   r3,[r2,#0x2c]      ; pen y
+0x25580C  ldr.w  r1,[r2,#0x98]      ; the current font
+0x255810  ldrb   r4,[r1,#0xb]       ; font[0x0b]
+0x255812  subs   r3,r3,r4           ; cell top = pen y - font[0x0b]   -> [sp+8]
+0x25581E  uxth.w r10,r8             ; the aligned x
+0x25591E  ldrh.w r0,[r3,r5,lsl #1]  ; pen offset of character i
+0x255924  add    r0,r10             ;   + aligned x
+0x255946  ldr    r1,[sp,#0x8]       ; cell top
+0x25594A  bl     0x2510C0           ; blit
+```
+
+**`FUN_002518F8` seeds character 0's pen offset** (`0x251904`-`0x25192E`): 0 when its class flag
+is clear, otherwise `-glyph[0x0a]` (`0x251922` `ldrb r5,[r3,#0xa]` / `rsbs`), or `-glyph[0]` when
+the glyph's `+0x0e` bit 0 is set (`0x25191A`). For one flagged character `W = glyph.x + glyph.w −
+glyph.x = glyph.w`, its bitmap width.
+
+**`FUN_002510C0`, the blitter, adds the bearings** (`0x251130` `ldrb r1,[r3,#0xa]` / `add r0,r1`;
+`0x251138` `ldrb r1,[r3,#0xc]` / `add r2,r1`) and the frame origin `+0x6BE0`/`+0x6BE2`
+(`0x2510EE`, `0x2510F8`), which every primitive adds alike. It clips columns to `+0x864A..0x864E`
+and never clips rows (Finding 78).
+
+**The rule.** A wtype-0 character's bitmap has its top-left pixel at
+
+```
+x = pen_x − A + (flagged ? (glyph[0x0e] & 1 ? glyph.x − glyph[0] : 0) : glyph.x)
+y = pen_y − font[0x0b] + glyph.y
+```
+
+with `A` = 0 for align 0/1, `W/2` for 2 and `W − 1` for 3. Whether a character is flagged is the
+measuring class (render `+0x0A`, Finding 78), turned into flags by `FUN_00251AA0`: class 2 flags
+every character (`0x251B34`); class 3 every one but the digits, space and `+ - * / =`
+(`0x251B42`-`0x251B6E`: `cmp.ne r4,#0x9` / `bls` keeps `0`-`9` unflagged); any other class none
+(`0x251AE8`). Every screen paint resets the class to 2 (`0x258716`). In that default a
+left-aligned character's bitmap starts at the pen across, and its bearing is cancelled. Down, the
+pen is `font[0x0b]` rows below the cell top: the baseline, and in icon fonts 24 and 25
+(`font[0x0b]` 47 and 71, cells 48 and 72) the cell's last row. `metrics.wt0_ink_offset` returns
+`(x, y) − pen` for a left-aligned character.
+
+**Any byte draws.** `FUN_00251AA0` looks the byte up by range alone, with no character test: it
+checks `font[0] ≤ byte ≤ font[1]` (`0x251B08`-`0x251B14`) and takes glyph `font[2] + byte −
+font[0]` (`0x251B16`-`0x251B2E`), else the fallback `font[4]` (`0x251AB0`). Icon font 25's
+characters are the control bytes `\x01`-`\x04`. The CLIMATE setpoint arrows are wtype-11 `\x01`
+and `\x02` in that font.
+
+**The photos.** Stock 13.6, the units beside a number readout. The number is wt-8 through the
+same function, so it shares the unit's line under either rule. The box around it is what tells
+the rules apart.
+
+| record | pen y | font (top) | glyph y, h | rows by the code | rows by `pen + y` | photo |
+|---|---|---|---|---|---|---|
+| HOME `V`, obj 443/440 rec 6 | 374 | 15 (20) | 5, 16 | **359-374**, centred in the green body 341-391 | 379-394, through its bottom edge | `12.4V` centred in the body |
+| HOME `%`, obj 719/721/723/613 | 178 | 13 (16) | 4, 13 | 166-178, the digits' own rows | 182-194 | on the digit line |
+| HOME `°`, obj 539 rec 4 | 409 | 17 (23) | 5, 8 | 391-398 (digits 392-409) | 414-421, under the baseline | `91°` superscript |
+| CLIMATE `°`, obj 872 rec 8 / 10 | 142 / 203 | 7 (23) / 9 (37) | 2, 8 / 6, 13 | 121-128 / 172-184 (digits 124-142 / 174-203) | below the digits | superscripts |
+
+**Which side was wrong.** `rvcbutton` was. It now places the pen at `target − wt0_ink_offset`.
+For the 16 × 16 ring (font 24, y bearing 16) that puts the pen 31 px *below* the bitmap's top.
+`render.py` already drew wtype 0 by this rule (its label loop: `base_y = p.y0 − top`, then each
+bitmap at its own `glyph.y`). The bearing-ignoring icon path is not involved, because it skips
+wtype 0. It was wrong in one place: the label loop dropped any non-printable label, so a wtype-0
+`\x03` drew nothing, and that was the missing slot-25 glyph. A wtype-0 label is now exempt from
+the printable test. No stock wtype-0 label holds a control byte (11.23, 13.6 and 14.7 surveyed),
+so no stock render changes.
+
+**Not settled here.** (1) The `+0x04 > 0` arm (`FUN_00255F44`). (2) The class at a given moment
+is runtime state (Finding 78 leaves its writers open). Under class 1 a character with an x bearing
+starts `glyph.x` right of the pen. The renderer and `rvcbutton` both assume class 2. The ring has
+x bearing 0, and among stock's single-character wtype-0 records only the `:` of fonts 7 and 9
+has one (4). (3) `render.panel_text_images`
+starts a line's first bitmap at the pen. Under the glyph's `+0x0e` bit 0 the firmware starts it
+`glyph.x − glyph[0]` from the pen instead. No stock single-character wtype-0 glyph sets the bit,
+so this is left as is.
+
+Tests: `tests/test_metrics.py` (`test_a_wt0_unit_draws_centred_in_its_battery_capsule`, which
+fails under `pen + y`; the baseline, superscript and class tests), `tests/test_render_bytes.py`
+(`test_a_wt0_character_draws_where_the_firmware_puts_it`: every single-character wtype-0 record on
+HOME, ELECTRICAL, CLIMATE and SETTINGS renders at `pen + wt0_ink_offset`), `tests/test_rvc_button.py`
+(`test_the_glyph_draws_inside_its_button`, `test_a_control_character_glyph_draws`).
+
 ## Finding 83 — every way the panel transmits: two paths into one LCD queue, the binding fields proven, and most touch actions run on release — `proven-from-code` (the transmit path, the dispatcher, the enumeration), captions `inferred-from-data`, 2026-10-19
 
 **Question.** Finding 82 mapped what the panel receives. What does it send, which control or
