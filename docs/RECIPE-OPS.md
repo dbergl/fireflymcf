@@ -59,6 +59,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
+| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), refused if anything else on the page would change. | UNVERIFIED. | **no** |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
 | [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`. | UNVERIFIED. | **no** |
@@ -597,6 +598,30 @@ Error codes:
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
+
+### add_button_status
+
+Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), refused if anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED.
+- **Proof:** `statelights.py`, `statusfold.py`
+- **Implementation:** `recipe_ops.AddButtonStatus`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `buttons` | array | yes |  | [{button: {ref}, source, compare: {bit\|eq\|ne\|ge: v}, mask?, shift?, valid_max?, off_colour?, on_colour?}] |
+| `off_colour` | array |  | [65, 81, 163] | [r, g, b] unlit body fill; a palette colour |
+| `on_colour` | array |  | [0, 174, 239] | [r, g, b] lit body fill; a palette colour |
+
+Error codes:
+
+- `BAD_PARAMS` — no entries, a malformed entry, no compare or two, an unknown compare, mask/shift/valid_max out of range, two entries naming one button, a button another op already lit (its handle has `status`), or `ge`/`ne` without `valid_max` on a whole-byte or u16 source.
+- `BAD_REF` — a button or source names no matching handle.
+- `NO_SUCH_REGISTER` — a source resolves to no variable-table entry.
+- `NO_DISPLAY_CELL` — the cell table could not be grown.
+- `NO_BODY_COLOUR` — a colour is not in this build's palette.
+- `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, or a wrap changes any other record on a page reaching the button.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
 
 ### add_card_readouts
 

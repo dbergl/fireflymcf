@@ -255,6 +255,13 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
         "UNVERIFIED.", "`rvcbutton.py`, `enumlabel.py`"),
+    "add_button_status": ("structural",
+        "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
+        "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
+        "above valid_max reads off) into its own fresh cell, and each button's static body "
+        "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), "
+        "refused if anything else on the page would change.",
+        "UNVERIFIED.", "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "

@@ -36,6 +36,7 @@ from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, 
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
 from fireflymcf import rvcbutton
+from fireflymcf import statelights
 from fireflymcf import statusfold
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
@@ -6873,6 +6874,8 @@ class AddAesBattHeatStatus(Op):
             "on_index": on_index,
             "w": bw, "h": bh_, "text": btext,
         }
+        if self.button is not None:                # one status op per button (add_button_status)
+            ctx.handles[self.button["ref"]]["status"] = self.spec.id
         return out
 
     def capability_delta(self, ctx):
@@ -7263,6 +7266,7 @@ class AddAesBmsButtonStatus(Op):
             "text": bh["text"], "w": bh["w"], "h": bh["h"],
             "off_index": off_index, "on_index": on_index,
         }
+        bh["status"] = self.spec.id         # one status op per button (add_button_status)
         return out
 
     def capability_delta(self, ctx):
@@ -7294,6 +7298,293 @@ class AddAesBmsButtonStatus(Op):
         return ("add_aes_bms_button_status: %r lit by var %d mask %d via cell %d (2-arm switch, "
                 "blue/cyan); UNVERIFIED on the coach" % (h["text"], h["var"], h["mask"],
                                                         h["slot"]))
+
+
+_COMPARE_KINDS = statusfold.KINDS            # "bit" | "eq" | "ne" | "ge"
+_BYTE_SOURCE_MODES = (1, 2)                  # `statusbind.LIVE_MODES`: whole byte, u16
+
+
+@op("add_button_status")
+class AddButtonStatus(Op):
+    """Light one or many buttons from receive slots: each button reads off (blue) or on (cyan).
+
+    ONE per-tick routine (`statusfold.Light` per entry, chained once on the per-tick hook) reads
+    each entry's slot, masks and shifts it, compares it, and writes 1 (lit) or 0 to the entry's
+    own display cell; a slot still stale, or above `valid_max`, reads off. Twelve buttons cost
+    one routine and one detour. Each button's static body (capsule, caption, glyph) is replaced
+    by ONE wtype-6 switch on its cell, enrolled for live redraw, over two whole-button arms
+    (`aescompact.BMS_BIT_STATE_ARMS`: the 0xFFFF default arm off at the base, 1 on); the body
+    records move into both arms byte for byte, so the touch region and everything after it stay
+    put (`statelights`). Every cell is freshly grown (`readout.allocate_fresh_cells`, recorded in
+    `ctx.authored_cells`). Every page reaching each button is walked before and after the wrap in
+    every switch-arm set: anything but the button's own records changing refuses
+    (`statelights.foreign_deltas`). A wrapped button's handle gains `status`.
+
+    Params:
+      buttons: 1+ entries, each {button: {ref}, source, compare, mask?, shift?, valid_max?,
+               off_colour?, on_colour?}:
+        button: an `add_rvc_button` handle, or a preset's (`add_aes_batt_heat`).
+        source: {var} | {ref} | {dgn, instance|selector}, resolved like `add_enum_label`'s.
+        mask (default 0xFFFF) ANDed with the slot, then shift (default 0) right.
+        compare: exactly one of {bit: m} (any bit of m set), {eq: v}, {ne: v}, {ge: v}.
+        valid_max: a field above it reads off; required for `ge`/`ne` on a whole-byte or u16
+                   source (RV-C sends 0xFF "not available"; 0xFA is the documented guard).
+      off_colour / on_colour: [r, g, b] for every entry (default [65, 81, 163] / [0, 174, 239]);
+                              an entry's own pair overrides. Each must be a palette colour.
+
+    Error codes:
+      BAD_PARAMS        -- no entries, a malformed entry, no compare or two, an unknown compare,
+                           mask/shift/valid_max out of range, two entries naming one button, a
+                           button another op already lit (its handle has `status`), or `ge`/`ne`
+                           without `valid_max` on a whole-byte or u16 source.
+      BAD_REF           -- a button or source names no matching handle.
+      NO_SUCH_REGISTER  -- a source resolves to no variable-table entry.
+      NO_DISPLAY_CELL   -- the cell table could not be grown.
+      NO_BODY_COLOUR    -- a colour is not in this build's palette.
+      INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, or a wrap
+                           changes any other record on a page reaching the button.
+      DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "buttons": {"type": "array",
+                        "description": "[{button: {ref}, source, compare: {bit|eq|ne|ge: v}, "
+                                       "mask?, shift?, valid_max?, off_colour?, on_colour?}]"},
+            "off_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_OFF_RGB),
+                           "description": "[r, g, b] unlit body fill; a palette colour"},
+            "on_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_ON_RGB),
+                          "description": "[r, g, b] lit body fill; a palette colour"},
+        },
+        "required": ["buttons"],
+    }
+
+    _ENTRY_KEYS = {"button", "source", "compare", "mask", "shift", "valid_max", "off_colour",
+                   "on_colour"}
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and not isinstance(c, bool) and 0 <= c <= 0xFF
+                        for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def _u16(self, name, v, low=0):
+        if not (isinstance(v, int) and not isinstance(v, bool) and low <= v <= 0xFFFF):
+            raise self._bad("%s must be an integer %d..0xFFFF, got %r" % (name, low, v))
+        return v
+
+    def validate(self):
+        self.off_colour = self._rgb("off_colour", self._param(
+            "off_colour", list(aescompact.BATT_HEAT_OFF_RGB)))
+        self.on_colour = self._rgb("on_colour", self._param(
+            "on_colour", list(aescompact.BATT_HEAT_ON_RGB)))
+        buttons = self._param("buttons", kind=list)
+        if not buttons:
+            raise self._bad("buttons needs at least one entry")
+        self.entries, refs = [], set()
+        for n, e in enumerate(buttons):
+            where = "buttons[%d]" % n
+            if not isinstance(e, dict):
+                raise self._bad("%s must be an object, got %r" % (where, e))
+            extra = set(e) - self._ENTRY_KEYS
+            if extra:
+                raise self._bad("%s has unknown keys %s" % (where, sorted(extra)))
+            button = e.get("button")
+            if not (isinstance(button, dict) and isinstance(button.get("ref"), str)):
+                raise self._bad("%s.button must be {ref: op id}, got %r" % (where, button))
+            if button["ref"] in refs:
+                raise self._bad("%s names button %r a second time" % (where, button["ref"]))
+            refs.add(button["ref"])
+            if not isinstance(e.get("source"), dict):
+                raise self._bad("%s.source must be an object, got %r" % (where, e.get("source")))
+            compare = e.get("compare")
+            if not (isinstance(compare, dict) and len(compare) == 1):
+                raise self._bad("%s.compare must hold exactly one of %s, got %r"
+                                % (where, list(_COMPARE_KINDS), compare))
+            ((kind, value),) = compare.items()
+            if kind not in _COMPARE_KINDS:
+                raise self._bad("%s.compare %r is not one of %s"
+                                % (where, kind, list(_COMPARE_KINDS)))
+            value = self._u16("%s.compare.%s" % (where, kind), value, 1 if kind == "bit" else 0)
+            mask = self._u16("%s.mask" % where, e.get("mask", 0xFFFF), 1)
+            shift = e.get("shift", 0)
+            if not (isinstance(shift, int) and not isinstance(shift, bool) and 0 <= shift <= 15):
+                raise self._bad("%s.shift must be 0..15, got %r" % (where, shift))
+            valid_max = e.get("valid_max")
+            if valid_max is not None:
+                valid_max = self._u16("%s.valid_max" % where, valid_max)
+            self.entries.append({
+                "ref": button["ref"], "source": e["source"], "kind": kind, "value": value,
+                "mask": mask, "shift": shift, "valid_max": valid_max,
+                "off_colour": (self.off_colour if e.get("off_colour") is None
+                               else self._rgb("%s.off_colour" % where, e["off_colour"])),
+                "on_colour": (self.on_colour if e.get("on_colour") is None
+                              else self._rgb("%s.on_colour" % where, e["on_colour"])),
+            })
+
+    def _button(self, ctx, ref):
+        h = ctx.handles.get(ref)
+        if h is None or not all(k in h for k in ("object", "group", "w", "h", "text")):
+            raise RecipeError("BAD_REF", "button ref %r is not an add_rvc_button (or preset) "
+                              "handle" % (ref,), op_id=self.spec.id)
+        if h.get("status") is not None:
+            raise self._bad("button %r is already lit by op %r; one status op per button"
+                            % (ref, h["status"]))
+        return h
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        plans = []
+        for e in self.entries:
+            bh = self._button(ctx, e["ref"])
+            slot_addr, var, live_mode = _resolve_status_source(data, ctx, e["source"], oid)
+            if (e["kind"] in ("ge", "ne") and e["valid_max"] is None
+                    and live_mode in _BYTE_SOURCE_MODES):
+                raise self._bad("button %r: a %r compare on a %s source needs valid_max (0xFA "
+                                "for RV-C, whose 0xFF 'not available' passes every threshold)"
+                                % (e["ref"], e["kind"], statusbind.LIVE_MODES[live_mode]))
+            try:
+                off = theme.resolve_fill_index(data, color=e["off_colour"])
+                on = theme.resolve_fill_index(data, color=e["on_colour"])
+            except theme.PaletteError as err:
+                raise RecipeError("NO_BODY_COLOUR", str(err), op_id=oid)
+            plans.append((e, bh, slot_addr, var, off, on))
+
+        # Always freshly grown cells (ruling R8): a reused stock index can alias another
+        # object's read (`recipe._assert_authored_cells_fresh`).
+        try:
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, readout._TYPE_FOR_WIDTH[2])] * len(plans))
+        except readout.ReadoutError as err:
+            raise RecipeError("NO_DISPLAY_CELL", str(err), op_id=oid)
+        ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)    # gated: must be freshly grown
+        items = [statusfold.Light(slot_addr=slot_addr, mask=e["mask"], shift=e["shift"],
+                                  kind=e["kind"], value=e["value"], valid_max=e["valid_max"],
+                                  cell_addr=cell.addr,
+                                  variant_group=bh["group"] if bh.get("toggle") else None)
+                 for (e, bh, slot_addr, _v, _o, _n), cell in zip(plans, cells)]
+        try:
+            plan = statusfold.resolve(out, items)
+        except followchannel.FollowChannelError as err:
+            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
+        except statusfold.StatusFoldError as err:
+            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, oid)
+        try:
+            blob, _ = statusfold.build(plan, code_load_addr)
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except (statusfold.StatusFoldError, growsection.GrowSectionError) as err:
+            raise RecipeError("INDICATOR_REFUSED", str(err), op_id=oid)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(
+            gcs.offset + load_off, b"", blob, "GuiCode",
+            "button status: %s" % "; ".join(
+                "%s var %d mask %#x shift %d %s %d%s -> cell %d @ %#x"
+                % (e["ref"], var, e["mask"], e["shift"], e["kind"], e["value"],
+                   "" if e["valid_max"] is None else " (max %d)" % e["valid_max"],
+                   cell.slot, cell.addr)
+                for (e, _b, _s, var, _o, _n), cell in zip(plans, cells))))
+        try:
+            hook_at, hook_old, hook_new = statusfold.detour_edit(plan, code_load_addr)
+        except followchannel.FollowChannelError as err:
+            raise RecipeError("DETOUR_REFUSED", str(err), op_id=oid)
+        file_off = gcs.offset + hook_at
+        if grown[file_off:file_off + 4] != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, grown[file_off:file_off + 4].hex(), hook_old.hex()),
+                              op_id=oid)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, hook_old, hook_new, "GuiCode",
+                         "button status: detour bl -> %#x" % code_load_addr))
+        out, _ = patch.reseal(bytes(buf))
+
+        lit = []
+        for (e, bh, slot_addr, var, off, on), cell in zip(plans, cells):
+            glyph = bh.get("glyph")
+            glyph = None if glyph is None else (glyph["slot"], glyph["char"])
+            try:
+                wrapped, info = statelights.wrap_button(
+                    out, object_index=bh["object"], value_slot=cell.slot, donors=ctx.stock,
+                    arms=aescompact.BMS_BIT_STATE_ARMS, off_index=off, on_index=on,
+                    w=bh["w"], h=bh["h"], text=bh["text"], glyph=glyph, font=bh.get("font"),
+                    touch_id=bh["group"])
+                bad = statelights.foreign_deltas(out, wrapped, bh["object"], info["span"])
+            except (ValueError, relocate.RelocationError) as err:
+                raise RecipeError("INDICATOR_REFUSED", "button %r: %s" % (e["ref"], err),
+                                  op_id=oid)
+            if bad:
+                raise RecipeError("INDICATOR_REFUSED", "lighting button %r changes %d "
+                                  "record(s) besides its own:\n%s"
+                                  % (e["ref"], len(bad), pagewalk.describe(bad[:20])),
+                                  op_id=oid)
+            out, _ = patch.reseal(wrapped)
+            lit.append({"ref": e["ref"], "object": bh["object"], "group": bh["group"],
+                        "slot": cell.slot, "cell_addr": cell.addr, "slot_addr": slot_addr,
+                        "var": var, "mask": e["mask"], "shift": e["shift"], "kind": e["kind"],
+                        "value": e["value"], "valid_max": e["valid_max"],
+                        "variant_group": bh["group"] if bh.get("toggle") else None,
+                        "arms_base": info["arms_base"], "w": bh["w"], "h": bh["h"],
+                        "text": bh["text"], "glyph": glyph, "off_index": off, "on_index": on})
+        for _e, bh, *_rest in plans:
+            bh["status"] = oid                      # one status op per button
+        ctx.handles[oid] = {"buttons": lit, "entry": code_load_addr + readout.ENTRY_OFF}
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        cells = status_map.cell_table(data)
+        inset = aescompact.PUMP_OUTLINE_INSET
+        for b in h["buttons"]:
+            recs = records.object_records(data, gs + tab[b["object"]])
+            sw = [r for r in recs if r.wtype == 6 and r.value_slot == b["slot"]]
+            assert len(sw) == 1 and sw[0].count == len(aescompact.BMS_BIT_STATE_ARMS), \
+                "button %r: expected one 2-arm switch on cell %d" % (b["ref"], b["slot"])
+            assert sw[0].header[4] & _ENROLL_BIT, "button %r: switch not enrolled" % b["ref"]
+            assert sw[0].child_index == b["arms_base"]
+            assert cells[b["slot"]] == b["cell_addr"]
+            cands = guidata.switch_candidates(data, sw[0], guidata.find_match_table(data))
+            assert [v for v, _o in cands] == [m for m, _l, _c in aescompact.BMS_BIT_STATE_ARMS], \
+                "button %r: arm matches %s" % (b["ref"], cands)
+            for (_m, on, _c), (_v, obj) in zip(aescompact.BMS_BIT_STATE_ARMS, cands):
+                arm = records.object_records(data, gs + tab[obj])
+                fill = b["on_index"] if on else b["off_index"]
+                assert arm[0].wtype == 33 and arm[0].colors[0] == ("fillA", 7, fill) \
+                    and arm[0].geom[2:4] == [b["w"] - 2 * inset, b["h"] - 2 * inset], \
+                    "button %r: arm %d does not draw the full button" % (b["ref"], obj)
+                assert [r.label for r in arm if r.wtype == 11 and r.label] == \
+                    ([] if b["text"] is None else [b["text"]]), \
+                    "button %r: arm %d lacks the caption" % (b["ref"], obj)
+                if b["glyph"] is not None:
+                    assert [(r.font, r.label) for r in arm if r.wtype == 0] == [b["glyph"]], \
+                        "button %r: arm %d lacks the glyph" % (b["ref"], obj)
+        assert h["entry"] in followchannel.chain_from_hook(data), \
+            "the per-tick chain does not reach the routine at %#x" % h["entry"]
+        gc = theme.guicode_section(data)
+        code = data[gc.offset:gc.offset + gc.length]
+        for b in h["buttons"]:
+            assert struct.pack("<I", b["slot_addr"]) in code \
+                and struct.pack("<I", b["cell_addr"]) in code, \
+                "no routine maps var %d into cell %#x" % (b["var"], b["cell_addr"])
+        return ("add_button_status: %s; one routine at %#x; UNVERIFIED on the coach"
+                % ("; ".join("%r lit by var %d (mask %#x, shift %d, %s %d%s) via fresh cell %d"
+                             % (b["text"], b["var"], b["mask"], b["shift"], b["kind"],
+                                b["value"], "" if b["valid_max"] is None
+                                else ", max %d" % b["valid_max"], b["slot"])
+                             for b in h["buttons"]), h["entry"]))
 
 
 @op("add_enum_label")
@@ -7833,6 +8124,10 @@ class AddRvcButton(Op):
         recs = records.object_records(data, gs + tab[h["object"]])
         ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
         assert ids == [h["group"]], "touch ids %s, expected [%d]" % (ids, h["group"])
+        if h.get("status") is not None:
+            # lit by `add_button_status`: the body lives in its switch's arms; check the base arm
+            (sw,) = [r for r in recs if r.wtype == 6]
+            recs = records.object_records(data, gs + tab[sw.child_index])
         if h["text"] is not None:
             assert [r.label for r in recs if r.wtype == 11 and r.label] == [h["text"]], \
                 "caption %r missing" % h["text"]
