@@ -21,8 +21,8 @@ into byte-identical presets.
 the in-repo Thumb interpreter `tests/thumbsim.py`.
 
 **Spec:** `docs/superpowers/specs/2026-10-20-generic-rvc-control-ops-design.md` (approved
-2026-10-20). Owner rulings since: the new device uses thermostat **instance 7**; the setpoint
-arrows are re-pointed by `set_binding_bytes` (groups 130/131, byte 0, 0 → 7); var 13 is re-pinned
+2026-10-20). Owner rulings since: the new device uses a new thermostat instance; the setpoint
+arrows are re-pointed by `set_binding_bytes` (groups 130/131, byte 0, to the new instance); var 13 is re-pinned
 after its extraction is decoded; fan speed comes from a new `append_filter` entry on `1FFE2` byte 2.
 
 ## Global Constraints
@@ -113,7 +113,7 @@ after its extraction is decoded; fan speed comes from a new `append_filter` entr
 ```
 
   The downstream project's session records its own table for its `builds/*.ffproj.json` and adds
-  its v54 byte-pin test (the owner approved this). **Do not start Task 4 until the downstream
+  its byte-pin test (the owner approved this). **Do not start Task 4 until the downstream
   session confirms its table is recorded.**
 - [ ] **Step 6: Commit** `scripts/golden.py`, the test, and a README "Byte identity" line saying
   how to run it.
@@ -131,14 +131,14 @@ after its extraction is decoded; fan speed comes from a new `append_filter` entr
   `from_instance` (integer|null, default null).
 
 - [ ] **Step 1: Failing tests** on stock 13.6:
-  - `test_repin_var13_from_0_to_7`: the op `{var: 13, instance: 7, dgn: 0x1FFE2, compare: 0,
-    from_instance: 0}` compiles. `variable_table(out)[13].raw[4] == 7`, and every other byte of
+  - `test_repin_var13_from_0_to_3`: the op `{var: 13, instance: 3, dgn: 0x1FFE2, compare: 0,
+    from_instance: 0}` compiles. `variable_table(out)[13].raw[4] == 3`, and every other byte of
     the entry is unchanged.
   - `test_repin_refuses_wrong_from`: `from_instance: 1` on var 13 gives `FILTER_REFUSED`, and the
     message names the current `0x00`.
   - `test_narrow_path_unchanged`: `from_instance` omitted on var 13 still refuses ("already
     compares").
-  - `test_repin_rooms_and_setpoint`: vars 9 (`1FF9C`) and 14 (`1FFE2`) re-pin 0 → 7.
+  - `test_repin_rooms_and_setpoint`: vars 9 (`1FF9C`) and 14 (`1FFE2`) re-pin 0 → 3.
 - [ ] **Step 2:** the tests fail.
 - [ ] **Step 3: Implement.** When `from_instance` is given, require `old[4] == from_instance`
   (else raise), skip the sentinel refusal, and write `instance`. When it is None, behave exactly
@@ -575,11 +575,8 @@ def wrap_button(data: bytes, *, object_index: int, value_slot: int, donors: byte
   tests/test_change_catalog.py -q` passes.
 - [ ] **Step 2: Final identity.** All three golden tables check clean. The research repository's
   suite is green against this worktree. The downstream session confirms its pins are green.
-- [ ] **Step 3: Privacy scan of the branch diff.** It must print nothing:
-
-```bash
-git diff main --name-only | xargs grep -n -i -E 'hank|julie|berglund|myfirmware|/home/|coach2mqtt|pi@' || true
-```
+- [ ] **Step 3: Privacy scan of the branch diff.** Run the privacy scan kept in the private
+  research repository over the branch diff and every commit message; it must find nothing.
 
 - [ ] **Step 4:** Full suite: `.venv/bin/python -m pytest tests -q -n auto` (with research data
   linked) is green, and the data-free subset (no links) is green.
@@ -588,7 +585,7 @@ git diff main --name-only | xargs grep -n -i -E 'hank|julie|berglund|myfirmware|
 
 ## After this plan (not tasks here)
 
-- **The downstream Climate and Home recipe** uses these ops: instance 7, vars 9/13/14 re-pinned,
+- **The downstream Climate and Home recipe** uses these ops: a new thermostat instance, vars 9/13/14 re-pinned,
   arrows via `set_binding_bytes`, new `append_filter` entries on `1FFE2` byte 2, `1FEFA` and
   P_STAT. The downstream session writes it.
 - **Bench and coach checks** per the spec's table. `hardware_verified` flips op by op with the
