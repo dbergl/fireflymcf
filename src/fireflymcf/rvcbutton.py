@@ -15,8 +15,12 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
   4-7) set to the seconds; the hold binding on mask `0x04` FIRST, then the tap on `0x02`.
 - ``hold``: the same clone with byte 2's held-phase repeat index (bits 2-3) cleared, one binding
   on `0x04` (`altreboot.group_entry`'s shape).
-- ``toggle``: the tap prefix with byte 1 `0x80` (no variant cycle on release); variant 0 sends
-  `on`, variant 1 sends `off`, both on `0x06`. Something else must drive the variant.
+- ``toggle``: the tap prefix with byte 1 `0x80` (no variant cycle on release) and byte 0's low
+  nibble 1; variant 0 sends `on`, variant 1 sends `off`, both on `0x06`. Something else must
+  drive the variant: the setter `FUN_0021B5E8` writes it only while the variant is at most
+  that nibble (`and r3,#0xf` / `cmp r3,r4` / `blo` @`0x21B60A`-`0x21B610`), so the tap donor's
+  0 would refuse variant 1. Stock's setter-driven two-variant groups carry 1 (129, the Low
+  Volts toggle, `11 80 0c 80`; 143 and 146).
 
 **Records** (`button_records`), from the stock donors `aescompact` names, in flow order:
 
@@ -56,6 +60,7 @@ TAP_DONOR_GROUP = levelcontrols.STEPPER_DONOR_GROUP          # stock 103, `10 00
 TAP_DONOR_PREFIX = bytes.fromhex("10000480")
 HOLD_DONOR_GROUP = aescompact.BATT_HEAT_HOLD_DONOR_GROUP      # stock 17, `10 00 0c 00`
 NO_CYCLE = 0x80                  # group byte 1: the variant is not cycled on release
+TOGGLE_VARIANT_MAX = 1           # group byte 0 low nibble: the highest variant the setter takes
 HELD_REPEAT_INDEX = 0x0C         # group byte 2 bits 2-3: the held-phase repeat-rate index
 MAX_HOLD_SECONDS = 15            # one nibble
 
@@ -82,6 +87,7 @@ def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
         raw[2] = 0x00
         raw[3] &= 0x7F
         if form == "toggle":
+            raw[0] = (raw[0] & 0xF0) | TOGGLE_VARIANT_MAX
             raw[1] = NO_CYCLE
     elif form in ("tap_hold", "hold"):
         raw = bytearray(gt[HOLD_DONOR_GROUP].raw)

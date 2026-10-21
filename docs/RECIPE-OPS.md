@@ -59,14 +59,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
-| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), refused if anything else on the page would change. | UNVERIFIED. | **no** |
+| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. | **no** |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
 | [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`. | UNVERIFIED. | **no** |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
-| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. | **no** |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
@@ -601,7 +601,7 @@ Error codes:
 
 ### add_button_status
 
-Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), refused if anything else on the page would change.
+Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.
 
 - **Hardware status:** UNVERIFIED.
 - **Proof:** `statelights.py`, `statusfold.py`
@@ -804,7 +804,7 @@ Error codes:
 
 ### add_rvc_button
 
-Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
+Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
 
 - **Hardware status:** UNVERIFIED.
 - **Proof:** `rvcbutton.py`, `enumlabel.py`
@@ -823,13 +823,13 @@ Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0
 | `dgn` | integer | yes |  | 18-bit DGN every binding sends |
 | `tap` | object\|null |  | null | {payload}: 8-byte hex sent once per press |
 | `hold` | object\|null |  | null | {payload, seconds}: sent once after a hold of seconds (1-15) |
-| `toggle` | object\|null |  | null | {off_payload, on_payload}: not supported yet (refused) |
+| `toggle` | object\|null |  | null | {off_payload, on_payload}: 8-byte hex each; a later add_button_status must drive it |
 | `colour` | array |  | [65, 81, 163] | [r, g, b] body fill; a palette colour |
 | `group_pool` | string {"free", "hold_safe"} |  |  | where the group comes from (default hold_safe with a hold, else free) |
 
 Error codes:
 
-- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle`, the `free` pool with a hold, or a box too small for its glyph and caption.
+- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle` with `tap` or `hold`, the `free` pool with a hold or a toggle, or a box too small for its glyph and caption.
 - `BAD_REF` — a `parent` ref names no earlier op's object.
 - `NO_FREE_GROUP` — the group pool is empty.
 - `NO_GLYPH` — the glyph falls back to the placeholder (or icon font 24's unused block).
@@ -838,6 +838,7 @@ Error codes:
 - `OFF_CANVAS` — a record leaves the 800x480 canvas.
 - `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, or the placement changes another record.
+- `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 
 ### aes_card_layout
 

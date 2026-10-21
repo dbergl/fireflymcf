@@ -7319,7 +7319,10 @@ class AddButtonStatus(Op):
     put (`statelights`). Every cell is freshly grown (`readout.allocate_fresh_cells`, recorded in
     `ctx.authored_cells`). Every page reaching each button is walked before and after the wrap in
     every switch-arm set: anything but the button's own records changing refuses
-    (`statelights.foreign_deltas`). A wrapped button's handle gains `status`.
+    (`statelights.foreign_deltas`). A wrapped button's handle gains `status`. An entry naming
+    an `add_rvc_button` toggle also drives its variant: after writing the cell the routine calls
+    `setVariant(group, lit)` (`statusfold.Light.variant_group`), so the toggle sends "on" while
+    the entry reads off and "off" while it reads on (`docs/CONTROL-BEHAVIOR.md` §11).
 
     Params:
       buttons: 1+ entries, each {button: {ref}, source, compare, mask?, shift?, valid_max?,
@@ -7853,7 +7856,7 @@ class AddEnumLabel(Op):
 
 @op("add_rvc_button")
 class AddRvcButton(Op):
-    """Add a button that sends RV-C frames, on any page: a tap, a hold, or both.
+    """Add a button that sends RV-C frames, on any page: a tap, a hold, both, or a toggle.
 
     Every binding sends `dgn` with a fixed 8-byte payload; the panel stamps priority 6 and
     source address 0x9F (`newbutton.binding_wire_frame`). The gesture is one of the coach-proven
@@ -7873,7 +7876,14 @@ class AddRvcButton(Op):
     region must meet no existing one, no new record may leave the canvas, and nothing else may
     change (`enumlabel.foreign_deltas`).
 
-    The toggle form (`toggle`) is not built yet and is refused.
+    The toggle form (`toggle`) is one group with byte 1 `0x80` (its variant is not cycled on
+    release) and byte 0's low nibble 1 (the setter refuses a variant above it), and two bindings on `dgn`, both on mask 0x06: variant 0 sends `on_payload`,
+    variant 1 sends `off_payload`. The op writes no routine: a LATER `add_button_status` entry
+    naming this button drives the variant every tick (`setVariant(group, lit)`,
+    `docs/CONTROL-BEHAVIOR.md` §11), so the button sends "on" while its status reads off and
+    "off" while it reads on. Compile refuses a toggle no later enabled status op drives
+    (`recipe._check_toggles_driven`): its variant would sit at 0 and it would only send "on".
+    A toggle's group comes from the `hold_safe` pool only (never a GuiCode-driven group).
 
     Params:
       parent: object index | {ref} -- the object the button is drawn on (it needs a wtype-5
@@ -7881,13 +7891,16 @@ class AddRvcButton(Op):
       x, y, w, h: the absolute box on the 800x480 canvas.
       text: caption (`\\n` makes two lines), or null. glyph: {slot, char} or null; font: the
             caption's font slot, or null for the donor's.
-      dgn: the 18-bit DGN every binding sends. tap: {payload}; hold: {payload, seconds 1-15}.
+      dgn: the 18-bit DGN every binding sends. tap: {payload}; hold: {payload, seconds 1-15};
+           toggle: {off_payload, on_payload} (alone: no tap or hold).
       colour: [r, g, b] body fill (default [65, 81, 163]); must be a palette colour.
-      group_pool: "free" | "hold_safe" (default "hold_safe" with a hold, else "free").
+      group_pool: "free" | "hold_safe" (default "hold_safe" with a hold or a toggle, else
+                  "free").
 
     Error codes:
-      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle`, the `free` pool with
-                        a hold, or a box too small for its glyph and caption.
+      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle` with `tap` or
+                        `hold`, the `free` pool with a hold or a toggle, or a box too small for
+                        its glyph and caption.
       BAD_REF        -- a `parent` ref names no earlier op's object.
       NO_FREE_GROUP  -- the group pool is empty.
       NO_GLYPH       -- the glyph falls back to the placeholder (or icon font 24's unused block).
@@ -7897,6 +7910,7 @@ class AddRvcButton(Op):
       GROW_REFUSED   -- the gesture donor groups or the binding table (arena, gates) refused.
       INSERT_REFUSED -- the attach could not be cloned or inserted, the walk's font/align state
                         cannot be handed back, or the placement changes another record.
+      TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
     """
 
     hardware_verified = False
@@ -7918,7 +7932,8 @@ class AddRvcButton(Op):
             "hold": {"type": ["object", "null"], "default": None,
                      "description": "{payload, seconds}: sent once after a hold of seconds (1-15)"},
             "toggle": {"type": ["object", "null"], "default": None,
-                       "description": "{off_payload, on_payload}: not supported yet (refused)"},
+                       "description": "{off_payload, on_payload}: 8-byte hex each; a later "
+                                      "add_button_status must drive it"},
             "colour": {"type": "array", "default": [0x41, 0x51, 0xA3],
                        "description": "[r, g, b] body fill; a palette colour"},
             "group_pool": {"type": "string", "enum": list(rvcbutton.POOLS),
@@ -7939,11 +7954,11 @@ class AddRvcButton(Op):
             raise self._bad("%s must be an integer, got %r" % (name, v))
         return v
 
-    def _payload(self, name, spec, keys):
+    def _payload(self, name, spec, keys, field="payload"):
         if not isinstance(spec, dict) or set(spec) != set(keys):
             raise self._bad("%s must be an object with exactly %s, got %r"
                             % (name, sorted(keys), spec))
-        raw = spec["payload"]
+        raw = spec[field]
         try:
             wire = bytes.fromhex(raw) if isinstance(raw, str) else b""
         except ValueError:
@@ -7979,8 +7994,14 @@ class AddRvcButton(Op):
         if not 0 <= self.dgn <= 0x3FFFF:
             raise self._bad("dgn %#x is not an 18-bit value" % self.dgn)
         tap, hold = self._param("tap", None), self._param("hold", None)
-        if self._param("toggle", None) is not None:
-            raise self._bad("the toggle form is not supported yet")
+        toggle = self._param("toggle", None)
+        self.off = self.on = None
+        if toggle is not None:
+            if tap is not None or hold is not None:
+                raise self._bad("toggle takes no tap or hold: its two bindings are the gesture")
+            keys = ("off_payload", "on_payload")
+            self.off = self._payload("toggle", toggle, keys, "off_payload")
+            self.on = self._payload("toggle", toggle, keys, "on_payload")
         self.tap = None if tap is None else self._payload("tap", tap, ("payload",))
         self.hold = None if hold is None else self._payload("hold", hold, ("payload", "seconds"))
         self.seconds = None
@@ -7991,9 +8012,10 @@ class AddRvcButton(Op):
                 raise self._bad("hold seconds must be 1..%d, got %r"
                                 % (rvcbutton.MAX_HOLD_SECONDS, s))
             self.seconds = s
-        if self.tap is None and self.hold is None:
-            raise self._bad("a button needs a gesture: tap, hold or both")
-        self.form = ("tap_hold" if self.tap is not None and self.hold is not None
+        if self.tap is None and self.hold is None and toggle is None:
+            raise self._bad("a button needs a gesture: tap, hold, both, or toggle")
+        self.form = ("toggle" if toggle is not None
+                     else "tap_hold" if self.tap is not None and self.hold is not None
                      else "tap" if self.tap is not None else "hold")
         colour = self._param("colour", [0x41, 0x51, 0xA3])
         if not (isinstance(colour, list) and len(colour) == 3
@@ -8001,13 +8023,17 @@ class AddRvcButton(Op):
                         for c in colour)):
             raise self._bad("colour must be [r, g, b] of 0..255, got %r" % (colour,))
         self.colour = tuple(colour)
-        self.group_pool = self._param("group_pool", "hold_safe" if self.hold else "free")
+        self.group_pool = self._param("group_pool", "hold_safe" if self.hold or toggle
+                                      else "free")
         if self.group_pool not in rvcbutton.POOLS:
             raise self._bad("group_pool must be one of %s, got %r"
                             % (list(rvcbutton.POOLS), self.group_pool))
         if self.hold is not None and self.group_pool == "free":
             raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
                             "is dead (v45)")
+        if toggle is not None and self.group_pool == "free":
+            raise self._bad("a toggle needs the hold_safe pool: GuiCode drives its own groups' "
+                            "variants, and would fight the status op's setVariant")
         if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
                 or self.y + self.h > _CANVAS_H):
             raise RecipeError("OFF_CANVAS", "the button box (%d,%d,%d,%d) leaves the %dx%d "
@@ -8041,7 +8067,7 @@ class AddRvcButton(Op):
         binding_start = len(guidata.binding_table(data))
         try:
             payload = rvcbutton.bindings(self.dgn, form=self.form, tap=self.tap, hold=self.hold,
-                                         off=None, on=None)
+                                         off=self.off, on=self.on)
             entry = rvcbutton.gesture_group(data, form=self.form, hold_seconds=self.seconds,
                                             binding_start=binding_start,
                                             count=len(payload) // 12)
@@ -8104,7 +8130,9 @@ class AddRvcButton(Op):
             "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
             "glyph": None if self.glyph is None else {"slot": self.glyph[0],
                                                       "char": self.glyph[1]},
-            "font": self.font, "colour": list(self.colour), "toggle": None,
+            "font": self.font, "colour": list(self.colour),
+            "toggle": (None if self.form != "toggle"
+                       else {"off_payload": self.off, "on_payload": self.on}),
             "parent": parent, "placement": "attach",
             "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
             "tap": self.tap, "hold": self.hold,
@@ -8117,8 +8145,7 @@ class AddRvcButton(Op):
         h = ctx.handles.get(self.spec.id)
         if h is None:
             return set(), set()
-        raws = rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
-                                  off=None, on=None)
+        raws = _rvc_button_bindings(h)
         mine = set()
         for i in range(0, len(raws), 12):
             b = guidata.Binding(index=0, offset=0, dgn_low=raws[i] | (raws[i + 1] << 8),
@@ -8150,12 +8177,18 @@ class AddRvcButton(Op):
         # the gesture: group prefix, then every binding's frame, mask and variant
         g = guidata.group_table(data)[h["group"]]
         bt = guidata.binding_table(data)
-        want = rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
-                                  off=None, on=None)
+        want = _rvc_button_bindings(h)
         assert (g.start, g.count) == (h["binding_start"], len(want) // 12), \
             "group %d slices %d+%d" % (h["group"], g.start, g.count)
         if h["form"] == "tap":
             assert bytes(g.raw[:4]) == bytes.fromhex("10000000"), "tap prefix %s" % g.raw[:4].hex()
+        elif h["form"] == "toggle":
+            assert bytes(g.raw[:4]) == bytes.fromhex("11800000"), \
+                "toggle prefix %s" % g.raw[:4].hex()
+            # Against stock: the finished image's status routine is itself a setVariant
+            # caller of this group, which the scan rightly reports.
+            assert h["group"] not in newbutton.guicode_selected_groups(ctx.stock), \
+                "toggle group %d is driven by stock GuiCode" % h["group"]
         else:
             assert g.raw[0] >> 4 == h["seconds"], "hold nibble %d" % (g.raw[0] >> 4)
         can_id = (6 << 26) | (h["dgn"] << 8) | 0x9F
@@ -8176,6 +8209,13 @@ class AddRvcButton(Op):
         return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
                 "UNVERIFIED on the coach"
                 % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
+
+
+def _rvc_button_bindings(h):
+    """The bindings an `add_rvc_button` handle `h` was built with (`rvcbutton.bindings`)."""
+    t = h.get("toggle") or {}
+    return rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
+                              off=t.get("off_payload"), on=t.get("on_payload"))
 
 
 @op("add_batt_heat_battery_glyph")

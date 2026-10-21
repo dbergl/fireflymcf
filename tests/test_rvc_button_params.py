@@ -91,7 +91,14 @@ def test_valid_params_construct():
     {"hold": {"payload": HOLD.hex()}},
     {"hold": {"payload": HOLD.hex(), "seconds": 3}, "group_pool": "free"},
     {"group_pool": "anywhere"},
-    {"toggle": {"off_payload": TAP.hex(), "on_payload": HOLD.hex()}, "tap": None},
+    {"toggle": {"off_payload": TAP.hex(), "on_payload": HOLD.hex()}},           # with tap
+    {"toggle": {"off_payload": TAP.hex(), "on_payload": HOLD.hex()}, "tap": None,
+     "hold": {"payload": HOLD.hex(), "seconds": 2}},
+    {"toggle": {"off_payload": TAP.hex(), "on_payload": HOLD.hex()}, "tap": None,
+     "group_pool": "free"},
+    {"toggle": {"off_payload": TAP.hex()}, "tap": None},
+    {"toggle": {"off_payload": TAP.hex(), "on_payload": "07f6"}, "tap": None},
+    {"toggle": "on", "tap": None},
     {"dgn": 0x40000},
     {"w": 0},
     {"colour": [1, 2]},
@@ -107,3 +114,56 @@ def test_bad_params(over):
 @pytest.mark.parametrize("over", [{"x": -1}, {"x": 760}, {"y": 450}])
 def test_off_canvas(over):
     assert _code(**over) == "OFF_CANVAS"
+
+
+def test_toggle_constructs():
+    op = recipe.REGISTRY["add_rvc_button"](_spec(
+        tap=None, toggle={"off_payload": TAP.hex(), "on_payload": HOLD.hex()}))
+    assert op.form == "toggle" and op.group_pool == "hold_safe"
+    assert (op.off, op.on) == (TAP, HOLD)
+
+
+# --- `recipe._check_toggles_driven`: a static check over the enabled specs ----------------------
+
+def _toggle(oid="eco", enabled=True):
+    return recipe.OpSpec(id=oid, type="add_rvc_button", enabled=enabled,
+                         params={"toggle": {"off_payload": TAP.hex(), "on_payload": HOLD.hex()}})
+
+
+def _lights(*refs, oid="st", enabled=True):
+    return recipe.OpSpec(id=oid, type="add_button_status", enabled=enabled,
+                         params={"buttons": [{"button": {"ref": r}} for r in refs]})
+
+
+def _undriven(specs):
+    errs = recipe._check_toggles_driven(specs)
+    assert all(e.code == "TOGGLE_UNDRIVEN" for e in errs)
+    return [e.op_id for e in errs]
+
+
+def test_check_driven_passes():
+    assert _undriven([_toggle(), _lights("other", "eco")]) == []
+    assert _undriven([recipe.OpSpec(id="b", type="add_rvc_button",
+                                    params={"tap": {"payload": TAP.hex()}})]) == []
+
+
+def test_check_undriven():
+    assert _undriven([_toggle()]) == ["eco"]
+    assert _undriven([_toggle("a"), _toggle("b"), _lights("b")]) == ["a"]
+
+
+def test_check_disabled_status_does_not_count():
+    assert _undriven([_toggle(), _lights("eco", enabled=False)]) == ["eco"]
+    assert _undriven([_toggle(enabled=False)]) == []
+
+
+def test_check_status_before_does_not_count():
+    assert _undriven([_lights("eco"), _toggle()]) == ["eco"]
+
+
+def test_check_tolerates_malformed_status():
+    bad = recipe.OpSpec(id="st", type="add_button_status",
+                        params={"buttons": ["x", {"button": "eco"}, {}]})
+    assert _undriven([_toggle(), bad]) == ["eco"]
+    assert _undriven([_toggle(), recipe.OpSpec(id="st", type="add_button_status",
+                                               params={"buttons": 3})]) == ["eco"]

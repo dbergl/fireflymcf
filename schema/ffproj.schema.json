@@ -1745,7 +1745,7 @@
                       "null"
                     ],
                     "default": null,
-                    "description": "{off_payload, on_payload}: not supported yet (refused)"
+                    "description": "{off_payload, on_payload}: 8-byte hex each; a later add_button_status must drive it"
                   },
                   "colour": {
                     "type": "array",

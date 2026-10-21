@@ -251,7 +251,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
         "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
-        "Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, "
+        "Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, "
+        "driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, "
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
         "UNVERIFIED.", "`rvcbutton.py`, `enumlabel.py`"),
@@ -259,8 +260,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
         "above valid_max reads off) into its own fresh cell, and each button's static body "
-        "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on), "
-        "refused if anything else on the page would change.",
+        "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); "
+        "a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.",
         "UNVERIFIED.", "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
