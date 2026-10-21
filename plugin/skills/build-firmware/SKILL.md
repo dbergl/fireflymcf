@@ -124,8 +124,9 @@ from `add_rvc_button`, `add_button_status` and `add_enum_label` rather than a on
   compute a value, so "set to 72" is a button per value, not a stepper.
 - **Light a button from the bus** with `add_button_status` (blue off, cyan on). A `toggle`
   button must be named by a LATER status entry, or compile refuses it (`TOGGLE_UNDRIVEN`).
-- **`ge` needs `valid_max`.** An RV-C byte reads 0xFF or 0xFE when not available; set
-  `valid_max` to 0xFA so those read off.
+- **`ge` and `ne` need `valid_max`** on a whole-byte or u16 source (compile refuses them
+  without it). An RV-C byte reads 0xFF or 0xFE when not available, which both would read as on;
+  set `valid_max` to 0xFA so those read off.
 - **Show a value as a word** with `add_enum_label` (a table of values and words).
 - All three are unverified: compile needs `--allow-unverified` and the owner's agreement to be
   first on the coach.

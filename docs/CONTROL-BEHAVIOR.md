@@ -883,8 +883,10 @@ through `0x20039908`. A status reading off (or stale, or above `valid_max`) give
 button sends "on". A status reading on gives variant 1, so it sends "off". The send follows the
 last tick's status, not the press count.
 
-Two status ops driving one toggle both call `setVariant` each tick, so the last in chain order
-wins; do not drive one toggle from two status ops.
+One toggle has one driver. A second `add_button_status` naming a button another status op
+already lights is refused `BAD_PARAMS` ("already lit by op ...; one status op per button",
+`AddButtonStatus._button`), as is a second entry for one button within one op, so two routines
+never call `setVariant` on one group.
 
 **Stock does the same for Climate.** `fireflymcf bus-map --dgn 1FFE2 --detail` on 13.6 shows
 GuiCode reading var 13 (THERMOSTAT_STATUS_1, instance 0) and calling `[0x20039908]` with
