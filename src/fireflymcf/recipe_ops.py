@@ -5294,7 +5294,19 @@ def _resolve_status_source(data, ctx, spec, op_id: str) -> tuple[int, int, int]:
     `live_mode` the entry's extraction mode (`raw[2] >> 4`, `statusbind.LIVE_MODES`), read as
     `register.resolve_register` and `appendfilter.handle_for` decode it. Other keys (`mask`,
     `shift`, a compare) are the caller's. Codes: BAD_PARAMS (not exactly one form), BAD_REF,
-    NO_SUCH_REGISTER."""
+    NO_SUCH_REGISTER (no such entry, or an inert one: a mode outside `LIVE_MODES` matches its
+    DGN and writes no slot, so a light or label on it would never change)."""
+    slot_addr, var, mode = _status_source_entry(data, ctx, spec, op_id)
+    if mode not in statusbind.LIVE_MODES:
+        raise RecipeError("NO_SUCH_REGISTER", "var %d's extraction mode %d is not one "
+                          "FUN_0021C760 dispatches (%s): the entry matches its DGN and writes no "
+                          "slot, so anything drawn from it would never change"
+                          % (var, mode, sorted(statusbind.LIVE_MODES)), op_id=op_id)
+    return slot_addr, var, mode
+
+
+def _status_source_entry(data, ctx, spec, op_id):
+    """`_resolve_status_source` before its live-mode check."""
     if not isinstance(spec, dict):
         raise RecipeError("BAD_PARAMS", "source must be an object, got %r" % (spec,), op_id=op_id)
     forms = [k for k in ("ref", "var", "dgn") if spec.get(k) is not None]
@@ -7353,7 +7365,9 @@ class AddButtonStatus(Op):
                            button another op already lit (its handle has `status`), or `ge`/`ne`
                            without `valid_max` on a whole-byte or u16 source.
       BAD_REF           -- a button or source names no matching handle.
-      NO_SUCH_REGISTER  -- a source resolves to no variable-table entry.
+      NO_SUCH_REGISTER  -- a source resolves to no variable-table entry, or to an inert one
+                           (an extraction mode outside `statusbind.LIVE_MODES` writes no
+                           slot, so the light would never change).
       NO_DISPLAY_CELL   -- the cell table could not be grown.
       NO_BODY_COLOUR    -- a colour is not in this build's palette.
       INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, or a wrap
@@ -7646,7 +7660,9 @@ class AddEnumLabel(Op):
                           key, an empty text, an unknown align, mask/shift out of range, a
                           source that is not exactly one form, or a non-positive box.
       BAD_REF          -- a `parent` or `source` ref names no usable handle.
-      NO_SUCH_REGISTER -- the source names no variable-table entry.
+      NO_SUCH_REGISTER -- the source names no variable-table entry, or an inert one (an
+                          extraction mode outside `statusbind.LIVE_MODES` writes no slot, so
+                          the label would never change).
       NO_DISPLAY_CELL  -- the cell table could not be grown.
       NO_COLOUR        -- `colour` or `background` is not in this build's palette.
       LABEL_REFUSED    -- an arm, the routine or the switch could not be built or placed; the

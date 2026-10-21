@@ -283,3 +283,11 @@ def test_home_placement_passes_the_gate(built):
     stock = _stock()
     obj, _sw = _label_switch(built)
     assert enumlabel.foreign_deltas(stock, built, CLIMATE_PARENT, obj) == []
+
+
+def test_inert_source_refuses():
+    """Var 185's extraction mode is 0: it writes no slot, so the label would never change."""
+    res = _compile([_op(source={"var": 185})])
+    assert not res.ok
+    assert res.errors[0]["code"] == "NO_SUCH_REGISTER", res.errors
+    assert "mode 0" in res.errors[0]["message"]

@@ -618,7 +618,7 @@ Error codes:
 
 - `BAD_PARAMS` — no entries, a malformed entry, no compare or two, an unknown compare, mask/shift/valid_max out of range, two entries naming one button, a button another op already lit (its handle has `status`), or `ge`/`ne` without `valid_max` on a whole-byte or u16 source.
 - `BAD_REF` — a button or source names no matching handle.
-- `NO_SUCH_REGISTER` — a source resolves to no variable-table entry.
+- `NO_SUCH_REGISTER` — a source resolves to no variable-table entry, or to an inert one (an extraction mode outside `statusbind.LIVE_MODES` writes no slot, so the light would never change).
 - `NO_DISPLAY_CELL` — the cell table could not be grown.
 - `NO_BODY_COLOUR` — a colour is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, or a wrap changes any other record on a page reaching the button.
@@ -703,7 +703,7 @@ Error codes:
 
 - `BAD_PARAMS` — a malformed param: empty or >16 `values`, a non-integer or duplicate key, an empty text, an unknown align, mask/shift out of range, a source that is not exactly one form, or a non-positive box.
 - `BAD_REF` — a `parent` or `source` ref names no usable handle.
-- `NO_SUCH_REGISTER` — the source names no variable-table entry.
+- `NO_SUCH_REGISTER` — the source names no variable-table entry, or an inert one (an extraction mode outside `statusbind.LIVE_MODES` writes no slot, so the label would never change).
 - `NO_DISPLAY_CELL` — the cell table could not be grown.
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
 - `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or the placement changes any other record on a page reaching `parent`.
