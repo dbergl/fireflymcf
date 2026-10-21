@@ -705,8 +705,10 @@ class Recolor(Op):
                 ctx.handles[self.spec.id] = {"object": obj, "index": target}
                 return data
             out, _ = patcher.build()
+        except RecipeError:
+            raise           # a ValueError too: _select_record's NO_SUCH_RECORD keeps its code
         except (patch.PatchError, theme.PaletteError, ValueError) as e:
-            raise RecipeError("NO_SUCH_COLOR", str(e))
+            raise RecipeError("NO_SUCH_COLOR", str(e), op_id=self.spec.id)
         ctx.edits.extend(patcher.edits())
         ctx.handles[self.spec.id] = {"object": obj, "index": target}
         return out

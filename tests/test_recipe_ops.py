@@ -373,6 +373,26 @@ def test_recolor_selector_without_a_mode7_fill_is_no_such_color(stock, stock_has
         "selector": {"wtype": 4, "nth": 1}}))
     assert not r.ok and r.errors[0]["code"] == "NO_SUCH_COLOR"
 
+def test_recolor_selector_matching_nothing_is_no_such_record(stock, stock_hash):
+    # 872 holds five wtype-4 records; nth 9 names none. RecipeError subclasses ValueError, so
+    # the broad except once re-labelled this NO_SUCH_COLOR and dropped the op id.
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 872, "color": {"index": 8}, "allow_container": True,
+        "selector": {"wtype": 4, "nth": 9}}))
+    assert not r.ok and r.errors[0]["code"] == "NO_SUCH_RECORD", r.errors
+    assert r.errors[0]["op_id"] == "a"
+
+@pytest.mark.parametrize("nth,code", [(9, "NO_SUCH_RECORD"), (1, "NO_SUCH_COLOR")])
+def test_recolor_apply_raises_with_its_op_id(stock, nth, code):
+    # Called directly, not through compile_project (which fills a missing op id in).
+    op = recipe.REGISTRY["recolor"](recipe.OpSpec(id="a", type="recolor", params={
+        "object": 872, "color": {"index": 8}, "allow_container": True,
+        "selector": {"wtype": 4, "nth": nth}}))
+    ctx = recipe.Ctx(stock=stock, edits=[], insertions=[], handles={})
+    with pytest.raises(recipe.RecipeError) as e:
+        op.apply(stock, ctx)
+    assert (e.value.code, e.value.op_id) == (code, "a")
+
 @pytest.mark.parametrize("selector", [{"wtyp": 4}, {"nth": -1}, {"nth": "0"}, {"wtype": "4"},
                                       {"label": 3}, []])
 def test_recolor_bad_selector_is_bad_params(stock, stock_hash, selector):
