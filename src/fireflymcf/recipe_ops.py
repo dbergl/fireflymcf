@@ -7930,6 +7930,11 @@ class AddEnumLabel(Op):
             "arms_base": sw.child_index, "var": var, "slot_addr": slot_addr,
             "live_mode": live_mode, "mask": self.mask, "shift": self.shift,
             "values": dict(zip(self.keys, self.texts)), "default": self.default,
+            # what verify rebuilds: the records' geometry and colours, the restore, the routine
+            "x": self.x, "y": self.y, "w": self.w, "h": self.h, "font": self.font,
+            "align": self.align, "colour_index": colour, "bg_index": bg, "restore": restore,
+            "entry": code_load_addr + readout.ENTRY_OFF, "code_load_addr": code_load_addr,
+            "plan": plan, "blob_len": len(blob),
         }
         return out
 
@@ -7960,22 +7965,59 @@ class AddEnumLabel(Op):
         assert cands[0] == (0xFFFF, sw.child_index), "no 0xFFFF default at the base: %s" % cands
         assert sorted(by_value) == list(range(n + 1)) + [0xFFFF] and len(cands) == n + 2, \
             "match values %s" % cands
-        blank = records.object_records(data, gs + tab[sw.child_index])
-        assert not any(r.wtype == 11 and r.label for r in blank), "the default arm draws text"
+        assert sw.base_modes[:4] == [0, 0, 1, 1] and sw.geom[:2] == [h["x"], h["y"]], \
+            "the switch is not absolute at (%d, %d)" % (h["x"], h["y"])
+
+        # every arm, record by record, as `enumlabel.build_arm` / `blank_arm` built it
+        def fill_ok(r):
+            return (r.wtype == 33 and r.geom[:4] == [0, 0, h["w"], h["h"]]
+                    and r.base_modes[:4] == [1, 1, 1, 1]
+                    and r.colors[0] == ("fillA", 7, h["bg_index"]))
+        lead = [] if h["bg_index"] is None else [33]
         want = [h["values"][k] for k in sorted(h["values"])] + [h["default"]]
         got = []
         for k in range(n + 1):
             arm = records.object_records(data, gs + tab[by_value[k]])
-            lab = [r for r in arm if r.wtype == 11]
-            assert len(lab) == 1 and lab[0].geom[2] and lab[0].geom[3], \
-                "arm %d needs one label with a declared box" % k
-            got.append(lab[0].label)
+            assert [r.wtype for r in arm] == lead + [11], \
+                "arm %d does not draw its records as built: wtypes %s" % (k, [r.wtype for r in arm])
+            assert not lead or fill_ok(arm[0]), "arm %d does not draw its fill as built" % k
+            lab = arm[-1]
+            assert (lab.geom[:4] == [0, 0, h["w"], h["h"]] and lab.base_modes[:4] == [1, 1, 1, 1]
+                    and lab.font == h["font"] and lab.h_align == h["align"]
+                    and ("fillA", 7, h["colour_index"]) in lab.colors), \
+                "arm %d does not draw %r in its %dx%d box, font %d, ink %d as built" % (
+                    k, lab.label, h["w"], h["h"], h["font"], h["colour_index"])
+            got.append(lab.label)
         assert got == want, "arm texts %s, expected %s" % (got, want)
+        blank = records.object_records(data, gs + tab[sw.child_index])
+        assert [r.wtype for r in blank] == lead + [11] and not blank[-1].label \
+            and blank[-1].font is None and (not lead or fill_ok(blank[0])), \
+            "the 0xFFFF default arm does not draw only its fill as built"
+        recs = records.object_records(data, gs + tab[h["object"]])
+        if h["restore"] is None:
+            assert len(recs) == 1, "the label object holds %d records, not its switch" % len(recs)
+        else:
+            font, align = h["restore"]
+            assert len(recs) == 2 and recs[1].wtype == 11 and not recs[1].label \
+                and recs[1].font == font and recs[1].align == align, \
+                "the label object does not end with the (font %r, align %d) restore" % (font,
+                                                                                        align)
         assert status_map.cell_table(data)[h["slot"]] == h["cell_addr"]
+
+        # the routine: rebuilt from the handle's source, mask, shift, keys and cell at the
+        # recorded load address and the hook state it chained on; the image must hold that blob
+        plan = h["plan"]
+        items = (statusfold.Enum(slot_addr=h["slot_addr"], mask=h["mask"], shift=h["shift"],
+                                 keys=tuple(sorted(h["values"])), cell_addr=h["cell_addr"]),)
+        assert items == plan.items, "the handle's source differs from the plan the op built"
+        blob, _ = statusfold.build(dataclasses.replace(plan, items=items), h["code_load_addr"])
         gc = theme.guicode_section(data)
-        code = data[gc.offset:gc.offset + gc.length]
-        assert struct.pack("<II", h["slot_addr"], h["cell_addr"]) in code, \
-            "no routine maps var %d into cell %#x" % (h["var"], h["cell_addr"])
+        at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+        assert len(blob) == h["blob_len"] and data[at:at + len(blob)] == blob, \
+            "the routine at %#x is not the one its source and %d keys build" % (
+                h["code_load_addr"], n)
+        assert h["entry"] in followchannel.chain_from_hook(data), \
+            "the per-tick chain does not reach the routine at %#x" % h["entry"]
         return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
                 % (h["var"], h["mask"], h["shift"], h["slot"], n + 1, got[:-1],
