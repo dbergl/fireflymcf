@@ -810,3 +810,18 @@ def test_find_match_table_survives_more_appends_than_the_width_scan_tries(monkey
     monkeypatch.setattr(guidata, "object_table_offset", unanchored)
     with pytest.raises(guidata.MatchTableNotFound):
         guidata.find_match_table(out)
+
+
+def test_find_match_table_anchors_a_table_two_wider_than_the_object_count(monkeypatch):
+    """A grow lands its values on the next object indices before those objects are appended,
+    so a table can be wider than the object count: eight committed 13.6 builds carry width
+    n + 2. The anchored walk must take them, not fall back to the width scan (disabled here)."""
+    from fireflymcf import guidata, relocate
+    data = open("firefly-13.6/mcf.bin", "rb").read()
+    stock_mt = guidata.find_match_table(data)
+    grown, _ = relocate.grow_match_table(data, [0, 1])
+    n = len(guidata.object_tables(grown)[1])
+    start, _end = relocate.object_table_bounds(grown, relocate.OBJECT_TABLE_INDEX)
+    assert (start - stock_mt) // 2 == n + 2
+    monkeypatch.setattr(guidata, "MATCH_TABLE_MAX_APPENDED", -1)   # the width scan tries nothing
+    assert guidata.find_match_table(grown) == stock_mt
