@@ -182,11 +182,13 @@ def test_glyph_and_caption():
     (cap,) = [r for r in walked if r.wtype == 11 and r.label]
     (touch,) = [r for r in walked if r.wtype == 12]
     # the caption takes a 24-px strip (font 14's cell) at the bottom; the ring (16 x 16, x
-    # bearing 0, y bearing 16 in its 48-px cell) is centred in the 32 px above it
+    # bearing 0, y bearing 16 in its 48-px cell, font top 47) is centred in the 32 px above it.
+    # The panel draws a wtype-0 character's ink at (pen_x, pen_y - top + y bearing) (GUICODE
+    # Finding 84), so the pen sits `top - y` = 31 px below the ink's top.
     assert cap.label == "Pump" and cap.box == (x + inset, y + h - inset - 24,
                                                x + w - inset, y + h - inset)
     assert g_w.box[:2] == (x + inset + (w - 2 * inset - 16) // 2,
-                           y + inset + (h - 2 * inset - 24 - 16) // 2 - 16)
+                           y + inset + (h - 2 * inset - 24 - 16) // 2 + 47 - 16)
     assert touch.box == (x + inset, y + inset, x + w - inset, y + h - inset)
     from fireflymcf import enumlabel
     assert enumlabel.foreign_deltas(_stock(), res.data, HOME, obj) == []
@@ -202,8 +204,63 @@ def test_glyph_only_is_centred():
     x, y, w, h = GBOX
     inset = aescompact.PUMP_OUTLINE_INSET
     assert g_w.box[:2] == (x + inset + (w - 2 * inset - 16) // 2,
-                           y + inset + (h - 2 * inset - 16) // 2 - 16)
+                           y + inset + (h - 2 * inset - 16) // 2 + 47 - 16)
     assert touch.box == (x + inset, y + inset, x + w - inset, y + h - inset)
+
+
+def _drawn_glyph(data, char):
+    """The ink box `(x0, y0, x1, y1)`, inclusive, of the one rendered prim drawing `char`."""
+    from fireflymcf import render
+    (prim,) = [p for p in render.screen_placements(data, HOME)[0].prims
+               if p.kind == "text" and p.text == char]
+    (dx, dy, img), = prim.glyph_images
+    return (prim.x + dx, prim.y + dy, prim.x + dx + img.width - 1, prim.y + dy + img.height - 1)
+
+
+@pytest.mark.parametrize("text", ["Pump", None])
+def test_the_glyph_draws_inside_its_button(text):
+    """The rendered glyph's ink lies inside the inner box, centred in the area above the
+    caption. Before GUICODE Finding 84 the pen was placed as if the panel drew the ink at
+    `pen + (x, y)` bearing, and the ring drew 47 px (its font's top) above the button."""
+    res = _ok([GLYPH_OP, _glyph_op(text=text)])
+    x, y, w, h = GBOX
+    inset = aescompact.PUMP_OUTLINE_INSET
+    area = h - 2 * inset - (24 if text else 0)
+    ix0, iy0 = x + inset, y + inset
+    gx0, gy0, gx1, gy1 = _drawn_glyph(res.data, "Y")
+    assert (gx0, gy0) == (ix0 + (w - 2 * inset - 16) // 2, iy0 + (area - 16) // 2)
+    assert ix0 <= gx0 and gx1 <= x + w - inset and iy0 <= gy0 and gy1 < iy0 + area
+
+
+def test_a_control_character_glyph_draws():
+    """Icon font 25's characters are control bytes (`\\x01`..`\\x04`). `FUN_00251AA0` indexes
+    the font by the byte with no printable test, so a wtype-0 `\\x03` draws; the renderer
+    dropped every non-printable label and drew nothing."""
+    rows = ["00" + "f" * 49 + "00"] * 56
+    inst = {"id": "g25", "type": "install_glyph", "enabled": True,
+            "params": {"slot": 25, "char": "\x03", "y": (72 - 56) // 2, "rows": rows}}
+    res = _ok([inst, _glyph_op(text=None, glyph={"slot": 25, "char": "\x03"})])
+    x, y, w, h = GBOX
+    inset = aescompact.PUMP_OUTLINE_INSET
+    gx0, gy0, gx1, gy1 = _drawn_glyph(res.data, "\x03")
+    assert (gx1 - gx0 + 1, gy1 - gy0 + 1) == (53, 56)
+    assert x + inset <= gx0 and gx1 <= x + w - inset
+    assert y + inset <= gy0 and gy1 <= y + h - inset
+
+
+def test_a_glyph_with_an_x_bearing_says_it_assumes_class_2():
+    """Font 24's `C` has an 11-px x bearing. Its horizontal placement holds only while the page
+    measures in class 2 (GUICODE Finding 84; under class 1 the ink lands 11 px right), and
+    nothing checks the page's class, so the manifest says so."""
+    res = _ok([_glyph_op(text=None, glyph={"slot": 24, "char": "C"})])
+    (line,) = [m for m in res.manifest if m.startswith("add_rvc_button")]
+    assert "x bearing 11 px" in line and "measuring class 2" in line, line
+
+
+def test_a_glyph_without_an_x_bearing_makes_no_class_claim():
+    res = _ok([GLYPH_OP, _glyph_op(text=None)])
+    (line,) = [m for m in res.manifest if m.startswith("add_rvc_button")]
+    assert "class" not in line, line
 
 
 def test_glyph_too_big_for_the_box():
@@ -261,3 +318,38 @@ def test_parent_reached_only_through_a_switch_arm():
     assert not any(r.obj == 904 for r in pagewalk.walk_records(stock, HOME))
     res = _ok([_op(parent=904, x=700, y=420)])
     assert any("under 904" in m for m in res.manifest), res.manifest
+
+
+def test_batt_heat_free_pool_never_takes_a_guicode_driven_group(monkeypatch):
+    """`add_aes_batt_heat`'s `free` pool is `assignable_groups`, not `free_group_slots`: with
+    only GuiCode-driven slots left (13.6's 136-139), the op runs dry as NO_FREE_GROUP rather
+    than handing out 136 for the finish gate to refuse."""
+    data = STOCK.read_bytes()
+    driven = sorted({136, 137, 138, 139} & set(newbutton.guicode_selected_groups(data)))
+    assert driven == [136, 137, 138, 139]
+    monkeypatch.setattr(newbutton, "free_group_slots", lambda _data: list(driven))
+    res = _compile([{"id": "aesswap", "type": "swap_aes_electrical", "enabled": True,
+                     "params": {}},
+                    {"id": "battheat", "type": "add_aes_batt_heat", "enabled": True,
+                     "params": {}}])
+    assert not res.ok
+    assert (res.errors[0]["code"], res.errors[0]["op_id"]) == ("NO_FREE_GROUP", "battheat"), \
+        res.errors
+
+
+def test_free_pool_never_offers_a_guicode_driven_group():
+    """The `free` pool used to hand out 13.6's 136-139 once the lower slots were taken, and the
+    finish gate (`recipe._assert_no_guicode_selected_group_reused`) then failed the whole build
+    with an assertion. The pool now skips every GuiCode-driven group, so running it dry is the
+    op's own NO_FREE_GROUP."""
+    from fireflymcf import levelcontrols, rvcbutton
+    data = STOCK.read_bytes()
+    driven = newbutton.guicode_selected_groups(data)
+    assert {136, 137, 138, 139} <= set(driven)
+    assert {136, 137, 138, 139} <= set(newbutton.free_group_slots(data))     # the old pool
+    pool = [g for g in newbutton.assignable_groups(data)
+            if g not in levelcontrols.RESERVED_GROUPS]
+    got = rvcbutton.allocate(data, pool="free", need=len(pool))
+    assert got == pool and not set(got) & set(driven)
+    with pytest.raises(rvcbutton.RvcButtonError, match="holds %d slot" % len(pool)):
+        rvcbutton.allocate(data, pool="free", need=len(pool) + 1)

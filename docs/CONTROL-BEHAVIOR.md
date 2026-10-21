@@ -624,6 +624,21 @@ error, v21 (`y = 3`) showed that a nudge sized by eye is invisible against it, a
 derived) fixed it. The lesson is the project's own: the formula was recoverable from the code the
 whole time, and two rounds were spent calibrating instead of deriving.
 
+**A wtype-0 single character is drawn by a different function** (`FUN_002557C0`, `GUICODE.md`
+Finding 84). It has no box and no v-align. Its glyph lands at
+
+```
+glyph_top  = pen_y − font[0x0b] + glyph[0x0c]     ; ldrb r4,[r1,#0xb] / subs @0x00255810
+glyph_left = pen_x                                 ; left-aligned, default measuring class
+```
+
+(The vertical rule holds in every measuring class; the horizontal one is proven given class 2,
+and under class 1 a glyph with an x bearing lands that many px right of the pen.)
+
+so the pen is the cell's baseline: for icon fonts 24 and 25, its **last** row, not its top.
+Placing such a record by `pen = target − (x, y)` drew a ring 47 px (font 24's `font[0x0b]`)
+above its button. `metrics.wt0_ink_offset` gives the offset.
+
 ---
 
 ## 8. Consequences for building controls
@@ -646,7 +661,9 @@ whole time, and two rounds were spent calibrating instead of deriving.
   tap still sends, but a hold never registers: v45's Track + (136) did not repeat and its
   hold-only reboot (137) sent nothing, while identical controls on 96/126/127 worked. The mechanism
   is not traced (the setter refuses a byte-1 `0x00` group, so it is not its write). Allocate holds
-  from `newbutton.hold_safe_groups`; `recipe._assert_no_guicode_selected_group_reused` gates reuse.
+  from `newbutton.hold_safe_groups` and taps from `newbutton.assignable_groups` (which drops
+  every GuiCode-driven group, 13.6's 136-139, 184, 231 and 232);
+  `recipe._assert_no_guicode_selected_group_reused` gates reuse.
 
 ### Hold-to-toggle — `gestures.make_hold_to_toggle`, CONFIRMED ON HARDWARE 2026-08-19
 

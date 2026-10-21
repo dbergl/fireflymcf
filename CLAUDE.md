@@ -203,7 +203,9 @@ twice been read as contradicting it and was wrong both times.
 
 - **A hold only works on a group GuiCode does not drive.** `newbutton.free_group_slots` lists
   13.6's 130-139, which GuiCode sets as a block; v45's holds on 136/137 were dead. Mint hold
-  controls from `newbutton.hold_safe_groups`; a compile gate refuses reusing a GuiCode-driven group.
+  controls from `newbutton.hold_safe_groups`, and any other new group from
+  `newbutton.assignable_groups` (the free list minus the GuiCode-driven groups); a compile gate
+  refuses reusing a GuiCode-driven group.
 - The DGN registration cap is **83** and fails silently; 13.6 registers 66. `retarget_filter` refuses
   to cross it.
 - A received value is painted only if fixed GuiCode copies its slot to a cell a widget draws: on 13.6,

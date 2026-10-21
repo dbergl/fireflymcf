@@ -731,7 +731,7 @@ def _object_tables(data: bytes, min_run: int) -> list[list[int]]:
             if len(run) >= min_run]
 
 
-def object_table_offset(data: bytes, index: int) -> int:
+def object_table_offset(data: bytes, index: int, table: list[int] | None = None) -> int:
     """Section-relative offset of object-pointer table `index` (the position of the table
     itself, not of the objects it names).
 
@@ -743,9 +743,11 @@ def object_table_offset(data: bytes, index: int) -> int:
 
     Located the same way `object_tables` locates the runs -- by matching the table's first
     entries as consecutive `0x900XXXXX` words -- so it follows the table wherever it moved.
+    `table`, when given, is `object_tables(data)[index]` already in hand (not rescanned).
     """
     section_start, section_end = guidata_extent(data)
-    table = object_tables(data)[index]
+    if table is None:
+        table = object_tables(data)[index]
     if not table:
         raise ValueError("table %d is empty" % index)
     want = struct.pack("<%dI" % min(4, len(table)),
@@ -1724,11 +1726,25 @@ def find_match_table(data: bytes) -> int:
     width is retried downward by up to `MATCH_TABLE_MAX_APPENDED` so the shorter table still
     locates (see that constant).
 
+    Anchored first: the table ENDS where object table 1 begins (`object_table_offset(data, 1)`;
+    `relocate.grow_match_table` inserts there and an appended object never moves it, so it holds
+    on every build), and the u16 before the table's first entry is half of a variable-table SRAM
+    pointer (`0x2003` on all three corpus files) that fails the hard filter. Walking back from
+    that end while entries pass the filter gives the table exactly, however many objects were
+    appended since it was last grown: the width scan below gives up after
+    `MATCH_TABLE_MAX_APPENDED` (a 58-op build appended more). A grow covers the next object
+    indices before their objects are appended, plus a 4-alignment pad, so a finished build's
+    table can be wider than the object count: eight committed 13.6 builds carry `n + 2`. The
+    walk accepts a table up to `n + 2` entries wide (it looks at `n + 3`, so the entry that ends
+    a table of exactly `n + 2` is seen) and must score at least `MATCH_TABLE_MIN_SCORE`; a file
+    where it does not hold falls back to the width scan.
+
     Raises `MatchTableNotFound` if no window at any tried width satisfies the hard filter with
     a score of at least `MATCH_TABLE_MIN_SCORE`.
     """
     gs, ge = guidata_extent(data)
-    n = len(object_tables(data)[1])
+    table1 = object_tables(data)[1]
+    n = len(table1)
     m = (ge - gs) // 2
     if n == 0 or m < n:
         raise MatchTableNotFound(
@@ -1745,6 +1761,18 @@ def find_match_table(data: bytes) -> int:
     if m >= 3:
         run_start[:-2] = (arr[:-2] == 0) & (arr[1:-1] == 1) & (arr[2:] == 2)
     run_csum = np.concatenate(([0], np.cumsum(run_start)))
+
+    try:
+        end = object_table_offset(data, 1, table1) // 2
+    except (ValueError, IndexError):
+        end = None
+    if end is not None and 0 < end <= m:
+        lo = max(0, end - (n + 3))          # a table up to n + 2 wide, and the entry before it
+        k = end
+        while k > lo and ok[k - 1]:
+            k -= 1
+        if k > lo and end > k and run_csum[end] - run_csum[k] >= MATCH_TABLE_MIN_SCORE:
+            return k * 2
 
     # Try the exact object count first (unchanged behaviour for un-patched files), then fall
     # back to narrower widths so a build with objects appended by `insert.py` -- which grows

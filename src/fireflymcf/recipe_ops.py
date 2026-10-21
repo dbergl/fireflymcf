@@ -200,7 +200,9 @@ class MoveElement(Op):
       selector: dict — record selector: wtype (int|None), label (str|None),
                 nth (int, default 0); resolved via `_select_record`
       set: dict — geometry fields to write, keys from x/y/w/h -> new int value; must
-           be non-empty
+           be non-empty. A value is -32768..65535: the layout engine reads geometry signed
+           (`layout._s16`), so a negative relative offset is stored as its two's complement
+           (-42 and 65494 are the same edit). `expect` takes either spelling too.
       expect: dict (default {}) — prior values to validate before writing; every key
               here must also be a key in `set` (an expect on a field never written is
               a silently-inert assertion)
@@ -208,8 +210,8 @@ class MoveElement(Op):
                 matched record (skipped rather than refused)
 
     Error codes:
-      BAD_PARAMS — a set/expect key is not x/y/w/h, set is empty, or an expect key is
-                   not also in set
+      BAD_PARAMS — a set/expect key is not x/y/w/h, set is empty, an expect key is
+                   not also in set, or a value is not an int in -32768..65535
       NO_SUCH_RECORD — no record matches selector (from `_select_record`)
       NO_FIELD — a requested `set` key has no geometry field on the matched record and
                 is not listed in `optional`
@@ -249,6 +251,14 @@ class MoveElement(Op):
                 "non-empty, and every expect key must also be in set (an expect on a "
                 "key never written is a silently-inert assertion); got bad=%r "
                 "stray_expect=%r" % (bad, stray_expect), op_id=self.spec.id)
+        for name, d in (("set", self.set), ("expect", self.expect)):
+            for k, v in d.items():
+                if not isinstance(v, int) or isinstance(v, bool) or not -0x8000 <= v <= 0xFFFF:
+                    raise RecipeError("BAD_PARAMS", "move_element %s[%r] = %r is not an int in "
+                                      "-32768..65535" % (name, k, v), op_id=self.spec.id)
+        self.written = {"set": dict(self.set), "expect": dict(self.expect)}   # for messages
+        self.set = {k: v & 0xFFFF for k, v in self.set.items()}       # signed -> stored u16
+        self.expect = {k: v & 0xFFFF for k, v in self.expect.items()}
 
     def apply(self, data, ctx):
         obj = resolve_target(ctx, self.target)
@@ -267,7 +277,8 @@ class MoveElement(Op):
                 if have != self.expect[key]:
                     raise RecipeError("EXPECT_MISMATCH",
                                       "object %d %s is %d, project expected %d"
-                                      % (obj, key, have, self.expect[key]))
+                                      % (obj, key, layout._s16(have),
+                                         self.written["expect"][key]))
             _put16(buf, off, val, ctx, "move_element obj %d %s -> %d" % (obj, key, val))
         out, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": obj}
@@ -282,8 +293,8 @@ class MoveElement(Op):
             if off is None and key in self.optional:
                 continue
             assert struct.unpack_from("<H", data, off)[0] == val, \
-                "move_element: obj %d %s != %d" % (obj, key, val)
-        return "move: object %d %s" % (obj, dict(self.set))
+                "move_element: obj %d %s != %d" % (obj, key, self.written["set"][key])
+        return "move: object %d %s" % (obj, self.written["set"])
 
 
 @op("move_attach")
@@ -612,15 +623,24 @@ class Recolor(Op):
       color: [r,g,b] (list of 3 ints 0-255) or {"index": int} — target colour, either
              as RGB triple (matched to theme palette via resolver) or palette index
       allow_container: bool (default False) — recolour a card of controls on purpose
+      selector: dict (optional) — recolour exactly this record (`_select_record`: wtype,
+                label, nth), for an object whose mode-7 boxes `patch.find_button_box` cannot
+                tell apart (card 872: the card box and an icon box, both wtype 4). The record
+                must carry a mode-7 fillA. Omitted, the box is `find_button_box`'s, as before.
+                The selector path has not run on a coach, so it compiles UNVERIFIED.
 
     Error codes:
-      BAD_PARAMS — color is not [r,g,b] list or {"index": n} dict
+      BAD_PARAMS — color is not [r,g,b] list or {"index": n} dict, or selector has a key
+                   other than wtype/label/nth, a non-int wtype, a non-str label, or a nth
+                   that is not a non-negative int
+      NO_SUCH_RECORD — no record matches selector (from `_select_record`)
       CONTAINER — the object is a card of controls (it attaches child objects and holds
                   two or more touch regions, like HOME's lights card 905), so its box is the
                   card's background, not one button's; offers=["acknowledge_container"] —
                   retry with allow_container=True to recolour the whole card
       NO_SUCH_COLOR — object has no button box, or resolver rejects the colour
-                      (PatchError, PaletteError, ValueError all mapped here)
+                      (PatchError, PaletteError, ValueError all mapped here), or the
+                      selected record has no mode-7 fillA
 
     Returns sealed image with box fill colour repointed and edits logged to context.
     """
@@ -632,6 +652,9 @@ class Recolor(Op):
                       "description": "[r, g, b] triple or {\"index\": n} palette index"},
             "allow_container": {"type": "boolean", "default": False,
                                 "description": "recolour a card of controls on purpose"},
+            "selector": {"type": "object",
+                         "description": "the record to recolour: wtype (int), label (str), "
+                                        "nth (int, default 0); omitted, the object's one box"},
         },
         "required": ["object", "color"],
     }
@@ -640,6 +663,18 @@ class Recolor(Op):
         self.object = self._param("object")
         self.color = self._param("color")
         self.allow_container = self._param("allow_container", False, kind=bool)
+        self.selector = self._param("selector", None)
+        if self.selector is not None:
+            sel = self.selector
+            nth = sel.get("nth", 0) if isinstance(sel, dict) else None
+            if (not isinstance(sel, dict) or set(sel) - {"wtype", "label", "nth"}
+                    or not isinstance(sel.get("wtype", 0), (int, type(None)))
+                    or isinstance(sel.get("wtype"), bool)
+                    or not isinstance(sel.get("label", ""), (str, type(None)))
+                    or not isinstance(nth, int) or isinstance(nth, bool) or nth < 0):
+                raise RecipeError("BAD_PARAMS", "selector wants {wtype: int, label: str, "
+                                  "nth: int >= 0}, got %r" % (sel,), op_id=self.spec.id)
+            self.hardware_verified = False      # the selector path has not run on a coach
         ok = (isinstance(self.color, list) and len(self.color) == 3) or \
              (isinstance(self.color, dict) and set(self.color) == {"index"})
         if not ok:
@@ -660,7 +695,7 @@ class Recolor(Op):
                     "every control on the card. Recolour one control's own object, or pass "
                     "allow_container=True" % (obj, touch), offers=["acknowledge_container"])
         try:
-            box = patch.find_button_box(data, obj)
+            box = self._box(data, obj)
             if isinstance(self.color, dict):
                 target = theme.resolve_fill_index(data, index=self.color["index"])
             else:
@@ -672,8 +707,10 @@ class Recolor(Op):
                 ctx.handles[self.spec.id] = {"object": obj, "index": target}
                 return data
             out, _ = patcher.build()
+        except RecipeError:
+            raise           # a ValueError too: _select_record's NO_SUCH_RECORD keeps its code
         except (patch.PatchError, theme.PaletteError, ValueError) as e:
-            raise RecipeError("NO_SUCH_COLOR", str(e))
+            raise RecipeError("NO_SUCH_COLOR", str(e), op_id=self.spec.id)
         ctx.edits.extend(patcher.edits())
         ctx.handles[self.spec.id] = {"object": obj, "index": target}
         return out
@@ -684,12 +721,23 @@ class Recolor(Op):
         # repointing the SAME box's fillA to a different cell after this op ran.
         h = ctx.handles[self.spec.id]
         obj, want = h["object"], h["index"]
-        box = patch.find_button_box(data, obj)
+        box = self._box(data, obj)
         fillA = next(c for c in box.colors if c[0] == "fillA")
         assert fillA[1] == 7 and fillA[2] == want, \
             "recolor: object %d fillA is mode %s index %s, wanted mode 7 index %d " \
             "(a later op repointed it)" % (obj, fillA[1], fillA[2], want)
         return "recolor: object %d -> %s (index %d)" % (obj, self.color, want)
+
+    def _box(self, data, obj):
+        """The record this op recolours: the selected one, or `find_button_box`'s."""
+        if self.selector is None:
+            return patch.find_button_box(data, obj)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if not any(c[0] == "fillA" and c[1] == 7 for c in rec.colors):
+            raise patch.PatchError("object %d's record selected by %r has no mode-7 fillA to "
+                                   "recolour" % (obj, self.selector))
+        return rec
 
 
 @op("remap_channel")
@@ -5302,6 +5350,16 @@ class AppendFilter(Op):
     A new var is NOT drawable by naming its index as a widget `value_slot` (that indexes the
     display-cell table); feed a cell from its slot with `add_register_readout`.
 
+    `refresh` is the entry's staleness class (`MCF-FORMAT.md` §5.4a, `ubfx sl,r0,#2,#2`
+    @`0x0021C9B6`): 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never. When the class's time passes with
+    no matching frame, `FUN_0021C374` defaults the slot to 0xFFFF and what it feeds reads "no
+    data" (an `add_button_status` arm draws off). The default, 3, never expires: the slot keeps
+    the last value it received until the panel reboots. That suits a value that is sent only
+    when it changes. For a live status from a device that can go silent, pass 1 or 2 (stock's
+    thermostat and temperature entries are class 2). On hardware, a class-3 append of a
+    thermostat's fan speed kept its buttons lit after the publisher stopped, while the stock
+    class-2 temperature readouts on the same page went back to their no-data text.
+
     Error codes:
       APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
     """
@@ -5316,7 +5374,9 @@ class AppendFilter(Op):
             "dgn": {"type": "integer", "description": "18-bit DGN to receive"},
             "mode": {"type": "integer", "description": "extraction mode (statusbind.LIVE_MODES)"},
             "payload_byte": {"type": "integer", "description": "payload byte the mode reads"},
-            "refresh": {"type": "integer", "default": 3, "description": "staleness class 0..3"},
+            "refresh": {"type": "integer", "default": 3,
+                        "description": "staleness class: 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never "
+                                       "expires. Use 1 or 2 for a live status"},
             "instance": {"type": "integer", "default": 255,
                         "description": "filter value for +4; 255 = no filter"},
             "compare_byte": {"type": "integer", "default": 255,
@@ -6602,8 +6662,9 @@ class AddAesBattHeat(Op):
         binding_start = len(guidata.binding_table(data))
 
         # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
-        # this op never did; byte identity keeps the old list)
-        free = (newbutton.free_group_slots(data) if self.group_pool == "free"
+        # this op never did; byte identity keeps the old list). The free pool skips the groups
+        # GuiCode drives (`newbutton.assignable_groups`): the finish gate refuses those anyway.
+        free = (newbutton.assignable_groups(data) if self.group_pool == "free"
                 else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
         if not free:
             raise RecipeError("NO_FREE_GROUP",
@@ -6649,7 +6710,8 @@ class AddAesBattHeat(Op):
             "binding_start": binding_start,
             "x": self.x, "y": self.y, "w": self.w, "h": self.h, "text": self.text,
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
-            "glyph": None, "font": None, "parent": aescompact.ELECTRICAL_AES_BODY,
+            "glyph": None, "glyph_x_bearing": 0, "font": None,
+            "parent": aescompact.ELECTRICAL_AES_BODY,
             "placement": "append", "toggle": None,
             # the keys an `add_rvc_button` handle carries, with the values this preset builds:
             # the static fill index's colour (None when this build's palette does not resolve
@@ -7229,6 +7291,10 @@ class AddCardReadouts(Op):
                          entering font/align cannot be measured or written back.
       BAD_REF         -- a row's ref names no draw:false readout handle.
       REPLACE_REFUSED -- 829 could not be relocated.
+      BAD_PARAMS      -- a row lacks caption, unit or value, or its caption or unit has a
+                         character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
+      NO_GLYPH        -- a non-ASCII caption or unit character the row's font has no glyph for
+                         (captions font 10, units font 12; both carry '°').
     """
 
     hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
@@ -7262,6 +7328,13 @@ class AddCardReadouts(Op):
                     or (("ref" in v) == ("slot" in v))):
                 raise RecipeError("BAD_PARAMS", "row %r needs caption, unit and value "
                                   "{ref} or {slot}" % (r,), op_id=self.spec.id)
+            for key in ("caption", "unit"):
+                try:
+                    r[key].encode("latin-1")
+                except UnicodeEncodeError:
+                    raise RecipeError("BAD_PARAMS", "row %s %r has a character outside "
+                                      "latin-1 (a label byte indexes the font)" % (key, r[key]),
+                                      op_id=self.spec.id)
         self.rows = rows
         self._verified_on_829 = self.hardware_verified    # before any parent narrowing
         self.geom = {k: self._param(k, d, kind=int) for k, d in
@@ -7287,6 +7360,15 @@ class AddCardReadouts(Op):
                 slot = h["display_slot"]
             else:
                 slot = int(v["slot"])
+            for text, font in ((r["caption"], cardreadouts.CAPTION_FONT),
+                               (r["unit"], cardreadouts.VALUE_FONT)):
+                # ASCII is what every flashed readout drew; only the newly allowed characters
+                # are checked (a blank glyph such as the space reads as "missing")
+                bad = [c for c in text if ord(c) > 0x7E and rvcbutton.glyph_missing(data, font, c)]
+                if bad:
+                    raise RecipeError("NO_GLYPH", "font %d has no glyph for %r in %r (it would "
+                                      "draw a fallback)" % (font, bad[0], text),
+                                      op_id=self.spec.id)
             fmt = r.get("format", {})
             rows.append(cardreadouts.Row(r["caption"], slot, int(fmt.get("width", 0)),
                                          int(fmt.get("places", 0)), r["unit"]))
@@ -7753,8 +7835,57 @@ class AddButtonStatus(Op):
                              for b in h["buttons"]), h["entry"]))
 
 
+class _LabelBox:
+    """The boxed-label params and checks `add_enum_label` and `add_text_label` share."""
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    def _rgb(self, name, v):
+        if v is None:
+            return None
+        if not (isinstance(v, list) and len(v) == 3
+                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
+            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
+        return tuple(v)
+
+    def _validate_box(self):
+        """The label-box params `add_enum_label` and `add_text_label` share: parent, x, y, w, h,
+        font, align, colour, background."""
+        self.parent = self._param("parent")
+        self.x, self.y, self.w, self.h, self.font = (
+            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
+        if self.w <= 0 or self.h <= 0:
+            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
+        if not 0 <= self.font <= 0xFE:
+            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
+        align = self._param("align", "left", kind=str)
+        if align not in enumlabel.ALIGNS:
+            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
+        self.align = enumlabel.ALIGNS[align]
+        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
+        self.background = self._rgb("background", self._param("background", None))
+
+    def _refuse_off_canvas(self):
+        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
+                or self.y + self.h > _CANVAS_H):
+            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
+                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
+                                 _CANVAS_H), op_id=self.spec.id)
+
+    def _resolve_colours(self, data):
+        """`(colour index, background index or None)` in this build's palette, or NO_COLOUR."""
+        try:
+            colour = theme.resolve_fill_index(data, color=self.colour)
+            bg = (None if self.background is None
+                  else theme.resolve_fill_index(data, color=self.background))
+        except theme.PaletteError as e:
+            raise RecipeError("NO_COLOUR", str(e), op_id=self.spec.id)
+        return colour, bg
+
+
 @op("add_enum_label")
-class AddEnumLabel(Op):
+class AddEnumLabel(_LabelBox, Op):
     """Show a value as text from a table, on any page: `{"0": "Off", "1": "Cool", ...}`.
 
     A per-tick routine (`statusfold.Enum`, one per op, chained on the per-tick hook) reads the
@@ -7825,31 +7956,8 @@ class AddEnumLabel(Op):
         "required": ["parent", "x", "y", "w", "h", "font", "source", "values"],
     }
 
-    def _bad(self, msg):
-        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
-
-    def _rgb(self, name, v):
-        if v is None:
-            return None
-        if not (isinstance(v, list) and len(v) == 3
-                and all(isinstance(c, int) and 0 <= c <= 0xFF for c in v)):
-            raise self._bad("%s must be [r, g, b] of 0..255, got %r" % (name, v))
-        return tuple(v)
-
     def validate(self):
-        self.parent = self._param("parent")
-        self.x, self.y, self.w, self.h, self.font = (
-            self._param(k, kind=int) for k in ("x", "y", "w", "h", "font"))
-        if self.w <= 0 or self.h <= 0:
-            raise self._bad("the label box must be positive, got %dx%d" % (self.w, self.h))
-        if not 0 <= self.font <= 0xFE:
-            raise self._bad("font must be a slot 0..0xFE, got %d" % self.font)
-        align = self._param("align", "left", kind=str)
-        if align not in enumlabel.ALIGNS:
-            raise self._bad("align must be one of %s, got %r" % (sorted(enumlabel.ALIGNS), align))
-        self.align = enumlabel.ALIGNS[align]
-        self.colour = self._rgb("colour", self._param("colour", [255, 255, 255]))
-        self.background = self._rgb("background", self._param("background", None))
+        self._validate_box()
         self.source = self._param("source", kind=dict)
         self.mask = self.source.get("mask", 0xFFFF)
         self.shift = self.source.get("shift", 0)
@@ -7874,22 +7982,13 @@ class AddEnumLabel(Op):
         self.default = self._param("default", "--", kind=str)
         if not self.default:
             raise self._bad("default must be a non-empty string")
-        if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
-                or self.y + self.h > _CANVAS_H):
-            raise RecipeError("OFF_CANVAS", "the label box (%d,%d,%d,%d) leaves the %dx%d canvas"
-                              % (self.x, self.y, self.x + self.w, self.y + self.h, _CANVAS_W,
-                                 _CANVAS_H), op_id=self.spec.id)
+        self._refuse_off_canvas()
 
     def apply(self, data, ctx):
         oid = self.spec.id
         parent = resolve_target(ctx, self.parent)
         slot_addr, var, live_mode = _resolve_status_source(data, ctx, self.source, oid)
-        try:
-            colour = theme.resolve_fill_index(data, color=self.colour)
-            bg = (None if self.background is None
-                  else theme.resolve_fill_index(data, color=self.background))
-        except theme.PaletteError as e:
-            raise RecipeError("NO_COLOUR", str(e), op_id=oid)
+        colour, bg = self._resolve_colours(data)
         try:
             arms = [enumlabel.build_arm(data, text=t, font=self.font, w=self.w, h=self.h,
                                         align=self.align, colour_index=colour, bg_index=bg)
@@ -8025,6 +8124,195 @@ class AddEnumLabel(Op):
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
                 % (h["var"], h["mask"], h["shift"], h["slot"], n + 2, got[:-1],
                    h["default"], h["object"], h["parent"]))
+
+
+@op("add_text_label")
+class AddTextLabel(_LabelBox, Op):
+    """Static text on any page: `add_enum_label` without the switch and the per-tick routine.
+
+    A new object attached under `parent` (`insert.insert_object`, a byte clone of the parent's
+    first wtype-5 attach, the paste path `add_enum_label` and `move_control` use) holds an
+    optional `background` fill (wtype 33, radius 1), ONE wtype-11 label in a declared `w` x `h`
+    box (the panel clips text to it, `GUICODE.md` Findings 69-70), both absolute at `x, y`
+    (`enumlabel.label_records(at=...)`, pagedraw's form), and, when the label leaves a font or
+    align other than the one the page walk carried in, the empty label that writes it back
+    (`enumlabel.restore_record`). A `'\\n'` starts a second line; a multi-line label carries
+    stock's cell-height pitch (line height 0, adds-font 1, as 'Go Power!\\nSettings' does), so
+    the lines must fit `h` one font cell each. After placement every page root reaching
+    `parent`, in every switch-arm set, is walked before and after (`enumlabel.foreign_deltas`):
+    any change besides the label's own records refuses, and so does a record inheriting a value
+    slot from a wtype-5 attach above it (`_pasted_inherited_slots`).
+
+    Every character is checked against the font: a label is free text in any font, so an ASCII
+    character is not assumed present (unlike `add_card_readouts`, whose ASCII captions are what
+    every flashed readout drew). A blank glyph (`rvcbutton.glyph_blank`: covered, declaring
+    height 0, so nothing is drawn; the space in fonts 0-20, NBSP and the C1 blanks sharing its
+    shape) draws as a space; anything else `rvcbutton.glyph_missing` reports draws a fallback
+    and is refused, the space included where the font lacks one (fonts 21-24, 26-28) or draws
+    it as a block (font 25). A text must draw at least one visible character.
+
+    Params:
+      parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
+              attach record to clone).
+      x, y: absolute pen; w, h: the label box (inclusive); font: the font slot.
+      text: the text, latin-1 (a label byte indexes the font); '\\n' starts a new line.
+      align: "left" | "centre" | "right" (default "left").
+      colour: [r, g, b] text colour (default white); background: [r, g, b] | null (default
+              null), a fill behind the box. Both must be palette colours.
+
+    Error codes:
+      BAD_PARAMS     -- a malformed param: an empty, non-latin-1 or over-254-byte text, an
+                        empty line (a leading, trailing or doubled '\\n'), a text with no
+                        visible character (only blank glyphs), an unknown align, a
+                        non-positive box, or text that does not fit the box (the message names
+                        the line too wide, or the lines too tall).
+      BAD_REF        -- a `parent` ref names no usable handle.
+      NO_GLYPH       -- the font slot has no font, or a character the font draws neither as a
+                        glyph nor as a blank (it would draw a fallback).
+      NO_COLOUR      -- `colour` or `background` is not in this build's palette.
+      OFF_CANVAS     -- the box leaves the 800x480 canvas.
+      LAYOUT_REFUSED -- the placement changes any other record on a page reaching `parent`; a
+                        pasted record would inherit a value slot (e.g. under 899); the entering
+                        font/align cannot be measured or written back (no page reaches
+                        `parent`, pages disagree, no font yet, align 0); or a record could not
+                        be built or attached.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "parent": {"description": "object index or {ref: op_id}"},
+            "x": {"type": "integer"}, "y": {"type": "integer"},
+            "w": {"type": "integer"}, "h": {"type": "integer"},
+            "font": {"type": "integer"},
+            "text": {"type": "string", "description": "latin-1; '\\n' starts a new line"},
+            "align": {"type": "string", "default": "left",
+                      "description": "left | centre | right"},
+            "colour": {"type": "array", "default": [255, 255, 255]},
+            "background": {"type": ["array", "null"], "default": None},
+        },
+        "required": ["parent", "x", "y", "w", "h", "font", "text"],
+    }
+
+    def validate(self):
+        self._validate_box()
+        self.text = self._param("text", kind=str)
+        if not self.text:
+            raise self._bad("text must be non-empty")
+        try:
+            raw = self.text.encode("latin-1")
+        except UnicodeEncodeError:
+            raise self._bad("text %r has a character outside latin-1 (a label byte indexes "
+                            "the font)" % (self.text,))
+        if len(raw) > 254:
+            raise self._bad("text is %d bytes; a label holds at most 254" % len(raw))
+        if "" in self.text.split("\n"):
+            raise self._bad("text %r has an empty line (a leading, trailing or doubled '\\n')"
+                            % (self.text,))
+        self._refuse_off_canvas()
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        parent = resolve_target(ctx, self.parent)
+        try:
+            glyphs.font_for_slot(data, self.font)
+        except glyphs.GlyphError:
+            raise RecipeError("NO_GLYPH", "font slot %d has no font in this build"
+                              % self.font, op_id=oid)
+        chars = [c for c in self.text if c != "\n"]
+        blank = {c for c in chars if rvcbutton.glyph_blank(data, self.font, c)}
+        bad = [c for c in chars if c not in blank and rvcbutton.glyph_missing(data, self.font, c)]
+        if bad:
+            raise RecipeError("NO_GLYPH", "font %d has no glyph for %r in %r (it would draw a "
+                              "fallback)" % (self.font, bad[0], self.text), op_id=oid)
+        if all(c in blank for c in chars):
+            raise self._bad("text %r has no visible character in font %d (every glyph is "
+                            "blank)" % (self.text, self.font))
+        misfit = pd.label_misfit(data, self.text, self.font, self.w, self.h)
+        if misfit:
+            raise self._bad("the text does not fit the %dx%d box: %s" % (self.w, self.h, misfit))
+        colour, bg = self._resolve_colours(data)
+        try:
+            parts = enumlabel.label_records(
+                data, text=self.text, font=self.font, w=self.w, h=self.h, align=self.align,
+                colour_index=colour, bg_index=bg, at=(self.x, self.y), multiline=True)
+            # the fill and the label both write header align 1; the label writes its font
+            placed, _edits, index, restore = enumlabel.place_static(
+                data, parent=parent, parts=parts, leaving=(self.font, pd.ALIGN_NO_SHIFT))
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LAYOUT_REFUSED", str(e), op_id=oid)
+        _paste_gates(data, placed, parent, index, code="LAYOUT_REFUSED", whose="the label's",
+                     action="placing the label", op_id=oid)
+        out, _ = patch.reseal(placed)
+        gs, tab = _gs_tab(out)
+        attach = [r for r in records.object_records(out, gs + tab[parent])
+                  if r.wtype == 5 and r.child_index == index][0]
+        ctx.handles[oid] = {
+            "object": index, "parent": parent, "text": self.text, "x": self.x, "y": self.y,
+            "w": self.w, "h": self.h, "font": self.font, "align": self.align,
+            "colour_index": colour, "bg_index": bg, "restore": restore,
+            # the attach as pasted (a clone of the parent's first wtype-5): its own pen
+            "attach_geom": list(attach.geom), "attach_modes": list(attach.base_modes),
+        }
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        parent_recs = records.object_records(data, gs + tab[h["parent"]])
+        attaches = [i for i, r in enumerate(parent_recs)
+                    if r.wtype == 5 and r.child_index == h["object"]]
+        assert len(attaches) == 1, "the label object %d is not attached once under %d" % (
+            h["object"], h["parent"])
+        att = parent_recs[attaches[0]]
+        assert (list(att.geom) == h["attach_geom"]
+                and list(att.base_modes) == h["attach_modes"]), \
+            "the attach under %d does not carry the geometry it was pasted with" % h["parent"]
+        recs = records.object_records(data, gs + tab[h["object"]])
+        lead = [] if h["bg_index"] is None else [33]
+        tail = [] if h["restore"] is None else [11]
+        assert [r.wtype for r in recs] == lead + [11] + tail, \
+            "the label object holds wtypes %s, not its records" % [r.wtype for r in recs]
+        box = [h["x"], h["y"], h["w"], h["h"]]
+        if lead:
+            f = recs[0]
+            assert (f.geom[:5] == box + [enumlabel.FILL_RADIUS]
+                    and f.base_modes[:4] == [0, 0, 1, 1]
+                    and f.colors[:2] == [("fillA", 7, h["bg_index"]),
+                                         ("fillA2", 7, h["bg_index"])]), \
+                "the fill does not draw as built"
+        lab = recs[len(lead)]
+        multi = "\n" in h["text"]
+        assert (lab.label == h["text"] and lab.font == h["font"] and lab.h_align == h["align"]
+                and lab.geom[:4] == box and lab.base_modes[:4] == [0, 0, 1, 1]
+                and lab.v_align == 2 and lab.value_slot is None
+                and [c for c in lab.colors if c[0] in ("fillA", "fillA2")] == [
+                    ("fillA", 7, h["colour_index"]), ("fillA2", 7, h["colour_index"])]
+                and [c for c in lab.colors if c[0] in ("fillB", "fillB2")] == [
+                    ("fillB", 5, None), ("fillB2", 5, None)]          # transparent
+                and (lab.line_height, lab.line_height_adds_font) == (
+                    pd.MULTILINE_PITCH if multi else (0x14, 0))), \
+            "the label does not draw %r in its %dx%d box at (%d, %d), font %d, ink %d as built" \
+            % (h["text"], h["w"], h["h"], h["x"], h["y"], h["font"], h["colour_index"])
+        if tail:
+            font, align = h["restore"]
+            r = recs[-1]
+            assert not r.label and r.font == font and r.align == align, \
+                "the label object does not end with the (font %r, align %d) restore" % (font,
+                                                                                        align)
+        # the walk leaves the object in the state it entered with, on every page reaching it
+        entering = enumlabel.entering_state(data, h["parent"], attaches[0])
+        leaving = enumlabel.leaving_state(data, h["parent"], attaches[0])
+        assert entering and entering == leaving, \
+            "the label object enters with font/align %s and leaves with %s" % (
+                sorted(entering, key=str), sorted(leaving, key=str))
+        return ("add_text_label: %r in font %d at (%d, %d) %dx%d, object %d under %d; "
+                "UNVERIFIED on the coach" % (h["text"], h["font"], h["x"], h["y"], h["w"],
+                                            h["h"], h["object"], h["parent"]))
 
 
 @op("add_rvc_button")
@@ -8260,6 +8548,12 @@ class AddRvcButton(Op):
                 font=self.font, fill_index=fill, x=self.x, y=self.y, glyph_image=out)
         except ValueError as e:                  # RvcButtonError: a box its content cannot fit
             raise self._bad(str(e))
+        # The glyph's pen is placed by the class-2 horizontal rule (`metrics.wt0_ink_offset`);
+        # under class 1 the ink lands this many px further right. Nothing checks the page's
+        # class, so a nonzero shift is named in the manifest.
+        x_bearing = 0 if self.glyph is None else (
+            metrics.wt0_ink_offset(out, *self.glyph, char_class=1)[0]
+            - metrics.wt0_ink_offset(out, *self.glyph)[0])
         try:
             placed, place_edits, index = rvcbutton.place(out, parent=parent, x=self.x, y=self.y,
                                                          frags=frags, mode="attach")
@@ -8302,7 +8596,7 @@ class AddRvcButton(Op):
                        else {"off_payload": self.off, "on_payload": self.on}),
             "parent": parent, "placement": "attach",
             "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
-            "tap": self.tap, "hold": self.hold,
+            "tap": self.tap, "hold": self.hold, "glyph_x_bearing": x_bearing,
         }
         return out
 
@@ -8382,9 +8676,14 @@ class AddRvcButton(Op):
                     assert boxes[0] == want_box, \
                         "root %d (arms %s) draws the box at %s" % (root, values, boxes[0])
         assert drawn, "no walk of roots %s reaches the button object %d" % (roots, h["object"])
-        return ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
+        line = ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
                 "UNVERIFIED on the coach"
                 % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
+        if h.get("glyph_x_bearing"):
+            line += ("; the glyph has an x bearing %d px: its horizontal placement assumes the "
+                     "page draws it in measuring class 2 (in class 1 it lands %d px right; "
+                     "GUICODE Finding 84)" % (h["glyph_x_bearing"], h["glyph_x_bearing"]))
+        return line
 
 
 def _palette_rgb(data, index):

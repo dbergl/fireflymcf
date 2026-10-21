@@ -20,7 +20,8 @@ concatenating primitives and wrapping them with `stream`. Every record is:
   text primitive always writes a real slot; and every record's header align is non-zero, because
   align 0 does not write the persistent `state+9` and so inherits the previous record's, which
   shifts a path-1 box (Finding 24; `ALIGN_NO_SHIFT`). Path-1 primitives write 1 (no shift); a
-  readout writes its own 1..3. Labels are single-line.
+  readout writes its own 1..3. Labels are single-line unless
+  `label(multiline=True)` (stock's cell-height pitch).
 
 **Text backgrounds.** For a text record (wt-11 label, wt-8 readout) fillA/fillA2 are the INK and
 fillB/fillB2 the BACKGROUND (`render.py`'s label ink resolution; the ALTERNATOR `CLEAR EEPROM`
@@ -94,6 +95,8 @@ _GEOM_BITS = ((2, 0x01), (2, 0x02), (2, 0x04), (2, 0x08), (6, 0x10), (6, 0x20))
 _LABEL_R39 = 0xFF
 _LABEL_LINE_HEIGHT = 0x14
 _LABEL_ADDS = 0x00
+# A multi-line label's R49 pair: line height 0, adds-font 1 (advance = the font's cell height).
+MULTILINE_PITCH = (0x00, 0x01)
 
 
 def _donor(data: bytes, where: tuple[int, int], pinned: bytes) -> bytes:
@@ -357,18 +360,40 @@ def hline(data: bytes, x: int, y: int, w: int, rgb) -> bytes:
                    _expect(pairs))
 
 
+def label_misfit(data: bytes, text: str, font: int, w: int, h: int) -> str | None:
+    """Why `text` in font `font` does not fit a `w` x `h` label box, or None when it does. The
+    panel clips wtype-11 text to the box inclusively (Finding 69/70) and wraps a line wider than
+    `w + 1` (Finding 39; `metrics.wrap_lines`), so every line must measure `<= w + 1`, and the
+    lines, advancing by the font's cell (`MULTILINE_PITCH`), `n * height <= h + 1`. A missing
+    glyph is not a misfit (`metrics.text_width` None; `label` refuses it on its own)."""
+    fm = metrics.font_metrics(data, _check_font(font))
+    lines = text.split("\n")
+    for line in lines:
+        tw = metrics.text_width(data, font, line)
+        if tw is not None and tw > w + 1:
+            return f"{line!r} is {tw} px in font {font}; box {w} would wrap it"
+    if len(lines) > 1 and len(lines) * fm.height > h + 1:
+        return (f"{len(lines)} lines of font {font} are {len(lines) * fm.height} px tall; "
+                f"box {h} would clip them")
+    if fm.height > h + 1:
+        return f"font {font} is {fm.height} px tall; box {h} would clip it"
+    return None
+
+
 def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, rgb,
-          h_align: int = 2, v_align: int = 2, bg=None) -> bytes:
+          h_align: int = 2, v_align: int = 2, bg=None, multiline: bool = False) -> bytes:
     """A wt-11 label in box `(x, y)-(x+w, y+h)`, ink `rgb`, font `font`, R49 `h_align`/`v_align`
     (2 centre, 3 right/bottom, else left/top). `bg=None` keeps the background transparent
     (block-B mode 5); `bg=rgb` paints the box opaque.
 
-    One line only: a `'\n'` is refused, because the R49 line pitch is fixed (285[1]'s 20 px, no
-    font-height add) and would overlap any font whose cell is taller. Refuses a box the text
-    would not fit: the panel clips wtype-11 text to the box inclusively (Finding 69/70) and wraps
-    a line wider than `w + 1` (Finding 39; `metrics.wrap_lines`), so the text must measure
-    `<= w + 1` and the font's cell height `<= h + 1`. The header align is 1 (`ALIGN_NO_SHIFT`):
-    the text's own placement is the R49 `h_align`/`v_align`."""
+    One line unless `multiline`: a `'\n'` is refused, because the default R49 line pitch is fixed
+    (285[1]'s 20 px, no font-height add) and would overlap any font whose cell is taller. With
+    `multiline` a text holding a `'\n'` gets stock's other pitch, `MULTILINE_PITCH` (line height
+    0, adds-font 1: the drawer `FUN_002559A0` adds the font's cell height once, so the lines
+    advance by the cell, GUICODE Finding 37; the 93 stock records with that pair include
+    'Go Power!\nSettings'); a one-line text keeps the default pitch byte for byte. Refuses a box
+    the text would not fit (`label_misfit`). The header align is 1 (`ALIGN_NO_SHIFT`): the
+    text's own placement is the R49 `h_align`/`v_align`."""
     _donor(data, LABEL_DONOR, LABEL_STOCK)
     if w <= 0 or h <= 0:
         raise PageDrawError(f"a visible wtype-11 label needs a box, got {w}x{h}")
@@ -381,20 +406,20 @@ def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, 
         raise PageDrawError(f"label text must be latin-1: {text!r}") from e
     if not 0 < len(tb) < 0xFF:
         raise PageDrawError(f"label length must be 1..254, got {len(tb)}")
-    if "\n" in text:
+    many = "\n" in text
+    if many and not multiline:
         raise PageDrawError(f"multi-line labels are not supported (fixed 20 px pitch): {text!r}")
-    fm = metrics.font_metrics(data, _check_font(font))
-    tw = metrics.text_width(data, font, text)
-    if tw is None:
+    _check_font(font)
+    if any(metrics.text_width(data, font, line) is None for line in text.split("\n")):
         raise PageDrawError(f"font {font} cannot draw {text!r} (missing glyph)")
-    if tw > w + 1:
-        raise PageDrawError(f"{text!r} is {tw} px in font {font}; box {w} would wrap it")
-    if fm.height > h + 1:
-        raise PageDrawError(f"font {font} is {fm.height} px tall; box {h} would clip it")
+    misfit = label_misfit(data, text, font, w, h)
+    if misfit:
+        raise PageDrawError(misfit)
+    pitch = MULTILINE_PITCH if many else (_LABEL_LINE_HEIGHT, _LABEL_ADDS)
     from .recipe_ops import AddLowVoltsControl       # lazy: see capsule
     frag = AddLowVoltsControl._label_record(
         "?" * len(tb), _u16("x", x), _u16("y", y), _u16("w", w), _u16("h", h), font,
-        _LABEL_R39, h_align, v_align, _LABEL_LINE_HEIGHT, _LABEL_ADDS)
+        _LABEL_R39, h_align, v_align, *pitch)
     lo = _decode(frag).label_offset
     frag = frag[:lo] + tb + frag[lo + len(tb):]
     pairs = {"fillA": rgb, "fillA2": rgb, "fillB": bg, "fillB2": bg}

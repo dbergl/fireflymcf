@@ -41,7 +41,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. | Flashed. | yes |
 | [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
 | [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
-| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. | Flashed. | yes |
+| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. | Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, repaints). | yes |
 | [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
 | [`remove_control`](#remove_control) | same-size | Park a control off the 480 px canvas by rewriting its attach records' y. Bindings stay. | UNVERIFIED. Never flashed. | **no** |
 | [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
@@ -67,8 +67,9 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
+| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
-| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
+| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
@@ -191,7 +192,7 @@ Set one record's geometry fields (x, y, width, height) inside an object.
 
 Error codes:
 
-- `BAD_PARAMS` — a set/expect key is not x/y/w/h, set is empty, or an expect key is not also in set
+- `BAD_PARAMS` — a set/expect key is not x/y/w/h, set is empty, an expect key is not also in set, or a value is not an int in -32768..65535
 - `NO_SUCH_RECORD` — no record matches selector (from `_select_record`)
 - `NO_FIELD` — a requested `set` key has no geometry field on the matched record and is not listed in `optional`
 - `EXPECT_MISMATCH` — an `expect` value differs from the field's current value
@@ -237,9 +238,9 @@ Error codes:
 
 ### recolor
 
-Repoint a button box's fill index to another colour in the firmware palette.
+Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box.
 
-- **Hardware status:** Flashed.
+- **Hardware status:** Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, repaints).
 - **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.Recolor`
 
@@ -248,12 +249,14 @@ Repoint a button box's fill index to another colour in the firmware palette.
 | `object` | integer\|object | yes |  | object index or {"ref": op_id} |
 | `color` | array\|object | yes |  | [r, g, b] triple or {"index": n} palette index |
 | `allow_container` | boolean |  | false | recolour a card of controls on purpose |
+| `selector` | object |  |  | the record to recolour: wtype (int), label (str), nth (int, default 0); omitted, the object's one box |
 
 Error codes:
 
-- `BAD_PARAMS` — color is not [r,g,b] list or {"index": n} dict
+- `BAD_PARAMS` — color is not [r,g,b] list or {"index": n} dict, or selector has a key other than wtype/label/nth, a non-int wtype, a non-str label, or a nth that is not a non-negative int
+- `NO_SUCH_RECORD` — no record matches selector (from `_select_record`)
 - `CONTAINER` — the object is a card of controls (it attaches child objects and holds two or more touch regions, like HOME's lights card 905), so its box is the card's background, not one button's; offers=["acknowledge_container"] — retry with allow_container=True to recolour the whole card
-- `NO_SUCH_COLOR` — object has no button box, or resolver rejects the colour (PatchError, PaletteError, ValueError all mapped here)
+- `NO_SUCH_COLOR` — object has no button box, or resolver rejects the colour (PatchError, PaletteError, ValueError all mapped here), or the selected record has no mode-7 fillA
 
 ### remap_channel
 
@@ -648,6 +651,8 @@ Error codes:
 - `LAYOUT_REFUSED` — (another `parent`) the placement changes any other record on a page reaching `parent`, a pasted record would inherit a value slot, or the entering font/align cannot be measured or written back.
 - `BAD_REF` — a row's ref names no draw:false readout handle.
 - `REPLACE_REFUSED` — 829 could not be relocated.
+- `BAD_PARAMS` — a row lacks caption, unit or value, or its caption or unit has a character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
+- `NO_GLYPH` — a non-ASCII caption or unit character the row's font has no glyph for (captions font 10, units font 12; both carry '°').
 
 ### add_corner_mark
 
@@ -842,6 +847,36 @@ Error codes:
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 
+### add_text_label
+
+Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock).
+- **Proof:** `enumlabel.py`, `pagedraw.py`
+- **Implementation:** `recipe_ops.AddTextLabel`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `font` | integer | yes |  |  |
+| `text` | string | yes |  | latin-1; '\n' starts a new line |
+| `align` | string |  | "left" | left \| centre \| right |
+| `colour` | array |  | [255, 255, 255] |  |
+| `background` | array\|null |  | null |  |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: an empty, non-latin-1 or over-254-byte text, an empty line (a leading, trailing or doubled '\n'), a text with no visible character (only blank glyphs), an unknown align, a non-positive box, or text that does not fit the box (the message names the line too wide, or the lines too tall).
+- `BAD_REF` — a `parent` ref names no usable handle.
+- `NO_GLYPH` — the font slot has no font, or a character the font draws neither as a glyph nor as a blank (it would draw a fallback).
+- `NO_COLOUR` — `colour` or `background` is not in this build's palette.
+- `OFF_CANVAS` — the box leaves the 800x480 canvas.
+- `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.
+
 ### aes_card_layout
 
 Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster.
@@ -859,7 +894,7 @@ Error codes:
 
 ### append_filter
 
-Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20.
+Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status.
 
 - **Hardware status:** Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7.
 - **Proof:** `src/fireflymcf/appendfilter.py`, `docs/HARDWARE-VERIFIED.md`
@@ -870,7 +905,7 @@ Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table
 | `dgn` | integer | yes |  | 18-bit DGN to receive |
 | `mode` | integer | yes |  | extraction mode (statusbind.LIVE_MODES) |
 | `payload_byte` | integer | yes |  | payload byte the mode reads |
-| `refresh` | integer |  | 3 | staleness class 0..3 |
+| `refresh` | integer |  | 3 | staleness class: 0 = 2 s, 1 = 10 s, 2 = 30 s, 3 = never expires. Use 1 or 2 for a live status |
 | `instance` | integer |  | 255 | filter value for +4; 255 = no filter |
 | `compare_byte` | integer |  | 255 | +5: low nibble = payload byte compared, high nibble = 2-bit mask select (0 = whole byte) |
 
