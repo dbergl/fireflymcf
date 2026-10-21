@@ -52,6 +52,10 @@ font. `entering_state` measures the `(font, align)` the walk carries to the atta
 `place(restore=...)` ends the object with an empty label (`restore_record`) that writes them back.
 The flow origin and frame the object leaves are not restored; `foreign_deltas` is the whole-page
 check that nothing after the label depends on them.
+
+**Static text** (`add_text_label`) is the same label without the switch: `label_records(at=...)`
+builds the fill and label absolute at `(x, y)` (pagedraw's own form), and `place_static`
+attaches them by the same paste and ends them with the same restore record.
 """
 from __future__ import annotations
 
@@ -81,38 +85,59 @@ def _index_colour(frag: bytes, roles: tuple, index: int) -> bytes:
     return frag
 
 
-def _check(frag: bytes, wtype: int, w: int, h: int, colour: tuple) -> records.WRecord:
+def _check(frag: bytes, wtype: int, w: int, h: int, colour: tuple,
+           at: "tuple[int, int] | None" = None) -> records.WRecord:
     r = records.decode_record(frag, 0)
-    if not (r.wtype == wtype and r.size == len(frag) and r.base_modes[:4] == [1, 1, 1, 1]
-            and r.geom[:4] == [0, 0, w, h] and r.in_regs == [0] * 6 and r.out_regs == [0] * 6
+    modes, xy = ([1, 1, 1, 1], [0, 0]) if at is None else ([0, 0, 1, 1], list(at))
+    if not (r.wtype == wtype and r.size == len(frag) and r.base_modes[:4] == modes
+            and r.geom[:4] == xy + [w, h] and r.in_regs == [0] * 6 and r.out_regs == [0] * 6
             and colour in r.colors):
         raise EnumLabelError(f"authored wtype-{wtype} arm record failed its self-decode: "
                              f"{frag.hex()}")
     return r
 
 
-def build_arm(data: bytes, *, text: str, font: int, w: int, h: int, align: int,
-              colour_index: int, bg_index: int | None) -> bytes:
-    """One arm object (`<count>` + records, padded to 4): an optional wtype-33 fill of `w` x `h`
-    in `bg_index`, then a wtype-11 label `text` in a declared `w` x `h` box, R49 `align`
-    (1 left, 2 centre, 3 right) and vertically centred, ink `colour_index`. Raises
-    `EnumLabelError` when the text does not fit the box or a record fails its self-decode."""
+def label_records(data: bytes, *, text: str, font: int, w: int, h: int, align: int,
+                  colour_index: int, bg_index: int | None,
+                  at: "tuple[int, int] | None" = None, multiline: bool = False) -> list[bytes]:
+    """The records of one boxed label: an optional wtype-33 fill of `w` x `h` in `bg_index`,
+    then a wtype-11 label `text` in a declared `w` x `h` box, R49 `align` (1 left, 2 centre,
+    3 right) and vertically centred, ink `colour_index`. `at` None makes them flow-relative at
+    `(0, 0)` (an arm, `build_arm`); `at=(x, y)` keeps `pagedraw`'s absolute form, the box
+    `(x, y)-(x+w, y+h)` (`add_text_label`). `multiline` lets a `'\n'` through
+    (`pagedraw.label`). Raises `EnumLabelError` when the text does not fit the box or a record
+    fails its self-decode."""
+    x, y = (0, 0) if at is None else at
+    place = _flow_relative if at is None else bytes
     try:
         parts = []
         if bg_index is not None:
-            fill = pd.capsule(data, 0, 0, w, h, FILL_RADIUS, _PLACEHOLDER)
-            fill = _index_colour(_flow_relative(fill), ("fillA", "fillA2"), bg_index)
-            _check(fill, 33, w, h, ("fillA", 7, bg_index))
+            fill = pd.capsule(data, x, y, w, h, FILL_RADIUS, _PLACEHOLDER)
+            fill = _index_colour(place(fill), ("fillA", "fillA2"), bg_index)
+            _check(fill, 33, w, h, ("fillA", 7, bg_index), at)
             parts.append(fill)
-        lab = pd.label(data, text, 0, 0, w, h, font=font, rgb=_PLACEHOLDER, h_align=align,
-                       v_align=2)
-        lab = _index_colour(_flow_relative(lab), ("fillA", "fillA2"), colour_index)
-        r = _check(lab, 11, w, h, ("fillA", 7, colour_index))
+        lab = pd.label(data, text, x, y, w, h, font=font, rgb=_PLACEHOLDER, h_align=align,
+                       v_align=2, multiline=multiline)
+        lab = _index_colour(place(lab), ("fillA", "fillA2"), colour_index)
+        r = _check(lab, 11, w, h, ("fillA", 7, colour_index), at)
         if not (r.label == text and r.font == font and r.h_align == align):
             raise EnumLabelError(f"authored label {text!r} failed its self-decode: {lab.hex()}")
         parts.append(lab)
+        return parts
+    except pd.PageDrawError as e:
+        raise EnumLabelError(str(e)) from e
+
+
+def build_arm(data: bytes, *, text: str, font: int, w: int, h: int, align: int,
+              colour_index: int, bg_index: int | None) -> bytes:
+    """One arm object (`<count>` + records, padded to 4): `label_records`' flow-relative fill
+    and label. Raises `EnumLabelError` when the text does not fit the box or a record fails its
+    self-decode."""
+    parts = label_records(data, text=text, font=font, w=w, h=h, align=align,
+                          colour_index=colour_index, bg_index=bg_index)
+    try:
         return cornermark._object(parts)
-    except (pd.PageDrawError, cornermark.CornerMarkError) as e:
+    except cornermark.CornerMarkError as e:
         raise EnumLabelError(str(e)) from e
 
 
@@ -196,16 +221,43 @@ def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes], defaul
         switch = switchbuild.author_switch(out, value_slot=value_slot, arms_base=base,
                                            count=count, at=(x, y))
         parts = [switch] + ([] if restore is None else [restore_record(*restore)])
-        out, edits = insert.insert_object(out, cornermark._object(parts), parent)
-    except (ValueError, cornermark.CornerMarkError) as e:   # RelocationError/InsertError too
+    except (ValueError, cornermark.CornerMarkError) as e:   # RelocationError too
         raise EnumLabelError(str(e)) from e
-    index = len(guidata.object_tables(out)[1]) - 1
-    gs, _ = guidata.guidata_extent(out)
-    recs = records.object_records(out, gs + guidata.object_tables(out)[1][index])
+    out, edits, index, recs = _attach(out, parent, parts)
     if not (len(recs) == len(parts) and recs[0].wtype == 6 and recs[0].child_index == base
             and recs[0].count == count and recs[0].value_slot == value_slot):
         raise EnumLabelError(f"the label object {index} does not hold the authored switch")
     return out, edits, index
+
+
+def _attach(data: bytes, parent: int, parts: list[bytes]) -> tuple[bytes, list, int, list]:
+    """`(image, edits, object_index, records)`: `parts` as one new object attached under
+    `parent` (`insert.insert_object`, a byte clone of its first wtype-5 attach). Not resealed."""
+    try:
+        out, edits = insert.insert_object(data, cornermark._object(parts), parent)
+    except (ValueError, cornermark.CornerMarkError) as e:   # InsertError, RelocationError too
+        raise EnumLabelError(str(e)) from e
+    gs, _ = guidata.guidata_extent(out)
+    tab = guidata.object_tables(out)[1]
+    index = len(tab) - 1
+    return out, edits, index, records.object_records(out, gs + tab[index])
+
+
+def place_static(data: bytes, *, parent: int, parts: list[bytes],
+                 leaving: "tuple[int | None, int]"
+                 ) -> "tuple[bytes, list, int, tuple[int | None, int] | None]":
+    """`(image, edits, object_index, restore)`: `parts` (absolute records, no switch:
+    `label_records(at=...)`) in a new object attached under `parent`, ended by
+    `restore_record(*restore)` when the `(font, align)` the records leave (`leaving`) differs
+    from what the walk carries in (`restore_state`; `restore` None when it does not). Raises
+    `EnumLabelError` as `restore_state` does, or when the object does not hold the records."""
+    out, edits, index, recs = _attach(data, parent, parts)
+    restore = restore_state(out, parent, leaving)
+    if restore is not None:
+        out, edits, index, recs = _attach(data, parent, parts + [restore_record(*restore)])
+    if len(recs) != len(parts) + (restore is not None):
+        raise EnumLabelError(f"the label object {index} does not hold the authored records")
+    return out, edits, index, restore
 
 
 def leaving_state(data: bytes, parent: int, attach_index: int) -> set:
