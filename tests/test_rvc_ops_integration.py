@@ -2,9 +2,9 @@
 
 Corpus-reading (needs the research data; not collected without it). One project puts an
 `add_rvc_button` toggle on HOME (root object 4), lights and drives it with an
-`add_button_status` entry, shows a value as words with an `add_enum_label` on the same page, and
-carries a `set_binding_bytes` edit (the stock arrow group 130's instance byte) and a
-`pin_filter_instance` narrowing (var 115 to instance 2). It asserts that the project compiles
+`add_button_status` entry, shows a value as words with an `add_enum_label` on the same page,
+captions it with an `add_text_label`, and carries a `set_binding_bytes` edit (the stock arrow
+group 130's instance byte) and a `pin_filter_instance` narrowing (var 115 to instance 2). It asserts that the project compiles
 with only the ops no coach has run listed unverified, that the cell-aliasing gate saw the fresh
 cells and passed, that every op's verify passed, and that nothing on HOME moved but the new
 records.
@@ -33,13 +33,16 @@ OPS = [
      "params": {"parent": HOME, "x": 88, "y": 372, "w": 98, "h": 16, "font": 11,
                 "align": "centre", "source": {"var": 13, "mask": 0x0F},
                 "values": {"0": "Off", "1": "On", "2": "Auto"}, "default": "--"}},
+    {"id": "caption", "type": "add_text_label", "enabled": True,
+     "params": {"parent": HOME, "x": 88, "y": 352, "w": 98, "h": 18, "font": 11,
+                "align": "centre", "text": "Thermostat"}},
     {"id": "bytes", "type": "set_binding_bytes", "enabled": True,
      "params": {"group": 130, "dgn": 0x1FEF9, "bindings": "all",
                 "set": {"0": {"from": 0, "to": 5}}}},
     {"id": "pin", "type": "pin_filter_instance", "enabled": True,
      "params": {"var": 115, "instance": 2, "dgn": 0x1FFC7, "compare": 0}},
 ]
-UNVERIFIED = ["toggle", "lit", "words", "bytes"]      # pin_filter_instance's narrowing is flashed
+UNVERIFIED = ["toggle", "lit", "words", "caption", "bytes"]      # pin_filter_instance's narrowing is flashed
 
 
 def _stock():
@@ -120,4 +123,4 @@ def test_nothing_else_on_the_page_moved(run):
         foreign = [d for d in deltas if d.kind != "appeared" or not ours(d.after)]
         assert not foreign, pagewalk.describe(foreign[:20])
         appeared |= {d.after.label for d in deltas if d.after.label}
-    assert {"Mode", "Off", "On", "Auto", "--"} <= appeared
+    assert {"Mode", "Off", "On", "Auto", "--", "Thermostat"} <= appeared

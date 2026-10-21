@@ -102,13 +102,14 @@ class TextExtent:
 # [0x0e] a flag byte (bit0 selects which bearing the endpoints use). `proven-from-code`
 # (FUN_002517AC / FUN_002518F8, on top of glyphs.py's OFF_X/OFF_WIDTH).
 class _GHdr:
-    __slots__ = ("left", "right", "x", "width", "flag")
+    __slots__ = ("left", "right", "x", "width", "y", "flag")
 
     def __init__(self, data: bytes, off: int):
         self.left = data[off:off + 5]
         self.right = data[off + 5:off + 10]
         self.x = data[off + glyphs.OFF_X]
         self.width = data[off + glyphs.OFF_WIDTH]
+        self.y = data[off + glyphs.OFF_Y]
         self.flag = data[off + 0x0E]
 
 
@@ -166,6 +167,54 @@ def text_width(data: bytes, slot: int, text: str,
         acc += _advance(prev, nxt, space)
     last = hdrs[-1]
     return (last.left[0] + acc + 1) if (last.flag & 1) else (last.x + last.width + acc)
+
+
+def class_flags_char(char_class: int, char: str) -> bool:
+    """Whether `FUN_00251AA0` flags `char` under measuring class `char_class` (render `+0x0A`):
+    class 2 flags every character, class 3 every one but the digits, space and `+ - * / =`
+    (`0x251B42`-`0x251B6E`: `sub r4,r5,#0x30` / `cmp.ne r4,#0x9` / `bls` keeps `0`-`9`
+    unflagged), any other class none (GUICODE Findings 78, 84). A flagged character's endpoints
+    are measured on its own glyph, an unflagged one's on the font's fixed cell."""
+    c = ord(char)
+    if char_class == 2:
+        return True
+    if char_class == 3:
+        return not (0x30 <= c <= 0x39 or c in (0x20, 0x2A, 0x2B, 0x2D, 0x2F, 0x3D))
+    return False
+
+
+def wt0_ink_offset(data: bytes, slot: int, char: str, *, char_class: int = 2,
+                   table: "glyphs.GlyphTable | None" = None) -> tuple[int, int]:
+    """`(dx, dy)` from a wtype-0 record's pen to the top-left pixel of its one character's
+    bitmap, left-aligned (persistent align 0/1). GUICODE Finding 84:
+
+    * vertical, `proven-from-code` in every class: `FUN_002557C0` takes the cell top as
+      `pen_y - font[0x0b]` (`0x255810` `ldrb r4,[r1,#0xb]`, `0x255812` `subs r3,r3,r4`) and the
+      blitter `FUN_002510C0` adds the glyph's `+0x0c` bearing, so `dy = glyph.y - font.top`.
+      The pen is `font.top` rows below the cell's top (the baseline; the last row of an icon
+      font's cell), not the top;
+    * horizontal, `proven-from-code` given the class (`char_class`; which class a given page
+      draws in is inferred): the blitter adds the glyph's `+0x0a` bearing to the pen offset
+      `FUN_002518F8` seeds for the first character, which is `-glyph[0x0a]` (`-glyph[0]` under
+      the glyph's `+0x0e` bit 0) when `FUN_00251AA0` flagged it and 0 otherwise. So `dx` is 0
+      (`x - left[0]` under the bit) for a flagged character and `glyph.x` for an unflagged one.
+
+    The measuring class is runtime render state (`+0x0A`, reset to 2 at every screen paint and
+    rewritten by a record whose header byte 4 has low bits set; Finding 78); 2 is the default,
+    and nothing here checks that a page is in it. The exposure is a glyph with a nonzero x
+    bearing, which lands that many px right under class 1: on 13.6, 20 of icon font 24's 33
+    glyphs and 8 of font 25's 52 (Finding 84 lists them).
+    Centre and right align (2/3) further shift the pen by the measured width (`aligned_x0`).
+    """
+    font = glyphs.font_for_slot(data, slot, table=table)
+    hdr = _glyph_hdr(data, font, ord(char), table=table)
+    if hdr is None:
+        raise glyphs.GlyphError(f"no glyph for {char!r} in font slot {slot}")
+    if class_flags_char(char_class, char):
+        dx = hdr.x - (hdr.left[0] if hdr.flag & 1 else hdr.x)
+    else:
+        dx = hdr.x
+    return dx, hdr.y - data[font.offset + OFF_TOP]
 
 
 def text_extent(data: bytes, slot: int, text: str,

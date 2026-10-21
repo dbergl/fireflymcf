@@ -184,3 +184,31 @@ def test_paste_gate_without_a_match_table_is_a_structured_refusal(monkeypatch):
     res = _with_readouts({"parent": PASTE_PARENT})
     assert not res.ok
     assert res.errors[0]["code"] == "LAYOUT_REFUSED", res.errors
+
+
+def _unit_rows(unit):
+    return [{"caption": "Set", "value": {"slot": 232}, "format": {"width": 4, "places": 1},
+             "unit": unit}]
+
+
+def test_unit_takes_a_latin1_degree_sign():
+    """A label is a latin-1 byte string indexing the font (`records.decode_record`): stock draws
+    '°' (0xB0) in fonts 11, 14 and 15, and the readouts' fonts 10 and 12 carry it too."""
+    from fireflymcf import records
+    res = _with_readouts({"parent": PASTE_PARENT, "rows": _unit_rows("°F")})
+    assert res.ok, res.errors
+    gs, tab = guidata.guidata_extent(res.data)[0], guidata.object_tables(res.data)[1]
+    unit = [r for r in records.object_records(res.data, gs + tab[len(tab) - 1])
+            if r.wtype == 11][1]
+    assert unit.label == "°F"
+    assert b"\x02\xb0F\x00" in res.data[unit.offset:unit.end]
+
+
+def test_unit_outside_latin1_is_bad_params():
+    res = _with_readouts({"parent": PASTE_PARENT, "rows": _unit_rows("€")})
+    assert not res.ok and res.errors[0]["code"] == "BAD_PARAMS", res.errors
+
+
+def test_unit_char_the_font_cannot_draw_is_no_glyph():
+    res = _with_readouts({"parent": PASTE_PARENT, "rows": _unit_rows("\x8d")})
+    assert not res.ok and res.errors[0]["code"] == "NO_GLYPH", res.errors

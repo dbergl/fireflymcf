@@ -60,7 +60,7 @@ _ALLOW = {
     ("src/fireflymcf/statusbind.py", 50):
         "CELL_TABLE_OFF re-exports status_map.CELL_TABLE_OFF -- kept, per the task brief, because "
         "tests/docs cite it as the stock value; not used to index a table",
-    ("src/fireflymcf/guidata.py", 1893):
+    ("src/fireflymcf/guidata.py", 1921):
         "genuine identity check in _relocated_variable_tables: is the live GuiCode literal STILL "
         "the stock cell base (i.e. the table has NOT been grown) -- a comparison, not an offset "
         "used to read or write the table",

@@ -1730,8 +1730,16 @@ def screen_placements(data: bytes, root: int,
         if not eff_label and p.wtype == 13 and p.value_slot in dyn_text:
             eff_label = dyn_text[p.value_slot]
             dyn = True
-        # allow multi-line labels: `\n` is not "printable" but each line is (split below)
-        if not (eff_label and eff_label.strip() and eff_label.replace("\n", "").isprintable()):
+        # allow multi-line labels: `\n` is not "printable" but each line is (split below).
+        # A wtype-0 label is exempt from the printable test: `FUN_002557C0` hands every byte to
+        # `FUN_00251AA0`, which indexes the font by it with no character test (0x251AA0), and
+        # icon font 25's characters ARE control bytes (`\x01`..`\x04`). The panel draws them;
+        # this filter dropped them (GUICODE Finding 84). No stock wtype-0 label holds one.
+        if p.wtype == 0:
+            if not (eff_label and eff_label.strip(" ")):
+                continue
+        elif not (eff_label and eff_label.strip()
+                  and eff_label.replace("\n", "").isprintable()):
             continue
         if len(eff_label) == 1 and p.font is not None and (p.x0, p.y0) in glyph_bottom:
             # this record is (one state of) the icon already drawn — skip its text form
@@ -2245,7 +2253,9 @@ def rasterize(placements: list[Placement], show_touch: bool = False,
             elif p.kind == "text" and p.glyph_images:
                 # real panel glyph bitmaps, one per character, at their own kerned advance dx and
                 # per-glyph vertical bearing dy (`panel_text_images`) -- native size, matching how
-                # the blitter blits each glyph at `pen + (glyph.x, glyph.y)`.
+                # the blitter blits each glyph at `cell top + (glyph.x, glyph.y)`. The prim's y is
+                # the CELL TOP, not the record's pen: for a wtype-0 record it is already
+                # `pen_y - font[0x0b]` (GUICODE Finding 84, `metrics.wt0_ink_offset`).
                 for dx, dy, gi in p.glyph_images:
                     _paste_clipped(img, gi, ax + dx, ay + dy, p.clip)
             elif p.kind in ("text", "icon", "glyph"):    # glyph w/o image -> text fallback

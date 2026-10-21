@@ -55,8 +55,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Repoint an icon record's font slot and/or character; optionally blank the caption.",
         "Flashed (the Starlink button).", "`docs/HARDWARE-VERIFIED.md`"),
     "recolor": ("same-size",
-        "Repoint a button box's fill index to another colour in the firmware palette.",
-        "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
+        "Repoint a button box's fill index to another colour in the firmware palette. A "
+        "`selector` (`move_element`'s wtype/label/nth) names the record when an object holds "
+        "more than one mode-7 box.",
+        "Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, "
+        "repaints).", "`docs/HARDWARE-VERIFIED.md`"),
     "remap_channel": ("same-size",
         "Make a labelled control command a different G12 output channel.",
         "Flashed with `move_display_list` (PC.13-16). The default indicator retarget is "
@@ -208,7 +211,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Flashed 2026-09-06. PC.61.", "`cornermark.py`, `BUS-BASELINE.md` PC.61"),
     "append_filter": ("structural",
         "Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in "
-        "the padding arena, count bumped in the descriptor and GuiCode header +0x20.",
+        "the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` "
+        "defaults to 3, which never expires: the slot keeps its last value when the publisher "
+        "goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status.",
         "Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected "
         "values 42 then 7.",
         "`src/fireflymcf/appendfilter.py`, `docs/HARDWARE-VERIFIED.md`"),
@@ -255,6 +260,15 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
         "`parent`. A preview without slot values (Studio, `render`) draws that blank arm.",
         "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
+    "add_text_label": ("structural",
+        "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
+        "at the font's cell pitch), optionally on a fill, absolute at x, y in a new object "
+        "attached under `parent`, ended by a restore record that hands back the font and align "
+        "the page walk carried in; refused if anything else on the page would change.",
+        "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
+        "two-line label spaces its lines by the font's cell, and every other control on the "
+        "page draws as before, its text in its own font (photo against stock).",
+        "`enumlabel.py`, `pagedraw.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
         "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
