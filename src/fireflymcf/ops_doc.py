@@ -37,13 +37,18 @@ CLASSES = [
 ]
 
 # name -> (class, purpose, hardware status, where the proof is)
+_SHIFT_NOTE = ("The build reports what else it shifted (a manifest line `ID: shifted N "
+               "record(s) ...` and the sidecar's `shifts`); for a recipe that should refuse "
+               "instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`).")
+
 OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "rename_label": ("same-size",
         "Replace a label's text. Same-size by default (padded to the field); a longer text "
         "relocates when `allow_grow` is set.",
         "Flashed. Grown label PC.18.", "`docs/HARDWARE-VERIFIED.md`, `BUS-BASELINE.md` PC.18"),
     "move_element": ("same-size",
-        "Set one record's geometry fields (x, y, width, height) inside an object.",
+        "Set one record's geometry fields (x, y, width, height) inside an object. "
+        + _SHIFT_NOTE,
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
     "move_attach": ("same-size",
         "Move where a page attaches a child object (its wtype-5 attach record).",
@@ -130,7 +135,7 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "UNVERIFIED. Never flashed.", "`CompileResult.unverified`"),
     "remove_records": ("structural",
         "Delete chosen records from one object (shrinking it), so a control is gone from the "
-        "page, its touch region included. Bindings stay.",
+        "page, its touch region included. Bindings stay. " + _SHIFT_NOTE,
         "Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.",
         "`relocate.replace_object_records`"),
     "move_control": ("structural",

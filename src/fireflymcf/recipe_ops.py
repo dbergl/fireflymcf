@@ -219,6 +219,12 @@ class MoveElement(Op):
 
     Returns sealed image with the matched record's geometry fields updated and edits
     logged to context.
+
+    A record laid out from the frame the one before it left moves with it, so a move can shift
+    records it never named. The compile reports them (`_side_shifts`, the op's own record and
+    everything drawn below it excluded): a manifest line per op and `CompileResult.shifts`, the
+    sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
+    the op is the form that does.
     """
     PARAMS = {
         "properties": {
@@ -2909,6 +2915,10 @@ class RemoveRecords(Op):
     lifted the "AES" gear button 29 px until a `move_element` gave the gear the offset back. This
     op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved,
     or use `move_control`, which removes through the same `_remove_records` and compensates.
+    The compile reports what moved (`_side_shifts`: every record of every page root reaching the
+    object, besides the removed ones and what they drew, whose box or inherited state changed):
+    a manifest line per op and `CompileResult.shifts`, the sidecar's `shifts`. It never refuses;
+    `assert_layout`'s `snapshot`/`unchanged_since` around the op is the form that does.
 
     Bindings and groups are untouched: a removed touch region stops this object reaching its
     group, and the group still runs from any other object that registers the same id. So
