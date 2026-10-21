@@ -136,12 +136,15 @@ def switch_arm_sets(data: bytes, roots, touching: int | None = None) -> list[dic
     (its parent is at base) and is not listed.
     `layout.Screen.walk` selects an arm for wtype 6 only, so 0x2E switches are not listed.
 
-    `touching`, an object index, keeps only the sets under which an edit inside that object can
-    show a shift the base walk does not: a switch whose selected arm reaches `touching` (the
-    edit is drawn only under it), or one walked after the walk first passes through `touching`
-    (its arm lays out from a frame the edit can move). A switch walked wholly before is laid
-    out before any record the edit can move (inference from the walk's sequential frame,
-    `layout.Screen.walk`)."""
+    `touching`, an object index, keeps only the sets under which a TRANSLATION of a record inside
+    that object (a `move_element` x/y) can show a shift the base walk does not: a switch whose
+    selected arm reaches `touching` (the edit is drawn only under it), or one walked after the
+    walk first passes through `touching` (its arm lays out from a frame the edit can move). A
+    switch walked wholly before only sets the frame the edit starts from, and every relative
+    reference of the walk is additive (`pen += reg`, the flow commit), so the shift is the same
+    (inference from `layout.Screen.walk`). It does not hold for an edit that removes a record:
+    one that wrote carried state (font, align, colours, registers) leaves its followers what an
+    earlier arm left, so a removal must walk every set."""
     match_off = guidata.find_match_table(data)
     graph = _container_graph(data) if touching is not None else None
     sets: list[dict] = [{}]

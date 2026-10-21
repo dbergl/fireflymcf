@@ -56,11 +56,11 @@ def _by(entries, root):
 
 def _line(r, n=1):
     """The shift text of the n-th op after the Water Pump feature: its manifest entry (one per
-    op) after the op's own verify() line."""
+    op) after the op's own verify() line and "; "."""
     assert len(r.manifest) == len(_pump_feature_ops()) + n, r.manifest
-    head, sep, tail = r.manifest[-1].partition("; shift")
+    head, sep, tail = r.manifest[-1].partition("; ")
     assert sep, r.manifest[-1]
-    return "shift" + tail
+    return tail
 
 
 def test_remove_records_reports_the_gear_it_lifted(stock):
@@ -83,8 +83,10 @@ def test_remove_records_reports_the_gear_it_lifted(stock):
     assert all(e["kind"] == "moved" for e in entries)
     line = _line(r)
     assert r.manifest[-1].startswith("remove_records: object 1425 lost 2 record(s)")
-    assert line.startswith("shifted 8 record(s)"), line
-    assert "on root 5:" in line and "'  AES' (-59,-29)" in line
+    # 8 entries (4 records on 2 roots) are 4 distinct records, each named once
+    assert line == ("moved 4 record(s), restyled 0, gone 0, new 0 on roots 5, 39: "
+                    "wtype 33 (-59,-29), '  AES' (-59,-29), wtype 12 (-59,-29), "
+                    "'L' (-59,-29)"), line
 
 
 def test_move_element_of_a_last_record_shifts_nothing_else(stock):
@@ -92,7 +94,8 @@ def test_move_element_of_a_last_record_shifts_nothing_else(stock):
     says so explicitly."""
     r = _compile(stock, _move("mv", {"wtype": 11, "label": "L"}, {"x": 3}))
     assert r.shifts["mv"] == []
-    assert _line(r) == "shifted nothing else (roots 5, 39)"
+    assert _line(r) == ("moved 0 record(s), restyled 0, gone 0, new 0 on roots 5, 39: "
+                        "nothing else changed")
 
 
 def test_move_element_reports_the_siblings_that_follow(stock):
@@ -103,7 +106,7 @@ def test_move_element_reports_the_siblings_that_follow(stock):
         got = _by(r.shifts["gear"], root)
         assert set(got) == {(CARD, 11), (CARD, 12), (CARD, 13)}, r.shifts["gear"]
         assert {(e["dx"], e["dy"]) for e in got.values()} == {(9, -124)}
-    assert _line(r).startswith("shifted 6 record(s)")
+    assert _line(r).startswith("moved 3 record(s), restyled 0, gone 0, new 0 on roots 5, 39: ")
 
 
 def test_the_report_changes_no_bytes(stock, monkeypatch):
@@ -112,9 +115,11 @@ def test_the_report_changes_no_bytes(stock, monkeypatch):
     without = _compile(stock, _rr(), _move("mv", {"wtype": 11, "label": "L"}, {"x": 3}))
     assert with_report.data == without.data
     # one entry per op either way, and each op's own verify() line is unchanged before "; "
-    assert len(with_report.manifest) == len(without.manifest) == len(_pump_feature_ops()) + 2
-    assert ([m.split("; shift")[0] for m in with_report.manifest]
-            == [m.split("; shift")[0] for m in without.manifest])
+    n = len(_pump_feature_ops())
+    assert len(with_report.manifest) == len(without.manifest) == n + 2
+    assert with_report.manifest[:n] == without.manifest[:n]
+    assert ([m.split("; ")[0] for m in with_report.manifest[n:]]
+            == [m.split("; ")[0] for m in without.manifest[n:]])
     assert with_report.unverified == without.unverified
 
 
@@ -128,11 +133,14 @@ def test_a_failing_report_never_refuses(stock, monkeypatch):
 
 
 def test_the_shift_line_is_capped():
-    entries = [{"root": 5, "kind": "moved", "label": "r%d" % i, "wtype": 11, "dx": 0,
-                "dy": -1} for i in range(12)]
-    line = recipe_ops._shift_line(entries, [5])
-    assert line.startswith("shifted 12 record(s) on root 5: 'r0' (0,-1), ")
-    assert line.endswith("... and 6 more")
+    entries = [{"root": root, "kind": "moved", "object": 9, "record": i, "label": "r%d" % i,
+                "wtype": 11, "dx": 0, "dy": -1} for i in range(12) for root in (5, 39)]
+    entries.append({"root": 5, "kind": "restyled", "object": 9, "record": 0, "label": "r0",
+                    "wtype": 11, "dx": 0, "dy": 0})
+    line = recipe_ops._shift_line(entries, [5, 39])
+    assert line.startswith("moved 12 record(s), restyled 1, gone 0, new 0 on roots 5, 39: "
+                           "'r0' (0,-1), 'r1' (0,-1), "), line
+    assert line.endswith("... and 7 more"), line
 
 
 def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
@@ -146,7 +154,7 @@ def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
     out = tmp_path / "mcf-test.bin"
     assert main(["compile", str(proj), STOCK, "-o", str(out)]) == 0
     printed = capsys.readouterr().out
-    assert "now 12; shifted 8 record(s) on root 5:" in printed
+    assert "now 12; moved 4 record(s), restyled 0, gone 0, new 0 on roots 5, 39:" in printed
     side = json.loads((tmp_path / "mcf-test.bin.json").read_text())
     assert len(side["shifts"]["rr"]) == 8
     assert side["shifts"]["rr"][0]["dy"] == -29
@@ -159,16 +167,91 @@ def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
 
 
 def test_the_arm_filter_loses_no_shift(stock, monkeypatch):
-    """`switch_arm_sets(touching=...)` walks only the arms an edit inside the card can show a
-    different shift under; walking every arm set reports the same records."""
+    """`switch_arm_sets(touching=...)` walks only the arms a translation inside the card can
+    show a different shift under (`move_element`); walking every arm set reports the same
+    records."""
     from fireflymcf import pagewalk
-    filtered = _compile(stock, _rr()).shifts["rr"]
+    gear = _move("gear", {"wtype": 33, "nth": 1}, {"x": -50, "y": -20})
+    filtered = _compile(stock, gear).shifts["gear"]
     real = pagewalk.switch_arm_sets
+    ops, _ = recipe._build_ops(_pump_feature_ops())
+    ctx = recipe.Ctx(stock=stock, edits=[], insertions=[], handles={})
+    card_page = stock
+    for o in ops:
+        card_page = o.apply(card_page, ctx)
+    # the filter drops arm sets on the card's own page, so the equality below means something
+    assert len(real(card_page, [5])) > len(real(card_page, [5], touching=CARD)) >= 1
     monkeypatch.setattr(pagewalk, "switch_arm_sets",
                         lambda data, roots, touching=None: real(data, roots))
     every = recipe.compile_project(
         recipe.Project(base_sha256=hashlib.sha256(stock).hexdigest(), build_name=None,
-                       ops=_pump_feature_ops() + [_rr()]), stock).shifts["rr"]
-    assert len(real(stock, [5])) > len(real(stock, [5], touching=0))
+                       ops=_pump_feature_ops() + [gear]), stock).shifts["gear"]
     assert ({(e["root"], e["key"], e["dx"], e["dy"]) for e in every}
             == {(e["root"], e["key"], e["dx"], e["dy"]) for e in filtered})
+
+
+# Synthetic walks for the two rules no stock page exercises. `pagewalk`'s reaching/arm/walk
+# functions are replaced; `_side_shifts` still reads record offsets from the real image, so the
+# fake records name real (object, record) pairs of stock object 315.
+
+_ROOT, _OBJ = 7, 315
+
+
+def _rec(key, index, box):
+    from fireflymcf import pagewalk
+    return pagewalk.WalkRec(key=key, wtype=11, label="r%d" % index, obj=_OBJ, index=index,
+                            box=box, font=1, align=0, colors=(), value_slot=None, in_regs=(),
+                            out_regs=())
+
+
+def _fake_pagewalk(monkeypatch, walks):
+    """`walks(is_after, switch_values) -> [WalkRec]`. `switch_arm_sets` answers [{}] when the
+    caller filters (`touching` given) and [{}, {50: 1}] when it walks every arm set, so a
+    shift seen only under {50: 1} is lost exactly when the filter is applied."""
+    from fireflymcf import pagewalk
+    after_box = []
+    monkeypatch.setattr(pagewalk, "reaching_roots", lambda data, obj: [_ROOT])
+    monkeypatch.setattr(pagewalk, "switch_arm_sets",
+                        lambda data, roots, touching=None:
+                        [{}] if touching is not None else [{}, {50: 1}])
+    monkeypatch.setattr(pagewalk, "walk_records",
+                        lambda data, root, switch_values=None, slot_values=None:
+                        walks(data is after_box[0], switch_values or {}))
+    return after_box
+
+
+def test_a_removal_is_walked_under_every_arm(stock, monkeypatch):
+    """Record 1 of the object writes carried state (an align): on the base arm the state
+    before it is already the same, so removing it changes nothing; under arm {50: 1} an
+    earlier record leaves another, and the follower (record 2, record 1 after the removal)
+    re-aligns. The removal must walk that arm, which `touching=` would filter out."""
+    def walks(is_after, values):
+        key = lambda i: ((_ROOT, 0), (_OBJ, i))          # noqa: E731
+        arm = values == {50: 1}
+        if not is_after:
+            return [_rec(key(0), 0, (0, 0, 10, 10)), _rec(key(1), 1, (0, 10, 10, 20)),
+                    _rec(key(2), 2, (0, 20, 10, 30))]
+        return [_rec(key(0), 0, (0, 0, 10, 10)),
+                _rec(key(1), 1, (40, 20, 50, 30) if arm else (0, 20, 10, 30))]
+    after = bytes(bytearray(stock))
+    _fake_pagewalk(monkeypatch, walks).append(after)
+    roots, entries = recipe_ops._side_shifts(stock, after, _OBJ, removed={1})
+    assert roots == [_ROOT]
+    assert [(e["kind"], e["record"], e["dx"], e["dy"], e["switch_values"]) for e in entries] \
+        == [("moved", 1, 40, 0, {"50": 1})]
+
+
+def test_a_child_that_moves_by_another_amount_is_reported(stock, monkeypatch):
+    """`move_element` of record 0 (a container, drawn with two children below it) by (5, 0):
+    a child that moved by the same (5, 0) is carried and not listed; one that moved by (7, 0)
+    is listed, marked `below_target`."""
+    top = ((_ROOT, 0), (_OBJ, 0))
+    def walks(is_after, values):
+        dx = 5 if is_after else 0
+        return [_rec(top, 0, (dx, 0, dx + 10, 10)),
+                _rec(top + ((_OBJ, 1),), 1, (dx, 10, dx + 10, 20)),
+                _rec(top + ((_OBJ, 2),), 2, ((7 if is_after else 0), 20, 10, 30))]
+    after = bytes(bytearray(stock))
+    _fake_pagewalk(monkeypatch, walks).append(after)
+    _roots, entries = recipe_ops._side_shifts(stock, after, _OBJ, own=(_OBJ, 0))
+    assert [(e["record"], e["dx"], e.get("below_target")) for e in entries] == [(2, 7, True)]

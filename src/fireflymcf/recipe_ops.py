@@ -221,8 +221,8 @@ class MoveElement(Op):
     logged to context.
 
     A record laid out from the frame the one before it left moves with it, so a move can shift
-    records it never named. The compile reports them (`_side_shifts`, the op's own record and
-    everything drawn below it excluded) at the end of the op's manifest line, and in
+    records it never named. The compile reports them (`_side_shifts`: not the op's own record,
+    nor a record drawn below it that moved by exactly its delta) at the end of the op's manifest line, and in
     `CompileResult.shifts`, the sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
     the op is the form that does.
     """
@@ -3303,20 +3303,37 @@ class AssertLayout(Op):
 # `assert_layout`'s `snapshot`/`unchanged_since` is the form that refuses instead.
 
 _SHIFT_CAP = 6     # items the shift text names before "... and N more"
+# `pagewalk.Delta.kind` -> the report's word for it (the structured `kind` and the manifest text)
+_SHIFT_KINDS = {"moved": "moved", "state": "restyled", "gone": "gone", "appeared": "new"}
 
 
 def _side_shifts(before, after, obj, *, removed=None, own=None):
     """`(roots, entries)`: every page root reaching `obj` in `before`
-    (`pagewalk.reaching_roots`), and every record of their walks whose placement changed from
-    `before` to `after` other than the op's own, as JSON-ready dicts.
+    (`pagewalk.reaching_roots`), and every record of their walks whose placement or inherited
+    state changed from `before` to `after` other than the op's own, as JSON-ready dicts (`kind`
+    one of `_SHIFT_KINDS`' values: moved, restyled, gone, new).
 
     Each root is walked as `assert_layout` walks it (`pagewalk.walk_records`, compared by
-    `pagewalk.diff`), at its base and under each switch-arm set an edit inside `obj` can show a
-    different shift under (`pagewalk.switch_arm_sets(..., touching=obj)`). The op's own records
-    are `removed` (indices of `obj` the op deleted: their keys, and every key below them, drop
-    out through `pagewalk.remap_after_removal`) or `own` (an `(obj, index)` step: any key passing
-    through it is the record itself or drawn below it). A record reported under several arm sets
-    with the same change is listed once, under the first."""
+    `pagewalk.diff`), at its base and under switch-arm sets (`pagewalk.switch_arm_sets`):
+
+    * `removed` (`remove_records`: indices of `obj` the op deleted). EVERY arm set. A removed
+      record can write state the walk carries forward (font, a non-zero align, colours, the
+      `regx`/`regy` registers, `layout.Screen.walk`), and what its followers fall back to is what
+      the record before it left, which an earlier switch arm can set; so a removal can change
+      followers under an arm the base walk does not show. The removed records' keys, and every
+      key below them, drop out through `pagewalk.remap_after_removal`.
+    * `own` (`move_element`: the `(obj, index)` step of the record it moved). Only the arm sets
+      an edit inside `obj` can show a different shift under (`touching=obj`): a translation is
+      additive through every relative reference of the walk (`pen += reg`, the flow commit), so
+      the shift it causes does not depend on the frame an earlier arm left. The record itself is
+      not reported, nor a record drawn below it (a key passing through the step) that moved by
+      exactly the record's own delta in that walk: a container carries its children. A
+      descendant that moved by any other amount, or changed otherwise, IS reported, with
+      `below_target: true`. (In 13.6 attach and switch records carry only x/y, so no such case
+      is known; the rule keeps one from being silenced.)
+
+    A record reported under several arm sets with the same change is listed once, under the
+    first."""
     roots = pagewalk.reaching_roots(before, obj)
     gs_b, tab_b = _gs_tab(before)
     gs_a, tab_a = _gs_tab(after)
@@ -3331,7 +3348,8 @@ def _side_shifts(before, after, obj, *, removed=None, own=None):
     entries, seen = [], set()
     for root in roots:
         try:
-            arm_sets = pagewalk.switch_arm_sets(before, [root], touching=obj)
+            arm_sets = pagewalk.switch_arm_sets(before, [root],
+                                                touching=obj if removed is None else None)
         except guidata.MatchTableNotFound:
             arm_sets = [{}]
         for values in arm_sets:
@@ -3339,9 +3357,19 @@ def _side_shifts(before, after, obj, *, removed=None, own=None):
             a = pagewalk.walk_records(after, root, switch_values=values or None)
             remap = ({r.key: pagewalk.remap_after_removal(r.key, obj, removed) for r in b}
                      if removed else None)
-            for d in pagewalk.diff(b, a, remap):
+            deltas = pagewalk.diff(b, a, remap)
+            carried = {}       # key of an instance of the moved record -> its own (dx, dy)
+            if own is not None:
+                carried = {d.key: (d.dx, d.dy) for d in deltas
+                           if d.key and d.key[-1] == own and d.kind == "moved"}
+            for d in deltas:
+                below = False
                 if own is not None and own in d.key:
-                    continue
+                    top = d.key[:d.key.index(own) + 1]
+                    if top == d.key or (d.kind == "moved"
+                                        and (d.dx, d.dy) == carried.get(top, (0, 0))):
+                        continue
+                    below = True
                 rec = d.after if d.after is not None else d.before
                 img, gs, tab = ((after, gs_a, tab_a) if d.after is not None
                                 else (before, gs_b, tab_b))
@@ -3351,13 +3379,16 @@ def _side_shifts(before, after, obj, *, removed=None, own=None):
                 if ident in seen:
                     continue
                 seen.add(ident)
-                entries.append({
-                    "root": root, "kind": d.kind, "key": _fmt_walk_key(rec.key),
+                entry = {
+                    "root": root, "kind": _SHIFT_KINDS[d.kind], "key": _fmt_walk_key(rec.key),
                     "object": rec.obj, "record": rec.index,
                     "offset": offset(img, gs, tab, rec.obj, rec.index),
                     "wtype": d.wtype, "label": d.label, "old": old, "new": new,
                     "dx": d.dx, "dy": d.dy,
-                    "switch_values": {str(k): v for k, v in values.items()}})
+                    "switch_values": {str(k): v for k, v in values.items()}}
+                if below:
+                    entry["below_target"] = True
+                entries.append(entry)
     return roots, entries
 
 
@@ -3375,27 +3406,30 @@ def _shift_item(e):
     what = repr(e["label"]) if e.get("label") else "wtype %d" % e["wtype"]
     if e["kind"] == "moved":
         return "%s (%d,%d)" % (what, e["dx"], e["dy"])
-    return "%s %s" % (what, {"state": "restyled"}.get(e["kind"], e["kind"]))
+    return "%s %s" % (what, e["kind"])
 
 
 def _shift_line(entries, roots, cap=_SHIFT_CAP):
-    """One op's shift report as manifest text: the shifted records by root, `cap` of them
-    named, or that nothing else moved."""
+    """One op's shift report as manifest text, in the structured data's words: how many
+    DISTINCT records (`(object, record)`, however many roots or arm sets draw them) moved, were
+    restyled, are gone or are new, on which roots, then the distinct changes, `cap` of them
+    named; or that nothing else changed."""
+    counts = {k: len({(e["object"], e["record"]) for e in entries if e["kind"] == k})
+              for k in _SHIFT_KINDS.values()}
+    where = ("roots " + ", ".join(map(str, roots))) if roots else "no page root"
+    head = "moved %d record(s), restyled %d, gone %d, new %d on %s" % (
+        counts["moved"], counts["restyled"], counts["gone"], counts["new"], where)
     if not entries:
-        return "shifted nothing else (%s)" % (
-            "roots " + ", ".join(map(str, roots)) if roots
-            else "no page root reaches the object")
-    parts, root = [], None
-    for e in entries[:cap]:
-        if e["root"] != root:
-            root = e["root"]
-            parts.append("%son root %d: " % ("; " if parts else "", root))
-        elif not parts[-1].endswith(": "):
-            parts.append(", ")
-        parts.append(_shift_item(e))
-    rest = len(entries) - cap
-    return "shifted %d record(s) %s%s" % (len(entries), "".join(parts),
-                                          ", ... and %d more" % rest if rest > 0 else "")
+        return head + ": nothing else changed"
+    items, seen = [], set()
+    for e in entries:
+        ident = (e["object"], e["record"], e["kind"], e["dx"], e["dy"])
+        if ident not in seen:
+            seen.add(ident)
+            items.append(_shift_item(e))
+    rest = len(items) - cap
+    return "%s: %s%s" % (head, ", ".join(items[:cap]),
+                         ", ... and %d more" % rest if rest > 0 else "")
 
 
 def shift_report(ops, ctx):
