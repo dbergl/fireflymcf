@@ -1732,10 +1732,12 @@ def find_match_table(data: bytes) -> int:
     pointer (`0x2003` on all three corpus files) that fails the hard filter. Walking back from
     that end while entries pass the filter gives the table exactly, however many objects were
     appended since it was last grown: the width scan below gives up after
-    `MATCH_TABLE_MAX_APPENDED` (a 58-op build appended more). The walk is bounded at `n + 2`
-    entries (the table is at most one 4-alignment pad wider than the object count) and must
-    score at least `MATCH_TABLE_MIN_SCORE`; a file where it does not hold falls back to the
-    width scan.
+    `MATCH_TABLE_MAX_APPENDED` (a 58-op build appended more). A grow covers the next object
+    indices before their objects are appended, plus a 4-alignment pad, so a finished build's
+    table can be wider than the object count: eight committed 13.6 builds carry `n + 2`. The
+    walk accepts a table up to `n + 2` entries wide (it looks at `n + 3`, so the entry that ends
+    a table of exactly `n + 2` is seen) and must score at least `MATCH_TABLE_MIN_SCORE`; a file
+    where it does not hold falls back to the width scan.
 
     Raises `MatchTableNotFound` if no window at any tried width satisfies the hard filter with
     a score of at least `MATCH_TABLE_MIN_SCORE`.
@@ -1765,7 +1767,7 @@ def find_match_table(data: bytes) -> int:
     except (ValueError, IndexError):
         end = None
     if end is not None and 0 < end <= m:
-        lo = max(0, end - (n + 2))
+        lo = max(0, end - (n + 3))          # a table up to n + 2 wide, and the entry before it
         k = end
         while k > lo and ok[k - 1]:
             k -= 1
