@@ -348,7 +348,9 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     resumed from a cached prefix. That is safe because every op's verify() and
     capability_delta() reads its state from ctx.handles (populated during apply, and
     snapshotted into the cache alongside the data), never from instance attributes —
-    see the per-op handle refactor. So a cache-resumed compile verifies correctly
+    see the per-op handle refactor. (The one instance attribute verify() writes is
+    `hardware_verified` where it depends on a resolved ref, `add_card_readouts`'s parent;
+    it is read only after verify, so a resumed compile still sets it.) So a cache-resumed compile verifies correctly
     without re-running the skipped ops' apply."""
     data, _ = patch.reseal(data)
     if project.build_name is not None:
@@ -424,20 +426,24 @@ def _snapshot(ctx: Ctx) -> tuple:
     """A deep, independent copy of the parts of Ctx that accumulate op-produced
     state. Stored in the cache alongside the data so a later resume never aliases a
     dict/list a subsequent compile might mutate in place (e.g. WireButton updates an
-    earlier op's handle dict)."""
-    return (list(ctx.edits), list(ctx.insertions), copy.deepcopy(ctx.handles))
+    earlier op's handle dict). `authored_cells` is carried too: the cell-aliasing gate
+    (`_assert_authored_cells_fresh`) reads it, so a resume that dropped it would skip the
+    gate for every cell the cached prefix minted."""
+    return (list(ctx.edits), list(ctx.insertions), copy.deepcopy(ctx.handles),
+            set(ctx.authored_cells))
 
 
 def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult:
     """Same result as compile_project, resuming from the longest cached enabled-op
     prefix. `cache` is a plain dict the caller owns (the server holds one per
     project); entries are keyed by `_prefix_key` and store `(data, ctx_snapshot)` —
-    the `ctx_snapshot` triple `_snapshot` returns. Editing op N of M re-applies only
+    the `ctx_snapshot` tuple `_snapshot` returns. Editing op N of M re-applies only
     ops N..M: every op before the edit shares its prefix key with the previous
     compile, so its cached (data, snapshot) is reused verbatim and only the tail is
     re-applied. Guaranteed byte-identical to compile_project (tests/test_recipe.py
     `test_cache_hit_is_byte_identical_and_resumes`) because op verify-state lives in
-    ctx.handles, not on the op instance — a resumed compile's verify()/
+    ctx.handles, not on the op instance (save a `hardware_verified` that verify() settles
+    from a resolved ref, see `_finish`) — a resumed compile's verify()/
     capability_delta() read the snapshotted handles exactly as a from-scratch compile
     would have populated them."""
     if hashlib.sha256(stock).hexdigest() != project.base_sha256:
@@ -447,7 +453,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
     enabled = [s for s in project.ops if s.enabled]
 
     start = 0
-    data, snap = stock, ([], [], {})
+    data, snap = stock, ([], [], {}, set())
     for i in range(len(enabled), 0, -1):
         key = _prefix_key(project.base_sha256, enabled[:i])
         if key in cache:
@@ -455,7 +461,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
             start = i
             break
     ctx = Ctx(stock=stock, edits=list(snap[0]), insertions=list(snap[1]),
-             handles=copy.deepcopy(snap[2]))
+             handles=copy.deepcopy(snap[2]), authored_cells=set(snap[3]))
 
     ops, errors = _build_ops(enabled)
     errors += _check_toggles_driven(enabled)
