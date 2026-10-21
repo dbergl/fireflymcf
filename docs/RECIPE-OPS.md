@@ -65,6 +65,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
@@ -775,6 +776,43 @@ Error codes:
 - `NO_LOW_VOLTS_TOUCH` — the donor has no wtype-12 region whose id is `touch_id` (129).
 - `NO_LOW_VOLTS_CHILD` — the donor has no wtype-5 record whose child draws the 'Low\nVolts' button face.
 - `INSERT_REFUSED` — `insert.insert_object` refused (bad parent, no attach template, or a correctness gate failed).
+
+### add_rvc_button
+
+Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
+
+- **Hardware status:** UNVERIFIED.
+- **Proof:** `rvcbutton.py`, `enumlabel.py`
+- **Implementation:** `recipe_ops.AddRvcButton`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `text` | string\|null |  | null | caption; \n makes two lines |
+| `glyph` | object\|null |  | null | {slot, char}: an installed glyph drawn above the caption |
+| `font` | integer\|null |  | null | caption font slot; null keeps the donor's |
+| `dgn` | integer | yes |  | 18-bit DGN every binding sends |
+| `tap` | object\|null |  | null | {payload}: 8-byte hex sent once per press |
+| `hold` | object\|null |  | null | {payload, seconds}: sent once after a hold of seconds (1-15) |
+| `toggle` | object\|null |  | null | {off_payload, on_payload}: not supported yet (refused) |
+| `colour` | array |  | [65, 81, 163] | [r, g, b] body fill; a palette colour |
+| `group_pool` | string {"free", "hold_safe"} |  |  | where the group comes from (default hold_safe with a hold, else free) |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle`, the `free` pool with a hold, or a box too small for its glyph and caption.
+- `BAD_REF` — a `parent` ref names no earlier op's object.
+- `NO_FREE_GROUP` — the group pool is empty.
+- `NO_GLYPH` — the glyph falls back to the placeholder (or icon font 24's unused block).
+- `NO_BODY_COLOUR` — `colour` is not in this build's palette.
+- `TOUCH_OVERLAP` — the touch region meets an existing one on a page reaching `parent`.
+- `OFF_CANVAS` — a record leaves the 800x480 canvas.
+- `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
+- `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, or the placement changes another record.
 
 ### aes_card_layout
 

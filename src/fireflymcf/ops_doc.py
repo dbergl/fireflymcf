@@ -248,6 +248,13 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
         "(optionally on a fill) attached under `parent`.",
         "UNVERIFIED.", "`enumlabel.py`, `statusfold.py`"),
+    "add_rvc_button": ("structural",
+        "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
+        "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
+        "Heat's group-17 clone), its Batt Heat body (box, capsule, caption, optional glyph, "
+        "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
+        "touch region would overlap or anything else on the page would change.",
+        "UNVERIFIED.", "`rvcbutton.py`, `enumlabel.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "
