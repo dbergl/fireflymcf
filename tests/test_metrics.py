@@ -173,3 +173,67 @@ def test_horizontal_bearing_actually_moves_a_glyph(mcf_136):
     metrics_positions = metrics.glyph_positions(mcf_136, 3, "ol")
     assert imgs[1][0] == metrics_positions[1] + bearing["l"] - bearing["o"], (
         "the 'l' bitmap is not offset by its own horizontal bearing")
+
+
+# --- where a wtype-0 single character lands relative to its pen (GUICODE Finding 84) ---------
+
+def _ink_top_bottom(data, slot, char, pen_y):
+    dx, dy = metrics.wt0_ink_offset(data, slot, char)
+    g = glyphs.decode_glyph(data, glyphs.font_for_slot(data, slot).glyph_index(ord(char)))
+    return pen_y + dy, pen_y + dy + g.height - 1
+
+
+@pytest.mark.parametrize("obj", [443, 440])
+def test_a_wt0_unit_draws_centred_in_its_battery_capsule(mcf_136, obj):
+    """`HOME.jpg` shows `12.4V` vertically centred in the green battery body. The body is the
+    object's wtype-33 record 2 (y 341..391); the `V` is its wtype-0 record 6, pen y 374. By the
+    firmware rule (cell top `pen_y - font[0x0b]`, `0x255810`/`0x255812`, plus the glyph's
+    `+0x0c` bearing in `FUN_002510C0`) the `V` inks rows 359..374, centred in the body. The rule
+    this replaced (ink at `pen + glyph.y`) inks rows 379..394, through the body's bottom edge.
+    This is the test that tells the two rules apart: a unit beside its value cannot, because
+    the value is drawn by the same function and moves with it."""
+    from fireflymcf import pagewalk
+    recs = {r.index: r for r in pagewalk.walk_records(mcf_136, 4) if r.obj == obj}
+    body, unit = recs[2], recs[6]
+    assert body.wtype == 33 and unit.wtype == 0 and unit.label == "V"
+    top, bot = _ink_top_bottom(mcf_136, unit.font, "V", unit.box[1])
+    assert body.box[1] < top and bot < body.box[3]
+    assert abs((top + bot) - (body.box[1] + body.box[3])) <= 2
+
+
+@pytest.mark.parametrize("unit,slot,pen_y", [
+    ("V", 15, 374),            # HOME House/Chassis battery: obj 443/440, pen (578|751, 374)
+    ("%", 13, 178),            # HOME tank percent: obj 721/723/719/613, pen (…, 178)
+])
+def test_a_wt0_unit_sits_on_its_values_baseline(mcf_136, unit, slot, pen_y):
+    """`HOME.jpg` shows `12.4V` and the tank `%` set on the digits' own line, at the digits'
+    height. Under the firmware rule (`FUN_002557C0`: cell top `pen_y - font[0x0b]` at
+    `0x255810`/`0x255812`, the blitter adds `glyph[0x0c]` at `0x2510c0`) the unit and an `8` of
+    the same font drawn at the same pen share their top and bottom rows exactly. (A relation inside
+    one drawer: it checks the bearings, not the `font[0x0b]` term.)"""
+    assert _ink_top_bottom(mcf_136, slot, unit, pen_y) == \
+        _ink_top_bottom(mcf_136, slot, "8", pen_y)
+
+
+@pytest.mark.parametrize("slot,pen_y", [(17, 409), (7, 142), (9, 203)])
+def test_a_wt0_degree_is_a_superscript(mcf_136, slot, pen_y):
+    """HOME's `91°` (font 17) and CLIMATE's two temperatures (fonts 7 and 9): the photos show
+    the degree sign at the top of the digits. By the firmware rule its ink starts within 3 px of
+    the digit top and ends in the upper half of the digit."""
+    deg_top, deg_bot = _ink_top_bottom(mcf_136, slot, "°", pen_y)
+    dig_top, dig_bot = _ink_top_bottom(mcf_136, slot, "8", pen_y)
+    assert abs(deg_top - dig_top) <= 3
+    assert deg_bot < (dig_top + dig_bot) // 2
+
+
+def test_wt0_ink_offset_horizontal_follows_the_measuring_class(mcf_136):
+    """`FUN_002518F8` seeds the first pen offset with `-glyph[0x0a]` only for a character
+    `FUN_00251AA0` flagged (class 2: all; class 3: all but digits, space and `+ - * / =`);
+    the blitter then adds `glyph[0x0a]` back. So a flagged character's ink starts at the pen and
+    an unflagged one's at `pen + glyph.x`. 13.6's font-7 `:` has x bearing 4."""
+    assert metrics.wt0_ink_offset(mcf_136, 7, ":")[0] == 0                   # class 2 (default)
+    assert metrics.wt0_ink_offset(mcf_136, 7, ":", char_class=3)[0] == 0     # ':' is flagged
+    assert metrics.wt0_ink_offset(mcf_136, 7, ":", char_class=1)[0] == 4     # never flagged
+    # class 3 leaves every digit unflagged, 9 included (`cmp.ne r4,#0x9` / `bls` at 0x251B4C)
+    assert not any(metrics.class_flags_char(3, c) for c in "0123456789 +-*/=")
+    assert metrics.class_flags_char(3, "V") and metrics.class_flags_char(3, "\x03")

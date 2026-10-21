@@ -431,3 +431,24 @@ def test_the_levelling_arrow_cells_have_no_colour_to_decode(mcf_136):
         assert f"file@{fill.offset:#x}" not in placed
         # The arrow is reached and its glyph draws, so the fill is silent for its colour alone.
         assert f"file@{glyph.offset:#x}" in placed
+
+
+@pytest.mark.parametrize("root", [4, 5, 7, 8])         # LIGHTS (6) has none
+def test_a_wt0_character_draws_where_the_firmware_puts_it(mcf_136, root):
+    """Every single-character wtype-0 record on the photo-oracle pages renders its bitmap
+    at `pen + metrics.wt0_ink_offset` (GUICODE Finding 84): `pen_y - font[0x0b] + glyph.y` down,
+    the pen across when left-aligned. Pins the renderer to the rule `rvcbutton` places glyphs
+    by, so the two cannot drift apart again."""
+    from fireflymcf import layout, metrics
+    placed = [p for p in layout.Screen(mcf_136).walk(root)
+              if p.wtype == 0 and p.label and len(p.label) == 1 and p.label != " "]
+    prims = {q.src: q for pl in render.screen_placements(mcf_136, root) for q in pl.prims
+             if q.kind == "text" and q.glyph_images}
+    assert placed
+    for p in placed:
+        q = prims[f"file@{p.record_offset:#x}"]
+        (dx, dy, _img), = q.glyph_images
+        ix, iy = metrics.wt0_ink_offset(mcf_136, p.font, p.label)
+        assert q.y + dy == p.y0 + iy, (root, p.label, p.record_offset)
+        if p.x1 == p.x0:                       # left-aligned: the box is the pen
+            assert q.x + dx == p.x0 + ix, (root, p.label, p.record_offset)

@@ -182,11 +182,13 @@ def test_glyph_and_caption():
     (cap,) = [r for r in walked if r.wtype == 11 and r.label]
     (touch,) = [r for r in walked if r.wtype == 12]
     # the caption takes a 24-px strip (font 14's cell) at the bottom; the ring (16 x 16, x
-    # bearing 0, y bearing 16 in its 48-px cell) is centred in the 32 px above it
+    # bearing 0, y bearing 16 in its 48-px cell, font top 47) is centred in the 32 px above it.
+    # The panel draws a wtype-0 character's ink at (pen_x, pen_y - top + y bearing) (GUICODE
+    # Finding 84), so the pen sits `top - y` = 31 px below the ink's top.
     assert cap.label == "Pump" and cap.box == (x + inset, y + h - inset - 24,
                                                x + w - inset, y + h - inset)
     assert g_w.box[:2] == (x + inset + (w - 2 * inset - 16) // 2,
-                           y + inset + (h - 2 * inset - 24 - 16) // 2 - 16)
+                           y + inset + (h - 2 * inset - 24 - 16) // 2 + 47 - 16)
     assert touch.box == (x + inset, y + inset, x + w - inset, y + h - inset)
     from fireflymcf import enumlabel
     assert enumlabel.foreign_deltas(_stock(), res.data, HOME, obj) == []
@@ -202,8 +204,48 @@ def test_glyph_only_is_centred():
     x, y, w, h = GBOX
     inset = aescompact.PUMP_OUTLINE_INSET
     assert g_w.box[:2] == (x + inset + (w - 2 * inset - 16) // 2,
-                           y + inset + (h - 2 * inset - 16) // 2 - 16)
+                           y + inset + (h - 2 * inset - 16) // 2 + 47 - 16)
     assert touch.box == (x + inset, y + inset, x + w - inset, y + h - inset)
+
+
+def _drawn_glyph(data, char):
+    """The ink box `(x0, y0, x1, y1)`, inclusive, of the one rendered prim drawing `char`."""
+    from fireflymcf import render
+    (prim,) = [p for p in render.screen_placements(data, HOME)[0].prims
+               if p.kind == "text" and p.text == char]
+    (dx, dy, img), = prim.glyph_images
+    return (prim.x + dx, prim.y + dy, prim.x + dx + img.width - 1, prim.y + dy + img.height - 1)
+
+
+@pytest.mark.parametrize("text", ["Pump", None])
+def test_the_glyph_draws_inside_its_button(text):
+    """The rendered glyph's ink lies inside the inner box, centred in the area above the
+    caption. Before GUICODE Finding 84 the pen was placed as if the panel drew the ink at
+    `pen + (x, y)` bearing, and the ring drew 47 px (its font's top) above the button."""
+    res = _ok([GLYPH_OP, _glyph_op(text=text)])
+    x, y, w, h = GBOX
+    inset = aescompact.PUMP_OUTLINE_INSET
+    area = h - 2 * inset - (24 if text else 0)
+    ix0, iy0 = x + inset, y + inset
+    gx0, gy0, gx1, gy1 = _drawn_glyph(res.data, "Y")
+    assert (gx0, gy0) == (ix0 + (w - 2 * inset - 16) // 2, iy0 + (area - 16) // 2)
+    assert ix0 <= gx0 and gx1 <= x + w - inset and iy0 <= gy0 and gy1 < iy0 + area
+
+
+def test_a_control_character_glyph_draws():
+    """Icon font 25's characters are control bytes (`\\x01`..`\\x04`). `FUN_00251AA0` indexes
+    the font by the byte with no printable test, so a wtype-0 `\\x03` draws; the renderer
+    dropped every non-printable label and drew nothing."""
+    rows = ["00" + "f" * 49 + "00"] * 56
+    inst = {"id": "g25", "type": "install_glyph", "enabled": True,
+            "params": {"slot": 25, "char": "\x03", "y": (72 - 56) // 2, "rows": rows}}
+    res = _ok([inst, _glyph_op(text=None, glyph={"slot": 25, "char": "\x03"})])
+    x, y, w, h = GBOX
+    inset = aescompact.PUMP_OUTLINE_INSET
+    gx0, gy0, gx1, gy1 = _drawn_glyph(res.data, "\x03")
+    assert (gx1 - gx0 + 1, gy1 - gy0 + 1) == (53, 56)
+    assert x + inset <= gx0 and gx1 <= x + w - inset
+    assert y + inset <= gy0 and gy1 <= y + h - inset
 
 
 def test_glyph_too_big_for_the_box():
