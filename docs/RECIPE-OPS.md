@@ -61,6 +61,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
+| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`. | UNVERIFIED. | **no** |
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
@@ -647,6 +648,40 @@ Error codes:
 - `BAD_REF` — `gate` names an op that has not run, or a field that op's handle does not carry
 - `NO_GLYPH` — `font`/`char` resolves to the shared placeholder, i.e. no glyph is installed
 - `MARK_REFUSED` — `cornermark.add_mark` refused (a duplicate switch on the same cell, a bad object index, a record that failed its self-decode, or a relocate gate)
+
+### add_enum_label
+
+Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) attached under `parent`.
+
+- **Hardware status:** UNVERIFIED.
+- **Proof:** `enumlabel.py`, `statusfold.py`
+- **Implementation:** `recipe_ops.AddEnumLabel`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `parent` | any | yes |  | object index or {ref: op_id} |
+| `x` | integer | yes |  |  |
+| `y` | integer | yes |  |  |
+| `w` | integer | yes |  |  |
+| `h` | integer | yes |  |  |
+| `font` | integer | yes |  |  |
+| `align` | string |  | "left" | left \| centre \| right |
+| `colour` | array |  | [255, 255, 255] |  |
+| `background` | array\|null |  | null |  |
+| `source` | object | yes |  | {ref}\|{var}\|{dgn, instance\|selector}, + mask?, shift? |
+| `values` | object | yes |  | {"<int>": text}, 1-16 entries |
+| `default` | string |  | "--" |  |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: empty or >16 `values`, a non-integer or duplicate key, an empty text, an unknown align, mask/shift out of range, a source that is not exactly one form, or a non-positive box.
+- `BAD_REF` — a `parent` or `source` ref names no usable handle.
+- `NO_SUCH_REGISTER` — the source names no variable-table entry.
+- `NO_DISPLAY_CELL` — no spare cell and the cell table could not be grown.
+- `NO_COLOUR` — `colour` or `background` is not in this build's palette.
+- `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed.
+- `OFF_CANVAS` — the box leaves the 800x480 canvas.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
 
 ### add_glyph_button
 
