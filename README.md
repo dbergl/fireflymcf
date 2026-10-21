@@ -54,6 +54,11 @@ says so. The tests that pin the reference coach's builds (its recipes and commit
 in that research repository, not here. The first full run is slow (recipe compiles fill
 `build/.compiled-images`); later runs reuse it.
 
+**Byte identity.** `scripts/golden.py record TABLE.json STOCK_DIR PROJECT.ffproj.json...` writes
+the sha256 of each project's compiled image (its stock is found under `STOCK_DIR` by
+`base_sha256`); `scripts/golden.py check` with the same arguments exits 1 and prints every project
+whose image changed. Run both around a refactor that must not change any build.
+
 ## Releasing
 
 Releases are GitHub releases; nothing is published to PyPI. A version tag starts
