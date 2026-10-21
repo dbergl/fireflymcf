@@ -486,6 +486,25 @@ def test_grow_match_table_refuses_an_odd_count():
         relocate.grow_match_table(data, [0])
 
 
+@pytest.mark.parametrize("value", [256, 0x1234, 0xFFFE])
+def test_grow_match_table_refuses_a_value_the_locator_would_reject(value):
+    """`find_match_table`'s hard filter takes every entry as 0xFFFF or below 256; a grown value
+    in 256..0xFFFE would stop its anchored walk inside the table, and every switch would then
+    read shifted match values."""
+    from fireflymcf import relocate
+    data = open("firefly-13.6/mcf.bin", "rb").read()
+    with pytest.raises(relocate.RelocationError, match="below 256"):
+        relocate.grow_match_table(data, [0, value])
+
+
+@pytest.mark.parametrize("value", [0, 255, 0xFFFF])
+def test_grow_match_table_takes_the_values_the_locator_accepts(value):
+    from fireflymcf import guidata, relocate
+    data = open("firefly-13.6/mcf.bin", "rb").read()
+    grown, _ = relocate.grow_match_table(data, [0, value])
+    assert guidata.find_match_table(grown) == guidata.find_match_table(data)
+
+
 def test_grow_match_table_after_a_prior_append_still_lands_on_the_right_object_indices():
     """v16 (aescompact.swap_electrical_to_compact) calls `grow_match_table` AFTER other objects
     have already been appended (aes_body/engine/cluster clones) -- objects `insert.py` never

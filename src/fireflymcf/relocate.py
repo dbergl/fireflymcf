@@ -821,8 +821,10 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
     pre-covering `0xFFFF` sentinels, so they are OVERWRITTEN in place with the first `values`
     and only the rest is inserted.
 
-    Raises only for a genuinely impossible state: a table wider than the object count whose
-    extra entries are NOT all `0xFFFF` -- `find_match_table` found the wrong window.
+    Raises for a value `find_match_table` could not read back (one in 256..0xFFFE; every stock
+    table tops out at 255), and for a genuinely impossible state: a table wider than the
+    object count whose extra entries are NOT all `0xFFFF` -- `find_match_table` found the
+    wrong window.
     """
     if not values or len(values) % 2:
         raise RelocationError(
@@ -831,6 +833,12 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
     for v in values:
         if not 0 <= v <= 0xFFFF:
             raise RelocationError(f"match value {v!r} is not a u16")
+        # `find_match_table`'s hard filter takes every entry as 0xFFFF or below 256: a value
+        # between would end its anchored walk inside the table, silently shifting every switch.
+        if guidata.MATCH_TABLE_VALUE_BOUND <= v < 0xFFFF:
+            raise RelocationError(
+                f"match value {v:#x} must be below 256 or the 0xFFFF default: the match table "
+                f"locator rejects any other entry")
     mt = guidata.find_match_table(data)
     if mt is None:
         raise RelocationError("no match table located in this image")
