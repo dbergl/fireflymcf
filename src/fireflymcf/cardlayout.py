@@ -151,6 +151,19 @@ def card_record(x: int, y: int, w: int, h: int, wtype: int = 33,
     return rec
 
 
+def _label_bytes(text: str) -> bytes:
+    """A label's bytes: latin-1, one byte per character, each indexing the font
+    (`records.decode_record` reads labels back the same way). Stock draws '°' as 0xB0."""
+    try:
+        raw = text.encode("latin-1")
+    except UnicodeEncodeError as e:
+        raise CardLayoutError("label %r has a character outside latin-1 (a label byte indexes "
+                              "the font): %s" % (text, e))
+    if len(raw) > 0xFF:
+        raise CardLayoutError("label %r is longer than 255 bytes" % (text,))
+    return raw
+
+
 def title_record(x: int, y: int, text: str, *, font: int = TITLE_FONT, w: int = TITLE_W,
                  h: int = TITLE_H) -> bytes:
     """An absolute white wtype-11 title with a declared box (GUICODE Finding 69), font
@@ -162,7 +175,7 @@ def title_record(x: int, y: int, text: str, *, font: int = TITLE_FONT, w: int = 
     rec = (bytes([0x0B, 0x50, 0x0F, 0x6B, 0, 0, 0, 0]) + bytes(WHITE_BGR)
            + struct.pack("<hhhh", x, y, w, h)
            + bytes([0x01, font, 0xFF, 0x01, 0x02, 0x0A, 0x00])
-           + bytes([len(text)]) + text.encode("ascii") + b"\x00")
+           + bytes([len(text)]) + _label_bytes(text) + b"\x00")
     d = records.decode_record(rec, 0)
     ink = [(m, v) for role, m, v in d.colors if role == "fillA"]
     if not (d.wtype == 11 and d.label == text and d.font == font and d.size == len(rec)

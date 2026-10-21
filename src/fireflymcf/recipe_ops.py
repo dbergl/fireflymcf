@@ -7274,6 +7274,10 @@ class AddCardReadouts(Op):
                          entering font/align cannot be measured or written back.
       BAD_REF         -- a row's ref names no draw:false readout handle.
       REPLACE_REFUSED -- 829 could not be relocated.
+      BAD_PARAMS      -- a row lacks caption, unit or value, or its caption or unit has a
+                         character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
+      NO_GLYPH        -- a non-ASCII caption or unit character the row's font has no glyph for
+                         (captions font 10, units font 12; both carry '°').
     """
 
     hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
@@ -7307,6 +7311,13 @@ class AddCardReadouts(Op):
                     or (("ref" in v) == ("slot" in v))):
                 raise RecipeError("BAD_PARAMS", "row %r needs caption, unit and value "
                                   "{ref} or {slot}" % (r,), op_id=self.spec.id)
+            for key in ("caption", "unit"):
+                try:
+                    r[key].encode("latin-1")
+                except UnicodeEncodeError:
+                    raise RecipeError("BAD_PARAMS", "row %s %r has a character outside "
+                                      "latin-1 (a label byte indexes the font)" % (key, r[key]),
+                                      op_id=self.spec.id)
         self.rows = rows
         self._verified_on_829 = self.hardware_verified    # before any parent narrowing
         self.geom = {k: self._param(k, d, kind=int) for k, d in
@@ -7332,6 +7343,15 @@ class AddCardReadouts(Op):
                 slot = h["display_slot"]
             else:
                 slot = int(v["slot"])
+            for text, font in ((r["caption"], cardreadouts.CAPTION_FONT),
+                               (r["unit"], cardreadouts.VALUE_FONT)):
+                # ASCII is what every flashed readout drew; only the newly allowed characters
+                # are checked (a blank glyph such as the space reads as "missing")
+                bad = [c for c in text if ord(c) > 0x7E and rvcbutton.glyph_missing(data, font, c)]
+                if bad:
+                    raise RecipeError("NO_GLYPH", "font %d has no glyph for %r in %r (it would "
+                                      "draw a fallback)" % (font, bad[0], text),
+                                      op_id=self.spec.id)
             fmt = r.get("format", {})
             rows.append(cardreadouts.Row(r["caption"], slot, int(fmt.get("width", 0)),
                                          int(fmt.get("places", 0)), r["unit"]))
