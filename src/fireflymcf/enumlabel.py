@@ -43,6 +43,8 @@ a child, but the R38 font and the align byte are not. The arm's label writes bot
 the walk reaches after the label object, one that inherits its font, would draw in the label's
 font. `entering_state` measures the `(font, align)` the walk carries to the attach point, and
 `place(restore=...)` ends the object with an empty label (`restore_record`) that writes them back.
+The flow origin and frame the object leaves are not restored; `foreign_deltas` is the whole-page
+check that nothing after the label depends on them.
 """
 from __future__ import annotations
 
@@ -177,3 +179,27 @@ def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes],
             and recs[0].count == len(arms) and recs[0].value_slot == value_slot):
         raise EnumLabelError(f"the label object {index} does not hold the authored switch")
     return out, edits, index
+
+
+def foreign_deltas(before: bytes, after: bytes, parent: int, label_object: int) -> list:
+    """Every `pagewalk.diff` delta, over each page root reaching `parent` and each of its
+    switch-arm sets (`pagewalk.switch_arm_sets` of the image before), that is NOT one of the
+    label's own records appearing: the attach (the parent's last record), the label object's
+    records and its arms' records. Empty means nothing else on any page moved or changed state,
+    the check `move_control` and `assert_layout` make."""
+    gs, _ = guidata.guidata_extent(after)
+    tab = guidata.object_tables(after)[1]
+    attach = len(records.object_records(after, gs + tab[parent])) - 1
+    sw = records.object_records(after, gs + tab[label_object])[0]
+    ours = {label_object, *range(sw.child_index, sw.child_index + sw.count)}
+    roots = pagewalk.reaching_roots(after, parent)
+    bad = []
+    for values in pagewalk.switch_arm_sets(before, roots):
+        for root in roots:
+            for d in pagewalk.diff(pagewalk.walk_records(before, root, switch_values=values),
+                                   pagewalk.walk_records(after, root, switch_values=values)):
+                if d.kind == "appeared" and (d.after.obj in ours or
+                                             (d.after.obj, d.after.index) == (parent, attach)):
+                    continue
+                bad.append(d)
+    return bad
