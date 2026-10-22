@@ -145,7 +145,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "position (a new object under a clone of the destination's first attach), and assert "
         "nothing else moved on either page.",
         "Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES "
-        "settings page, the gear's compensation found by the op.",
+        "settings page, the gear's compensation found by the op. Not yet flashed: a move whose "
+        "pasted labels arrive with a transparent background where the source page never wrote "
+        "one (the paste check accepts it, `_paste_restyled`).",
         "`pagewalk.py`, `absrecord.py`, `CONTROL-BEHAVIOR.md` §10"),
     "assert_layout": ("same-size",
         "Check, at its place in the recipe, that chosen records (by walk key, object and record, "
@@ -268,12 +270,14 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
     "add_text_label": ("structural",
         "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
-        "at the font's cell pitch), optionally on a fill, absolute at x, y in a new object "
+        "at the font's cell pitch), optionally on a fill and inside a 1 px section frame, "
+        "absolute at x, y in a new object "
         "attached under `parent`, ended by a restore record that hands back the font and align "
         "the page walk carried in; refused if anything else on the page would change.",
         "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
         "two-line label spaces its lines by the font's cell, and every other control on the "
-        "page draws as before, its text in its own font (photo against stock).",
+        "page draws as before, its text in its own font, and a `frame` draws as the stock "
+        "section frames do, its edge masked behind a title's fill (photo against stock).",
         "`enumlabel.py`, `pagedraw.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
