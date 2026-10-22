@@ -219,6 +219,12 @@ class MoveElement(Op):
 
     Returns sealed image with the matched record's geometry fields updated and edits
     logged to context.
+
+    A record laid out from the frame the one before it left moves with it, so a move can shift
+    records it never named. The compile reports them (`_side_shifts`: not the op's own record,
+    nor a record drawn below it that moved by exactly its delta) at the end of the op's manifest line, and in
+    `CompileResult.shifts`, the sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
+    the op is the form that does.
     """
     PARAMS = {
         "properties": {
@@ -282,6 +288,9 @@ class MoveElement(Op):
             _put16(buf, off, val, ctx, "move_element obj %d %s -> %d" % (obj, key, val))
         out, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": obj}
+        index = next(i for i, r in enumerate(records.object_records(data, gs + tab[obj]))
+                     if r.offset == rec.offset)
+        _report_shifts(ctx, self.spec.id, data, out, obj, own=(obj, index))
         return out
 
     def verify(self, data, ctx):
@@ -2906,6 +2915,10 @@ class RemoveRecords(Op):
     lifted the "AES" gear button 29 px until a `move_element` gave the gear the offset back. This
     op does not compensate; diff the render (`fireflymcf verify`) and fix any record that moved,
     or use `move_control`, which removes through the same `_remove_records` and compensates.
+    The compile reports what moved (`_side_shifts`: every record of every page root reaching the
+    object, besides the removed ones and what they drew, whose box or inherited state changed)
+    at the end of the op's manifest line, and in `CompileResult.shifts`, the sidecar's `shifts`.
+    It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around the op is the form that does.
 
     Bindings and groups are untouched: a removed touch region stops this object reaching its
     group, and the group still runs from any other object that registers the same id. So
@@ -2953,11 +2966,15 @@ class RemoveRecords(Op):
 
     def apply(self, data, ctx):
         obj = resolve_target(ctx, self.target)
+        gs_before, tab_before = _gs_tab(data)
         out, doomed = _remove_records(data, ctx, obj, self.records, self.spec.id)
         gs, tab = _gs_tab(out)
         ctx.handles[self.spec.id] = {
             "obj": obj, "count": len(records.object_records(out, gs + tab[obj])),
             "gone": [(d.wtype, d.child_index, _touch_id(data, d)) for d in doomed]}
+        recs = records.object_records(data, gs_before + tab_before[obj])
+        removed = {i for i, r in enumerate(recs) if r.offset in {d.offset for d in doomed}}
+        _report_shifts(ctx, self.spec.id, data, out, obj, removed=removed)
         return out
 
     def verify(self, data, ctx):
@@ -3279,6 +3296,158 @@ class AssertLayout(Op):
             return "assert_layout: root %d, %d record(s) where expected" % (h["root"],
                                                                            h["count"])
         return "assert_layout: root %d unchanged since %r" % (h["root"], h["since"])
+
+
+# The shift report: what `remove_records` and `move_element` moved besides their own records.
+# Report only: it changes no bytes and never refuses (`_report_shifts` swallows its own errors).
+# `assert_layout`'s `snapshot`/`unchanged_since` is the form that refuses instead.
+
+_SHIFT_CAP = 6     # items the shift text names before "... and N more"
+# `pagewalk.Delta.kind` -> the report's word for it (the structured `kind` and the manifest text)
+_SHIFT_KINDS = {"moved": "moved", "state": "restyled", "gone": "gone", "appeared": "new"}
+
+
+def _side_shifts(before, after, obj, *, removed=None, own=None):
+    """`(roots, entries)`: every page root reaching `obj` in `before`
+    (`pagewalk.reaching_roots`), and every record of their walks whose placement or inherited
+    state changed from `before` to `after` other than the op's own, as JSON-ready dicts (`kind`
+    one of `_SHIFT_KINDS`' values: moved, restyled, gone, new).
+
+    Each root is walked as `assert_layout` walks it (`pagewalk.walk_records`, compared by
+    `pagewalk.diff`), at its base and under switch-arm sets (`pagewalk.switch_arm_sets`):
+
+    * `removed` (`remove_records`: indices of `obj` the op deleted). EVERY arm set. A removed
+      record can write state the walk carries forward (font, a non-zero align, colours, the
+      `regx`/`regy` registers, `layout.Screen.walk`), and what its followers fall back to is what
+      the record before it left, which an earlier switch arm can set; so a removal can change
+      followers under an arm the base walk does not show. The removed records' keys, and every
+      key below them, drop out through `pagewalk.remap_after_removal`.
+    * `own` (`move_element`: the `(obj, index)` step of the record it moved). Only the arm sets
+      an edit inside `obj` can show a different shift under (`touching=obj`): a translation is
+      additive through every relative reference of the walk (`pen += reg`, the flow commit), so
+      the shift it causes does not depend on the frame an earlier arm left. The record itself is
+      not reported, nor a record drawn below it (a key passing through the step) that moved by
+      exactly the record's own delta in that walk: a container carries its children. A
+      descendant that moved by any other amount, or changed otherwise, IS reported, with
+      `below_target: true`. (In 13.6 attach and switch records carry only x/y, so no such case
+      is known; the rule keeps one from being silenced.)
+
+    A record reported under several arm sets with the same change is listed once, under the
+    first."""
+    roots = pagewalk.reaching_roots(before, obj)
+    gs_b, tab_b = _gs_tab(before)
+    gs_a, tab_a = _gs_tab(after)
+    offsets: dict = {}
+
+    def offset(img, gs, tab, o, i):
+        k = (img is after, o, i)
+        if k not in offsets:
+            offsets[k] = records.object_records(img, gs + tab[o])[i].offset
+        return offsets[k]
+
+    entries, seen = [], set()
+    for root in roots:
+        try:
+            arm_sets = pagewalk.switch_arm_sets(before, [root],
+                                                touching=obj if removed is None else None)
+        except guidata.MatchTableNotFound:
+            arm_sets = [{}]
+        for values in arm_sets:
+            b = pagewalk.walk_records(before, root, switch_values=values or None)
+            a = pagewalk.walk_records(after, root, switch_values=values or None)
+            remap = ({r.key: pagewalk.remap_after_removal(r.key, obj, removed) for r in b}
+                     if removed else None)
+            deltas = pagewalk.diff(b, a, remap)
+            carried = {}       # key of an instance of the moved record -> its own (dx, dy)
+            if own is not None:
+                carried = {d.key: (d.dx, d.dy) for d in deltas
+                           if d.key and d.key[-1] == own and d.kind == "moved"}
+            for d in deltas:
+                below = False
+                if own is not None and own in d.key:
+                    top = d.key[:d.key.index(own) + 1]
+                    if top == d.key or (d.kind == "moved"
+                                        and (d.dx, d.dy) == carried.get(top, (0, 0))):
+                        continue
+                    below = True
+                rec = d.after if d.after is not None else d.before
+                img, gs, tab = ((after, gs_a, tab_a) if d.after is not None
+                                else (before, gs_b, tab_b))
+                old = list(d.before.box[:2]) if d.before is not None else None
+                new = list(d.after.box[:2]) if d.after is not None else None
+                ident = (root, d.key, d.kind, d.dx, d.dy, tuple(old or ()), tuple(new or ()))
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                entry = {
+                    "root": root, "kind": _SHIFT_KINDS[d.kind], "key": _fmt_walk_key(rec.key),
+                    "object": rec.obj, "record": rec.index,
+                    "offset": offset(img, gs, tab, rec.obj, rec.index),
+                    "wtype": d.wtype, "label": d.label, "old": old, "new": new,
+                    "dx": d.dx, "dy": d.dy,
+                    "switch_values": {str(k): v for k, v in values.items()}}
+                if below:
+                    entry["below_target"] = True
+                entries.append(entry)
+    return roots, entries
+
+
+def _report_shifts(ctx, op_id, before, after, obj, **kw):
+    """Put `_side_shifts`' report on the op's handle (`shifts`, `shift_roots`), or, if it fails,
+    the failure (`shifts_error`): the report must never refuse a build."""
+    h = ctx.handles[op_id]
+    try:
+        h["shift_roots"], h["shifts"] = _side_shifts(before, after, obj, **kw)
+    except Exception as e:      # noqa: BLE001 -- report only, never a refusal
+        h["shifts_error"] = "%s: %s" % (type(e).__name__, e)
+
+
+def _shift_item(e):
+    what = repr(e["label"]) if e.get("label") else "wtype %d" % e["wtype"]
+    if e["kind"] == "moved":
+        return "%s (%d,%d)" % (what, e["dx"], e["dy"])
+    return "%s %s" % (what, e["kind"])
+
+
+def _shift_line(entries, roots, cap=_SHIFT_CAP):
+    """One op's shift report as manifest text, in the structured data's words: how many
+    DISTINCT records (`(object, record)`, however many roots or arm sets draw them) moved, were
+    restyled, are gone or are new, on which roots, then the distinct changes, `cap` of them
+    named; or that nothing else changed."""
+    counts = {k: len({(e["object"], e["record"]) for e in entries if e["kind"] == k})
+              for k in _SHIFT_KINDS.values()}
+    where = (("root " if len(roots) == 1 else "roots ") + ", ".join(map(str, roots))
+             if roots else "no page root")
+    head = "moved %d record(s), restyled %d, gone %d, new %d on %s" % (
+        counts["moved"], counts["restyled"], counts["gone"], counts["new"], where)
+    if not entries:
+        return head + ": nothing else changed"
+    items, seen = [], set()
+    for e in entries:
+        ident = (e["object"], e["record"], e["kind"], e["dx"], e["dy"])
+        if ident not in seen:
+            seen.add(ident)
+            items.append(_shift_item(e))
+    rest = len(items) - cap
+    return "%s: %s%s" % (head, ", ".join(items[:cap]),
+                         ", ... and %d more" % rest if rest > 0 else "")
+
+
+def shift_report(ops, ctx):
+    """`(shifts, texts)` over `ops` in order: `{op_id: entries}` for every op whose handle
+    carries a shift report, and `{op_id: manifest text}` for every op that ran one (a failed
+    report says it is unavailable and is not in `shifts`)."""
+    shifts, texts = {}, {}
+    for o in ops:
+        h = ctx.handles.get(o.spec.id)
+        if not isinstance(h, dict):
+            continue
+        if "shifts_error" in h:
+            texts[o.spec.id] = "shift report unavailable: %s" % h["shifts_error"]
+        elif "shifts" in h:
+            shifts[o.spec.id] = h["shifts"]
+            texts[o.spec.id] = _shift_line(h["shifts"], h["shift_roots"])
+    return shifts, texts
 
 
 _CANVAS_W, _CANVAS_H = 800, 480
@@ -5338,6 +5507,10 @@ class ResolveRegister(Op):
             h["dgn_low"], h["value"], h["var_index"], h["slot_addr"])
 
 
+# A variable-table entry's staleness class (`appendfilter.NewFilter.refresh`, +3 bits 2-3)
+_REFRESH_TIMEOUT = ("2 s", "10 s", "30 s", "never expires")
+
+
 @op("append_filter")
 class AppendFilter(Op):
     """Subscribe the panel to a DGN by APPENDING a new variable-table entry, instead of
@@ -5418,10 +5591,11 @@ class AppendFilter(Op):
         gc_count = struct.unpack_from("<H", data, gc.offset + appendfilter.GUICODE_VAR_COUNT_FIELD)[0]
         assert gc_count == len(vt), "GuiCode count %d != table %d" % (gc_count, len(vt))
         assert len(statusbind.registered_dgns(data)) <= statusbind.REGISTRY_CAP
-        return ("append_filter: var %d receives DGN %#07x mode %d payload[%d] -> slot %#x; "
-                "table %d entries (GuiCode +0x20 matches); COACH-VERIFIED 2026-09-22"
+        return ("append_filter: var %d receives DGN %#07x mode %d payload[%d] -> slot %#x, "
+                "refresh %d (%s); table %d entries (GuiCode +0x20 matches)"
                 % (h["var_index"], self.filter.dgn, self.filter.mode, self.filter.payload_byte,
-                   h["slot_addr"], len(vt)))
+                   h["slot_addr"], self.filter.refresh, _REFRESH_TIMEOUT[self.filter.refresh],
+                   len(vt)))
 
 
 _REGISTER_HANDLE_KEYS = ("var_index", "slot_addr", "dgn_low", "value", "extract_mode",

@@ -115,29 +115,57 @@ def reaching_roots(data: bytes, obj: int) -> list[int]:
     return out
 
 
-def switch_arm_sets(data: bytes, roots) -> list[dict]:
+def _reaches(graph: dict, start: int, target: int) -> bool:
+    seen, todo = {start}, deque([start])
+    while todo:
+        node = todo.popleft()
+        if node == target:
+            return True
+        for child in graph.get(node, ()):
+            if child not in seen:
+                seen.add(child)
+                todo.append(child)
+    return False
+
+
+def switch_arm_sets(data: bytes, roots, touching: int | None = None) -> list[dict]:
     """The `switch_values` sets that cover every arm of every type-6 switch the base walks of
     `roots` reach: `{}` first, then `{child_base: value}` for each (switch, distinct candidate
     match value) whose selected candidate is not the base one, in walk order. Each set drives
     one switch; the rest stay at their base, so a switch nested in a non-base arm is not reached
     (its parent is at base) and is not listed.
-    `layout.Screen.walk` selects an arm for wtype 6 only, so 0x2E switches are not listed."""
+    `layout.Screen.walk` selects an arm for wtype 6 only, so 0x2E switches are not listed.
+
+    `touching`, an object index, keeps only the sets under which a TRANSLATION of a record inside
+    that object (a `move_element` x/y) can show a shift the base walk does not: a switch whose
+    selected arm reaches `touching` (the edit is drawn only under it), or one walked after the
+    walk first passes through `touching` (its arm lays out from a frame the edit can move). A
+    switch walked wholly before only sets the frame the edit starts from, and every relative
+    reference of the walk is additive (`pen += reg`, the flow commit), so the shift is the same
+    (inference from `layout.Screen.walk`). It does not hold for an edit that removes a record:
+    one that wrote carried state (font, align, colours, registers) leaves its followers what an
+    earlier arm left, so a removal must walk every set."""
     match_off = guidata.find_match_table(data)
+    graph = _container_graph(data) if touching is not None else None
     sets: list[dict] = [{}]
-    seen: set = set()
+    first: dict = {}
+    added: set = set()
     for root in roots:
+        past = touching is None
         for r in walk_records(data, root):
+            past = past or any(o == touching for o, _i in r.key)
             if r.wtype != 6:
                 continue
             rec = _record(data, r.obj, r.index)
             for value, obj in guidata.switch_candidates(data, rec, match_off):
-                if (rec.child_index, value) in seen:
-                    continue
-                seen.add((rec.child_index, value))
                 # the first candidate with a value is the one `_switch_child` selects for it;
                 # the base candidate is what the base walk already draws
-                if obj != rec.child_index:
-                    sets.append({rec.child_index: value})
+                arm = first.setdefault((rec.child_index, value), obj)
+                if (arm == rec.child_index or (rec.child_index, value) in added
+                        or not (past or _reaches(graph, arm, touching))):
+                    continue
+                added.add((rec.child_index, value))
+                sets.append({rec.child_index: value})
     return sets
 
 
