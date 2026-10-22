@@ -1525,6 +1525,18 @@ So 14.7 added a clamped, bus-broadcast parameter pair (`0xDB`/`0xDC`) and a meas
 that together adjust the AES start threshold — a genuine new auto-gen-start behaviour, on top of the
 existing start-at/stop-at/timeout clamps (`g12code.AGS_LIMITS`, `RVC-GAPS.md` §3).
 
+**2026-10-22 — units and source settled; the paragraph below is superseded.** All three are
+state of charge in half-percent (`BUS-BASELINE.md` PC.41): `0xDB` [20, 180] = 10–90 %, `0xDC`
+[150, 200] = 75–100 %, and `0xDA` is the live SoC, which the 14.7 **panel** asserts every 3 s
+(`1FED9 FF 96 DA 0F <u16> D1 FF`). Running the 14.7 panel against the PC.41 bus
+(`observed-in-emulation`, reproducing the coach's first two `FFFF`s and then 174) and reading its
+handlers: the value is the average of `DC_SOURCE_STATUS_2` (`1FFFC`) byte 4 over four battery
+slots, instance n in slot n (instances above 4 ignored), and **`0xFFFF` until the same source
+address has sent a `DM_RV` whose status byte is non-zero**; on the coach that is the WS500's 5 s
+`DM_RV`. A slot times out about 30 s after its last `1FFFC`. If the `1FFFC` stops while `DM_RV`
+continues, the average divides by zero slots and the panel sends **0**, not `0xFFFF` (the core
+does not trap divide-by-zero), which a 14.7 G12 reads as an empty battery against `0xDB`.
+
 **What is NOT established:** the *units/meaning*. The clamp ranges [20,180] and [150,200] do not fit
 the panel's `0.05 V`/unit voltage scale (that would be 1–9 V), and could be SOC %, current, or a
 time — the file does not say, and guessing a scale is the exact trap `RVC-GAPS.md` §3 and this
