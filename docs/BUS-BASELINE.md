@@ -956,6 +956,14 @@ Between them the G12 reports the level walking `C8 BE B4 AC A0 96 8C 82 78 6E 64
 brightness** — it asks for a ramp once per second and stops on release; the controller
 interpolates. Direction alternates between holds.
 
+> **Corrected 2026-10-21 (`observed-on-hardware`, live capture, owner ramping output 21 from the
+> Firefly app, which repeats command 21 every 0.5 s):** direction does not alternate. **Every hold
+> starts downward**, turns straight back up at the bottom (level ~4, below the 10 this capture's
+> statuses show — statuses go out only at each 10, so the dip below 10 and back reads as
+> "10, pause, 10"), and stays at 200 while held there (0.74 s observed). The "later hold walks it
+> back up" here started at 14, dipped to the bottom and climbed. All six holds on record fit.
+> Ramp curve: 200 → 100 in 1.10 s, → 50 at 2.35 s, → 10 at 3.69 s, → 4 at 4.02 s, symmetric up.
+
 This is the first sighting of command 21 on the wire. It is present in the binding table
 for every dimmable channel but absent from PC.8, because nobody held a button during that
 capture — the stored command set is a *superset* of what any given session transmits.
