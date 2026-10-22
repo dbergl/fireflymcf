@@ -1,7 +1,7 @@
 # G12 code blob (section table `0x67`)
 
 *Started 2026-08-19 as a first pass; as of 2026-09-10 the blob is read to more than 97% (the
-`lr`-relative jump table is now followed) and its three functions (init, the 1 Hz tick, a jump
+`lr`-relative jump table is now followed) and its three functions (init, the 10 ms tick, a jump
 helper) are named, with about 60 of the 146 config
 cells it touches identified and the 128 sentinel defaults enumerated. The core is an STM32L4
 (Cortex-M4), which the device states on the bus (PC.19); the encoding is Thumb-1 only. Sections are
@@ -87,7 +87,7 @@ bootloader protocol, or find any absolute code pointer in the blob.
 +0x033A  code                config-defaults routine, part 2 — the `+0x0000` branch lands HERE, not +0x033E, and it is
                              not a working entry: `+0x033A adds r1,#0xd0` needs r3 = base and r2 = 0xFFFF, set only at
                              +0x000C/+0x000E. Part 1 falls through into it (`+0x02B8 b +0x2C8` hops the pool). Corrected 2026-09-02
-+0x0918  code                the 1 Hz service tick (header pointer `+0x08`), one function to +0x1928
++0x0918  code                the 10 ms service tick (header pointer `+0x08`), one function to +0x1928
 +0x19F8  code                the lr-relative table-jump helper, the blob's only real callee
 +0x1A60  data                RV-C frame templates
 +0x1AB4  "G8 Test\0"         the only genuine ASCII string in the blob
@@ -254,7 +254,7 @@ only gaps left are the header, the data tail, and — on 14.7 — one 20-byte by
 
 **The "functions" column is an artifact — corrected 2026-09-02.** 13.6 has **three** functions:
 `push` at `+0x0012` / `+0x0918` / `+0x19F8`, `pop`/return at `+0x08E2` / `+0x1928` / `+0x1A0A`
-(init, the 1 Hz tick, and a 10-instruction `lr`-relative table-jump helper called from
+(init, the 10 ms tick, and a 10-instruction `lr`-relative table-jump helper called from
 `+0x118A`). Every other `bl` target is a **long-branch arm** inside the tick — the pattern the
 clamp section already noted, and it is the rule throughout. Side effect worth knowing: treating
 `bl` as a call makes the walker decode pool words after some `bl`s as code (`+0x173C`–`+0x174B`
@@ -484,7 +484,11 @@ Four adjacent u16 timers at `+994`/`+996`/`+998`/`+1000` and four adjacent u16 s
   `[base+0xA6]`, not a physical threshold. *An earlier reading of that instruction as a magnitude
   comparison would have invented a limit that does not exist.*
 
-**The tick rate is ~1 Hz — `inferred`, with one measurement carrying it (2026-08-24).** Nothing in
+~~**The tick rate is ~1 Hz — `inferred`, with one measurement carrying it (2026-08-24).**~~
+**RETRACTED 2026-10-21: the tick runs every 10 ms, and the timer bank below it counts seconds
+through a 100-tick divider the reading below missed.** See "The tick is 100 Hz" in "Executing
+the blob". The conclusion that a timer armed to 60 is about a minute still stands; the tick
+rate does not. Original text kept for the record: Nothing in
 the blob sets the loop's period; its caller is in the G12 application at `0x08006000`, which the MCF
 does not contain. Three independent things now point the same way, and they are not equally strong:
 
@@ -860,6 +864,9 @@ the event *is* remains unknown; its shape does not.
 using `0xFFFF` for disarmed. Above `+0x200`, so runtime, not config.
 
 ## The 1 Hz input refresh is not in this blob — `proven-from-code` (negative), 2026-09-10
+
+*2026-10-21: true of 11.23 and 13.6. 14.7 moved push-button handling into its blob, including a
+once-a-second re-send of a held button's ramp; see "The context for ABI 17 (14.7)".*
 
 `BUS-BASELINE.md` PC.24 measured every held input pin re-broadcasting its `0x1FBDA`
 GENERIC_INDICATOR_COMMAND at **1.000 s** while the pin stayed active — a tap under ~1 s sends one
@@ -1699,7 +1706,7 @@ ever transmitted (`inferred`).
 
 | region | what it is |
 |---|---|
-| `+0x0918`–`+0x1928` | the 1 Hz service tick (header pointer); prologue reads `[r4,#4]` count |
+| `+0x0918`–`+0x1928` | the 10 ms service tick (header pointer); prologue reads `[r4,#4]` count |
 | `+0x09A8`–`+0x0A12`, `+0x1240`–`+0x1266` | mode-change handler (`0xEF` vs latch `0x7A`): AES defaults `0C/0D/0E/0F/16`, `73`, `50`, `7B/7C` |
 | `+0x0A14`–`+0x0AD4` | AES-profile clamps + sweep re-broadcast (#13-16, 19, 20) |
 | `+0x13DA`–`+0x15DA` | AGS-profile arm: `50 := 20, 7B/7C := 30, 73 := 19`, clamps `0C ≤ 60, 31 ≤ 250, 0D ≤ 290, 0E ≤ 7200, 16 ≤ 720, 0F ≤ 1800, 15.lo ≤ 5`, then `01 := 0`, and on `06 == 3` rule #4 + #6/#7 |
@@ -1789,11 +1796,12 @@ and named as such.
 
 `+0x18` was already named as "transmit" in "The frame table and the AWNING IGNITION INTERLOCK";
 executing the code confirms it is a context slot like the other four and that the interlock cannot
-run without it (with the slot absent the first ignition edge branches to address 0). Every call
-being one second follows from the 16-timer loop: any count works for `+0x04` as long as the bank
+run without it (with the slot absent the first ignition edge branches to address 0). ~~Every call
+being one second follows from the 16-timer loop~~ (*wrong: one call is 10 ms; see "The tick is 100 Hz"
+below*): any count works for `+0x04` as long as the bank
 clears the config cells (the emulator uses `0x200`). The header word `+0x04` is the ABI version
 (next steps #4): 13 on 11.23 and 13.6, both of which run under this layout; 14.7's 17 does not
-(its slots moved) and is not mapped here.
+(its slots moved) and is mapped in "The context for ABI 17 (14.7)" below.
 
 **Re-derived by execution, all agreeing with this document:** init's 128 sentinel defaults and its
 48 boot activations; the tank bucketer (raw cells `B0`-`B3` = `0BFC1` instances 1-4 → buckets 0-3
@@ -1806,6 +1814,76 @@ after a write); the four `0x95` seed-test cells. Two values this document did no
   table above), so the coach's max engine run time is the handler's, not only the panel template's.
 - **Switching AES → AGS leaves `0D = 270`**, `50 = 20`, `7B/7C = 30`: the 12 V AGS stop voltage, not
   the 290 ceiling of the AGS clamps.
+
+### The tick is 100 Hz — `proven-from-code`, 2026-10-21
+
+The tick is called every **10 ms**, and the seconds come from a divider inside it. This corrects
+"The tick rate is ~1 Hz" above, which took the 714 ms `BF` gap as one tick.
+
+- Init arms the top cell, `cell[count-1]`, to **100**. Each tick drops it by `ctx[7]+1`. Only
+  when it wraps does the 16-timer bank drop by 1, and the cell reloads as `cell - extra + 99`
+  (13.6 `+0x0968`, 14.7 `+0x1FA2`). So the bank counts seconds and `cell[count-1]` is its
+  100-tick divider.
+- The first two timers drop by `ctx[7]+1` every tick, so they count 10 ms. `ctx[7]` is the number
+  of missed ticks; the application passes 0 normally.
+- **14.7 settles the rate.** A held button's ramp is re-sent when a 300-tick counter (cell `0x1FD`)
+  is a multiple of 100. At 100 Hz that is the once-a-second re-send the panel's own ramp uses; at
+  1 Hz it would be every 100 s.
+- The measurements fit. A bank timer armed to 1 fires at the next divider wrap, anywhere from 0 to
+  1 s later: `BF` clears 714 ms after it is set in PC.24 and 343 ms after in PC.39. The coach relays
+  a config write in 2–10 ms (PC.23) and locks the awning 4 ms after ignition-off (`pc28`). Both
+  are one tick, with no event-driven call needed.
+
+Running the blob at 100 Hz turns on three settle-after-boot behaviours that a 1 Hz emulation hid,
+all `observed-in-emulation` on 13.6:
+
+- **Charge-rate soft start** (`+0x0E48`): cell `0x81` rises by 20 every 10 s up to cell `0x92`,
+  sending rule #8 (`1FF95`) at each step. The coach reads `0x81 = 0x92 = 200`, i.e. settled.
+- **Quiet hours** (`+0x0F70`): cell `0x04` comes from comparing the clock cell `0x2A` with
+  `0x2B`/`0x2C`.
+- **The AES watchdog** arms a 60 s OFF of channel 18 when cell `0x53` is set. Init defaults `0x53`
+  to 0; on the coach the WS500's out-of-range DM_RV keeps it at `0xFFFF` (see the live read-back
+  below), so the coach never sends it.
+
+### The context for ABI 17 (14.7) — `proven-from-code` / `observed-in-emulation`, 2026-10-21
+
+Mapped by disassembling both builds and running 14.7's blob in the emulator:
+
+```
++0x00  u32  cell array            as ABI 13
++0x04  u16  cell count            as ABI 13
++0x07  u8   extra ticks           still read by the tick (ldrb [r0,#7])
++0x08  fn   activate rule N       \
++0x0C  fn   deactivate rule N      | as ABI 13
++0x10  fn   is rule N active?     /
++0x14  —                          ABI 13's log slot; gone with the "G8 Test" string
++0x18  fn   send(record *)        as ABI 13
++0x24  fn   button(n) -> state    push-button input n: 0 idle, 1 pressed, 2 tapped, 3 held,
+                                  4 released after a hold
++0x40  fn   notify(value)         return value unused
+```
+
+Call sites, 13.6 / 14.7: activate 88 / 91, deactivate 5 / 10, is_active 6 / 11, send 14 / 34,
+`+0x24` 0 / 7, `+0x40` 0 / 3.
+
+**`button(n)` moves the wall switches into the blob.** The five states are table `0x20`'s input
+phases, and 14.7's table `0x20` has no input rules. The blob polls inputs n = 0, 1, 3, 5, 6, 8 and
+9 and keeps the last state of each as a nibble in cell `0x116` (a real runtime cell, despite the
+"false hit" note in the `0xDA`–`0xDC` section). On a change it sends from its frame table
+(`1FEDB`), then `1FFB8` DIGITAL_INPUT_STATUS `[n+1, down, FF, 02, FF FF FF FF]`, where down means
+state 1 or 3. 14.7 also feeds cell `0x28` (ignition) from `1FFB8`. Executed:
+
+| input | tap | hold | release |
+|---|---|---|---|
+| 0 | toggle output 22 (`FA 05`) | ramp (`21`), re-sent every 1 s | stop (`04`) |
+| 1 and 3 | toggle output 35 | ramp, re-sent every 1 s | stop |
+| 5 / 6 | relay 3 / 4 on at 200 while pressed | — | off |
+| 8 | toggle output 44 | — | toggle again |
+| 9 | output 3 off, then lock (`33`), on press | — | unlock (`34`) |
+
+**`notify(value)`** is called three times by a defaults routine, with cells `0x0E` (300), `0x0F`
+(1800) and `0x16` (115) just after it sets them. What the application does with them is not in
+the MCF.
 
 ### Table `0x61` #15 (`1FFFD` instance 1 → cell `0x55`) is a RECEIVE — `observed-on-hardware`
 
@@ -1837,12 +1915,12 @@ closing on the wire, `observed-on-hardware`:
 ```
 
 Four milliseconds, so the application both **loops its own transmissions through its receive
-rules** and **runs the tick on the event** rather than waiting for the 1 Hz call — the same
+rules** and ~~**runs the tick on the event** rather than waiting for the 1 Hz call~~ — *2026-10-21: no event
+needed; the tick runs every 10 ms, so the next tick picks the cell up* — the same
 latency PC.23 measured for config-write relays (2-10 ms). Replaying only the recorded ignition and
 sensor frames into the emulated G12 (`tools/fidelity.py --g12`) puts the UNLOCK at **260.569 s**
 against 260.567 s on the coach, from this blob's code. What remains app-side and unread: cell `0x05`
-(832 ↔ 960 around the stop), and whether the event-driven tick advances the timers (the emulator
-accepts up to one extra second per event).
+(832 ↔ 960 around the stop), ~~and whether the event-driven tick advances the timers~~ (moot at 100 Hz).
 
 The G12's own self-addressed `1FED9` rules (#2/#3/#6/#7, "bus loop-back" in the table above) are
 the same mechanism: the emulator applies every frame the G12 sends to its own receive path, and
