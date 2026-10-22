@@ -1,6 +1,6 @@
 {
   "name": "fireflymcf",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Build custom Firefly MCF firmware for Spyder RV panels from an owner's description",
   "author": { "name": "Dan Berglund" },
   "license": "MIT"

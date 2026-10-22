@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fireflymcf"
-version = "0.3.1"
+version = "0.3.2"
 description = "Read, render, and safely edit Firefly Integrations MCF firmware for Jayco/Spyder RV panels"
 readme = "README.md"
 requires-python = ">=3.10"
