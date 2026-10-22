@@ -1996,6 +1996,56 @@ product ID by BAM, `BUS-BASELINE.md` line ~1390); DM_RV `05 84 1F 16`, `1FFE2` a
 5 s; the bus clock `1FFFF` (table `0x61` #3 puts cell `0x2A`'s low byte, the hour, at byte 4;
 `0x2A = hour | minute << 8`); input pins held from 1 s and refreshed each second (PC.24).
 
+### The thermostat — application behaviour from captures, 2026-10-22
+
+The temperature sensor is wired to the G12 (owner), so the G12 is the coach's thermostat: it
+broadcasts `1FF9C` THERMOSTAT_AMBIENT_STATUS (table `0x61` #8, from cell `0x6B`) and `1FFE2`
+THERMOSTAT_STATUS_1, and acts on `1FEF9` THERMOSTAT_COMMAND_1 from the panel. The blob's part is
+small (cell `0x68`, "The caller" above); the rest is the application, read from `pc8`, `pc34`,
+`pc37`, `pc38` and `pc63` (`observed-on-hardware`) and reproduced by `firefly-emulator`'s
+`g12thermo.py`, which matches `pc34`, `pc37` and `pc38` frame for frame.
+
+**State.** `1FEF9` instance 0 updates it field by field; `FF` (nibble `F`, two-bit `3`) keeps a
+field. Byte 1 = operating mode (bits 0-3: 0 off, 1 cool, 2 heat, 3 auto) | fan mode (4-5: 0 auto,
+1 on) | schedule (6-7, not reported). A fan speed of 0 or 100 reads back 100, 200 reads back 200.
+A setpoint of `FFFA` / `FFF9` steps it 1 °F up / down: `pc8` walks `0x2501 → 0x2513 → 0x2501 →
+0x24F0`, which fits `ceil(((F − 32) / 1.8 + 273.25) × 32)` (three points, `inferred`). `1FFE2`
+answers within ~2 ms and repeats every 5 s as `[0, mode | fan << 4, speed, heat u16, cool u16,
+00]`; a changed cool setpoint is copied to heat at the next periodic status, not the immediate one.
+Cell `0x68` = status bytes 1 | 2 << 8 (`0` on the coach's live read-back, matching its idle status).
+
+**Fans (blob).** With fan mode 1, speed 100 runs fan low (rules #37 `0C` on, #34 `0B` off `0F`),
+speed 200 fan high (#38 `0B` on, #35 `0C` off `0F`). Rules of kind `0x24` (#36/#37) and `0x28`
+(#38/#39) go out as **pairs**, so fan low on the wire is `0B` off, `0C` on, then `0B` off `0F`.
+Fan mode back to auto turns the running fan off (`0B` after speed 200 in `pc8`, `0C` after 100 in
+`pc37`); the blob does nothing there, so this is the application.
+
+**Compressor (application).** Cool or auto, with the ambient above the cool setpoint, starts it
+**3.0 s** after the command (`pc8` 3.007, `pc34` 3.001, `pc38` 3.009 s): `0B` off, `0C` on, `2B`
+and `09` on (#36/#37, #32, #33), then ~14 ms later `0B` on, `0C` off (#38/#39), whatever the fan
+speed. `2B`/`09` ON (#32/#33, kind `0xCC`) is re-sent every 5 s on the run's own phase, not the
+`15FCE` sweep's. **Every run lasted exactly 120 s**, even when the mode went off after 82 s
+(`pc38`): the stop comes on a 5 s re-send with `0B`/`0C` off `0F` (#34/#35) and `2B`/`09` OFF
+three times 250 ms apart (#30/#31, kind `0x40`). `pc34` and `pc38` send one last ON just before
+the stop and `pc8` does not, so the two timers race. No blob site activates #30–#33 or #40/#41.
+The ambient condition is `inferred`: heat mode at 35 °C against a 22 °C setpoint drove nothing
+(`pc34`), and every cooling run had the ambient above the setpoint.
+
+**Power-up.** 26 ms after its first sweep frame the G12 switches everything off: #34, #35, then
+`2B`, `09` and `0A` OFF three times 250 ms apart (#30, #31, #40; `pc63`, after the network upload).
+
+**Heat pump — `inferred`, never observed.** The heat pump is the OPTIONS row Heat Pump (cell `0xEB`,
+which also reveals the Heat Pump and Auto modes on CLIMATE; `BUS-BASELINE.md` PC.34). The blob only
+defaults `0xEB` (`+0x064A`), and the owner's coach has no heat pump, so no capture shows channel
+10 (`A/C Heat Pump`) on. Its rules sit in the compressor's classes (#41 ON, kind `0xCC`; #40 OFF,
+kind `0x40`), and the owner expects heating to be driven like cooling, so the emulator runs the
+cooling sequence on `0A` for heat or auto with `0xEB = 1` and the ambient below the heat setpoint.
+Whether `2B`/`09` also run and what the fans do are open; a capture from a coach with the option
+would settle them.
+
+**Second thermostat.** The panel also sends instance 3 (`03C0…`) beside some mode changes; the G12
+reports only instance 0 and nothing follows from instance 3.
+
 ### Live read-back on the coach, 2026-10-21 — `observed-on-hardware`
 
 PC.49's read-only sweep repeated (D3 queries from `0xC0`, 4 Hz): 256/256 answered; no CAN id
