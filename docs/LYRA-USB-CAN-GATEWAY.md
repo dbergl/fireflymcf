@@ -120,8 +120,8 @@ The sweep exercising a single output is why the value was taken for a level. It 
 plus a zero frame with byte 6 = `00` when the output switches on and when toggle (5) or memory-off
 (6) switches it off; nothing while off. Still a *report* directed at the driver — consistent with,
 but not proven to be, an internal command; use `1FEDB` for control. Documented as
-`DC_DIMMER_LEVEL_16_SPYDER` in the rvc2mqtt fork's `rvc-spec.yml` (branch `unknown-dgns`, corrected
-there in the same terms; the names are kept for MQTT compatibility). The emulator models it per
+`DC_DIMMER_LOAD_CURRENT_SPYDER` (byte 4 `load current`; formerly `DC_DIMMER_LEVEL_16_SPYDER` /
+`level`) in the rvc2mqtt fork's `rvc-spec.yml` (branch `unknown-dgns`). The emulator models it per
 output (`firefly-emulator` `firefly_emu/g12out.py`).
 
 ## Load / instance map
