@@ -1893,6 +1893,22 @@ state 1 or 3. 14.7 also feeds cell `0x28` (ignition) from `1FFB8`. Executed:
 | 8 | toggle output 44 | — | toggle again |
 | 9 | output 3 off, then lock (`33`), on press | — | unlock (`34`) |
 
+**Corroborated on another coach, 2026-10-22 (owner's photo of NETWORK DIAGNOSTICS, panel config
+14.12, G12 firmware `4.0k`).** Its G12 INPUTS list is pin 1 Kitchen OHC Lts (GND), 2 Bench Seat OHC
+Lts, 6/7 Awning EXT/RET (12V), 8 Shore Power (12V), 9 Water Pump (12V), 10 Ignition (12V). With
+pin p = input p−1, and the 14.7 MCF's own output labels, every row matches the table above: input 0
+→ output 22 "Kitchen OHC Lts"; 5/6 → outputs 3/4 "Awning EXT"/"Awning RET"; 8 → output 44 "Water
+Pump"; 9 (ignition) → locks output 3, the MCF's "AWNING EXTEND LOCKED BY IGNITION". Shore power
+(input 7) is not one the blob polls. Output 35's label is blank in the 14.7 MCF ("35 - "), so input
+1 → "Bench Seat OHC Lts" is likely but not shown.
+
+**The application version moves with the ABI.** This coach's G12 reports application `0x0300`,
+release `0x64` (PC.64), and its NETWORK DIAGNOSTICS shows **`3.0d`** (owner's photo, panel firmware
+`1.6r`, config 13.6), so the page prints major.minor plus the release byte as a letter. The
+photographed 14.12 coach shows `4.0k` (panel firmware `1.6t`). That fits
+ABI 17 needing a 4.x application (`inferred`). No MCF carries the application image, so loading a
+14.x `G12` section into a 3.0 G12 should be expected to fail.
+
 **`notify(value)`** is called three times by a defaults routine, with cells `0x0E` (300), `0x0F`
 (1800) and `0x16` (115) just after it sets them. What the application does with them is not in
 the MCF.
