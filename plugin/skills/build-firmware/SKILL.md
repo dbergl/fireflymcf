@@ -8,7 +8,7 @@ description: Use when an RV owner wants to change what their Firefly / Spyder mu
 Turn an owner's description into a flashable `mcf-<name>.bin`, compiled from **their own** stock
 `mcf.bin` with the `fireflymcf` CLI. It is not on PyPI; install it from GitHub with
 `pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"` (a release: end
-the URL `fireflymcf.git@v0.3.2`). Never install it by its bare name: a PyPI package of that
+the URL `fireflymcf.git@v0.3.3`). Never install it by its bare name: a PyPI package of that
 name would not be this project. The panel checks checksums,
 not whether the content suits the coach, so a build must be right by construction and described
 honestly. One change you can stand behind beats four you guessed at.
