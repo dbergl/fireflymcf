@@ -2069,7 +2069,8 @@ the timing**: output 9's ON, re-sent every 5 s while the compressor runs, answer
 again at the next check (69 of 69); outputs 21–44 keep it (output 43's 81 re-sends, output 21's
 level changes and ramps live). The switch-off status of 9–20 never carries it.
 
-**Cell `0x05`** (swept on `15FCE`; the panel reads it as data point 231, the spec's "AES state")
+**Cell `0x05`** (swept on `15FCE`; the spec's "AES state"; the panel stores it as data point 231 and
+never reads it, `GUICODE.md` Finding 86)
 is `0x300` | flags, across every capture:
 
 | bit | meaning | evidence |
