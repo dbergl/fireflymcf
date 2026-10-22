@@ -320,7 +320,7 @@ def test_parent_reached_only_through_a_switch_arm():
     assert any("under 904" in m for m in res.manifest), res.manifest
 
 
-def test_batt_heat_free_pool_never_takes_a_guicode_driven_group(monkeypatch):
+def test_batt_heat_free_pool_never_takes_a_guicode_driven_group(monkeypatch, request):
     """`add_aes_batt_heat`'s `free` pool is `assignable_groups`, not `free_group_slots`: with
     only GuiCode-driven slots left (13.6's 136-139), the op runs dry as NO_FREE_GROUP rather
     than handing out 136 for the finish gate to refuse."""
@@ -328,6 +328,11 @@ def test_batt_heat_free_pool_never_takes_a_guicode_driven_group(monkeypatch):
     driven = sorted({136, 137, 138, 139} & set(newbutton.guicode_selected_groups(data)))
     assert driven == [136, 137, 138, 139]
     monkeypatch.setattr(newbutton, "free_group_slots", lambda _data: list(driven))
+    # `assignable_groups` is memoised on content: clear it so an earlier test's pool for the
+    # same image is not served past the patch, and again afterwards so this test's empty pool
+    # is not served to a later one.
+    newbutton.assignable_groups.cache_clear()
+    request.addfinalizer(newbutton.assignable_groups.cache_clear)
     res = _compile([{"id": "aesswap", "type": "swap_aes_electrical", "enabled": True,
                      "params": {}},
                     {"id": "battheat", "type": "add_aes_batt_heat", "enabled": True,
