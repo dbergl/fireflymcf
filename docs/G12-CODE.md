@@ -2031,7 +2031,10 @@ and `09` on (#36/#37, #32, #33), then ~14 ms later `0B` on, `0C` off (#38/#39), 
 speed. `2B`/`09` ON (#32/#33, kind `0xCC`) is re-sent every 5 s on the run's own phase, not the
 `15FCE` sweep's. **Every run lasted exactly 120 s**, even when the mode went off after 82 s
 (`pc38`): the stop comes on a 5 s re-send with `0B`/`0C` off `0F` (#34/#35) and `2B`/`09` OFF
-three times 250 ms apart (#30/#31, kind `0x40`). `pc34` and `pc38` send one last ON just before
+three times 250 ms apart (#30/#31, kind `0x40`). *2026-10-22:* "off `0F`" is OFF with a 15 s
+duration, a **delayed off** (below), so the running fan keeps going **15 s after the compressor
+stops** (`pc34` `0B` 285.821 → off 300.819) — and 15 s after fan mode goes back to auto (`pc8`
+1124.82, `pc37` 851.466 → 866.466). `pc34` and `pc38` send one last ON just before
 the stop and `pc8` does not, so the two timers race. No blob site activates #30–#33 or #40/#41.
 The ambient condition is `inferred`: heat mode at 35 °C against a 22 °C setpoint drove nothing
 (`pc34`), and every cooling run had the ambient above the setpoint.
@@ -2064,10 +2067,26 @@ clear while 0.42–0.48 s are latched. What fits all but two of the 990 statuses
 latches once the output has been on **0.23 s** (fit 0.222–0.236); statuses answering a command
 report the bit but do not check. The two misses are one output with the same command at the same
 tick phase: 38 latched at 0.226 s in `pc14` and was clear at 0.251 s in `pc15`, so something off
-the bus also decides. On the half-bridge outputs 9–20 **every command clears the bit and restarts
-the timing**: output 9's ON, re-sent every 5 s while the compressor runs, answers `04` and is `44`
-again at the next check (69 of 69); outputs 21–44 keep it (output 43's 81 re-sends, output 21's
-level changes and ramps live). The switch-off status of 9–20 never carries it.
+the bus also decides. On the half-bridge outputs 9–20 **a command's own status never shows the bit,
+but the latch stays**: output 9's ON, re-sent every 5 s while the compressor runs, answers `04`, and
+the periodic status 3 ms later is `44` (`pc38` 874.346 / 874.349; *corrected the same day from
+"every command clears and restarts it", which the 3 ms case refutes*); outputs 21–44 show it
+throughout (output 43's 81 re-sends, output 21's level changes and ramps live). The switch-off
+status of 9–20 never carries it.
+
+**Timed commands** (`1FEDB` byte 4 = D seconds, commands 0–3). The output's end comes **exactly D s
+after the command**, not on the 1 s tick (`pc34` 285.821 → 300.819, `pc37` 851.466 → 866.466).
+`1FEDA` byte 4 reports floor(D − elapsed) with elapsed counted in the G12's **10 ms ticks**: `0F`
+5 ms after the command in `pc34` but already `0E` 2 ms after in `pc37` (a tick fell in between),
+then `0E`, `0C` … `00` on the 2 s statuses. **OFF (3) with a duration is a delayed off**: the
+output stays on (status level 200, command `03`, the countdown) and goes off at D; sent to an
+output that is already off it reports D and still sends the expiry status (`pc8` 1117.830 →
+1132.829, `0C FF 00 FC FF 03 00 00`). A plain OFF, SET or toggle cancels the timer (`pc8`
+1117.821). `16F84` keeps reporting every second through a timed command (`pc8`'s awning relay,
+output 3, held with "ON 2 s" each second; the fans' run-on in `pc34`/`pc37`/`pc38`). With these,
+`firefly-emulator`'s output check reproduces `pc34` 631 of 632 status/level frames, `pc38` 653 of
+658 and `pc8` 1335 of 1370; the rest is current-reading jitter (heaters flicker a count, the water
+pump and awning motors vary) and the compressor's end-of-run race.
 
 **Cell `0x05`** (swept on `15FCE`; the spec's "AES state"; the panel stores it as data point 231 and
 never reads it, `GUICODE.md` Finding 86)
