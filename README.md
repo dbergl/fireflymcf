@@ -20,17 +20,23 @@ Start with [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md) if you own a coa
 
 ## Claude Code plugin
 
-The plugin drives the `fireflymcf` command-line tool, so install that first:
-
-```
-pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"
-```
-
-Then, at the prompt of a Claude Code session:
+At the prompt of a Claude Code session:
 
 ```
 /plugin marketplace add dbergl/fireflymcf
 /plugin install fireflymcf@fireflymcf
+```
+
+The plugin drives the `fireflymcf` command-line tool and installs it itself. At each session start
+its hook (`plugin/hooks/hooks.json`, `plugin/scripts/session-start.sh`) checks that the release
+matching the plugin's version is installed in a venv in the plugin's data folder, installs it from
+that release's wheel when it is not (the first session, and the first after a plugin update), and
+tells the agent where it is. It needs Python 3.10+ (`python3`, `python` or `py -3`) and, on
+Windows, Git Bash, which Claude Code runs hooks in. It does not touch any other Python install.
+When it cannot install, the agent says so and gives the command to run by hand:
+
+```
+pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"
 ```
 
 Describe the change you want ("rename the Water Pump button to Pump"), or use
@@ -95,6 +101,11 @@ git push origin v0.3.0
 
 Move only a tag that never produced a release. Once a release exists, someone may have installed
 it by its tag: ship the fix as the next version instead.
+
+**The plugin installs the release its `plugin.json` names**, from that release's wheel. Between
+the version bump reaching `main` and the release run publishing the wheel, a session that has
+already picked up the new plugin finds no wheel; its hook says it did not install, writes no
+marker, and the next session start installs it.
 
 An owner installs a release with
 `pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git@v0.3.0"`.
