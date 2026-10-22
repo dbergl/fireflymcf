@@ -141,6 +141,8 @@ def test_the_shift_line_is_capped():
     assert line.startswith("moved 12 record(s), restyled 1, gone 0, new 0 on roots 5, 39: "
                            "'r0' (0,-1), 'r1' (0,-1), "), line
     assert line.endswith("... and 7 more"), line
+    assert recipe_ops._shift_line([], [4]) == ("moved 0 record(s), restyled 0, gone 0, new 0 "
+                                               "on root 4: nothing else changed")
 
 
 def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
