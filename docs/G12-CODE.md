@@ -1980,7 +1980,8 @@ needed; the tick runs every 10 ms, so the next tick picks the cell up* — the s
 latency PC.23 measured for config-write relays (2-10 ms). Replaying only the recorded ignition and
 sensor frames into the emulated G12 (`tools/fidelity.py --g12`) puts the UNLOCK at **260.569 s**
 against 260.567 s on the coach, from this blob's code. What remains app-side and unread: cell `0x05`
-(832 ↔ 960 around the stop), ~~and whether the event-driven tick advances the timers~~ (moot at 100 Hz).
+(832 ↔ 960 around the stop; *2026-10-22: decoded from the captures, bit `0x80` = 30 s after any
+ignition change — "Undercurrent latch and cells `0x03`/`0x05`" below*), ~~and whether the event-driven tick advances the timers~~ (moot at 100 Hz).
 
 The G12's own self-addressed `1FED9` rules (#2/#3/#6/#7, "bus loop-back" in the table above) are
 the same mechanism: the emulator applies every frame the G12 sends to its own receive path, and
@@ -2018,7 +2019,11 @@ Cell `0x68` = status bytes 1 | 2 << 8 (`0` on the coach's live read-back, matchi
 speed 200 fan high (#38 `0B` on, #35 `0C` off `0F`). Rules of kind `0x24` (#36/#37) and `0x28`
 (#38/#39) go out as **pairs**, so fan low on the wire is `0B` off, `0C` on, then `0B` off `0F`.
 Fan mode back to auto turns the running fan off (`0B` after speed 200 in `pc8`, `0C` after 100 in
-`pc37`); the blob does nothing there, so this is the application.
+`pc37`); the blob does nothing there, so this is the application. So is the switch-on: fan mode 1
+or a new speed is answered **with the command**, before the status — the old fan off `0F`, then the
+new pair — and the blob's own off rule follows on its next 10 ms pass (`pc8` 1108.43: `0B` off,
+`0C` on, status, `0B` off `0F` +8 ms; 1117.82 low → high: `0C` off `0F`, `0B` on, `0C` off, status,
+`0C` off `0F` again +10 ms). With this the emulator matches all of `pc8`'s fan frames.
 
 **Compressor (application).** Cool or auto, with the ambient above the cool setpoint, starts it
 **3.0 s** after the command (`pc8` 3.007, `pc34` 3.001, `pc38` 3.009 s): `0B` off, `0C` on, `2B`
@@ -2045,6 +2050,41 @@ would settle them.
 
 **Second thermostat.** The panel also sends instance 3 (`03C0…`) beside some mode changes; the G12
 reports only instance 0 and nothing follows from instance 3.
+
+### Undercurrent latch and cells `0x03`/`0x05` — application behaviour from captures, 2026-10-22
+
+Neither is in the blob; both are fitted to every capture (`observed-on-hardware`) and reproduced by
+`firefly-emulator` (`g12out.py`, `G12._aes_state`).
+
+**When the `1FEDA` undercurrent bit latches.** Byte 6 bit `0x40` on the outputs that carry it (9,
+17, 18, 21, 24–26, 35, 38, 43, 44 on the coach) is not a plain time since switch-on: 0.225 s is
+clear and 0.254 s latched at the same status phase, and a switch-off 0.378 s after switch-on is
+clear while 0.42–0.48 s are latched. What fits all but two of the 990 statuses after a switch-on is a
+**check on the G12's half-second grid** — its 1 s tick and the status tick 0.5 s later — that
+latches once the output has been on **0.23 s** (fit 0.222–0.236); statuses answering a command
+report the bit but do not check. The two misses are one output with the same command at the same
+tick phase: 38 latched at 0.226 s in `pc14` and was clear at 0.251 s in `pc15`, so something off
+the bus also decides. On the half-bridge outputs 9–20 **every command clears the bit and restarts
+the timing**: output 9's ON, re-sent every 5 s while the compressor runs, answers `04` and is `44`
+again at the next check (69 of 69); outputs 21–44 keep it (output 43's 81 re-sends, output 21's
+level changes and ramps live). The switch-off status of 9–20 never carries it.
+
+**Cell `0x05`** (swept on `15FCE`; the panel reads it as data point 231, the spec's "AES state")
+is `0x300` | flags, across every capture:
+
+| bit | meaning | evidence |
+|---|---|---|
+| `0x01` | AES enabled (= cell `0x01`) | every enable / disable in `pc37`, `pc38`, `pc39` |
+| `0x02` | the low-volts start is pending: set `0x0C` s after the voltage fell below `0x0B`, kept until disabled | `pc39`: clear at the 112.575 sweep, set at 117.575, start at 117.658; `771 → 768` on disable |
+| `0x40` | set by an ignition change, cleared when AES is enabled or disabled | `pc37` `832 → 769 → 768`; `pc48` `768 → 960 → 832` |
+| `0x80` | the 30 s after **any** ignition change, on or off | `pc27` (both edges), `pc28` (the drop), `pc48` (the owner's injected `1FBDA`); 28.8–30.5 s from the sweeps |
+
+So `PC.28`'s 64 → 192 → 64 (`BUS-BASELINE.md` Result 4) is bit `0x80` over bit `0x40`, and 64 is
+"an ignition change since AES was last switched", not a run state. `pc39` also splits the fitted
+"below for `0x0C` + 5 s" start: bit `0x02` lands `0x0C` = 10 s after the crossing, the start 5 s
+later. **Cell `0x03`** is 720 while AES is enabled and `FFFF` otherwise; no other cell holds 720.
+Replaying `pc27`, `pc28`, `pc37`, `pc38`, `pc39` and `pc48` into the emulated G12 gives the real
+value sequences of both cells. What 720 and bit `0x40` mean is not known.
 
 ### Live read-back on the coach, 2026-10-21 — `observed-on-hardware`
 
