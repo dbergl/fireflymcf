@@ -402,7 +402,8 @@ class StatusRule:
     **Direction.** Kinds `0x24`/`0x28`/`0x2C` are the G12's 1 Hz status broadcasts, six of
     seven observed on the coach (`1FFFF` clock, `1AAFD` DC voltage x2 instances, `1FF9C`
     ambient temperature, `0BFC1` tank sensors x4, `1AADC` generator, `1AAB7` LPG level; `1FFFD`
-    never -- gated). Kinds `0x14`/`0x18`/`0x1C` are read as **subscriptions**: none of their
+    never -- **corrected 2026-10-21: #15 `1FFFD` is a receive** (the APS-500's instance 1 lands in
+    cell `0x55`; G12-CODE.md "Executing the blob"), so kind `0x28` does not fix the direction). Kinds `0x14`/`0x18`/`0x1C` are read as **subscriptions**: none of their
     DGNs is sourced by the G12 *from that record* (the `1FBDA` instances it does send come from
     table `0x20`; `1AADC` is sent by #12/#13; DM_RV is every RV-C node's own), instance `0xFE`,
     `1FF96`, `1FFFE` and `1FFAB` have never been seen from anyone, and the cells they name are
