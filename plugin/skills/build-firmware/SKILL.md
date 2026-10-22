@@ -6,10 +6,15 @@ description: Use when an RV owner wants to change what their Firefly / Spyder mu
 # Build a custom Firefly firmware
 
 Turn an owner's description into a flashable `mcf-<name>.bin`, compiled from **their own** stock
-`mcf.bin` with the `fireflymcf` CLI. It is not on PyPI; install it from GitHub with
-`pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"` (a release: end
-the URL `fireflymcf.git@v0.3.3`). Never install it by its bare name: a PyPI package of that
-name would not be this project. The panel checks checksums,
+`mcf.bin` with the `fireflymcf` CLI. This plugin installs it: at every session start its hook
+puts the release matching the plugin's version in the plugin's own data folder and leaves one line
+in your context, `fireflymcf X is installed for this plugin: run PATH`. Run that PATH wherever
+this skill or a command says `fireflymcf` (`F=PATH` below; `fireflymcf-tankpatch` and
+`fireflymcf-g12flash` are beside it). When the line says it did not install, it gives the `pip
+install` command to run by hand; do that. Without the line (the hook did not run), install it
+from GitHub with `pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"`
+(a release: end the URL `fireflymcf.git@v0.3.3`). Never install it by its bare name: a PyPI
+package of that name would not be this project. The panel checks checksums,
 not whether the content suits the coach, so a build must be right by construction and described
 honestly. One change you can stand behind beats four you guessed at.
 
@@ -30,7 +35,7 @@ honestly. One change you can stand behind beats four you guessed at.
 ## Inspect (all read-only)
 
 ```bash
-F=fireflymcf; M=stock/mcf.bin
+F=fireflymcf; M=stock/mcf.bin          # F=the PATH the plugin's hook printed
 $F doctor $M                          # build name, sections, interlocks, tank broadcasts
 $F pages $M                           # each screen: --root index, --page name, header
 $F labels $M --containing "Pump"      # every record with that text, by object index
