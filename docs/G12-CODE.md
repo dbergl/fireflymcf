@@ -1857,3 +1857,23 @@ no longer triggers its clamp relay); answers to the panel's 14 s requests (`1FED
 product ID by BAM, `BUS-BASELINE.md` line ~1390); DM_RV `05 84 1F 16`, `1FFE2` and `17EFE` every
 5 s; the bus clock `1FFFF` (table `0x61` #3 puts cell `0x2A`'s low byte, the hour, at byte 4;
 `0x2A = hour | minute << 8`); input pins held from 1 s and refreshed each second (PC.24).
+
+### Live read-back on the coach, 2026-10-21 — `observed-on-hardware`
+
+PC.49's read-only sweep repeated (D3 queries from `0xC0`, 4 Hz): 256/256 answered; no CAN id
+outside a 25-minute live baseline but the probe's own `19FED9C0`.
+
+- **#15 confirmed as a receive, live:** cell `0x55` = 1071 = the WS500's (`0x80`, formerly
+  "APS-500") `1FFFD` instance 1 at the same instant, and `0x0A` steps 1072 → 1071 with it; `0x56`
+  = 248 = the G12's own house reading (`1AAFD` instance 1).
+- **Table `0x61` params are the accepted value range.** #14 (`1FECA`, byte 0, params 80..65535)
+  receives the WS500's DM_RV, whose byte 0 is 5: out of range, and cell `0x53` (block C's guard,
+  default 0 in init) reads `0xFFFF`; block C's status `0x77` reads 0 accordingly. Same reading fits
+  #0 (0..257), #2 (0..3), #6 (0..200) and the transmit records' brackets (10–16 V, -51..82 °C).
+- **Cell `0xC2` is packed:** `0x6450` = LPG level 80 | resolution 100 << 8; #16 (`1AAB7`, u8) and
+  #93 (`TANK_STATUS`, one byte) both take the low byte.
+- **The blob explains most of the hidden state:** an emulation seeded only with what the G12
+  broadcasts reproduces 231/256 cells, 189 of the 214 never broadcast. The rest are owner settings
+  never swept (`82`/`83` 210, `86`/`87` 60, `88`/`89` 13, `99` 5, `BA` 288, `BC` 268), cells the
+  13.6 code never writes (`12 19 1A 1D 1E A0 DB DC E7 ED F0`; `1D`/`1E` = 14, `DB`/`DC` = 29 as in
+  PC.49), and live drift.
