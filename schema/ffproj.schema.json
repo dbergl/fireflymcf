@@ -1837,6 +1837,14 @@
                       "null"
                     ],
                     "default": null
+                  },
+                  "frame": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{x, y, w, h}: a 1 px section frame in `colour`, drawn before the label"
                   }
                 },
                 "required": [
