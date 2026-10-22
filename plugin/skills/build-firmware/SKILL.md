@@ -178,7 +178,11 @@ N), every object changed or added, and every page whose render changed, with the
 Account for **each** line: a run, object or page an op did not mean to change is a defect, not a
 side effect. Exit 1 (a checksum that fails, a byte nothing claims, an unexplained run, a page that will not render, a
 build name equal to stock's) means do not hand it over. Also read the compile manifest: each line
-is an op checking itself on the finished bytes. Look at the changed pages' PNGs
+is an op checking itself on the finished bytes. A `remove_records` or `move_element` line ends
+`; moved N record(s), restyled N, gone N, new N on roots ...: ...`. Those are the records the op
+changed although the recipe did not name them (the `.bin.json` sidecar's `shifts` lists each
+one). Account for every one: compensate with a `move_element`, or use `move_control`, and pin
+the result with `assert_layout`. Look at the changed pages' PNGs
 (`$F render`).
 
 ## Hand over

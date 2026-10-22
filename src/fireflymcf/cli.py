@@ -938,7 +938,8 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     out.write_bytes(data)
     sidecar = {"sha256": sha, "size": len(data), "build_name": patch.build_name(data),
                "project": str(args.project), "stock_sha256": project.base_sha256,
-               "manifest": result.manifest, "unverified": result.unverified}
+               "manifest": result.manifest, "unverified": result.unverified,
+               "shifts": result.shifts}
     Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     if args.json:
         print(json.dumps(dict(sidecar, ok=True, out=str(out)), indent=2))

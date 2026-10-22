@@ -190,6 +190,9 @@ class CompileResult:
     errors: list
     manifest: list
     unverified: list
+    # {op_id: [entry, ...]}: what each `remove_records`/`move_element` moved besides its own
+    # records (`recipe_ops.shift_report`); report only, additive
+    shifts: dict = dataclasses.field(default_factory=dict)
 
 
 def capabilities(img: bytes) -> set:
@@ -385,7 +388,11 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     res, ch = patch.reseal(data)
     assert res == data, "image not sealed after verify: %s" % ch
     unverified = [o.spec.id for o in ops if not o.hardware_verified]
-    return CompileResult(True, data, [], manifest, unverified)
+    # An op's shift report joins its own line: the manifest stays one entry per op
+    shifts, texts = recipe_ops.shift_report(ops, ctx)
+    manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
+                for o, m in zip(ops, manifest)]
+    return CompileResult(True, data, [], manifest, unverified, shifts)
 
 
 def compile_project(project: Project, stock: bytes) -> CompileResult:
