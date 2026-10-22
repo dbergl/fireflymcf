@@ -2159,7 +2159,10 @@ with the engine actually cranking/running to confirm". This is that capture:
 **`192` is undocumented anywhere in this project or in `rvc-spec.yml`.** Two things are worth
 recording and nothing more: 64 is *not* "running" (it holds both while the engine runs and long
 after it stops), and 192 is a **transient tied to the sense dropping, not to the relay opening** —
-the relay opened 74 s earlier. The round 30.0 s duration suggests a post-run timer. `131` never
+the relay opened 74 s earlier. The round 30.0 s duration suggests a post-run timer. *2026-10-22,
+across all captures (`G12-CODE.md`, "Undercurrent latch and cells `0x03`/`0x05`"): the byte is
+flags — `0x80` for 30 s after any ignition change, on or off; `0x40` set by an ignition change and
+cleared by AES enable/disable; `0x01` enabled; `0x02` low-volts start pending.* `131` never
 appeared. *No interpretation is offered:* one capture, with the van's AES driving rather than the
 Firefly's, is not enough to name a state — and this document has withdrawn three named mechanisms
 in one day for exactly that reason.

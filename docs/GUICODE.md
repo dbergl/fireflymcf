@@ -6381,6 +6381,38 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 85 — "The Front thermistor has an invalid reading." is the `1FF9C` instance-0 ambient out of range or stale — `observed-in-emulation`, 2026-10-22
+
+**Question.** A 14.12 coach's Network Diagnostics photo lists "The Front thermistor has an invalid
+reading." What makes the panel say it?
+
+**Where it lives.** SETTINGS → Network Diagnostics → FAULTS. The fault texts are GuiData widget
+records (13.6: GuiData `0x69A4C`–`0x69BF7`, file offsets `0x92E84`–`0x9302F`; 14.7 carries the same
+strings): Bay, System, Rear (two layouts) and Front (two layouts) thermistors, then the Atwood water
+heater, transfer switch, PMM, G6, G12 #2, G12 offline and Aqua Hot texts. While any fault is listed
+a warning triangle shows in the title bar.
+
+**What drives it.** Running 13.6 in `firefly-emulator` with its emulated G12 online: writing each of
+the 298 data points in turn (values 1, 2, `0x8000`, `0xFFFF`) changes the FAULTS box only for
+**data point 9** — `1FF9C` byte 1 u16 where byte 0 = 0, the G12's sensor (the same point the HOME
+CLIMATE tile paints) — and for point 21 (`1FEDA` instance 4 status byte 6,
+another fault, not followed here). Then, through the real path — the emulated G12's cell `0x6B`,
+broadcast as `1FF9C` — and bisected to one count:
+
+| raw (0.03125 K) | reading | FAULTS |
+|---|---|---|
+| `0x0000`–`0x1BC0` | ≤ 222 K (−51 °C) | Front thermistor fault |
+| `0x1BC1`–`0x2C5F` | 222.03–354.97 K | none |
+| `0x2C60`–`0xFFFF` | ≥ 355 K (82 °C), incl. `FFFD`–`FFFF` | Front thermistor fault |
+
+**No `1FF9C` for 30 s** (the point's timeout) raises it too; the next in-range frame clears it.
+Instances 1–3 (points 10–12) raised nothing on this floorplan, so the Rear/Bay/System texts are
+gated on something else (floorplan or option, not followed).
+
+**What stays open.** Whether a G12 with an open or shorted sensor sends an extreme reading or goes
+silent (either raises the text), and whether its thermostat then refuses to run. Not seen on the
+owner's coach.
+
 ## Finding 84 — where a wtype-0 character lands: `pen_y − font[0x0b] + glyph.y` down, the pen across, and any byte draws — `proven-from-code` down; across, `proven-from-code` given measuring class 2 (the class on a given page is inferred); checked against `HOME.jpg` and `CLIMATE.jpg`, 2026-10-21
 
 **Question.** `add_rvc_button` placed an icon's wtype-0 record so that `pen = target − (glyph.x,
