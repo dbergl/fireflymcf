@@ -42,6 +42,7 @@ against the image before use; a drifted donor raises `PageDrawError("donor ... d
 | `rbox` (wt-0x20) | object 368 record 1, the Status box | aux byte (out-regs 1) dropped; b1 0x55 -> 0x50; fillB 7 -> 3; A2/B2 0 -> 3 |
 | `capsule` (wt-0x21) | object 285 record 0 via `AddLowVoltsControl._box_record` | fillA 7 -> 3; fillA2 0 -> 3 |
 | `hline` (wt-2) | object 367 record 6 | fillA/fillA2 0 -> 3 (3 bytes each inserted) |
+| `frame` (wt-3) | object 947 record 3, the LIGHTS Interior frame | aux byte (in-regs 1) dropped; fillA 2 -> 3; A2 0 -> 3; B2 0 -> 5 |
 | `label`/`glyph` (wt-11) | object 285 record 1 via `AddLowVoltsControl._label_record` | fillA 2 -> 3; A2 0 -> 3; B/B2 5 or 3 |
 | `readout` (wt-9 + wt-8) | object 793 records 4/5 via `readout.author_readout_object` | font, align; A/A2 0 -> 3; B 7 -> 3; B2 0 -> 3 |
 | `touch` (wt-12) | object 186 record 1, an absolute touch region | geom; R50 touch id; align 0 -> 1 |
@@ -73,6 +74,10 @@ CAPSULE_DONOR = (285, 0)
 CAPSULE_STOCK = bytes.fromhex("21550c07000010002d00690032000500")
 HLINE_DONOR = (367, 6)
 HLINE_STOCK = bytes.fromhex("02500f000000000058029a0050005000")
+# The LIGHTS Interior section frame (floorplan WD's lights body), a hollow wt-3 (header byte 0
+# bit 1): a 1 px square outline in fillA, interior not painted (`render.py`'s wt-3 case).
+FRAME_DONOR = (947, 3)
+FRAME_STOCK = bytes.fromhex("43500f6a00000000990c005f00ae01160100")
 LABEL_DONOR = (285, 1)
 LABEL_STOCK = bytes.fromhex("0b550c2a0000000069003200010eff020214"
                             "00094c6f770a566f6c747300")
@@ -357,6 +362,18 @@ def hline(data: bytes, x: int, y: int, w: int, rgb) -> bytes:
         frag = _set_geom(frag, i, v)
     pairs = {"fillA": rgb, "fillA2": rgb}
     return _finish(_set_align(_paint(frag, pairs), ALIGN_NO_SHIFT), 2, [x, y, w, 0],
+                   _expect(pairs))
+
+
+def frame(data: bytes, x: int, y: int, w: int, h: int, rgb) -> bytes:
+    """A wt-3 section frame: a 1 px square outline `(x, y)-(x+w, y+h)` inclusive in `rgb`, its
+    interior transparent (fillB/fillB2 mode 5), as the stock LIGHTS Interior/Exterior frames
+    draw (`FUN_00255E90`'s four straight borders, width `state+0x6C10` = 1; `render.py`)."""
+    frag = _absolute(_drop_aux18(_donor(data, FRAME_DONOR, FRAME_STOCK)))
+    for i, v in enumerate((x, y, w, h)):
+        frag = _set_geom(frag, i, v)
+    pairs = {"fillA": rgb, "fillA2": rgb, "fillB": None, "fillB2": None}
+    return _finish(_set_align(_paint(frag, pairs), ALIGN_NO_SHIFT), 3, [x, y, w, h],
                    _expect(pairs))
 
 
