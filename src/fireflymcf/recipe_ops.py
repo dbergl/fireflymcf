@@ -3416,7 +3416,8 @@ def _shift_line(entries, roots, cap=_SHIFT_CAP):
     named; or that nothing else changed."""
     counts = {k: len({(e["object"], e["record"]) for e in entries if e["kind"] == k})
               for k in _SHIFT_KINDS.values()}
-    where = ("roots " + ", ".join(map(str, roots))) if roots else "no page root"
+    where = (("root " if len(roots) == 1 else "roots ") + ", ".join(map(str, roots))
+             if roots else "no page root")
     head = "moved %d record(s), restyled %d, gone %d, new %d on %s" % (
         counts["moved"], counts["restyled"], counts["gone"], counts["new"], where)
     if not entries:
