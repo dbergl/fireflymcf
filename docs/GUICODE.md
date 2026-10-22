@@ -6381,6 +6381,44 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 86 — the FAULTS list has exactly three entries in 13.6, and the panel never reads cell `0x05` — `proven-from-code` (the object tree, the writers), checked `observed-in-emulation`, 2026-10-22
+
+**The tree.** The FAULTS box is object 525: its caption and **three type-6 switches**, so 13.6 can
+list three faults and no more.
+
+| variable | candidates | text |
+|---|---|---|
+| 235 | 495–497 | The G12 is offline. |
+| 236 | 512–514 | The Front thermistor has an invalid reading. |
+| 237 | 504–505 | "\<name\> Switch has a dead battery or is disconnected." — 505 is a switch on variable 5 (the floorplan) over objects 706–714: Rear Wall, Hallway, Hallway, Bed Wall, Entry Door, Entry Door, Hallway, Hallway, Rear Wall; floorplan WD shows "Hallway Switch" |
+
+The Aqua Hot, G12 #2, G6 driver card, PMM, transfer switch, Atwood and Rear/System/Bay thermistor
+texts sit in objects (494–522) that no record in 13.6 references.
+
+**The writers** (GuiCode's per-pass block at `0x24B440` and its outlined tails `0x24E852`–`0x24E8DC`;
+addresses from `layout.variable_register`):
+- **236** = (byte `0x2003A33F` == 1), evaluated only while 235 = 0 (`0x24B450`–`0x24B468`).
+  `0x2003A33F` is set at `0x24AA98` when the converted ambient (`0x2003A53E`) is the 10000
+  (`0x2710`) "no reading" sentinel — Finding 85's range and timeout.
+- **237**: a deadline at `0x200398B4` set **once at boot** to now + 600 000 ms (`0x247F6E`, among
+  the other start-up timers). Before it 237 = 0; after it, 237 = (variable 480 == 0). Variable 480
+  (`0x2003A6CA`, `0x24B2FC`) = `FUN_0025918C((point 16 + 1) / 2)`, point 16 being `1FFFD`
+  instance `0x81` — the wireless panel's battery, which the LCD itself broadcasts every 10 s from
+  the RF module's status packets and loops back into the point. In 0.1 V steps: 2.4–3.5 V → 1,
+  0.1–2.3 V → 2 (low; not listed), 0, ≥ 3.6 V or no data → 0 (listed). Variable 481 is the same
+  for instance `0x82`; no widget here uses it.
+- Each listed fault also increments `0x20039CCC` (the title-bar warning triangle's count,
+  `inferred`).
+
+Checked in `firefly-emulator` with the deadline shortened: no remote and 3.6 V list the switch,
+2.0 and 2.8 V do not. The coach's live logs report `81 FF 36 00` (2.70 V).
+
+**Cell `0x05` is not used by the panel.** Data point 231 (`15FCE` selector `05`, u16) is read once,
+at `0x24A1C6` (`ldrh.w r2,[r4,#0x1ce]`), and stored to `0x200399B6`; no instruction reads that
+address and no widget variable maps to it. 14.7 does the same (`0x24A6A2` → `0x20039682`). Cell
+`0x03` has no data point. So the meanings of `0x05` bit `0x40` and of `0x03` = 720
+(`G12-CODE.md`) cannot be read off the panel; of the AES cells only `0x01` (point 41) reaches it.
+
 ## Finding 85 — "The Front thermistor has an invalid reading." is the `1FF9C` instance-0 ambient out of range or stale — `observed-in-emulation`, 2026-10-22
 
 **Question.** A 14.12 coach's Network Diagnostics photo lists "The Front thermistor has an invalid
@@ -6406,8 +6444,8 @@ broadcast as `1FF9C` — and bisected to one count:
 | `0x2C60`–`0xFFFF` | ≥ 355 K (82 °C), incl. `FFFD`–`FFFF` | Front thermistor fault |
 
 **No `1FF9C` for 30 s** (the point's timeout) raises it too; the next in-range frame clears it.
-Instances 1–3 (points 10–12) raised nothing on this floorplan, so the Rear/Bay/System texts are
-gated on something else (floorplan or option, not followed).
+Instances 1–3 (points 10–12) raised nothing on this floorplan. *Resolved by Finding 86: the
+Rear/Bay/System texts are in objects nothing references in 13.6.*
 
 **What stays open.** Whether a G12 with an open or shorted sensor sends an extreme reading or goes
 silent (either raises the text), and whether its thermostat then refuses to run. Not seen on the
