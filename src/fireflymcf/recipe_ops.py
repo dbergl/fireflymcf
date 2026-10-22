@@ -3537,6 +3537,37 @@ def _effective_slot(by_key, r):
     return None
 
 
+# Records that draw nothing themselves (attach, switch, touch region): the colours and the
+# inherited value slot they walk with reach the page only through their children, and the paste
+# check compares each child itself.
+_PASTE_NO_DRAW = (5, 6, 0x2E, 12)
+
+
+def _paste_restyled(src, got, src_slot, got_slot):
+    """Whether `move_control`'s pasted record `got` is styled otherwise than its source `src`
+    (`pagewalk.WalkRec`s; `*_slot` their effective value slots, `_effective_slot`).
+
+    Font and align are compared on every record, and the record's own value slot (a switch's
+    selector cell). A record in `_PASTE_NO_DRAW` is not compared on colours or on an inherited
+    slot: it paints nothing. A drawn record's effective colours must match role for role, with
+    one exception: a role the source left with nothing to inherit (mode 0, no value: no record
+    on its path ever wrote the slot, so the page does not decide what it paints) may arrive
+    transparent (mode 5, which paints nothing: the transparency bit, GUICODE Finding 38). The
+    reverse, a transparent source arriving on an unwritten slot, is a restyle."""
+    if (src.font, src.align) != (got.font, got.align):
+        return True
+    if src.wtype in _PASTE_NO_DRAW:
+        return src.value_slot != got.value_slot
+    if src_slot != got_slot or len(src.colors) != len(got.colors):
+        return True
+    for (role, mode, value), g in zip(src.colors, got.colors):
+        if g == (role, mode, value):
+            continue
+        if not (mode == 0 and value is None and g[0] == role and g[1] == 5):
+            return True
+    return False
+
+
 def _inherited_slot(by_key, r):
     """`(slot, attach)` when `r` has no value slot of its own and the nearest wrapping wtype-5
     attach on its key that carries one is `attach`; else None (`_effective_slot`'s rule)."""
@@ -3749,8 +3780,10 @@ class MoveControl(Op):
     6. **Measure after and assert.** Re-walk every (root, arm) pair of both sides. Every record
        that was there must be unchanged (the source through the removal's index remap); the only
        new records are the attach on `to` and, under it, the control, each at its source box
-       translated to `at`, with the same font, align, colours and effective `value_slot`. A
-       state difference is STATE_CHANGED (the pasted record would be styled wrong); any other
+       translated to `at`, with the same font, align, colours and effective `value_slot`
+       (`_paste_restyled`: a record that draws nothing keeps only its font, align and own
+       slot; a colour role the source never had written may arrive transparent). A state
+       difference is STATE_CHANGED (the pasted record would be styled wrong); any other
        difference is LAYOUT_MOVED, with `pagewalk.describe` lines.
 
     Touch ids map to groups globally (`FUN_00256B84` copies the id into the hit-region table
@@ -4185,7 +4218,7 @@ class MoveControl(Op):
                     want = (e.box[0] + ox, e.box[1] + oy, e.box[2] + ox, e.box[3] + oy)
                     es = dataclasses.replace(e, value_slot=_effective_slot(exp_keys, e))
                     as_ = dataclasses.replace(a, value_slot=_effective_slot(by_key, a))
-                    if pagewalk._state(es) != pagewalk._state(as_):
+                    if _paste_restyled(e, a, es.value_slot, as_.value_slot):
                         restyled.append(pagewalk.Delta(a.key, a.wtype, a.label, "state", es,
                                                        as_))
                     if a.box != want:
@@ -8306,7 +8339,9 @@ class AddTextLabel(_LabelBox, Op):
 
     A new object attached under `parent` (`insert.insert_object`, a byte clone of the parent's
     first wtype-5 attach, the paste path `add_enum_label` and `move_control` use) holds an
-    optional `background` fill (wtype 33, radius 1), ONE wtype-11 label in a declared `w` x `h`
+    optional `frame` (a page section's 1 px outline, `pagedraw.frame`: the stock LIGHTS
+    Interior frame re-encoded absolute, drawn first so a title with a `background` masks the
+    frame's edge behind it as the stock titles do), an optional `background` fill (wtype 33, radius 1), ONE wtype-11 label in a declared `w` x `h`
     box (the panel clips text to it, `GUICODE.md` Findings 69-70), both absolute at `x, y`
     (`enumlabel.label_records(at=...)`, pagedraw's form), and, when the label leaves a font or
     align other than the one the page walk carried in, the empty label that writes it back
@@ -8333,6 +8368,8 @@ class AddTextLabel(_LabelBox, Op):
       align: "left" | "centre" | "right" (default "left").
       colour: [r, g, b] text colour (default white); background: [r, g, b] | null (default
               null), a fill behind the box. Both must be palette colours.
+      frame: {x, y, w, h} | null (default null) -- a section frame `(x, y)-(x+w, y+h)`
+             inclusive, a 1 px outline in `colour` with a transparent interior.
 
     Error codes:
       BAD_PARAMS     -- a malformed param: an empty, non-latin-1 or over-254-byte text, an
@@ -8344,7 +8381,7 @@ class AddTextLabel(_LabelBox, Op):
       NO_GLYPH       -- the font slot has no font, or a character the font draws neither as a
                         glyph nor as a blank (it would draw a fallback).
       NO_COLOUR      -- `colour` or `background` is not in this build's palette.
-      OFF_CANVAS     -- the box leaves the 800x480 canvas.
+      OFF_CANVAS     -- the box or the frame leaves the 800x480 canvas.
       LAYOUT_REFUSED -- the placement changes any other record on a page reaching `parent`; a
                         pasted record would inherit a value slot (e.g. under 899); the entering
                         font/align cannot be measured or written back (no page reaches
@@ -8365,6 +8402,9 @@ class AddTextLabel(_LabelBox, Op):
                       "description": "left | centre | right"},
             "colour": {"type": "array", "default": [255, 255, 255]},
             "background": {"type": ["array", "null"], "default": None},
+            "frame": {"type": ["object", "null"], "default": None,
+                      "description": "{x, y, w, h}: a 1 px section frame in `colour`, drawn "
+                                     "before the label"},
         },
         "required": ["parent", "x", "y", "w", "h", "font", "text"],
     }
@@ -8385,6 +8425,19 @@ class AddTextLabel(_LabelBox, Op):
             raise self._bad("text %r has an empty line (a leading, trailing or doubled '\\n')"
                             % (self.text,))
         self._refuse_off_canvas()
+        self.frame = self._param("frame", None)
+        if self.frame is not None:
+            if not (isinstance(self.frame, dict) and set(self.frame) == {"x", "y", "w", "h"}
+                    and all(isinstance(v, int) and not isinstance(v, bool)
+                            for v in self.frame.values())):
+                raise self._bad("frame must be {x, y, w, h} of integers, got %r" % (self.frame,))
+            fx, fy, fw, fh = (self.frame[k] for k in ("x", "y", "w", "h"))
+            if fw <= 0 or fh <= 0:
+                raise self._bad("the frame must be positive, got %dx%d" % (fw, fh))
+            if fx < 0 or fy < 0 or fx + fw >= _CANVAS_W or fy + fh >= _CANVAS_H:
+                raise RecipeError("OFF_CANVAS", "the frame (%d,%d,%d,%d) leaves the %dx%d canvas"
+                                  % (fx, fy, fx + fw, fy + fh, _CANVAS_W, _CANVAS_H),
+                                  op_id=self.spec.id)
 
     def apply(self, data, ctx):
         oid = self.spec.id
@@ -8411,10 +8464,13 @@ class AddTextLabel(_LabelBox, Op):
             parts = enumlabel.label_records(
                 data, text=self.text, font=self.font, w=self.w, h=self.h, align=self.align,
                 colour_index=colour, bg_index=bg, at=(self.x, self.y), multiline=True)
-            # the fill and the label both write header align 1; the label writes its font
+            if self.frame is not None:
+                f = self.frame
+                parts = [pd.frame(data, f["x"], f["y"], f["w"], f["h"], self.colour)] + parts
+            # the frame, the fill and the label all write header align 1; the label its font
             placed, _edits, index, restore = enumlabel.place_static(
                 data, parent=parent, parts=parts, leaving=(self.font, pd.ALIGN_NO_SHIFT))
-        except enumlabel.EnumLabelError as e:
+        except (enumlabel.EnumLabelError, pd.PageDrawError) as e:
             raise RecipeError("LAYOUT_REFUSED", str(e), op_id=oid)
         _paste_gates(data, placed, parent, index, code="LAYOUT_REFUSED", whose="the label's",
                      action="placing the label", op_id=oid)
@@ -8426,6 +8482,7 @@ class AddTextLabel(_LabelBox, Op):
             "object": index, "parent": parent, "text": self.text, "x": self.x, "y": self.y,
             "w": self.w, "h": self.h, "font": self.font, "align": self.align,
             "colour_index": colour, "bg_index": bg, "restore": restore,
+            "frame": self.frame, "frame_rgb": list(self.colour),
             # the attach as pasted (a clone of the parent's first wtype-5): its own pen
             "attach_geom": list(attach.geom), "attach_modes": list(attach.base_modes),
         }
@@ -8447,13 +8504,22 @@ class AddTextLabel(_LabelBox, Op):
                 and list(att.base_modes) == h["attach_modes"]), \
             "the attach under %d does not carry the geometry it was pasted with" % h["parent"]
         recs = records.object_records(data, gs + tab[h["object"]])
-        lead = [] if h["bg_index"] is None else [33]
+        framed = h["frame"] is not None
+        lead = ([3] if framed else []) + ([] if h["bg_index"] is None else [33])
         tail = [] if h["restore"] is None else [11]
         assert [r.wtype for r in recs] == lead + [11] + tail, \
             "the label object holds wtypes %s, not its records" % [r.wtype for r in recs]
         box = [h["x"], h["y"], h["w"], h["h"]]
-        if lead:
-            f = recs[0]
+        if framed:
+            fr, fb = recs[0], h["frame"]
+            ink = pd._rgb_int(h["frame_rgb"])
+            assert (fr.geom[:4] == [fb["x"], fb["y"], fb["w"], fb["h"]]
+                    and fr.base_modes[:4] == [0, 0, 1, 1]
+                    and fr.colors == [("fillA", 3, ink), ("fillA2", 3, ink),
+                                      ("fillB", 5, None), ("fillB2", 5, None)]), \
+                "the frame does not draw as built"
+        if h["bg_index"] is not None:
+            f = recs[int(framed)]
             assert (f.geom[:5] == box + [enumlabel.FILL_RADIUS]
                     and f.base_modes[:4] == [0, 0, 1, 1]
                     and f.colors[:2] == [("fillA", 7, h["bg_index"]),
@@ -8484,9 +8550,11 @@ class AddTextLabel(_LabelBox, Op):
         assert entering and entering == leaving, \
             "the label object enters with font/align %s and leaves with %s" % (
                 sorted(entering, key=str), sorted(leaving, key=str))
-        return ("add_text_label: %r in font %d at (%d, %d) %dx%d, object %d under %d; "
+        framed_at = ("" if not framed else ", framed (%d, %d) %dx%d" % tuple(
+            h["frame"][k] for k in ("x", "y", "w", "h")))
+        return ("add_text_label: %r in font %d at (%d, %d) %dx%d%s, object %d under %d; "
                 "UNVERIFIED on the coach" % (h["text"], h["font"], h["x"], h["y"], h["w"],
-                                            h["h"], h["object"], h["parent"]))
+                                            h["h"], framed_at, h["object"], h["parent"]))
 
 
 @op("add_rvc_button")

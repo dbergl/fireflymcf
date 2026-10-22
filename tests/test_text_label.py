@@ -364,3 +364,55 @@ def test_verify_reads_every_field_apply_placed(monkeypatch):
         tamper(bad)
         with pytest.raises(AssertionError):
             op.verify(bytes(bad), ctx)
+
+
+FRAME = {"x": 80, "y": 216, "w": 200, "h": 60}
+
+
+def test_frame_draws_first_and_the_title_masks_it():
+    """A section: the frame (the stock LIGHTS Interior frame's wt-3, absolute, a 1 px outline
+    in `colour` with a transparent interior), then the title's background fill, then the
+    title, whose fill sits over the frame's top edge as the stock titles do."""
+    res = _compile([_op(frame=FRAME, background=[39, 40, 98])])
+    assert res.ok, res.errors
+    obj, recs = _label_object(res.data)
+    assert [r.wtype for r in recs][:3] == [3, 33, 11]
+    fr = recs[0]
+    assert fr.geom[:4] == [80, 216, 200, 60] and fr.base_modes[:4] == [0, 0, 1, 1]
+    assert fr.colors == [("fillA", 3, 0xFFFFFF), ("fillA2", 3, 0xFFFFFF),
+                         ("fillB", 5, None), ("fillB2", 5, None)]
+    assert fr.align == 1 and not any(fr.in_regs) and not any(fr.out_regs)
+    walk = pagewalk.walk_records(res.data, CLIMATE_ROOT)
+    placed = {r.index: r for r in walk if r.obj == obj}
+    assert placed[0].box == (80, 216, 280, 276)
+    assert placed[1].box[:2] == placed[2].box[:2] == (X, Y)
+    assert any("framed (80, 216) 200x60" in m for m in res.manifest), res.manifest
+
+
+@pytest.mark.parametrize("frame,code,why", [
+    ({"x": 80, "y": 216, "w": 200}, "BAD_PARAMS", "frame must be"),
+    ({"x": 80, "y": 216, "w": 200, "h": True}, "BAD_PARAMS", "frame must be"),
+    ([80, 216, 200, 60], "BAD_PARAMS", "frame must be"),
+    ({"x": 80, "y": 216, "w": 0, "h": 60}, "BAD_PARAMS", "positive"),
+    ({"x": 700, "y": 216, "w": 100, "h": 60}, "OFF_CANVAS", "frame"),
+    ({"x": 80, "y": 430, "w": 100, "h": 50}, "OFF_CANVAS", "frame"),
+    ({"x": -1, "y": 216, "w": 100, "h": 60}, "OFF_CANVAS", "frame"),
+])
+def test_frame_refusals(frame, code, why):
+    got, msg = _errors(_op(frame=frame))
+    assert got == code and why in msg, msg
+
+
+def test_verify_catches_a_tampered_frame(monkeypatch):
+    seen = _spy_apply(monkeypatch)
+    res = _compile([_op(frame=FRAME)])
+    assert res.ok, res.errors
+    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    assert "framed" in op.verify(data, ctx)
+    _obj, recs = _label_object(data)
+    fr = recs[0]
+    for gi, v in ((0, 81), (3, 61)):
+        bad = bytearray(data)
+        struct.pack_into("<h", bad, fr.geom_off[gi], v)
+        with pytest.raises(AssertionError):
+            op.verify(bytes(bad), ctx)

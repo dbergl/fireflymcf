@@ -67,11 +67,11 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
-| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock). | **no** |
+| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
-| [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. | yes |
+| [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`). | yes |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
@@ -849,9 +849,9 @@ Error codes:
 
 ### add_text_label
 
-Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change.
+Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change.
 
-- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font (photo against stock).
+- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock).
 - **Proof:** `enumlabel.py`, `pagedraw.py`
 - **Implementation:** `recipe_ops.AddTextLabel`
 
@@ -867,6 +867,7 @@ Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more
 | `align` | string |  | "left" | left \| centre \| right |
 | `colour` | array |  | [255, 255, 255] |  |
 | `background` | array\|null |  | null |  |
+| `frame` | object\|null |  | null | {x, y, w, h}: a 1 px section frame in `colour`, drawn before the label |
 
 Error codes:
 
@@ -874,7 +875,7 @@ Error codes:
 - `BAD_REF` — a `parent` ref names no usable handle.
 - `NO_GLYPH` — the font slot has no font, or a character the font draws neither as a glyph nor as a blank (it would draw a fallback).
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
-- `OFF_CANVAS` — the box leaves the 800x480 canvas.
+- `OFF_CANVAS` — the box or the frame leaves the 800x480 canvas.
 - `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.
 
 ### aes_card_layout
@@ -946,7 +947,7 @@ Error codes:
 
 Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page.
 
-- **Hardware status:** Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op.
+- **Hardware status:** Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`).
 - **Proof:** `pagewalk.py`, `absrecord.py`, `CONTROL-BEHAVIOR.md` §10
 - **Implementation:** `recipe_ops.MoveControl`
 
