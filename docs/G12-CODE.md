@@ -1275,6 +1275,9 @@ Sharper still, the black-tank gate reuses **one call instruction for both direct
 A helper that merely "fired a rule once" could not be reached by that branch, and would not need
 the idempotence query at `+0x1112` either.
 
+*(2026-10-21: the full context, including `[r4,#0x14]` log and `[r4,#0x18]` send, is tabulated in
+"Executing the blob" at the end of this document.)*
+
 ### The four water/waste broadcasts on 13.6
 
 | rule | instance | tank | activation | gate |
@@ -1371,8 +1374,9 @@ standard.
 8. ~~Name `0xCC`/`0xCD`/`0xCE`.~~ **DONE, PC.35** — the tank level thresholds (0/33/67/100%
    boundaries in raw ADC counts). The "second cheapest" route in this entry is the one that worked,
    and it took minutes: *ask the owner*. Worth remembering next time a value resists the file.
-8. **Where does `+0x50` come from?** Not from this blob — its writer is in the G12 application at
-   `0x08006000`, which the MCF does not contain. Dumping that image over the bootloader protocol
+8. ~~**Where does `+0x50` come from?**~~ **ANSWERED 2026-10-21** — the G12 receives its own pin-10
+   `1FBDA FB` frame through table `0x61` #0; see "Executing the blob". *Original entry:* Not from
+   this blob — its writer is in the G12 application at `0x08006000`, which the MCF does not contain. Dumping that image over the bootloader protocol
    (PC.19 has the memory map) is the only route, and it would answer far more than this.
 
 ---
@@ -1754,3 +1758,102 @@ stores *at the next mode switch*. Not edited here.
    (measured: 95% → 70%). Telling a long branch from a leaf call needs interprocedural return
    analysis, not worth it for a cosmetic count, so `functions` stays an over-count.
 
+
+---
+
+## Executing the blob — `observed-in-emulation` / `observed-on-hardware`, 2026-10-21
+
+The blob has now been **run**, not only read. `firefly-emulator` (`firefly_emu/g12.py`) loads table
+`0x67` unmodified into a Unicorn Cortex-M4 (mapped at the inferred `0x08038AE4`; it is
+position-independent, so the base does not matter), calls init and the tick with a context built to
+the layout below, and sends the rule records the code activates. New label for this section:
+**`observed-in-emulation`** — the 13.6 code executed on these inputs did this. It proves what the
+blob does; it says nothing about the G12 application around it, which is modelled from captures
+and named as such.
+
+### The context, complete for ABI 13 (11.23 and 13.6)
+
+```
++0x00  u32  cell array            u16 per selector, selector N at index N, 0xFFFF = unset
++0x04  u16  cell count            the timer bank sits at the top (cell[count-2] ... cell[count-19])
++0x06  u8   ?                     never read by 13.6
++0x07  u8   extra seconds         +0x0936/+0x095A: the first two timers drop by ctx[7]+1 per call;
+                                  the 16-timer loop +0x098E-+0x09A6 drops each by exactly 1
++0x08  fn   activate rule N       \
++0x0C  fn   deactivate rule N      | "The per-rule broadcast switch" above
++0x10  fn   is rule N active?     /
++0x14  fn   log(char *)           called once by init with "G8 Test" (+0x077E-+0x0788)
++0x18  fn   send(record *)        a 12-byte frame-table record copied to the stack
+                                  (+0x10B8 ldr r3,[r4,#0x18] ... +0x10D2 blx ip)
+```
+
+`+0x18` was already named as "transmit" in "The frame table and the AWNING IGNITION INTERLOCK";
+executing the code confirms it is a context slot like the other four and that the interlock cannot
+run without it (with the slot absent the first ignition edge branches to address 0). Every call
+being one second follows from the 16-timer loop: any count works for `+0x04` as long as the bank
+clears the config cells (the emulator uses `0x200`). The header word `+0x04` is the ABI version
+(next steps #4): 13 on 11.23 and 13.6, both of which run under this layout; 14.7's 17 does not
+(its slots moved) and is not mapped here.
+
+**Re-derived by execution, all agreeing with this document:** init's 128 sentinel defaults and its
+48 boot activations; the tank bucketer (raw cells `B0`-`B3` = `0BFC1` instances 1-4 → buckets 0-3
+in `B5`-`B8`, descending: ≥ `CC` empty, < `CE` full; `TANK_STATUS` resolution 3); #47 gated on
+`0xEC`, #48 on floorplan ∈ {RA, RD, WA, WD}, #93 off in AES; the change-detect relays (`82` → #52
+after a write); the four `0x95` seed-test cells. Two values this document did not have:
+
+- **`0x16 = 115` comes from the AES mode-change handler.** From fresh cells with `EF := 3` the first
+  tick leaves `0D 1080, 31 1000, 73 18, 16 115` — 115 is the coach's swept value (115:1967 in the
+  table above), so the coach's max engine run time is the handler's, not only the panel template's.
+- **Switching AES → AGS leaves `0D = 270`**, `50 = 20`, `7B/7C = 30`: the 12 V AGS stop voltage, not
+  the 290 ceiling of the AGS clamps.
+
+### Table `0x61` #15 (`1FFFD` instance 1 → cell `0x55`) is a RECEIVE — `observed-on-hardware`
+
+`StatusRule.direction` reads kind `0x28` as a transmit and `g12rules` records `1FFFD` as "never —
+gated". It is never seen from the G12 because the G12 **receives** it:
+
+- `pc23-baseline`: the G12 sweeps `0x0A` (AES measured voltage, copied from `0x55`/`0x56` at
+  `+0x190C`/`+0x1912`) as **1077**; the APS-500 (SA `0x80`) sends `1FFFD` instance 1 with raw
+  **1077** in all 60 of its frames. 53.85 V on a 48 V house bank; `1AAFD` instance 1 (cell `0x56`,
+  12.3 V) is the other source.
+- `pc28`: `0x0A` follows the APS-500's `1FFFD` through 1086 … 1095 over the 366 s, step for step.
+- Run the same way, the emulated G12 fed the APS-500's frames into `0x55` reproduces both.
+
+So **kind does not give direction**: `0x28` is a transmit on #1 (`1AAFD`) and a receive on #15.
+`StatusRule.direction` is unchanged by this note; a caller wanting the truth for #15 needs an
+override until a second distinguishing field is found.
+
+### `+0x50` is written by the G12 receiving its OWN ignition frame — next steps #8 answered
+
+The G12 sends `1FBDA` instance `0xFB` itself (table `0x20` #28/#29, input pin 10), and table `0x61`
+#0 copies `1FBDA` instance `0xFB` byte 1 into cell `0x28` (= struct `+0x50`). `pc28` shows the loop
+closing on the wire, `observed-on-hardware`:
+
+```
+260.563  19FBDA9C#FB00FFFFFFFFFFFF    ignition off (pin 10)
+260.567  19FEDB9C#03FF0022FF00FFFF    UNLOCK, ch 3 (record 13, the +0x183A tail)
+261.099  195FCE9C#0500C003...         0x05 832 -> 960
+261.108  195FCE9C#0600000000000000    run state 0x06 3 -> 0
+```
+
+Four milliseconds, so the application both **loops its own transmissions through its receive
+rules** and **runs the tick on the event** rather than waiting for the 1 Hz call — the same
+latency PC.23 measured for config-write relays (2-10 ms). Replaying only the recorded ignition and
+sensor frames into the emulated G12 (`tools/fidelity.py --g12`) puts the UNLOCK at **260.569 s**
+against 260.567 s on the coach, from this blob's code. What remains app-side and unread: cell `0x05`
+(832 ↔ 960 around the stop), and whether the event-driven tick advances the timers (the emulator
+accepts up to one extra second per event).
+
+The G12's own self-addressed `1FED9` rules (#2/#3/#6/#7, "bus loop-back" in the table above) are
+the same mechanism: the emulator applies every frame the G12 sends to its own receive path, and
+the `0x79`/`0x7D` writes follow.
+
+### Application behaviour the emulator models from captures (for completeness)
+
+Not from this blob; cited so the boundary is explicit. Rule repeat per kind (`KIND_OBSERVED`); the
+15FCE sweep = every kind-`0xC0` record activated since power-up, one burst every 5 s about 1 ms
+apart (`pc23`), which makes the sweep set history (the coach sweeps `0x11` although a stored 45
+no longer triggers its clamp relay); answers to the panel's 14 s requests (`1FED8` + four `0FF01`;
+product ID by BAM, `BUS-BASELINE.md` line ~1390); DM_RV `05 84 1F 16`, `1FFE2` and `17EFE` every
+5 s; the bus clock `1FFFF` (table `0x61` #3 puts cell `0x2A`'s low byte, the hour, at byte 4;
+`0x2A = hour | minute << 8`); input pins held from 1 s and refreshed each second (PC.24).
