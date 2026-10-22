@@ -765,6 +765,27 @@ immediates out of the blob rather than restating them) and `test_selector_f5_is_
 
 ### The caller — and the dispatch is GATED OFF at the config default
 
+**CORRECTED 2026-10-22 — `observed-in-emulation`; the rest of this subsection is superseded.** The
+`bl +0x1778` at `+0x0FDC` is a long-branch jump, not a call, and `+0x1778` is not this block: it
+is the **A/C fan** arm (fan speed 100 → rules #37/#34), and it jumps back at `+0x17AA` without
+reaching `+0x17AE`. The dispatch is reached from **`+0x1056`**, a change detector on **cell
+`0x4A`**, which table `0x61` #10 fills from `1FBDA` instance `A2` byte 1: the G12's **own input
+pin 2** indicator, looped back. Executed: pin 2 held 1 s (100 ticks) sends ramp (`21`) and again
+every 0.5 s (`+0x10A2` re-arms 50 ticks), released after a hold sends stop (`04`), and a tap sends
+toggle (`FA 05`), on channel 25 for this coach's floorplan and 35 for floorplans 4/5/6/10. So
+this is pin 2's wall switch, and it is **not** gated by `0x68`. The owner's NETWORK DIAGNOSTICS
+photo labels this coach's pin 2 **Bath Lts (GND)**, channel 25's name; a 14.12 coach's photo
+labels its pin 2 **Bench Seat OHC Lts**, a channel 35 name. 14.7 moved pins into `button(n)` and
+sends input 1 to 35 on every floorplan.
+
+**Cell `0x68` is the thermostat's mode and fan state**: `1FFE2` THERMOSTAT_STATUS_1 bytes 1 | 2 << 8
+as the G12 reports them (low nibble = operating mode, next nibble = fan mode, high byte = fan
+speed). With fan mode 1 the code runs fan low (rules #37 on, #34 off) at speed 100 and fan high
+(#38 on, #35 off) at 200, which reproduces the G12's own commands in `pc8` at 1108.43 and 1117.82.
+The compressor rules (#30–#33, #40/#41) have no activation site in the blob; the application runs
+them.
+
+
 `+0x0FDC` is the function's only call site, and reading it qualifies the result above. The caller
 unpacks **`config[0x68]`** (cell `+0xD0`) into three fields and gates the call on two of them:
 
@@ -858,6 +879,17 @@ never occurred**, not that a frame was missed.
 defaults routine (writes 0), the read above, and the clear. **Nothing here ever writes it non-zero**
 — the trigger comes from the G12 application at `0x08006000`, which the MCF does not contain. What
 the event *is* remains unknown; its shape does not.
+
+*2026-10-22, `observed-in-emulation`:* `0x7D` is raised by loop-back of the `1FED9` rules #7
+(`7D := 1`, `BF 01`) and #3 (`7D := 2`, `BF 02`). The blob activates #7 at one site, `+0x15A6`:
+on an ignition edge (`0x28` ≠ its latch `0x29`) with `0x01 = 1`, outside AES (`0xEF` = `0x7A` and
+not 2 or 3; that path copies `0x2D` into `06`, which must be 3), together with #10, #4 and #6
+(`79 := 0`). The coach was in AES for PC.24, so PC.24's `BF 01` is not this path. Nothing in the
+blob activates #2/#3: in PC.39 the **application** sends the start (start channel on, channel 20
+off, `79 := 1`, `7D := 2`), 15.0 s after the voltage first fell below `0x0B` with `0x0C` = 10.
+Modelling that start and replaying PC.39 into the executed blob puts `BF 00` at 120.585 s against
+120.586 s on the coach, at the G12's one-second boundary (its 1 Hz `1FFB7` goes out at x.999).
+This is an independent check of the 10 ms tick and its divider.
 
 **A timer bank, not scattered timers.** `+990`, `+992` (here) and `+994`, `+996`, `+998`, `+1000`
 (the AES watchdog) are six adjacent u16s, all driven by the one decrement loop at `+0x18AA` and all
@@ -1634,7 +1666,7 @@ GuiCode `D1 EA` template value(s). Name sources: **r** rvc2mqtt `rvc-spec.yml` (
 | 37 | +06E | 0 | quiet-time path writes 1 (`+0x0FA4`) — inferred | never | – |
 | 39-3C, 3E, 3F, 47, 49 | | 0 | unknown | never | – |
 | 3D, 4B | | 0/–/– | 11.23-only, unknown | never | – |
-| 4A | +094 | 0/0/– | unknown; read `+0x1014`, `+0x1064` (copied to a runtime cell) | never | – |
+| 4A | +094 | 0/0/– | input pin 2 state, from the G12's own `1FBDA A2` via table `0x61` #10; drives the pin-2 dimmer switch (2026-10-22, "The caller") | never | – |
 | 4F | +09E | –/0/0 | re-arm gate (`== 2`, `+0x1306`); the Stop template clears it (G) | never | 0 |
 | 50 | +0A0 | –/255/255 | **generator-STOP output channel — new, `proven-from-code`**: rule #4 = `1FEDB` with instance ← `0x50`, byte 4 ← `0x7C`; the mode switch writes 20 (AGS `+0x14B2`; AES mode 2 via `+0x1250`→`+0x0A0A`) or 255 = none (AES-single, `+0x0A0A` with r2 = mode+0xFC) | never | – |
 | 53 | +0A6 | –/0/– | watchdog block-C guard (G); DM_RV-fed per §9a.3 | never | – |
@@ -1642,7 +1674,7 @@ GuiCode `D1 EA` template value(s). Name sources: **r** rvc2mqtt `rvc-spec.yml` (
 | 55 / 56 | +0AA / +0AC | – | AES / AGS measured-voltage source (`+0x190C`/`+0x19B0`) | never | – |
 | 58 | +0B0 | –/0/0 | unknown; Stop clears; read `+0x148A` | 0 (read-back) | 0 |
 | 5E, 5F, 60 | | 0 | the three unpacked fields of `0x68` (`+0x0FC0`–`+0x0FD2`) | never | – |
-| 68 | +0D0 | 0 | packed light-dispatch enable (G) | never | – |
+| 68 | +0D0 | 0 | ~~packed light-dispatch enable~~ thermostat mode / fan mode / fan speed, = `1FFE2` bytes 1-2 (corrected 2026-10-22, "The caller") | never | – |
 | 69, 6A, 6B | | 9413, 9467, 9568 | derived family (G) | never | – |
 | 6C, 6E | | 0 | unknown | never | – |
 | 6F | +0DE | –/255/– | unknown | never | – |
