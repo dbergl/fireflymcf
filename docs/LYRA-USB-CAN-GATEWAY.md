@@ -88,21 +88,41 @@ cansend can1 19FEDB44#20FF64 00FF00FFFF  # command 00 = set brightness (0x64 = 5
 - Verify state by reading `DC_DIMMER_STATUS_3` (`19FEDA9C`). **A load broadcasts `1FEDA` only while
   its output is ON**; an absent status means off, not missing.
 
-## Proprietary level report: DGN 16F00 (new)
+## Proprietary load-current report: DGN 16F00 (new; corrected 2026-10-21)
 
 `196F849C` decodes as priority 6, DP=1, **PF=0x6F, dest=0x84, src=0x9C** — a directed proprietary
-message from the G12 Controller (`0x9C`) to the load-driver module (`0x84`). It mirrors the dimmer
-level for the same instance at coarser 0–15 resolution and updates faster (it shows the fade ramp
-the 0–200 brightness can't). Fields:
+message from the G12 Controller (`0x9C`) to the load-driver module (`0x84`). Fields:
 
 ```
-FF | instance | FF FF | level(0-15) | 7D | active(05=on/00=off) | 00
+FF | instance | FF FF | load current | 7D (FF on outputs 9-20) | active(05=on/00=off) | 00
 ```
 
-Brightness sweep confirmed **`level = floor(1FEDA_brightness * 15 / 200)`** (200→0x0F, 100→0x07,
-50→0x03; round/ceil ruled out). It is a level *report* directed at the driver — consistent with,
-but not proven to be, the internal drive command; use `1FEDB` for control. Documented as
-`DC_DIMMER_LEVEL_16_SPYDER` in the rvc2mqtt fork's `rvc-spec.yml` (branch `unknown-dgns`).
+**Correction, 2026-10-21 — byte 4 is the output's load current (unit unknown), not a 0–15 level.**
+This section first read it as the dimmer level at 0–15 resolution. Across the coach captures
+(`captures/pc*.log`), with the same commanded brightness (`1FEDA` byte 2 = 200, output on), outputs
+report different and stable values — `observed-on-hardware`:
+
+| output | byte 4 at brightness 200 | frames (captures) |
+|---|---|---|
+| 24 | `0x0A` | 567 (5) |
+| 43 | `0x02` | 358 (3) |
+| 32 | `0x0F` | 60 (3) |
+| 22 / 23 / 21 | `0x0A`-`0x0B` / `0x16` / `0x07` | |
+| 26, 38 | `0x00` — on, nothing measured | 62 (2), 78 (4) |
+| 3, 4 (awning motors) | `0x37` … `0x79`, varying at a fixed level | |
+| 9–20 (half-bridge) | `FF FF` in bytes 4-5 — no current sense | 1,223 |
+
+For a dimmable load the current follows the delivered brightness, so on output 32 — whose full-load
+value happens to be `0x0F` — **`floor(brightness * 15 / 200)` holds**: the brightness sweep
+(`captures/lyra-brightness-sweep.log`, output 32 only) fits it at 24 of 25 levels (120 → 8, not 9).
+The sweep exercising a single output is why the value was taken for a level. It follows the
+*actual* output (fading in over ~0.7 s while `1FEDA` already reports the target), at 1 Hz while on,
+plus a zero frame with byte 6 = `00` when the output switches on and when toggle (5) or memory-off
+(6) switches it off; nothing while off. Still a *report* directed at the driver — consistent with,
+but not proven to be, an internal command; use `1FEDB` for control. Documented as
+`DC_DIMMER_LOAD_CURRENT_SPYDER` (byte 4 `load current`; formerly `DC_DIMMER_LEVEL_16_SPYDER` /
+`level`) in the rvc2mqtt fork's `rvc-spec.yml` (branch `unknown-dgns`). The emulator models it per
+output (`firefly-emulator` `firefly_emu/g12out.py`).
 
 ## Load / instance map
 
