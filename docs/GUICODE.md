@@ -6413,6 +6413,11 @@ addresses from `layout.variable_register`):
 Checked in `firefly-emulator` with the deadline shortened: no remote and 3.6 V list the switch,
 2.0 and 2.8 V do not. The coach's live logs report `81 FF 36 00` (2.70 V).
 
+*On the coach, 2026-10-22 (`observed-on-hardware`):* pulling the wireless switch's battery with the
+panel up more than 10 minutes **did not** list it. The LCD kept broadcasting instance `0x81` at the
+last reading (2.95 V) every 10 s, so point 16 never goes stale. Only a switch not heard since boot,
+or a 0 / ≥ 3.6 V report, lists it.
+
 **Cell `0x05` is not used by the panel.** Data point 231 (`15FCE` selector `05`, u16) is read once,
 at `0x24A1C6` (`ldrh.w r2,[r4,#0x1ce]`), and stored to `0x200399B6`; no instruction reads that
 address and no widget variable maps to it. 14.7 does the same (`0x24A6A2` → `0x20039682`). Cell
@@ -6448,8 +6453,14 @@ Instances 1–3 (points 10–12) raised nothing on this floorplan. *Resolved by 
 Rear/Bay/System texts are in objects nothing references in 13.6.*
 
 **What stays open.** Whether a G12 with an open or shorted sensor sends an extreme reading or goes
-silent (either raises the text), and whether its thermostat then refuses to run. Not seen on the
-owner's coach.
+silent (either raises the text), and whether its thermostat then refuses to run. An open sensor
+is answered below; a shorted one is still unseen.
+
+*On the coach, 2026-10-22 (`observed-on-hardware`):* with the sensor unplugged the G12 kept sending
+instance 0 every second at the open-circuit reading — `0x1AF0` (−57.6 °C), settling noisily around
+`0x191F` (−72 °C) — and the panel showed "Temp Sensor Error!", "---" and the triangle. In Cool it
+switched nothing (the reading is below any setpoint). Plugged back in, the reading was normal within
+~5 s.
 
 ## Finding 84 — where a wtype-0 character lands: `pen_y − font[0x0b] + glyph.y` down, the pen across, and any byte draws — `proven-from-code` down; across, `proven-from-code` given measuring class 2 (the class on a given page is inferred); checked against `HOME.jpg` and `CLIMATE.jpg`, 2026-10-21
 

@@ -891,6 +891,12 @@ Modelling that start and replaying PC.39 into the executed blob puts `BF 00` at 
 120.586 s on the coach, at the G12's one-second boundary (its 1 Hz `1FFB7` goes out at x.999).
 This is an independent check of the 10 ms tick and its divider.
 
+*2026-10-22, `observed-on-hardware`* (coach tests, below): **the event is the AES engine command.**
+`BF 02` went out with both G12 auto-starts and `BF 01` with the automatic stop, the abandoned start
+and an AES disable; after a panel AES Stop the G12 repeated it. At the automatic stop the ignition
+fell ~0.5 s after `BF 01` — the "bracketing an ignition-off" that PC.24 saw, so PC.24's `BF 01`
+was most likely an AES stop.
+
 **A timer bank, not scattered timers.** `+990`, `+992` (here) and `+994`, `+996`, `+998`, `+1000`
 (the AES watchdog) are six adjacent u16s, all driven by the one decrement loop at `+0x18AA` and all
 using `0xFFFF` for disarmed. Above `+0x200`, so runtime, not config.
@@ -2095,16 +2101,51 @@ is `0x300` | flags, across every capture:
 | bit | meaning | evidence |
 |---|---|---|
 | `0x01` | AES enabled (= cell `0x01`) | every enable / disable in `pc37`, `pc38`, `pc39` |
-| `0x02` | the low-volts start is pending: set `0x0C` s after the voltage fell below `0x0B`, kept until disabled | `pc39`: clear at the 112.575 sweep, set at 117.575, start at 117.658; `771 → 768` on disable |
-| `0x40` | set by an ignition change, cleared when AES is enabled or disabled | `pc37` `832 → 769 → 768`; `pc48` `768 → 960 → 832` |
-| `0x80` | the 30 s after **any** ignition change, on or off | `pc27` (both edges), `pc28` (the drop), `pc48` (the owner's injected `1FBDA`); 28.8–30.5 s from the sweeps |
+| `0x02` | the low-volts start is pending: set `0x0C` s after the voltage fell below `0x0B`, kept until AES is disabled or stops the engine | `pc39`: clear at the 112.575 sweep, set at 117.575, start at 117.658; `771 → 768` on disable; coach tests run 2: `0x383 → 0x381` at the automatic stop |
+| `0x04` | AES was enabled while the ignition was on; kept until disabled (an ignition-off does not clear it); **blocks the auto-start** | coach tests: set by three enables with the ignition on, never by three with it off; with it set the start went pending (`0x307`) and never fired |
+| `0x40` | set by an ignition change while AES is disabled, or by a stop that disables it; cleared when AES is enabled or disabled | `pc37` `832 → 769 → 768`; `pc48` `768 → 960 → 832`; coach tests: the abandoned start `→ 0x3C0` |
+| `0x80` | the 30 s after such an event, an automatic stop, or the ignition coming on during a run | `pc27` (both edges), `pc28`, `pc48` (the owner's injected `1FBDA`); 28.8–30.5 s from the sweeps. With AES enabled and idle an ignition change sets nothing, nor does the ignition dropping mid-run (coach tests) |
 
 So `PC.28`'s 64 → 192 → 64 (`BUS-BASELINE.md` Result 4) is bit `0x80` over bit `0x40`, and 64 is
 "an ignition change since AES was last switched", not a run state. `pc39` also splits the fitted
 "below for `0x0C` + 5 s" start: bit `0x02` lands `0x0C` = 10 s after the crossing, the start 5 s
 later. **Cell `0x03`** is 720 while AES is enabled and `FFFF` otherwise; no other cell holds 720.
 Replaying `pc27`, `pc28`, `pc37`, `pc38`, `pc39` and `pc48` into the emulated G12 gives the real
-value sequences of both cells. What 720 and bit `0x40` mean is not known.
+value sequences of both cells. What 720 and bit `0x40` mean is not known. A panel AES Stop is not
+fitted: it left `0x300` once and `0x3C0` three times.
+
+### AES start inhibit, automatic stop and abandoned start — coach tests, 2026-10-22 — `observed-on-hardware`
+
+Two passive captures on the coach (AES mode, the WS500's `1FFFD` instance 1 as the voltage), with
+the owner driving the panel: the first G12 **automatic stop** on record, an **abandoned start**,
+and the start inhibit. All application behaviour, reproduced by `firefly-emulator`
+(`G12._watchdog`); replaying the capture into the executed blob puts both starts 4–10 ms, the
+abandoned start 12 ms and the stop 4 ms from the real frames.
+
+- **The start is timed from when its condition becomes true, on the 10 ms tick.** With the voltage
+  already below Start At, the start came **15.012 s and 15.002 s after the enable** (`0x0C` = 10),
+  between `1FFFD` frames. In `pc39` the condition began at a frame, so "checked on receipt" fit
+  there too. The start frames are as in `pc39` (start channel `0x12` ON 200, channel 20 OFF,
+  `79 := 1`, `7D := 2`, `BF 02`), except that one start omitted `79 := 1`.
+- **Bit `0x04` blocks it.** Enabled with the ignition on (cell `0x28` = 1): pending at `0x0C` s, then
+  nothing. AES Stop and Enable with the ignition off cleared it and the start followed 15.0 s later.
+- **The automatic stop** — running (`0x79` = 1), the mode's voltage **strictly above** stop volts
+  `0x0D` for `0x0E` seconds: rules #4 (`1FEDB FF FF C8 01 01 00`), #5 (the start channel OFF), #6
+  (`79 := 0`), #7 (`7D := 1` → `BF 01`); AES stays enabled. A reading of exactly `0x0D` (1088 =
+  54.40 V) restarted the count, and the stop came **600.5 s** after it with `0x0E` = 600 — changed
+  from 900 twenty seconds into the run, so `0x0E` is read live. The ignition dropped 0.5 s later.
+- **The abandoned start.** The ignition came on 57.6 s after a start and fell 10.6 s later without
+  the engine running. **59.7 s after it fell**, on the timer bank's wrap, frame-table record 3 (the
+  channel-18 OFF, `12 FF 00 03 00 00`) — the `+0x0CAA` timeout above, which needs `+0x50` (the
+  ignition) at 0 — and then rules #4–#7 and **AES disabled**. With no ignition at all the executed
+  blob fires the same record 60 s after the start.
+- **The blob's limits, on the panel:** `0x0E` would not go below 600 (300 bounced back) and Start
+  At (`0x31`) would not go above 1080 (54.0 V).
+- **Two one-second phases.** The output driver's tick (periodic `16F84`, the 2 s statuses) ran
+  0.46 s after the `15FCE` sweep, and the timer bank (`BF 00`, the 60 s OFF) shares the sweep's.
+
+A low chassis battery also cranked the engine without the G12 (ignition on, off, on; no start
+channel, no `BF`): a chassis feature, not AES.
 
 ### Live read-back on the coach, 2026-10-21 — `observed-on-hardware`
 
