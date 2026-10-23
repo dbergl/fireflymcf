@@ -41,7 +41,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed. | yes |
 | [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
 | [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
-| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. | Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, repaints). | yes |
+| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. `role` (default `fillA`) picks the colour field: `fillB` is a label's or readout's background. | Flashed. With a `selector`, or a `role` other than `fillA`, UNVERIFIED (bench check: the selected field, and only it, repaints). | yes |
 | [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
 | [`remove_control`](#remove_control) | same-size | Park a control off the 480 px canvas by rewriting its attach records' y. Bindings stay. | UNVERIFIED. Never flashed. | **no** |
 | [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
@@ -238,9 +238,9 @@ Error codes:
 
 ### recolor
 
-Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box.
+Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. `role` (default `fillA`) picks the colour field: `fillB` is a label's or readout's background.
 
-- **Hardware status:** Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, repaints).
+- **Hardware status:** Flashed. With a `selector`, or a `role` other than `fillA`, UNVERIFIED (bench check: the selected field, and only it, repaints).
 - **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.Recolor`
 
@@ -250,13 +250,14 @@ Repoint a button box's fill index to another colour in the firmware palette. A `
 | `color` | array\|object | yes |  | [r, g, b] triple or {"index": n} palette index |
 | `allow_container` | boolean |  | false | recolour a card of controls on purpose |
 | `selector` | object |  |  | the record to recolour: wtype (int), label (str), nth (int, default 0); omitted, the object's one box |
+| `role` | string {"fillA", "fillA2", "fillB", "fillB2"} |  | "fillA" | the colour field to repoint; fillB is a label's or readout's background |
 
 Error codes:
 
-- `BAD_PARAMS` — color is not [r,g,b] list or {"index": n} dict, or selector has a key other than wtype/label/nth, a non-int wtype, a non-str label, or a nth that is not a non-negative int
+- `BAD_PARAMS` — color is not [r,g,b] list or {"index": n} dict, or selector has a key other than wtype/label/nth, a non-int wtype, a non-str label, or a nth that is not a non-negative int, or role is not one of the four fields
 - `NO_SUCH_RECORD` — no record matches selector (from `_select_record`)
 - `CONTAINER` — the object is a card of controls (it attaches child objects and holds two or more touch regions, like HOME's lights card 905), so its box is the card's background, not one button's; offers=["acknowledge_container"] — retry with allow_container=True to recolour the whole card
-- `NO_SUCH_COLOR` — object has no button box, or resolver rejects the colour (PatchError, PaletteError, ValueError all mapped here), or the selected record has no mode-7 fillA
+- `NO_SUCH_COLOR` — object has no button box, or resolver rejects the colour (PatchError, PaletteError, ValueError all mapped here), or the selected record's `role` is not mode 7
 
 ### remap_channel
 
