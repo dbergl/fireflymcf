@@ -63,9 +63,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "recolor": ("same-size",
         "Repoint a button box's fill index to another colour in the firmware palette. A "
         "`selector` (`move_element`'s wtype/label/nth) names the record when an object holds "
-        "more than one mode-7 box.",
-        "Flashed. With a `selector`, UNVERIFIED (bench check: the selected box, and only it, "
-        "repaints).", "`docs/HARDWARE-VERIFIED.md`"),
+        "more than one mode-7 box. `role` (default `fillA`) picks the colour field: `fillB` "
+        "is a label's or readout's background.",
+        "Flashed. With a `selector`, or a `role` other than `fillA`, UNVERIFIED (bench check: "
+        "the selected field, and only it, repaints).", "`docs/HARDWARE-VERIFIED.md`"),
     "remap_channel": ("same-size",
         "Make a labelled control command a different G12 output channel.",
         "Flashed with `move_display_list` (PC.13-16). The default indicator retarget is "

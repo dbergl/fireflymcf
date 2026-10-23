@@ -620,6 +620,9 @@ class SetIcon(Op):
             " caption blanked" if self.blank_caption else "")
 
 
+_RECOLOR_ROLES = ("fillA", "fillA2", "fillB", "fillB2")
+
+
 @op("recolor")
 class Recolor(Op):
     """Recolor a button box by repointing its mode-7 fill index via the theme resolver.
@@ -637,11 +640,15 @@ class Recolor(Op):
                 tell apart (card 872: the card box and an icon box, both wtype 4). The record
                 must carry a mode-7 fillA. Omitted, the box is `find_button_box`'s, as before.
                 The selector path has not run on a coach, so it compiles UNVERIFIED.
+      role: "fillA"|"fillA2"|"fillB"|"fillB2" (default "fillA") — the colour field to repoint.
+            A label's or readout's background is its fillB (card 872's setpoint readout:
+            fillB mode 7 index 3, the page navy). The field must be mode 7. A role other than
+            fillA has not run on a coach, so it compiles UNVERIFIED.
 
     Error codes:
       BAD_PARAMS — color is not [r,g,b] list or {"index": n} dict, or selector has a key
                    other than wtype/label/nth, a non-int wtype, a non-str label, or a nth
-                   that is not a non-negative int
+                   that is not a non-negative int, or role is not one of the four fields
       NO_SUCH_RECORD — no record matches selector (from `_select_record`)
       CONTAINER — the object is a card of controls (it attaches child objects and holds
                   two or more touch regions, like HOME's lights card 905), so its box is the
@@ -649,7 +656,7 @@ class Recolor(Op):
                   retry with allow_container=True to recolour the whole card
       NO_SUCH_COLOR — object has no button box, or resolver rejects the colour
                       (PatchError, PaletteError, ValueError all mapped here), or the
-                      selected record has no mode-7 fillA
+                      selected record's `role` is not mode 7
 
     Returns sealed image with box fill colour repointed and edits logged to context.
     """
@@ -664,6 +671,9 @@ class Recolor(Op):
             "selector": {"type": "object",
                          "description": "the record to recolour: wtype (int), label (str), "
                                         "nth (int, default 0); omitted, the object's one box"},
+            "role": {"type": "string", "enum": list(_RECOLOR_ROLES), "default": "fillA",
+                     "description": "the colour field to repoint; fillB is a label's or "
+                                    "readout's background"},
         },
         "required": ["object", "color"],
     }
@@ -673,6 +683,12 @@ class Recolor(Op):
         self.color = self._param("color")
         self.allow_container = self._param("allow_container", False, kind=bool)
         self.selector = self._param("selector", None)
+        self.role = self._param("role", "fillA")
+        if self.role not in _RECOLOR_ROLES:
+            raise RecipeError("BAD_PARAMS", "role wants one of %s, got %r"
+                              % ("/".join(_RECOLOR_ROLES), self.role), op_id=self.spec.id)
+        if self.role != "fillA":
+            self.hardware_verified = False      # only fillA has been recoloured on a coach
         if self.selector is not None:
             sel = self.selector
             nth = sel.get("nth", 0) if isinstance(sel, dict) else None
@@ -710,7 +726,7 @@ class Recolor(Op):
             else:
                 target = theme.resolve_fill_index(data, color=tuple(self.color))
             patcher = patch.McfPatcher(data)
-            patcher.set_fill_color(box, index=target)
+            patcher.set_fill_color(box, index=target, role=self.role)
             if not patcher.edits():
                 # No-op recolor (already the requested colour); return input unchanged.
                 ctx.handles[self.spec.id] = {"object": obj, "index": target}
@@ -725,27 +741,31 @@ class Recolor(Op):
         return out
 
     def verify(self, data, ctx):
-        # Re-read the box's fillA directly and assert it still matches the request --
+        # Re-read the box's `role` fill directly and assert it still matches the request --
         # a vacuous `find_button_box` alone would miss a later op (e.g. wire_button)
         # repointing the SAME box's fillA to a different cell after this op ran.
         h = ctx.handles[self.spec.id]
         obj, want = h["object"], h["index"]
         box = self._box(data, obj)
-        fillA = next(c for c in box.colors if c[0] == "fillA")
-        assert fillA[1] == 7 and fillA[2] == want, \
-            "recolor: object %d fillA is mode %s index %s, wanted mode 7 index %d " \
-            "(a later op repointed it)" % (obj, fillA[1], fillA[2], want)
-        return "recolor: object %d -> %s (index %d)" % (obj, self.color, want)
+        fill = next(c for c in box.colors if c[0] == self.role)
+        assert fill[1] == 7 and fill[2] == want, \
+            "recolor: object %d %s is mode %s index %s, wanted mode 7 index %d " \
+            "(a later op repointed it)" % (obj, self.role, fill[1], fill[2], want)
+        role = "" if self.role == "fillA" else " " + self.role
+        return "recolor: object %d%s -> %s (index %d)" % (obj, role, self.color, want)
 
     def _box(self, data, obj):
         """The record this op recolours: the selected one, or `find_button_box`'s."""
         if self.selector is None:
-            return patch.find_button_box(data, obj)
-        gs, tab = _gs_tab(data)
-        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
-        if not any(c[0] == "fillA" and c[1] == 7 for c in rec.colors):
-            raise patch.PatchError("object %d's record selected by %r has no mode-7 fillA to "
-                                   "recolour" % (obj, self.selector))
+            rec = patch.find_button_box(data, obj)
+            what = "button box"
+        else:
+            gs, tab = _gs_tab(data)
+            rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+            what = "record selected by %r" % (self.selector,)
+        if not any(c[0] == self.role and c[1] == 7 for c in rec.colors):
+            raise patch.PatchError("object %d's %s has no mode-7 %s to recolour"
+                                   % (obj, what, self.role))
         return rec
 
 

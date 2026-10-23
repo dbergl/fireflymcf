@@ -465,6 +465,17 @@
                   "selector": {
                     "type": "object",
                     "description": "the record to recolour: wtype (int), label (str), nth (int, default 0); omitted, the object's one box"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "fillA",
+                      "fillA2",
+                      "fillB",
+                      "fillB2"
+                    ],
+                    "default": "fillA",
+                    "description": "the colour field to repoint; fillB is a label's or readout's background"
                   }
                 },
                 "required": [

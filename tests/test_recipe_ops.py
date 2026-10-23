@@ -419,6 +419,69 @@ def test_recolor_without_selector_stays_verified(stock, stock_hash):
                                                              "color": [65, 81, 163]}))
     assert r.ok and "a" not in r.unverified
 
+def _fill(data, obj, i, role):
+    gs, tab = _gs_tab_t(data)
+    rec = records.object_records(data, gs + tab[obj])[i]
+    return next(c for c in rec.colors if c[0] == role)
+
+def _recolor_872_readout(stock, stock_hash, **extra):
+    return compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 872, "color": [39, 40, 98], "allow_container": True,
+        "selector": {"wtype": 8, "nth": 0}, **extra}))
+
+def test_recolor_role_fillB_repoints_the_readout_background(stock, stock_hash):
+    # Card 872's setpoint readout (record 7, wt-8) paints its background from fillB mode 7
+    # index 3, the page navy; its fillA is mode 2. role fillB repoints that index, and only it.
+    from fireflymcf import theme
+    r = _recolor_872_readout(stock, stock_hash, role="fillB")
+    assert r.ok, r.errors
+    want = theme.resolve_fill_index(stock, color=(39, 40, 98))
+    assert _fill(r.data, 872, 7, "fillB") == ("fillB", 7, want)
+    assert _fill(r.data, 872, 7, "fillA") == ("fillA", 2, None)
+    assert "a" in r.unverified          # no role but fillA has run on a coach
+    gs, tab = _gs_tab_t(stock)
+    rec = records.object_records(stock, gs + tab[872])[7]
+    off = records.color_offset(stock, rec, "fillB")
+    ge = guidata.guidata_extent(stock)
+    diff = [i for i, (x, y) in enumerate(zip(stock, r.data)) if x != y]
+    assert diff and all(off <= i < off + 2 or not ge[0] <= i < ge[1] - 4 for i in diff), \
+        "GuiData changed outside record 7's fillB"
+
+def test_recolor_default_role_still_wants_fillA(stock, stock_hash):
+    # The readout's fillA is mode 2: the default role refuses it, as before the role param.
+    r = _recolor_872_readout(stock, stock_hash)
+    assert not r.ok and r.errors[0]["code"] == "NO_SUCH_COLOR"
+    assert "fillA" in r.errors[0]["message"]
+
+def test_recolor_role_not_mode7_is_no_such_color(stock, stock_hash):
+    # The room readout (wt-8 nth 1, record 9) inherits fillB (mode 0): nothing to repoint.
+    r = _recolor_872_readout(stock, stock_hash, role="fillB", selector={"wtype": 8, "nth": 1})
+    assert not r.ok and r.errors[0]["code"] == "NO_SUCH_COLOR"
+    assert "fillB" in r.errors[0]["message"]
+
+@pytest.mark.parametrize("role", ["fillC", "fillb", 3, None])
+def test_recolor_bad_role_is_bad_params(stock, stock_hash, role):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 279, "color": [65, 81, 163], "role": role}))
+    assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS", r.errors
+
+def test_recolor_explicit_fillA_is_byte_identical_and_verified(stock, stock_hash):
+    base = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 279, "color": [65, 81, 163]}))
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="a", type="recolor", params={
+        "object": 279, "color": [65, 81, 163], "role": "fillA"}))
+    assert r.ok and r.data == base.data and "a" not in r.unverified
+
+def test_recolor_role_verify_catches_later_repoint(stock, stock_hash):
+    # verify re-reads the op's own role: a later fillB recolour of the same record trips it.
+    p = recipe.Project(base_sha256=stock_hash, build_name=None, ops=[
+        recipe.OpSpec(id=i, type="recolor", params={
+            "object": 872, "color": c, "allow_container": True,
+            "selector": {"wtype": 8, "nth": 0}, "role": "fillB"})
+        for i, c in (("a", [39, 40, 98]), ("b", {"index": 15}))])
+    with pytest.raises(AssertionError, match="fillB is mode 7"):
+        recipe.compile_project(p, stock)
+
 def test_set_icon_slot_and_char(stock, stock_hash):
     # Object 247 (Bath Fan template): icon is font 24 char 'E'. Change the char.
     r = compile_ops(stock, stock_hash,
