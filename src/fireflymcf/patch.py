@@ -550,6 +550,12 @@ class McfPatcher:
         if old != new:
             self._edits.append(Edit(offset, old, new, structure, note))
 
+    def set_bytes(self, offset: int, old: bytes, new: bytes, note: str) -> None:
+        """A raw same-size edit under the same guards as every other edit: `old` must be what
+        the image holds, the span must sit inside one claimed structure, and it may not overlap
+        an earlier edit. For a caller that located the bytes itself (`themeswap`)."""
+        self._add(offset, old, new, note)
+
     def set_label(self, site: LabelSite, old: str, new: str,
                   align: str = "right") -> None:
         """Rewrite `site`'s field, replacing `old` with `new` and re-padding to fit.

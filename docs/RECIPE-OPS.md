@@ -51,6 +51,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
+| [`set_theme`](#set_theme) | same-size | Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only. | Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner). | yes |
 | [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04. | yes |
 | [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
 | [`add_aes_batt_heat`](#add_aes_batt_heat) | structural | Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`). | Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged. | yes |
@@ -441,6 +442,26 @@ Error codes:
 - `BAD_PARAMS` — char is not a single character, or all three (slot, char, blank_caption) are None/False
 - `NO_SUCH_RECORD` — object has no wtype-11 icon record (one with font is not None), or blank_caption=True but no caption record exists, or `current` does not name exactly one icon record
 - `NO_FONT_SELECTOR` — icon record's font slot selector `01 <font> ff` not found or found multiple times (expected exactly one)
+
+### set_theme
+
+Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only.
+
+- **Hardware status:** Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner).
+- **Proof:** `docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`
+- **Implementation:** `recipe_ops.SetTheme`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `colours` | object | yes |  | {role: [r, g, b]} for bg, panel, button, header, rail, active |
+| `tank_wells` | string {"bg", "panel", "button", "header", "rail"} |  |  | the static colour the tank wells repoint to |
+| `extra` | array |  |  | [[from_rgb, to_rgb], ...] stand-alone colours to remap |
+| `tank_fills` | array |  |  | [[from_rgb, to_rgb], ...] for the HOME tank fills only |
+
+Error codes:
+
+- `BAD_PARAMS` — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is not a role with a static index
+- `WRONG_BUILD` — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or a theme already applied)
 
 ### show_nav_slides_icon
 
