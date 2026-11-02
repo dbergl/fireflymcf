@@ -174,14 +174,50 @@ def _cmp_w_sites(code: bytes, base: int) -> tuple:
     Both bound searches below start from this scan, which is the expensive part (a capstone
     decode at every halfword of GuiCode). It depends only on the section's bytes, so it is
     memoised on them: a compile asks it again after every GuiData edit, which never changes
-    GuiCode."""
-    md = _capstone_thumb()
-    out = []
-    for off in range(0, len(code) - 4, 2):
-        insns = list(md.disasm(code[off:off + 4], base + off))
-        if insns and insns[0].mnemonic == "cmp.w":
-            out.append((off, insns[0].size, insns[0].op_str))
-    return tuple(out)
+    GuiCode. Each offset's answer depends only on its own 4 bytes, so a GuiCode edit (most are
+    the relocator moving a few literals) re-decodes only the offsets within 3 bytes of a changed
+    byte of a recent scan of the same base (and, when the length changed, those near the end)."""
+    code = bytes(code)
+    for prev_code, prev_base, prev in reversed(_RECENT_CMP_W):
+        if prev_base == base:
+            import numpy as np
+            common = min(len(code), len(prev_code))
+            changed = np.flatnonzero(np.frombuffer(code, np.uint8, common)
+                                     != np.frombuffer(prev_code, np.uint8, common)).tolist()
+            if len(code) != len(prev_code):     # the scan's last offset moved with the end
+                changed += range(max(0, common - 4), max(len(code), len(prev_code)))
+            redo_set = {o for c in changed for o in range(c - 3, c + 1) if o >= 0 and o % 2 == 0}
+            redo = sorted(o for o in redo_set if o < len(code) - 4)
+            found = {o: v for o, v in ((x[0], x) for x in prev) if o not in redo_set}
+            for off in redo:
+                hit = _cmp_w_at(code, base, off)
+                if hit is not None:
+                    found[off] = hit
+            out = tuple(found[o] for o in sorted(found))
+            break
+    else:
+        out = tuple(hit for hit in (_cmp_w_at(code, base, off)
+                                    for off in range(0, len(code) - 4, 2)) if hit is not None)
+    _RECENT_CMP_W.append((code, base, out))
+    return out
+
+
+_RECENT_CMP_W: deque = deque(maxlen=4)
+_LITE = []
+
+
+def _cmp_w_at(code: bytes, base: int, off: int):
+    """`(off, size, op_str)` when the instruction capstone decodes at `off` is `cmp.w`. A
+    `.w` mnemonic is a 32-bit encoding, whose first halfword has top five bits 0b11101,
+    0b11110 or 0b11111; any other halfword is a 16-bit instruction and is not decoded."""
+    if (code[off + 1] >> 3) < 0b11101:
+        return None
+    if not _LITE:
+        _LITE.append(_capstone_thumb())
+    for _addr, size, mnemonic, op_str in _LITE[0].disasm_lite(code[off:off + 4], base + off, 1):
+        if mnemonic == "cmp.w":
+            return (off, size, op_str)
+    return None
 
 
 def find_bound_sites(data: bytes, bound: int) -> list[int]:

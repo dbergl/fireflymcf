@@ -197,9 +197,6 @@ def _trace_config_offsets(code: bytes, base: int) -> Dict[int, int]:
         raise CapstoneUnavailable(
             "capstone is required to disassemble the GuiCode config-unpack") from exc
 
-    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
-    md.detail = True
-
     def literal(addr: int) -> int | None:
         off = addr - base
         if 0 <= off <= len(code) - 4:
@@ -224,11 +221,10 @@ def _trace_config_offsets(code: bytes, base: int) -> Dict[int, int]:
         cfgbyte.clear()
         clamp_guard.clear()
 
-    pos = 0
-    while pos < len(code):
-        decoded_end = pos
-        for ins in md.disasm(code[pos:], base + pos):
-            decoded_end = ins.address - base + ins.size
+    # The resyncing decode (`theme.detail_runs`): one entry per capstone call, shared with the
+    # other GuiCode passes and updated incrementally between intermediate images.
+    for _start, decoded_end, run in theme.detail_runs(code, base):
+        for ins in run:
             mnem = ins.mnemonic
             ops = ins.operands
 
@@ -370,11 +366,8 @@ def _trace_config_offsets(code: bytes, base: int) -> Dict[int, int]:
 
         # capstone stopped: end of section, or an undecodable byte (a data island). Resync two
         # bytes on (Thumb is 2-byte aligned) with all state cleared, exactly as `theme.py` does.
-        if decoded_end <= pos:
-            decoded_end = pos + 2
         if decoded_end < len(code):
             clear_all()
-        pos = decoded_end
 
     return {offset: next(iter(addrs)) for offset, addrs in seen.items() if len(addrs) == 1}
 
