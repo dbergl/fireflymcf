@@ -117,7 +117,7 @@ def test_op_compiles_unverified_and_verifies(mcf_136):
                    "colours": {k: list(v) for k, v in HARVEST.items()}, "tank_wells": "bg"}}]}
     res = recipe.compile_project(recipe.Project.from_json(json.dumps(doc)), mcf_136)
     assert res.ok, res.errors
-    assert res.unverified == ["t"]
+    assert res.unverified == []                # verified on the coach 2026-11-02 (v54 Saffron)
     assert any("set_theme" in line for line in res.manifest)
 
 

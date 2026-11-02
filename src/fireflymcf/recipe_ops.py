@@ -10861,10 +10861,12 @@ class SetTheme(Op):
       WRONG_BUILD — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or
                     a theme already applied)
 
-    Hardware status: run in the emulator (2026-11-02, Harvest Maple on a reference build LV-mc: every page
-    of the nav rail draws in the new colours, no stock theme pixel left); not yet on a coach.
+    Hardware status: verified on the coach 2026-11-02 (owner): v54 Saffron, a recipe with the
+    six roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.
+    First run in the emulator the same day (Harvest Maple on a reference build LV-mc: no stock theme pixel on
+    any nav-rail page).
     """
-    hardware_verified = False
+    hardware_verified = True
     PARAMS = {
         "properties": {
             "colours": {"type": "object",
@@ -10957,6 +10959,6 @@ class SetTheme(Op):
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
         return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
                 "entries, %d GuiCode colour literals, %d tank fills, %d tank wells "
-                "-- HARDWARE-UNVERIFIED (emulator-run)"
+                "-- HARDWARE-VERIFIED (v54 Saffron, 2026-11-02)"
                 % (applied, len(h.get("extra", {})), h["inline"], h["palette"],
                    h.get("literals", 0), h.get("tank_fills", 0), h["wells"]))

@@ -65,8 +65,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "(bg, panel, button, header, rail, active), every GuiData inline field and mode-6 "
         "palette entry that holds them, and optionally the tank wells' colour. Runs after every "
         "op that names a colour by RGB, before a header rename. 13.6 only.",
-        "UNVERIFIED on a coach. Emulator-run 2026-11-02 (a reference build Harvest Maple: no stock theme "
-        "pixel left on any nav-rail page).", "`themeswap.py`; firefly-firmware `docs/BUILD-LOG.md`"),
+        "Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner).",
+        "`docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`"),
     "recolor": ("same-size",
         "Repoint a button box's fill index to another colour in the firmware palette. A "
         "`selector` (`move_element`'s wtype/label/nth) names the record when an object holds "

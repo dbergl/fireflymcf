@@ -19,6 +19,16 @@ a character** — `'Star\nLink'` (9) will not fit an 8-byte field; `'Bath Fan'` 
 **A *longer* label is now possible via the relocator** — hardware-confirmed 2026-08-18,
 `BUS-BASELINE.md` PC.18 — so that limit binds `patch.set_label`, not the tooling.
 
+**Colour scheme** (`set_theme`, `themeswap.py`; verified on the coach 2026-11-02, owner): v54
+Saffron was flashed and the palette change confirmed. The six chrome colours are GuiCode
+constants written at boot by `FUN_00247bf8` (`0x248316`-`0x248388`). Three are literal words;
+header and rail are add-chains, rewritten as `movw`+`movt`. The lit colour is a 4-byte `movw`,
+rewritten as one `add.w` from the button value, so it lands on the nearest reachable colour. The
+same colours also live inline in GuiData and in the mode-6 palette, and a re-theme has to reach
+all three places or stock shows through. Stand-alone colours (`extra`) also reach GuiCode words
+only ever stored straight into SRAM: the battery green and black. HOME's tank fills
+(`tank_fills`) and wells (`tank_wells`) are scoped.
+
 **Remap** (spec §11–12, `BUS-BASELINE.md` PC.13–16): the `Bath Fan → Starlink` job is
 complete and flashed. The panel **does not cache bindings** — a two-byte GuiData edit
 changed what it transmits (instance 38, not 40). The panel only ever sends **command 5
