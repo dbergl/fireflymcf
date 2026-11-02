@@ -159,3 +159,30 @@ def _apply_extra(data, extra):
     for off, old, new, note in p.edits:
         pt.set_bytes(off, old, new, note)
     return pt.build()[0], p
+
+
+def test_stored_colour_literals_are_the_theme_init_stores_not_returned_constants(mcf_136):
+    lits = themeswap.stored_colour_literals(mcf_136)
+    assert lits[0x2485FC] == 0x2BB673          # theme-init battery green -> idx 224's cell
+    assert lits[0x248614] == 0x141414          # theme-init black -> idx 130's cell
+    # the stock percent->colour helper at 0x2591ac returns its colours with `bx lr`
+    assert 0x2591CC not in lits and 0x2591D0 not in lits
+
+
+def test_extra_rewrites_a_stored_literal(mcf_136):
+    out, p = _apply_extra(mcf_136, [((43, 182, 115), (112, 150, 58))])
+    assert p.literals >= 1
+    assert theme.mode7_palette(out)[224] == (112, 150, 58)
+
+
+def test_tank_fills_change_tanks_only(mcf_136):
+    grey = 0x808285
+    before = sum(v == grey for _, v, _ in themeswap.inline_fields(mcf_136))
+    p = themeswap.plan(mcf_136, HARVEST, None, None, [((128, 130, 133), (150, 134, 118))])
+    assert p.tank_fills == 2                   # GREY and GREY2
+    pt = patch.McfPatcher(mcf_136)
+    for e in p.edits:
+        pt.set_bytes(*e)
+    out = pt.build()[0]
+    after = sum(v == grey for _, v, _ in themeswap.inline_fields(out))
+    assert after == before - 2 and after > 0   # every other UI grey is untouched

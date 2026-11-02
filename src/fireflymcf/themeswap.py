@@ -164,6 +164,8 @@ class Plan:
     inline: int            # GuiData mode-3 fields rewritten
     palette: int           # mode-6 palette entries rewritten
     wells: int             # tank-well records repointed
+    literals: int = 0      # GuiCode colour literals rewritten (extra)
+    tank_fills: int = 0    # tank fill fields rewritten (tank_fills)
 
 
 def _guicode(data: bytes):
@@ -193,15 +195,132 @@ def inline_fields(data: bytes) -> list[tuple[int, int, int]]:
     return out
 
 
+def stored_colour_literals(data: bytes) -> dict:
+    """`{literal runtime address: rgb888}` for every GuiCode literal-pool word whose **every**
+    PC-relative load is stored, unchanged, straight into SRAM (`ldr rT,[pc,#]` ... `str rT,[rB]`
+    with rB a PC-loaded SRAM address and nothing done to rT between). Those words are colour
+    constants by use, not by value, so rewriting one cannot change a non-colour constant that
+    happens to share its value. A literal loaded anywhere else (returned with `bx lr`, compared,
+    added to) is left out -- the stock keypad-battery helper's green is one.
+
+    A linear register tracer, like `theme._trace_constant_stores_impl`, with the same clearing
+    rules: register state is dropped at every branch/call/return, `it`, and data island, except
+    that an unconditional `b` keeps the loaded register for its target's first store (the
+    two-arm `ldr r3,=a; b join; ldr r3,=b; join: ldr r0,=cell; str r3,[r0]` select that
+    `voltagebattery` emits) -- followed by decoding the target, never by guessing.
+    """
+    import capstone
+    from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_REG_PC
+
+    sec, base, fo = _guicode(data)
+    code = data[sec.offset:sec.offset + sec.length]
+    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+    md.detail = True
+
+    def word(addr):
+        off = addr - base
+        return struct.unpack_from("<I", code, off)[0] if 0 <= off <= len(code) - 4 else None
+
+    loads: dict = {}          # literal addr -> number of loads
+    stored: dict = {}         # literal addr -> number of loads proven stored to SRAM
+
+    def follow(start, reg, seed, budget=6):
+        """From `start`, is `reg` stored to a PC-loaded SRAM address before anything else
+        touches it? `seed` is the PC-loaded registers live at `start`. Follows at most one
+        unconditional `b` (the seed does not survive it)."""
+        addr, regs, jumps = start, dict(seed), 0
+        regs.pop(reg, None)
+        while budget > 0:
+            off = addr - base
+            ins = next(md.disasm(code[off:off + 4], addr), None) if 0 <= off < len(code) else None
+            if ins is None:
+                return False
+            m, ops = ins.mnemonic, ins.operands
+            if m in ("ldr", "ldr.w") and len(ops) == 2 and ops[1].type == ARM_OP_MEM \
+                    and ops[1].mem.base == ARM_REG_PC and ops[0].reg != reg:
+                regs[ops[0].reg] = word((ins.address & ~3) + 4 + ops[1].mem.disp)
+            elif m in ("str", "str.w") and len(ops) == 2 and ops[0].reg == reg \
+                    and ops[1].type == ARM_OP_MEM and ops[1].mem.index == 0 \
+                    and ops[1].mem.disp == 0 and ops[1].mem.base in regs:
+                tgt = regs[ops[1].mem.base]
+                return tgt is not None and 0x20000000 <= tgt < 0x20080000
+            elif m in ("b", "b.w") and len(ops) == 1 and ops[0].type == ARM_OP_IMM and jumps == 0:
+                addr, jumps, regs = ops[0].imm, 1, {}
+                budget -= 1
+                continue
+            else:
+                _, written = ins.regs_access()
+                if reg in written or reg in ins.regs_access()[0] or ins.group(capstone.CS_GRP_JUMP) \
+                        or ins.group(capstone.CS_GRP_CALL) or ins.group(capstone.CS_GRP_RET):
+                    return False
+            addr += ins.size
+            budget -= 1
+        return False
+
+    pos = 0
+    while pos < len(code):
+        end = pos
+        live: dict = {}            # registers holding a PC-loaded word, linear, cleared on flow
+        for ins in md.disasm(code[pos:], base + pos):
+            end = ins.address - base + ins.size
+            ops = ins.operands
+            if ins.mnemonic in ("ldr", "ldr.w") and len(ops) == 2 and ops[1].type == ARM_OP_MEM \
+                    and ops[1].mem.base == ARM_REG_PC:
+                la = (ins.address & ~3) + 4 + ops[1].mem.disp
+                v = word(la)
+                if v is not None and v <= theme.RGB888_MAX:
+                    loads[la] = loads.get(la, 0) + 1
+                    if follow(ins.address + ins.size, ops[0].reg, live):
+                        stored[la] = stored.get(la, 0) + 1
+                live[ops[0].reg] = v
+                continue
+            if ins.group(capstone.CS_GRP_JUMP) or ins.group(capstone.CS_GRP_CALL) \
+                    or ins.group(capstone.CS_GRP_RET) or ins.mnemonic == "it":
+                live.clear()
+                continue
+            for r in ins.regs_access()[1]:
+                live.pop(r, None)
+        pos = end if end > pos else pos + 2
+    return {la: word(la) for la, n in loads.items() if stored.get(la) == n}
+
+
+def _tank_fill_offsets(data: bytes) -> dict:
+    """`{file offset: rgb888}` of the inline (mode-3) fill of every HOME tank: the wtype-33 record
+    straight after a wtype-32 well whose fillB is mode-7 idx 161 (objects 719-726 on 13.6;
+    `GUICODE.md` Finding 18's tank addendum)."""
+    gs, _ = guidata.guidata_extent(data)
+    out = {}
+    for rel in guidata.object_tables(data)[1]:
+        if not rel:
+            continue
+        try:
+            recs = records.object_records(data, gs + rel)
+        except Exception:
+            continue
+        for well, fill in zip(recs, recs[1:]):
+            is_well = well.wtype == 32 and any(
+                c[0] == "fillB" and c[1] == 7 and c[2] == TANK_WELL_INDEX for c in well.colors)
+            if is_well and fill.wtype == 33:
+                for (role, mode, val), off in zip(fill.colors, fill.color_off):
+                    if role == "fillA" and mode == 3 and off is not None:
+                        out[off] = val
+    return out
+
+
 def plan(data: bytes, colours: dict, tank_wells: str | None = None,
-         extra: list | None = None) -> Plan:
+         extra: list | None = None, tank_fills: list | None = None) -> Plan:
     """The edits that give `data` the palette `colours` (`{role: (r, g, b)}`, any subset of
     `ROLES`; an omitted role keeps its stock colour).
 
     `extra` is `[(from_rgb, to_rgb), ...]`: stand-alone colours that are not theme-init roles
     and live only inline (mode-3 fields) or in the mode-6 palette -- `levelpage.BODY`
     `(38, 44, 96)`, the old Firefly blue `(27, 117, 188)`. Each is remapped wherever it occurs
-    in those two places. A `from` that is a role's stock colour is refused (use `colours`)."""
+    in those two places, and in any GuiCode literal word `stored_colour_literals` proves is
+    only ever stored into SRAM (the theme-init's green and black, a fireflymcf routine's
+    colour select). A `from` that is a role's stock colour is refused (use `colours`).
+
+    `tank_fills` is `[(from_rgb, to_rgb), ...]` applied only to the HOME tanks' inline fill
+    fields (`_tank_fill_offsets`), so the tank grey can change without every UI grey."""
     unknown = set(colours) - set(ROLES)
     if unknown:
         raise ThemeSwapError("unknown theme role(s) %s; the roles are %s"
@@ -221,6 +340,12 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
         if f in extra_map:
             raise ThemeSwapError("extra maps %s twice" % (tuple(pair[0]),))
         extra_map[f] = t
+    tank_map: dict = {}
+    for pair in tank_fills or ():
+        if len(pair) != 2:
+            raise ThemeSwapError("tank_fills wants [from, to] pairs, got %r" % (pair,))
+        tank_map[rgb_int(pair[0])] = rgb_int(pair[1])
+    tank_offs = _tank_fill_offsets(data) if tank_map else {}
     sec, base, fo = _guicode(data)
 
     def u32(addr):
@@ -278,9 +403,15 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
 
     remap = {STOCK[r]: applied[r] for r in ROLES if applied[r] != STOCK[r]}
     remap.update({f: t for f, t in extra_map.items() if f != t})
-    inline = 0
+    inline = tanks = 0
     for off, val, obj in inline_fields(data):
-        if val in remap:
+        if off in tank_offs and val in tank_map:
+            new = tank_map[val]
+            put(off, bytes([val & 0xFF, val >> 8 & 0xFF, val >> 16]),
+                bytes([new & 0xFF, new >> 8 & 0xFF, new >> 16]),
+                "tank fill object %d %#08x -> %#08x" % (obj, val, new))
+            tanks += 1
+        elif val in remap:
             new = remap[val]
             put(off, bytes([val & 0xFF, val >> 8 & 0xFF, val >> 16]),
                 bytes([new & 0xFF, new >> 8 & 0xFF, new >> 16]),
@@ -316,7 +447,15 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
                             "tank well object %d %s idx %d -> %d (%s)"
                             % (idx, role, val, to, tank_wells))
                         wells += 1
-    return Plan(edits, applied, inline, pal, wells)
+    lits = 0
+    xmap = {f: t for f, t in extra_map.items() if f != t}
+    if xmap:
+        for la, v in sorted(stored_colour_literals(data).items()):
+            if v in xmap:
+                put(fo(la), struct.pack("<I", v), struct.pack("<I", xmap[v]),
+                    "GuiCode colour literal %#x %#08x -> %#08x" % (la, v, xmap[v]))
+                lits += 1
+    return Plan(edits, applied, inline, pal, wells, lits, tanks)
 
 
 def decoded_theme(data: bytes) -> dict:

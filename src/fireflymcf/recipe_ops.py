@@ -10848,7 +10848,12 @@ class SetTheme(Op):
                button colour's cell; a light button would read as a full tank.
       extra: [[from_rgb, to_rgb], ...] (optional) — stand-alone colours outside the six roles
                that live only inline or in the mode-6 palette (the level pages' body navy
-               [38, 44, 96]); each is remapped wherever it occurs there.
+               [38, 44, 96]); each is remapped wherever it occurs there, and in any GuiCode
+               literal only ever stored straight into SRAM (`themeswap.stored_colour_literals`:
+               the theme-init's battery green and black, a fireflymcf routine's colour select).
+      tank_fills: [[from_rgb, to_rgb], ...] (optional) — applied only to the HOME tanks' inline
+               fills (the wtype-33 record after each tank well), so the tank grey can change
+               without every UI grey.
 
     Error codes:
       BAD_PARAMS — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is
@@ -10873,6 +10878,13 @@ class SetTheme(Op):
                                           "items": {"type": "integer", "minimum": 0,
                                                     "maximum": 255}}},
                       "description": "[[from_rgb, to_rgb], ...] stand-alone colours to remap"},
+            "tank_fills": {"type": "array",
+                           "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                                     "items": {"type": "array", "minItems": 3, "maxItems": 3,
+                                               "items": {"type": "integer", "minimum": 0,
+                                                         "maximum": 255}}},
+                           "description": "[[from_rgb, to_rgb], ...] for the HOME tank fills "
+                                          "only"},
         },
         "required": ["colours"],
     }
@@ -10882,6 +10894,7 @@ class SetTheme(Op):
         self.colours = self._param("colours", kind=dict)
         self.tank_wells = self._param("tank_wells", None)
         self.extra = self._param("extra", [], kind=list)
+        self.tank_fills = self._param("tank_fills", [], kind=list)
         try:
             for role, c in self.colours.items():
                 if role not in themeswap.ROLES:
@@ -10890,7 +10903,7 @@ class SetTheme(Op):
                 if not isinstance(c, list) or len(c) != 3:
                     raise themeswap.ThemeSwapError("%s wants [r, g, b], got %r" % (role, c))
                 themeswap.rgb_int(c)
-            for pair in self.extra:
+            for pair in self.extra + self.tank_fills:
                 if not isinstance(pair, list) or len(pair) != 2 or \
                         not all(isinstance(c, list) and len(c) == 3 for c in pair):
                     raise themeswap.ThemeSwapError("extra wants [[r,g,b], [r,g,b]] pairs, got %r"
@@ -10908,7 +10921,8 @@ class SetTheme(Op):
         from fireflymcf import themeswap
         try:
             p = themeswap.plan(data, {r: tuple(c) for r, c in self.colours.items()},
-                               self.tank_wells, [(tuple(a), tuple(b)) for a, b in self.extra])
+                               self.tank_wells, [(tuple(a), tuple(b)) for a, b in self.extra],
+                               [(tuple(a), tuple(b)) for a, b in self.tank_fills])
         except themeswap.ThemeSwapError as e:
             raise RecipeError("WRONG_BUILD", str(e), op_id=self.spec.id)
         extra = {themeswap.rgb_int(a): themeswap.rgb_int(b) for a, b in self.extra
@@ -10918,7 +10932,8 @@ class SetTheme(Op):
                                      "remap": {themeswap.STOCK[r]: p.applied[r]
                                                for r in themeswap.ROLES
                                                if p.applied[r] != themeswap.STOCK[r]},
-                                     "extra": extra}
+                                     "extra": extra, "literals": p.literals,
+                                     "tank_fills": p.tank_fills}
         if not p.edits:
             return data
         patcher = patch.McfPatcher(data)
@@ -10941,5 +10956,7 @@ class SetTheme(Op):
             "first at %#x" % (len(stale), stale[0][0])
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
         return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
-                "entries, %d tank wells -- HARDWARE-UNVERIFIED (emulator-run)"
-                % (applied, len(h.get("extra", {})), h["inline"], h["palette"], h["wells"]))
+                "entries, %d GuiCode colour literals, %d tank fills, %d tank wells "
+                "-- HARDWARE-UNVERIFIED (emulator-run)"
+                % (applied, len(h.get("extra", {})), h["inline"], h["palette"],
+                   h.get("literals", 0), h.get("tank_fills", 0), h["wells"]))

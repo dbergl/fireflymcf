@@ -456,6 +456,7 @@ Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at 
 | `colours` | object | yes |  | {role: [r, g, b]} for bg, panel, button, header, rail, active |
 | `tank_wells` | string {"bg", "panel", "button", "header", "rail"} |  |  | the static colour the tank wells repoint to |
 | `extra` | array |  |  | [[from_rgb, to_rgb], ...] stand-alone colours to remap |
+| `tank_fills` | array |  |  | [[from_rgb, to_rgb], ...] for the HOME tank fills only |
 
 Error codes:
 

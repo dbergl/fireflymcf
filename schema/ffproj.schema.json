@@ -908,6 +908,25 @@
                       }
                     },
                     "description": "[[from_rgb, to_rgb], ...] stand-alone colours to remap"
+                  },
+                  "tank_fills": {
+                    "type": "array",
+                    "items": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2,
+                      "items": {
+                        "type": "array",
+                        "minItems": 3,
+                        "maxItems": 3,
+                        "items": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 255
+                        }
+                      }
+                    },
+                    "description": "[[from_rgb, to_rgb], ...] for the HOME tank fills only"
                   }
                 },
                 "required": [
