@@ -1,0 +1,130 @@
+"""`themeswap` / the `set_theme` op: replacing the panel's chrome colours.
+
+The oracle is the theme-init block itself: after a swap, `theme.mode7_palette` (the independent
+extractor, which emulates the block) must read the requested colours back out of the patched
+instructions, and no GuiData field may still carry a stock theme colour.
+"""
+from __future__ import annotations
+
+import struct
+
+import pytest
+
+from fireflymcf import patch, recipe, theme, themeswap
+
+HARVEST = {"bg": (33, 22, 17), "panel": (61, 40, 29), "button": (166, 86, 38),
+           "header": (176, 58, 28), "rail": (112, 40, 22), "active": (200, 118, 22)}
+
+
+def _apply(data, colours, wells=None):
+    p = themeswap.plan(data, colours, wells)
+    pt = patch.McfPatcher(data)
+    for off, old, new, note in p.edits:
+        pt.set_bytes(off, old, new, note)
+    return pt.build()[0], p
+
+
+def test_encoders_reproduce_the_stock_instructions(mcf_136):
+    sec = theme.guicode_section(mcf_136)
+    base = theme.guicode_base(sec)
+
+    def at(addr, n):
+        o = sec.offset + addr - base
+        return mcf_136[o:o + n]
+    assert at(0x24831E, 8) == themeswap.enc_dp_imm(False, 2, 2, 0xA90000) + themeswap.enc_addw(2, 2, 0x5F3)
+    assert at(0x248340, 8) == themeswap.enc_dp_imm(False, 3, 3, 0x3AC000) + themeswap.enc_addw(3, 3, 0x37A)
+    assert at(0x248336, 4) == themeswap.enc_movw(1, 0xAEEF)
+
+
+def test_stock_theme_is_what_the_extractor_reads(mcf_136):
+    pal = theme.mode7_palette(mcf_136)
+    for role, idx in (("bg", 3), ("header", 4), ("panel", 8), ("rail", 10)):
+        assert pal[idx] == themeswap.int_rgb(themeswap.STOCK[role])
+
+
+def test_swap_reads_back_through_the_independent_extractor(mcf_136):
+    out, p = _apply(mcf_136, HARVEST)
+    pal = theme.mode7_palette(out)
+    assert pal[3] == HARVEST["bg"] and pal[4] == HARVEST["header"]
+    assert pal[8] == HARVEST["panel"] and pal[10] == HARVEST["rail"]
+    # header and rail are exact (movw/movt), whatever bg and button are
+    assert p.applied["header"] == themeswap.rgb_int(HARVEST["header"])
+    assert p.applied["rail"] == themeswap.rgb_int(HARVEST["rail"])
+
+
+def test_active_lands_on_the_nearest_reachable_colour_and_says_so(mcf_136):
+    out, p = _apply(mcf_136, HARVEST)
+    got = themeswap.int_rgb(p.applied["active"])
+    assert max(abs(a - b) for a, b in zip(got, HARVEST["active"])) <= 16
+    # the extractor emulates add.w r1,r3,#imm from the button literal: idx 35 is the lit colour
+    assert theme.mode7_palette(out)[35] == got
+
+
+def test_no_guidata_field_keeps_a_stock_theme_colour(mcf_136):
+    out, p = _apply(mcf_136, HARVEST)
+    stock = set(themeswap.STOCK.values())
+    assert p.inline > 0
+    assert not [o for o, v, _ in themeswap.inline_fields(out) if v in stock]
+    gs, _ = __import__("fireflymcf").guidata.guidata_extent(out)
+    pal = [struct.unpack_from("<I", out, gs + themeswap.GUIDATA_PALETTE_OFFSET + 4 * i)[0]
+           for i in range(themeswap.GUIDATA_PALETTE_LEN)]
+    assert not stock & set(pal)
+
+
+def test_only_the_traced_block_changes_in_guicode(mcf_136):
+    out, _ = _apply(mcf_136, HARVEST)
+    sec = theme.guicode_section(mcf_136)
+    base = theme.guicode_base(sec)
+    for off, n in patch.diff_ranges(mcf_136, out):
+        if sec.offset <= off < sec.offset + sec.length:
+            addr = base + off - sec.offset
+            in_block = 0x248316 <= addr < 0x248390 or 0x2485CC <= addr < 0x2485E0
+            at_checksum = off + n >= sec.offset + sec.length - 4
+            assert in_block or at_checksum, hex(addr)
+
+
+def test_tank_wells_repoint_only_wtype32_index_161(mcf_136):
+    out, p = _apply(mcf_136, HARVEST, wells="bg")
+    assert p.wells >= 4
+    out2, p2 = _apply(mcf_136, HARVEST)
+    assert p2.wells == 0
+
+
+def test_a_second_swap_refuses(mcf_136):
+    out, _ = _apply(mcf_136, HARVEST)
+    with pytest.raises(themeswap.ThemeSwapError, match="already"):
+        themeswap.plan(out, HARVEST)
+
+
+@pytest.mark.parametrize("build", ["1123", "147"])
+def test_other_builds_refuse(build, request):
+    data = request.getfixturevalue(f"mcf_{build}")
+    with pytest.raises(themeswap.ThemeSwapError):
+        themeswap.plan(data, HARVEST)
+
+
+def test_unknown_role_refuses(mcf_136):
+    with pytest.raises(themeswap.ThemeSwapError, match="unknown"):
+        themeswap.plan(mcf_136, {"chrome": (1, 2, 3)})
+
+
+def test_op_compiles_unverified_and_verifies(mcf_136):
+    import hashlib
+    import json
+    doc = {"schema": 1, "base_sha256": hashlib.sha256(mcf_136).hexdigest(),
+           "build_name": "theme test", "ops": [
+               {"id": "t", "type": "set_theme", "params": {
+                   "colours": {k: list(v) for k, v in HARVEST.items()}, "tank_wells": "bg"}}]}
+    res = recipe.compile_project(recipe.Project.from_json(json.dumps(doc)), mcf_136)
+    assert res.ok, res.errors
+    assert res.unverified == ["t"]
+    assert any("set_theme" in line for line in res.manifest)
+
+
+def test_op_rejects_bad_colour():
+    import json
+    doc = {"schema": 1, "base_sha256": "0" * 64, "build_name": "x", "ops": [
+        {"id": "t", "type": "set_theme", "params": {"colours": {"bg": [1, 2]}}}]}
+    with pytest.raises(recipe.RecipeError):
+        recipe.Project.from_json(json.dumps(doc)).ops[0]
+        recipe.compile_project(recipe.Project.from_json(json.dumps(doc)), b"")

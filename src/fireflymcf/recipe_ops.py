@@ -7411,12 +7411,14 @@ class AddAesBattHeatStatus(Op):
                     obj, match, len(glyphs), 1 if contactor_on else 0)
 
         pal = theme.mode7_palette(data)
-        assert pal.get(h["off_index"]) == aescompact.BATT_HEAT_OFF_RGB, \
-            "off fill index %d is %s, not the button blue %s" % (
-                h["off_index"], pal.get(h["off_index"]), aescompact.BATT_HEAT_OFF_RGB)
-        assert pal.get(h["on_index"]) == aescompact.BATT_HEAT_ON_RGB, \
-            "on fill index %d is %s, not the cyan %s" % (
-                h["on_index"], pal.get(h["on_index"]), aescompact.BATT_HEAT_ON_RGB)
+        off_rgb = _themed_rgb(ctx, aescompact.BATT_HEAT_OFF_RGB)
+        on_rgb = _themed_rgb(ctx, aescompact.BATT_HEAT_ON_RGB)
+        assert pal.get(h["off_index"]) == off_rgb, \
+            "off fill index %d is %s, not the button colour %s" % (
+                h["off_index"], pal.get(h["off_index"]), off_rgb)
+        assert pal.get(h["on_index"]) == on_rgb, \
+            "on fill index %d is %s, not the lit colour %s" % (
+                h["on_index"], pal.get(h["on_index"]), on_rgb)
 
         return ("add_aes_batt_heat_status: APPENDED vars %d (heater, byte 2 bits 0-1) and %d "
                 "(contactor, byte 1 bits 2-3) receive 0x18FF7070 and are folded per tick into "
@@ -8946,6 +8948,19 @@ class AddRvcButton(Op):
                      "page draws it in measuring class 2 (in class 1 it lands %d px right; "
                      "GUICODE Finding 84)" % (h["glyph_x_bearing"], h["glyph_x_bearing"]))
         return line
+
+
+def _themed_rgb(ctx, rgb):
+    """`rgb` (a stock theme colour) as the image now holds it: mapped through the remap of any
+    `set_theme` op in this compile, so a verify that checks a stock colour by value still holds
+    after a re-theme. Unchanged when no `set_theme` ran or the colour is not a theme role."""
+    rgb = tuple(rgb)
+    v = rgb[0] << 16 | rgb[1] << 8 | rgb[2]
+    for h in ctx.handles.values():
+        if isinstance(h, dict) and "remap" in h and "applied" in h and v in h["remap"]:
+            n = h["remap"][v]
+            return (n >> 16 & 0xFF, n >> 8 & 0xFF, n & 0xFF)
+    return rgb
 
 
 def _palette_rgb(data, index):
@@ -10811,3 +10826,97 @@ class AddLevelPage(Op):
                 "%d enrolled switches%s -- HARDWARE-UNVERIFIED"
                 % (self.BODY, len(body), len(mine), self.dgn, mine[0], mine[-1], self.refresh,
                    len(h["cells"]), h["routine_addr"], len(switches), controls))
+
+
+@op("set_theme")
+class SetTheme(Op):
+    """Replace the panel's colour scheme (`themeswap.py`): the six chrome colours GuiCode's
+    theme-init forms at boot (background, cards, buttons, header, nav rail, lit/selected), every
+    GuiData field that carries those colours inline, and the GuiData mode-6 palette entries that
+    hold them. White, the alarm red, tank fills and bitmap images keep their colours.
+
+    Run it **after** every op that names a colour by RGB (`recolor`, `add_aes_batt_heat`'s
+    `off_colour`, ...): those resolve against the theme as it stands, and a stock colour is gone
+    once this op has run. A header rename may still follow it.
+
+    Params:
+      colours: {role: [r, g, b]} — any of bg, panel, button, header, rail, active. An omitted
+               role keeps its stock colour. `active` is reached from `button` by one Thumb-2
+               immediate, so it lands on the nearest such colour (the result says which).
+      tank_wells: "bg"|"panel"|"button"|"header"|"rail" (optional) — the static colour the
+               HOME tank wells (wtype-32 fillB, mode-7 idx 161) repoint to. They share the
+               button colour's cell; a light button would read as a full tank.
+
+    Error codes:
+      BAD_PARAMS — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is
+                   not a role with a static index
+      WRONG_BUILD — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or
+                    a theme already applied)
+
+    Hardware status: run in the emulator (2026-11-02, Harvest Maple on a reference build LV-mc: every page
+    of the nav rail draws in the new colours, no stock theme pixel left); not yet on a coach.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "colours": {"type": "object",
+                        "description": "{role: [r, g, b]} for bg, panel, button, header, rail, "
+                                       "active"},
+            "tank_wells": {"type": "string", "enum": ["bg", "panel", "button", "header", "rail"],
+                           "description": "the static colour the tank wells repoint to"},
+        },
+        "required": ["colours"],
+    }
+
+    def validate(self):
+        from fireflymcf import themeswap
+        self.colours = self._param("colours", kind=dict)
+        self.tank_wells = self._param("tank_wells", None)
+        try:
+            for role, c in self.colours.items():
+                if role not in themeswap.ROLES:
+                    raise themeswap.ThemeSwapError(
+                        "unknown role %r; the roles are %s" % (role, ", ".join(themeswap.ROLES)))
+                if not isinstance(c, list) or len(c) != 3:
+                    raise themeswap.ThemeSwapError("%s wants [r, g, b], got %r" % (role, c))
+                themeswap.rgb_int(c)
+            if self.tank_wells is not None and self.tank_wells not in themeswap.STATIC_INDEX:
+                raise themeswap.ThemeSwapError("tank_wells wants a role, got %r" % self.tank_wells)
+        except themeswap.ThemeSwapError as e:
+            raise RecipeError("BAD_PARAMS", str(e), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        from fireflymcf import themeswap
+        try:
+            p = themeswap.plan(data, {r: tuple(c) for r, c in self.colours.items()},
+                               self.tank_wells)
+        except themeswap.ThemeSwapError as e:
+            raise RecipeError("WRONG_BUILD", str(e), op_id=self.spec.id)
+        ctx.handles[self.spec.id] = {"applied": p.applied, "inline": p.inline,
+                                     "palette": p.palette, "wells": p.wells,
+                                     "remap": {themeswap.STOCK[r]: p.applied[r]
+                                               for r in themeswap.ROLES
+                                               if p.applied[r] != themeswap.STOCK[r]}}
+        if not p.edits:
+            return data
+        patcher = patch.McfPatcher(data)
+        for off, old, new, note in p.edits:
+            patcher.set_bytes(off, old, new, note)
+        out, _ = patcher.build()
+        ctx.edits.extend(patcher.edits())
+        return out
+
+    def verify(self, data, ctx):
+        from fireflymcf import themeswap
+        h = ctx.handles[self.spec.id]
+        got = themeswap.decoded_theme(data)
+        for role, v in got.items():
+            assert v == h["applied"][role], \
+                "set_theme: %s decodes as %#08x, applied %#08x" % (role, v, h["applied"][role])
+        stale = [(off, val) for off, val, _ in themeswap.inline_fields(data) if val in h["remap"]]
+        assert not stale, "set_theme: %d inline field(s) still carry a stock theme colour, " \
+            "first at %#x" % (len(stale), stale[0][0])
+        applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
+        return ("set_theme: %s; %d inline fields, %d mode-6 palette entries, %d tank wells "
+                "-- HARDWARE-UNVERIFIED (emulator-run)"
+                % (applied, h["inline"], h["palette"], h["wells"]))

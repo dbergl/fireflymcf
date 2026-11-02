@@ -70,6 +70,7 @@
             "set_font",
             "set_gesture",
             "set_icon",
+            "set_theme",
             "show_nav_slides_icon",
             "tank_heater_names",
             "add_aes_batt_heat",
@@ -855,6 +856,43 @@
                 },
                 "required": [
                   "target"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "set_theme"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "colours": {
+                    "type": "object",
+                    "description": "{role: [r, g, b]} for bg, panel, button, header, rail, active"
+                  },
+                  "tank_wells": {
+                    "type": "string",
+                    "enum": [
+                      "bg",
+                      "panel",
+                      "button",
+                      "header",
+                      "rail"
+                    ],
+                    "description": "the static colour the tank wells repoint to"
+                  }
+                },
+                "required": [
+                  "colours"
                 ]
               }
             }
