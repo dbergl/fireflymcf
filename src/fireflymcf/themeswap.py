@@ -30,6 +30,11 @@ stock colours show through:
 Tank wells (wtype-32 fillB mode-7 idx 161) share the button colour's cell; `tank_wells`
 repoints them to another role's static index so an empty tank does not read as button-filled.
 
+`extra` remaps stand-alone colours that only live inline or in the mode-6 palette (not in the
+theme-init): stock's own (`(27, 117, 188)`, the old Firefly blue, in palette entry 5) and the
+ones fireflymcf's level ops author (`levelpage.BODY` `(38, 44, 96)`, the van body and the LEVEL
+SETUP body).
+
 Not touched: white (text and icons), the alarm red, the tank fill colours, bitmap images.
 
 Pinned to 13.6's GuiCode: every patched instruction and literal is asserted to hold its stock
@@ -188,9 +193,15 @@ def inline_fields(data: bytes) -> list[tuple[int, int, int]]:
     return out
 
 
-def plan(data: bytes, colours: dict, tank_wells: str | None = None) -> Plan:
+def plan(data: bytes, colours: dict, tank_wells: str | None = None,
+         extra: list | None = None) -> Plan:
     """The edits that give `data` the palette `colours` (`{role: (r, g, b)}`, any subset of
-    `ROLES`; an omitted role keeps its stock colour)."""
+    `ROLES`; an omitted role keeps its stock colour).
+
+    `extra` is `[(from_rgb, to_rgb), ...]`: stand-alone colours that are not theme-init roles
+    and live only inline (mode-3 fields) or in the mode-6 palette -- `levelpage.BODY`
+    `(38, 44, 96)`, the old Firefly blue `(27, 117, 188)`. Each is remapped wherever it occurs
+    in those two places. A `from` that is a role's stock colour is refused (use `colours`)."""
     unknown = set(colours) - set(ROLES)
     if unknown:
         raise ThemeSwapError("unknown theme role(s) %s; the roles are %s"
@@ -199,6 +210,17 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None) -> Plan:
         raise ThemeSwapError("tank_wells wants one of %s, got %r"
                              % (", ".join(STATIC_INDEX), tank_wells))
     want = {r: rgb_int(colours[r]) if r in colours else STOCK[r] for r in ROLES}
+    extra_map: dict = {}
+    for pair in extra or ():
+        if len(pair) != 2:
+            raise ThemeSwapError("extra wants [from, to] pairs, got %r" % (pair,))
+        f, t = rgb_int(pair[0]), rgb_int(pair[1])
+        if f in STOCK.values():
+            raise ThemeSwapError("extra colour %s is a theme role's stock colour; set the role "
+                                 "in colours instead" % (tuple(pair[0]),))
+        if f in extra_map:
+            raise ThemeSwapError("extra maps %s twice" % (tuple(pair[0]),))
+        extra_map[f] = t
     sec, base, fo = _guicode(data)
 
     def u32(addr):
@@ -255,6 +277,7 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None) -> Plan:
             "theme active %#08x (%s; asked %#08x)" % (applied["active"], how, want["active"]))
 
     remap = {STOCK[r]: applied[r] for r in ROLES if applied[r] != STOCK[r]}
+    remap.update({f: t for f, t in extra_map.items() if f != t})
     inline = 0
     for off, val, obj in inline_fields(data):
         if val in remap:

@@ -128,3 +128,34 @@ def test_op_rejects_bad_colour():
     with pytest.raises(recipe.RecipeError):
         recipe.Project.from_json(json.dumps(doc)).ops[0]
         recipe.compile_project(recipe.Project.from_json(json.dumps(doc)), b"")
+
+
+STOCK_SLATE = (32, 50, 64)          # a stock inline-only blue (objects 720-727), no theme role
+
+
+def test_extra_remaps_a_standalone_inline_colour(mcf_136):
+    v = themeswap.rgb_int(STOCK_SLATE)
+    assert [o for o, val, _ in themeswap.inline_fields(mcf_136) if val == v]
+    out, p = _apply_extra(mcf_136, [(STOCK_SLATE, (61, 40, 29))])
+    assert not [o for o, val, _ in themeswap.inline_fields(out) if val == v]
+    assert [o for o, val, _ in themeswap.inline_fields(out) if val == 0x3D281D]
+
+
+def test_extra_reaches_the_mode6_palette(mcf_136):
+    blue = (27, 117, 188)           # mode-6 entry 5
+    out, _ = _apply_extra(mcf_136, [(blue, (184, 104, 44))])
+    gs, _ = __import__("fireflymcf").guidata.guidata_extent(out)
+    assert struct.unpack_from("<I", out, gs + themeswap.GUIDATA_PALETTE_OFFSET + 20)[0] == 0xB8682C
+
+
+def test_extra_refuses_a_role_colour(mcf_136):
+    with pytest.raises(themeswap.ThemeSwapError, match="role"):
+        themeswap.plan(mcf_136, HARVEST, extra=[((39, 40, 98), (1, 2, 3))])
+
+
+def _apply_extra(data, extra):
+    p = themeswap.plan(data, HARVEST, None, extra)
+    pt = patch.McfPatcher(data)
+    for off, old, new, note in p.edits:
+        pt.set_bytes(off, old, new, note)
+    return pt.build()[0], p

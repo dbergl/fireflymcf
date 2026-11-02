@@ -10846,6 +10846,9 @@ class SetTheme(Op):
       tank_wells: "bg"|"panel"|"button"|"header"|"rail" (optional) — the static colour the
                HOME tank wells (wtype-32 fillB, mode-7 idx 161) repoint to. They share the
                button colour's cell; a light button would read as a full tank.
+      extra: [[from_rgb, to_rgb], ...] (optional) — stand-alone colours outside the six roles
+               that live only inline or in the mode-6 palette (the level pages' body navy
+               [38, 44, 96]); each is remapped wherever it occurs there.
 
     Error codes:
       BAD_PARAMS — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is
@@ -10864,6 +10867,12 @@ class SetTheme(Op):
                                        "active"},
             "tank_wells": {"type": "string", "enum": ["bg", "panel", "button", "header", "rail"],
                            "description": "the static colour the tank wells repoint to"},
+            "extra": {"type": "array",
+                      "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                                "items": {"type": "array", "minItems": 3, "maxItems": 3,
+                                          "items": {"type": "integer", "minimum": 0,
+                                                    "maximum": 255}}},
+                      "description": "[[from_rgb, to_rgb], ...] stand-alone colours to remap"},
         },
         "required": ["colours"],
     }
@@ -10872,6 +10881,7 @@ class SetTheme(Op):
         from fireflymcf import themeswap
         self.colours = self._param("colours", kind=dict)
         self.tank_wells = self._param("tank_wells", None)
+        self.extra = self._param("extra", [], kind=list)
         try:
             for role, c in self.colours.items():
                 if role not in themeswap.ROLES:
@@ -10880,6 +10890,15 @@ class SetTheme(Op):
                 if not isinstance(c, list) or len(c) != 3:
                     raise themeswap.ThemeSwapError("%s wants [r, g, b], got %r" % (role, c))
                 themeswap.rgb_int(c)
+            for pair in self.extra:
+                if not isinstance(pair, list) or len(pair) != 2 or \
+                        not all(isinstance(c, list) and len(c) == 3 for c in pair):
+                    raise themeswap.ThemeSwapError("extra wants [[r,g,b], [r,g,b]] pairs, got %r"
+                                                   % (pair,))
+                themeswap.rgb_int(pair[0]); themeswap.rgb_int(pair[1])
+                if themeswap.rgb_int(pair[0]) in themeswap.STOCK.values():
+                    raise themeswap.ThemeSwapError("extra %r is a role's stock colour; set the "
+                                                   "role in colours" % (pair[0],))
             if self.tank_wells is not None and self.tank_wells not in themeswap.STATIC_INDEX:
                 raise themeswap.ThemeSwapError("tank_wells wants a role, got %r" % self.tank_wells)
         except themeswap.ThemeSwapError as e:
@@ -10889,14 +10908,17 @@ class SetTheme(Op):
         from fireflymcf import themeswap
         try:
             p = themeswap.plan(data, {r: tuple(c) for r, c in self.colours.items()},
-                               self.tank_wells)
+                               self.tank_wells, [(tuple(a), tuple(b)) for a, b in self.extra])
         except themeswap.ThemeSwapError as e:
             raise RecipeError("WRONG_BUILD", str(e), op_id=self.spec.id)
+        extra = {themeswap.rgb_int(a): themeswap.rgb_int(b) for a, b in self.extra
+                 if a != b}
         ctx.handles[self.spec.id] = {"applied": p.applied, "inline": p.inline,
                                      "palette": p.palette, "wells": p.wells,
                                      "remap": {themeswap.STOCK[r]: p.applied[r]
                                                for r in themeswap.ROLES
-                                               if p.applied[r] != themeswap.STOCK[r]}}
+                                               if p.applied[r] != themeswap.STOCK[r]},
+                                     "extra": extra}
         if not p.edits:
             return data
         patcher = patch.McfPatcher(data)
@@ -10913,10 +10935,11 @@ class SetTheme(Op):
         for role, v in got.items():
             assert v == h["applied"][role], \
                 "set_theme: %s decodes as %#08x, applied %#08x" % (role, v, h["applied"][role])
-        stale = [(off, val) for off, val, _ in themeswap.inline_fields(data) if val in h["remap"]]
+        gone = set(h["remap"]) | set(h.get("extra", {}))
+        stale = [(off, val) for off, val, _ in themeswap.inline_fields(data) if val in gone]
         assert not stale, "set_theme: %d inline field(s) still carry a stock theme colour, " \
             "first at %#x" % (len(stale), stale[0][0])
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
-        return ("set_theme: %s; %d inline fields, %d mode-6 palette entries, %d tank wells "
-                "-- HARDWARE-UNVERIFIED (emulator-run)"
-                % (applied, h["inline"], h["palette"], h["wells"]))
+        return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
+                "entries, %d tank wells -- HARDWARE-UNVERIFIED (emulator-run)"
+                % (applied, len(h.get("extra", {})), h["inline"], h["palette"], h["wells"]))
