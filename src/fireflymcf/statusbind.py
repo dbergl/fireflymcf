@@ -599,7 +599,7 @@ def _code_index(code: bytes, base: int) -> tuple:
     from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_REG_PC
     loads: list = []
     branches: dict = {}
-    for ins in _disasm(code, base):
+    for ins in (i for _s, _e, run in theme.detail_runs(code, base) for i in run):
         if (ins.mnemonic.startswith("ldr") and len(ins.operands) == 2
                 and ins.operands[1].type == ARM_OP_MEM
                 and ins.operands[1].mem.base == ARM_REG_PC):

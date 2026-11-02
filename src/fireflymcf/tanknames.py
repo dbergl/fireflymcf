@@ -126,7 +126,9 @@ def _sweep(md, code: bytes, base: int, pools: set) -> list:
             off += 2
             continue
         moved = False
-        for ins in md.disasm(code[off:], base + off):
+        calls = (md.fresh_call(off) if isinstance(md, theme.LinearSweep)
+                 else md.disasm(code[off:], base + off))
+        for ins in calls:
             if ins.address in pools or (ins.size == 4 and ins.address + 2 in pools):
                 break
             out.append(ins)
@@ -161,6 +163,12 @@ def _disassemble(code: bytes, base: int) -> tuple:
     import capstone
     md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
     md.detail = True
+    if len(code) % 2 == 0:
+        # Every call `_sweep` makes is a fresh decode from `off`, so it can be answered from
+        # the shared plain decode (`theme.LinearSweep.fresh_call`): the same instructions, with
+        # capstone run only where that decode has no clean entry. (`off < len - 1` is
+        # `off < len` on an even length, as in the plain loop.)
+        md = theme.LinearSweep.of(code, base, detail=True)
     pools: set = set()
     for _ in range(4):
         out = _sweep(md, code, base, pools)

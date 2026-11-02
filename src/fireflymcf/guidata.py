@@ -1749,6 +1749,32 @@ def find_match_table(data: bytes) -> int:
     if n == 0 or m < n:
         raise MatchTableNotFound(
             "GuiData is too short to hold a table this wide")
+    try:
+        end = object_table_offset(data, 1, table1) // 2
+    except (ValueError, IndexError):
+        end = None
+    if end is not None and 0 < end <= m:
+        # The anchored walk reads only the `n + 3` entries before `end` (and two after, for a
+        # 0/1/2 run starting near it): decode that window, not all of GuiData. Same test as the
+        # whole-array form below, entry for entry (a run cannot start in the last two entries).
+        lo = max(0, end - (n + 3))
+        hi = min(m, end + 2)
+        win = struct.unpack_from("<%dH" % (hi - lo), data, gs + 2 * lo)
+
+        def _ok(i):
+            v = win[i - lo]
+            return v == 0xFFFF or v < MATCH_TABLE_VALUE_BOUND
+
+        k = end
+        while k > lo and _ok(k - 1):
+            k -= 1
+        if k > lo and end > k:
+            score = sum(1 for i in range(k, end)
+                        if i < m - 2 and win[i - lo] == 0 and win[i + 1 - lo] == 1
+                        and win[i + 2 - lo] == 2)
+            if score >= MATCH_TABLE_MIN_SCORE:
+                return k * 2
+
     import numpy as np
     arr = np.frombuffer(data[gs:gs + 2 * m], dtype="<u2").astype(np.int64)
 
@@ -1761,18 +1787,6 @@ def find_match_table(data: bytes) -> int:
     if m >= 3:
         run_start[:-2] = (arr[:-2] == 0) & (arr[1:-1] == 1) & (arr[2:] == 2)
     run_csum = np.concatenate(([0], np.cumsum(run_start)))
-
-    try:
-        end = object_table_offset(data, 1, table1) // 2
-    except (ValueError, IndexError):
-        end = None
-    if end is not None and 0 < end <= m:
-        lo = max(0, end - (n + 3))          # a table up to n + 2 wide, and the entry before it
-        k = end
-        while k > lo and ok[k - 1]:
-            k -= 1
-        if k > lo and end > k and run_csum[end] - run_csum[k] >= MATCH_TABLE_MIN_SCORE:
-            return k * 2
 
     # Try the exact object count first (unchanged behaviour for un-patched files), then fall
     # back to narrower widths so a build with objects appended by `insert.py` -- which grows

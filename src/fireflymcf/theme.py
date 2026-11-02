@@ -52,6 +52,7 @@ omitted from the result, never guessed, so the caller keeps its heuristic (the c
 """
 from __future__ import annotations
 
+import collections
 import functools
 import re
 import struct
@@ -91,32 +92,376 @@ def _pcrel_literal_offsets(code: bytes, base: int) -> list[int]:
 
     Memoised on the SECTION's bytes, not the file's: a compile calls this on every intermediate
     image, and a GuiData edit changes the file but not GuiCode, so only an op that writes
-    GuiCode pays for a new disassembly (about 60 ms each, 286 times in one v50 compile)."""
-    try:
-        import capstone
-    except ImportError as exc:  # pragma: no cover - capstone is installed in this repo
-        raise CapstoneUnavailable("capstone is required to scan PC-relative loads") from exc
-    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
-    out: list[int] = []
-    pos = 0
+    GuiCode pays for a new disassembly. Most of those writes are the relocator moving a few
+    GuiData-pointer literals, so a miss re-decodes only around the changed bytes of the last
+    decode of the same length (`LinearSweep.update`), not the whole section."""
+    sweep = LinearSweep.of(code, base, detail=False)
     limit = len(code) - 4
-    while pos < len(code):
-        decoded_end = pos
-        for addr, size, mnemonic, op_str in md.disasm_lite(code[pos:], base + pos):
-            decoded_end = addr - base + size
-            if mnemonic in ("ldr", "ldr.w"):
-                m = _PCREL_LDR.search(op_str)
-                if m:
-                    disp = int(m.group(2), 16)
-                    if m.group(1):
-                        disp = -disp
-                    lit_off = (addr & ~3) + 4 + disp - base
-                    if 0 <= lit_off <= limit:
-                        out.append(lit_off)
-        if decoded_end <= pos:
-            decoded_end = pos + 2
-        pos = decoded_end
-    return out
+    return [lit for lit in sweep.items if lit is not None and 0 <= lit <= limit]
+
+
+def detail_runs(code: bytes, base: int) -> tuple:
+    """The resyncing linear decode every detail pass over GuiCode runs, as
+    `((start, end, (CsInsn, ...)), ...)`: one entry per `md.disasm(code[start:], base + start)`
+    call of the loop
+
+        pos = 0
+        while pos < len(code):
+            decoded_end = pos
+            for ins in md.disasm(code[pos:], base + pos):     # md.detail = True
+                decoded_end = ins.address - base + ins.size
+            if decoded_end <= pos:
+                decoded_end = pos + 2
+            pos = decoded_end
+
+    with `end` that call's `decoded_end`. The instruction objects are shared between callers
+    and between intermediate images (an unchanged instruction keeps its object), so their
+    lazily decoded operands are paid for once; treat them as read-only. Updated from the last
+    decode of the same length like `_pcrel_literal_offsets`.
+
+    Raises `CapstoneUnavailable` without capstone."""
+    return LinearSweep.of(code, base, detail=True).runs()
+
+
+# Capstone's only decode state that crosses instructions is an open IT block: `it*` opens one,
+# and an instruction inside it decodes differently (`ldr` prints as `ldreq`, `adds` as `add`).
+# Every `disasm` call starts with none. So where the state is empty, the decode depends only on
+# the bytes from there on: such an entry ("clean") is a point a re-decode can start from, or
+# rejoin a previous decode at. How many instructions a block spans is capstone's business (an
+# instruction from some decoder tables takes no slot), so emptiness is not counted: it is asked.
+# A decode from the last clean entry, with `_PROBE` placed at the candidate, prints `movs` there
+# only if no block is open (`InITBlock` drops the `s`, whatever the condition, `al` included).
+# Only an entry after an `it*` needs asking, and only within `_PROBE_REACH` bytes of the last
+# clean entry; past that it is left unclean, which is always safe.
+_PROBE = b"\x00\x20"                    # movs r0, #0
+_PROBE_REACH = 64
+_BATCH = 64
+
+
+class _CleanTracker:
+    """Clean flags for the entries of one capstone call, in decode order."""
+
+    __slots__ = ("code", "base", "lite", "clean_off", "it_open")
+
+    def __init__(self, code: bytes, base: int, lite, at: int):
+        self.code, self.base, self.lite = code, base, lite
+        self.clean_off, self.it_open = at, False     # `at` starts a call, or is clean
+
+    def check(self, off: int, mnemonic: str) -> bool:
+        """Whether the state before the entry at `off` is empty; then note the entry."""
+        if not self.it_open:
+            clean = True
+        elif off - self.clean_off > _PROBE_REACH:
+            clean = False
+        else:
+            buf = self.code[self.clean_off:off] + _PROBE
+            last = None
+            for addr, _size, mn, _ops in self.lite.disasm_lite(buf, self.base + self.clean_off):
+                last = (addr, mn)
+            clean = last == (self.base + off, "movs")
+        if clean:
+            self.clean_off, self.it_open = off, False
+        if mnemonic.startswith("it"):
+            self.it_open = True
+        return clean
+
+
+class LinearSweep:
+    """The resyncing linear decode of one `code`, entry by entry, so a later `code` can be
+    decoded by re-running it only where bytes changed.
+
+    Entry `k` is the decode attempt at `offs[k]`: an instruction of `sizes[k]` bytes, or
+    `sizes[k] == 0` for a fresh `disasm` call that decoded nothing (the scan then steps 2
+    bytes). `starts[k]` says a `disasm` call of the original loop begins at it. `items[k]` is,
+    lite, the section offset a PC-relative `ldr` loads, unchecked against the section's extent
+    (else None); detail, the `CsInsn` (None for a failed attempt). `clean[k]` says the decode
+    state before it was empty (see `_PROBE`). Capstone decides an entry from at most the 4 bytes
+    at its offset, and ends a call at an entry's offset only from those same bytes, so an entry
+    whose `[off, off + 4)` holds no changed byte, reached in the same state, decodes the same.
+    """
+
+    __slots__ = ("code", "base", "detail", "offs", "sizes", "items", "clean", "starts",
+                 "_runs", "_index")
+
+    def __init__(self, code: bytes, base: int, detail: bool):
+        self.code, self.base, self.detail = code, base, detail
+        self.offs: list = []
+        self.sizes: list = []
+        self.items: list = []
+        self.clean: list = []
+        self.starts: list = []
+        self._runs = None
+        self._index = None
+
+    @classmethod
+    def of(cls, code: bytes, base: int, detail: bool) -> "LinearSweep":
+        """The sweep of `code`: an update of a recent one of the same base and mode (of the
+        same length if there is one), else a full decode."""
+        try:
+            import capstone  # noqa: F401
+        except ImportError as exc:  # pragma: no cover - capstone is installed in this repo
+            raise CapstoneUnavailable("capstone is required to decode GuiCode") from exc
+        code = bytes(code)
+        recent = _RECENT_SWEEPS[detail]
+        same = [p for p in recent if p.base == base]
+        prev = next((p for p in reversed(same) if len(p.code) == len(code)),
+                    same[-1] if same else None)
+        sweep = prev.update(code) if prev is not None else None
+        if sweep is None:
+            sweep = cls(code, base, detail)
+            sweep._run(0, None, 0)
+        if not recent or recent[-1] is not sweep:
+            recent.append(sweep)
+        return sweep
+
+    def runs(self) -> tuple:
+        if self._runs is None:
+            out, cur, start, end = [], [], None, 0
+            for off, size, item, first in zip(self.offs, self.sizes, self.items, self.starts):
+                if first:
+                    if start is not None:
+                        out.append((start, end, tuple(cur)))
+                    start, cur, end = off, [], off + 2
+                if size:
+                    cur.append(item)
+                    end = off + size
+            if start is not None:
+                out.append((start, end, tuple(cur)))
+            self._runs = tuple(out)
+        return self._runs
+
+    @staticmethod
+    def _lite():
+        import capstone
+        return capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+
+    def fresh_call(self, at: int):
+        """The instructions a fresh detail `md.disasm(code[at:], base + at)` call yields, in
+        order, for a scan that starts calls where this sweep's loop does not (a pool-aware
+        sweep resumes past each literal word). Where this sweep has a clean entry the call
+        decodes as this sweep did from there to the end of that entry's call (same bytes, same
+        empty state), so those objects are replayed; capstone runs only from a position with no
+        clean entry until the call reaches one."""
+        if not self.detail:
+            raise ValueError("fresh_call needs a detail sweep")
+        if self._index is None:
+            self._index = {o: k for k, o in enumerate(self.offs)}
+        index, n = self._index, len(self.offs)
+        sizes, items, clean, starts = self.sizes, self.items, self.clean, self.starts
+
+        def replay(k):
+            if sizes[k] == 0:                    # a fresh call here decodes nothing
+                return
+            while True:
+                yield items[k]
+                k += 1
+                if k >= n or starts[k]:          # this sweep's call ended here, so does ours
+                    return
+
+        k = index.get(at)
+        if k is not None and clean[k]:
+            yield from replay(k)
+            return
+        import capstone
+        md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+        md.detail = True
+        lite = self._lite()
+        code, base = self.code, self.base
+        pos, bounded = at, True
+        while True:
+            track = _CleanTracker(code, base, lite, pos)
+            batch, last_clean = [], 0
+            window = code[pos:pos + 4 * _BATCH] if bounded else code[pos:]
+            for ins in md.disasm(window, base + pos, _BATCH if bounded else 0):
+                off = ins.address - base
+                is_clean = track.check(off, ins.mnemonic)
+                if is_clean and off != at:
+                    k = index.get(off)
+                    if k is not None and clean[k]:
+                        yield from batch
+                        yield from replay(k)
+                        return
+                if is_clean:
+                    last_clean = len(batch)
+                batch.append(ins)
+            if not bounded or len(batch) < _BATCH:   # capstone really stopped: the call ends
+                yield from batch
+                return
+            if last_clean == 0:                  # no clean entry to go on from: the rest whole
+                bounded = False
+                continue
+            yield from batch[:last_clean]        # go on from the last clean one, fresh
+            pos = batch[last_clean].address - base
+
+    def _decoder(self):
+        import capstone
+        md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+        if self.detail:
+            md.detail = True
+
+            def decode(at, bounded):
+                window = self.code[at:at + 4 * _BATCH] if bounded else self.code[at:]
+                for ins in md.disasm(window, self.base + at, _BATCH if bounded else 0):
+                    yield ins.address, ins.size, ins.mnemonic, ins
+        else:
+            base = self.base
+
+            def decode(at, bounded):
+                # the literal's offset, unchecked: whether it lies inside the section depends
+                # on the section's length, which an update can change under a copied entry
+                window = self.code[at:at + 4 * _BATCH] if bounded else self.code[at:]
+                for addr, size, mnemonic, op_str in md.disasm_lite(
+                        window, base + at, _BATCH if bounded else 0):
+                    lit = None
+                    if mnemonic in ("ldr", "ldr.w"):
+                        m = _PCREL_LDR.search(op_str)
+                        if m:
+                            disp = int(m.group(2), 16)
+                            if m.group(1):
+                                disp = -disp
+                            lit = (addr & ~3) + 4 + disp - base
+                    yield addr, size, mnemonic, lit
+        return decode
+
+    def _run(self, pos: int, old: "LinearSweep | None", after: int, mid: bool = False,
+             old_dirty=None):
+        """Decode from `pos` toward the end, appending entries. `pos` is a call start, or with
+        `mid` a clean entry inside a call (the call goes on from it as a fresh one would). With
+        `old`, stop at the first clean point at or past `after` where `old` has a clean entry
+        none of whose 4 bytes changed (`old_dirty[j]` false), append that entry with this
+        decode's call-start flag, and return the index after it in `old`; otherwise decode to
+        the end and return None."""
+        import bisect
+        decode = self._decoder()
+        lite = self._lite()
+        code, base = self.code, self.base
+        offs, sizes, items, clean, starts = (self.offs, self.sizes, self.items, self.clean,
+                                             self.starts)
+
+        def rejoin(at: int, first: bool):
+            if old is None or at < after:
+                return None
+            j = bisect.bisect_left(old.offs, at)
+            if (j < len(old.offs) and old.offs[j] == at and old.clean[j]
+                    and not old_dirty[j]):
+                offs.append(at)
+                sizes.append(old.sizes[j])
+                items.append(old.items[j])
+                clean.append(True)
+                starts.append(first)
+                return j + 1
+            return None
+
+        while pos < len(code):
+            j = rejoin(pos, not mid)
+            if j is not None:
+                return j
+            call_start = None if mid else pos
+            got_any = False
+            decoded_end = pos
+            # One call of the loop, decoded in batches: capstone decodes a call's whole input
+            # before yielding, so a re-decode near the start of a long call would pay for all
+            # of it. A batch is at most `_BATCH` instructions from a window they cannot
+            # outrun, so fewer than `_BATCH` means capstone really stopped there; a full batch
+            # resumes from its last clean entry, where a fresh call decodes as this one would,
+            # or, with none past its first, decodes the rest of the call whole.
+            at, bounded = pos, True
+            while True:
+                track = _CleanTracker(code, base, lite, at)
+                first = len(offs)
+                got = 0
+                for addr, size, mnemonic, item in decode(at, bounded):
+                    got += 1
+                    off = addr - base
+                    is_clean = track.check(off, mnemonic)
+                    if is_clean and off != pos:
+                        j = rejoin(off, False)
+                        if j is not None:
+                            return j
+                    offs.append(off)
+                    sizes.append(size)
+                    items.append(item)
+                    clean.append(is_clean)
+                    starts.append(off == call_start)
+                    got_any = True
+                    decoded_end = off + size
+                if not bounded or got < _BATCH:
+                    break
+                last = len(offs) - 1        # the last clean entry past this batch's first
+                while last > first and not clean[last]:
+                    last -= 1
+                if last == first:
+                    bounded = False
+                else:
+                    at = offs[last]
+                del offs[last:], sizes[last:], items[last:], clean[last:], starts[last:]
+            if mid and not got_any:         # the call ended here; the next one starts here
+                mid = False
+                continue
+            if decoded_end <= pos:
+                offs.append(pos)
+                sizes.append(0)
+                items.append(None)
+                clean.append(True)
+                starts.append(True)
+                decoded_end = pos + 2
+            pos = decoded_end
+            mid = False
+        return None
+
+    def update(self, code: bytes) -> "LinearSweep":
+        """The sweep of `code` (same base as this one's). Entries are copied from this sweep up
+        to the first whose 4 bytes changed; the decode re-runs from the last clean entry before
+        it until it reaches a clean entry of this sweep past the change, and copying resumes
+        there. When the lengths differ (an op appended a routine), the bytes from 4 before the
+        shorter end on count as changed: the last call ended at the old end of the buffer, and
+        every entry whose 4 bytes reach that far is decoded again, to the new end."""
+        import numpy as np
+        code = bytes(code)
+        if code == self.code:
+            return self
+        common = min(len(code), len(self.code))
+        changed = np.flatnonzero(np.frombuffer(code, np.uint8, common)
+                                 != np.frombuffer(self.code, np.uint8, common))
+        if len(code) != len(self.code):
+            changed = np.union1d(changed, np.arange(max(0, common - 4),
+                                                    max(len(code), len(self.code))))
+        offs_arr = np.asarray(self.offs, dtype=np.int64)
+        n = len(self.offs)
+        # entry k is dirty when a changed byte c has offs[k] in (c - 4, c]
+        mark = np.zeros(n + 1, dtype=np.int64)
+        np.add.at(mark, np.searchsorted(offs_arr, changed - 3, side="left"), 1)
+        np.add.at(mark, np.searchsorted(offs_arr, changed, side="right"), -1)
+        is_dirty = np.cumsum(mark)[:n] > 0
+        dirty = np.flatnonzero(is_dirty)
+
+        new = LinearSweep(code, self.base, self.detail)
+        k = 0                                   # next entry of `self` to copy
+        while True:
+            at = int(np.searchsorted(dirty, k))
+            d = int(dirty[at]) if at < len(dirty) else n
+            new.offs.extend(self.offs[k:d])
+            new.sizes.extend(self.sizes[k:d])
+            new.items.extend(self.items[k:d])
+            new.clean.extend(self.clean[k:d])
+            new.starts.extend(self.starts[k:d])
+            if d == n:
+                return new
+            # restart at the last clean entry strictly before entry d, inside its call or as
+            # the call start it is
+            r = len(new.offs) - 1
+            while r > 0 and not new.clean[r]:
+                r -= 1
+            pos, mid = (new.offs[r], not new.starts[r]) if r >= 0 else (0, False)
+            r = max(r, 0)
+            del new.offs[r:], new.sizes[r:], new.items[r:], new.clean[r:], new.starts[r:]
+            back = new._run(pos, self, self.offs[d] + 4, mid, is_dirty)
+            if back is None:
+                return new
+            k = back
+
+
+_RECENT_SWEEPS = {False: collections.deque(maxlen=4), True: collections.deque(maxlen=4)}
 
 
 # The mode-7 colour table is the value-slot variable data-pointer table; a colour cell is a
@@ -310,9 +655,6 @@ def _trace_constant_stores_impl(code: bytes, base: int, cells: Dict[int, int]) -
         raise CapstoneUnavailable(
             "capstone is required to disassemble the GuiCode theme-init") from exc
 
-    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
-    md.detail = True
-
     def literal(addr: int) -> int | None:
         off = addr - base
         if 0 <= off <= len(code) - 4:
@@ -321,11 +663,8 @@ def _trace_constant_stores_impl(code: bytes, base: int, cells: Dict[int, int]) -
 
     seen: Dict[int, set] = {}
     regs: Dict[int, int] = {}
-    pos = 0
-    while pos < len(code):
-        decoded_end = pos
-        for ins in md.disasm(code[pos:], base + pos):
-            decoded_end = ins.address - base + ins.size
+    for _start, decoded_end, run in detail_runs(code, base):   # one entry per capstone call
+        for ins in run:
             mnem = ins.mnemonic
             ops = ins.operands
             _, written = ins.regs_access()
@@ -409,11 +748,8 @@ def _trace_constant_stores_impl(code: bytes, base: int, cells: Dict[int, int]) -
 
         # capstone stopped: either at end of section, or on a byte it could not decode. In the
         # latter case resync two bytes on (Thumb is 2-byte aligned) with state cleared.
-        if decoded_end <= pos:
-            decoded_end = pos + 2
         if decoded_end < len(code):
             regs.clear()
-        pos = decoded_end
     return {index: next(iter(values)) for index, values in seen.items() if len(values) == 1}
 
 

@@ -96,6 +96,12 @@ def _disassemble(body: bytes, base: int):
         from capstone import CS_ARCH_ARM, CS_MODE_THUMB, Cs
     except ImportError as exc:  # pragma: no cover - environment guard
         raise theme.CapstoneUnavailable("capstone is required to classify slot sources") from exc
+    if len(body) % 2 == 0:
+        # The same loop as `theme.detail_runs` (on an even length, `off < len - 1` is
+        # `off < len`): its decode is shared with the other GuiCode passes and updated
+        # incrementally between a compile's images. Only mnemonic, operand text, address and
+        # size are read, which detail mode does not change.
+        return [ins for _start, _end, run in theme.detail_runs(body, base) for ins in run]
     md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
     out, off = [], 0
     while off < len(body) - 1:
