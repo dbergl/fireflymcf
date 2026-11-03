@@ -188,13 +188,14 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
 
     Returns `(image, cells, edits)`; `cells[i]` describes `specs[i]` (tier 3, fresh=True).
 
-    LIMITATION (single grow per recipe): the SRAM reservation carves distinct addresses within
-    ONE call, but `sramreach.free_runs` sees only addresses already reachable in the image, so a
-    SECOND `allocate_fresh_cells` call in the same recipe would reserve the same SRAM unless the
-    first call's addresses became reach-visible in between (e.g. the consuming op appended a
-    routine that loads them, as `add_voltage_battery` does). Today only `add_voltage_battery` grows
-    the cell table, so this is safe; a future recipe with two growing ops must ensure each op's
-    addresses are reachable before the next call, or this must reserve across calls explicitly.
+    Several calls in one recipe: each call's new rows name their SRAM addresses in the grown
+    cell table, and `sramreach` counts a table row as reaching its address for the width its
+    type byte gives (`sramreach._TYPE_WIDTH`), so a later call's `free_runs` (and
+    `routinekit.fresh_sram`) skip it. Give every spec the type that covers the bytes it uses:
+    a 4-byte colour word typed 0 (`vtype=None`) reserves only its first byte, which leaves
+    its other three to a later 1-byte allocation; `colourcell` types its words 10 (4 bytes).
+    Within one call the addresses are carved apart explicitly (`_take`). Each call copies the
+    whole table to GuiData's end and leaves the previous copy unread; `coverage` claims both.
     """
     from . import tablegrow  # local import: tablegrow -> theme/xref only, avoid an import cycle
     if not specs:

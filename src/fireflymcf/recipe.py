@@ -278,6 +278,9 @@ def capabilities(img: bytes) -> set:
 
 
 def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
+    from fireflymcf import limits
+    gs, ge = guidata.guidata_extent(data)
+    limits.check_guidata_size(ge - gs)
     ok, reason = relocate._boundary_oracle(data)
     _gate(ok, "STRUCTURAL_GATE", reason)
     ok, reason = relocate._verify_record_geometry(data)

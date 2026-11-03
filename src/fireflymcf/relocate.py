@@ -565,6 +565,13 @@ def _apply_downstream_shift(data: bytes, out: bytearray, at: int,
     return edits
 
 
+def _check_size(length: int) -> None:
+    """The flash ceiling (`limits.check_guidata_size`): raises `limits.GuiDataTooLarge`, a
+    RecipeError with code GUIDATA_TOO_LARGE, before anything is inserted."""
+    from . import limits            # local: limits imports recipe, which imports this module
+    limits.check_guidata_size(length)
+
+
 def relocate(data: bytes, at: int, payload: bytes) -> tuple[bytes, list[Edit]]:
     """Insert `payload` into GuiData at section-relative offset `at`.
 
@@ -581,7 +588,8 @@ def relocate(data: bytes, at: int, payload: bytes) -> tuple[bytes, list[Edit]]:
     `_deep_coverage_ok`, `_verify_table_shifts`, `_boundary_oracle` -- see the module
     docstring for what each one catches that the others cannot) -- this function never
     returns a build it has not itself re-verified, entry by entry, across all four
-    object-pointer tables.
+    object-pointer tables. Raises `limits.GuiDataTooLarge` (code GUIDATA_TOO_LARGE), before
+    inserting anything, if GuiData would end past the flash ceiling.
     """
     gs, ge = guidata.guidata_extent(data)
     span = ge - gs
@@ -591,6 +599,7 @@ def relocate(data: bytes, at: int, payload: bytes) -> tuple[bytes, list[Edit]]:
     k = len(payload)
     if k == 0:
         return data, []
+    _check_size(span + k)
 
     ins = gs + at  # absolute file offset of the insertion point
 
@@ -727,6 +736,7 @@ def replace_object_records(data: bytes, obj_index: int,
     pad = (-len(new_body)) % 4
     padded = new_body + b"\x00" * pad                    # re-pad to the 4-byte object boundary
     delta = len(padded) - old_footprint                  # net footprint change; a multiple of 4
+    _check_size(guidata.guidata_extent(data)[1] - gs + delta)
 
     # Swap the object's whole footprint (payload + old pad) for the re-padded new body, then let
     # `_apply_downstream_shift` bump every reference that names a position at or after the object

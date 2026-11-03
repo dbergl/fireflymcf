@@ -161,7 +161,9 @@ container header can never be declared), `written_against` (a list of objects: `
 - `build(self, ed, ctx)`: every byte goes through the `Editor` `ed`. `ed.patch(off, expected,
   new, note)` / `ed.patch_addr("GuiCode", addr, expected, new, note)` (same length; the expected
   bytes are checked, a mismatch is "this op does not match your firmware"),
-  `ed.grow_guicode(payload, note)`, `ed.call("primitive", ...)`, `ed.section("GuiData")`, `ed.data` (read). Reading is free:
+  `ed.grow_guicode(payload, note)` and `ed.grow_guidata(payload, note)` (append; each returns
+  the new bytes' address, GuiData's as a `0x9xxxxxxx` panel address), `ed.call("primitive",
+  ...)`, `ed.section("GuiData")`, `ed.data` (read). Reading is free:
   `ctx.handles[ref_id]` holds what earlier ops published (an op refers to one with
   `{"ref": "<op id>"}`), and `ctx.handles[self.spec.id] = {...}` publishes yours.
 - `check(self, data, ctx) -> str`: runs on the finished image; prove the change is there and
@@ -184,6 +186,8 @@ with JSON-able or bytes arguments (lists, not sets):
 | `config_frame(selector, value, function)` | a 12-byte `0x1FED9` OPTIONS frame template (`0xD1` write, `0xD2` delta, `0xD3` read-back) |
 | `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
+| `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); touches GuiCode and GuiData |
+| `ed.call("own_colour_cells", [[object_index, field], ...])` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells |
 | `guicode(data)`, `find_tag(data, tag)`, `tick_chain(data)` | readers: GuiCode at its runtime base; the address of a tag you put in a prefix; the tick chain |
 
 `thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strb_imm`, `cmp_imm8`, `movw`, …) and the
@@ -201,7 +205,9 @@ primitives (`emit_send_frame`); a call to any other GuiCode function needs its o
 ## 5. Compile and emulate
 
 The project lists the op like any other: `{"id": "my", "type": "user:<name>", "params": {...}}`.
-Put it after the ops whose results it uses; a page-header rename and `set_theme` stay last.
+Put it after the ops whose results it uses; a page-header rename and `set_theme` stay last,
+except that an op calling `own_colour_cell(s)` goes after `set_theme`, so the colour it restores is
+the themed one.
 
 ```bash
 $F ops --project P.ffproj.json               # lists the user ops it found (reads manifests only)

@@ -449,3 +449,36 @@ def test_resealing_alone_touches_nothing(mcf_136):
     assert userop.touched_sections(stale, ed.data) == {"guicode"}
     from fireflymcf import patch
     assert userop.touched_sections(stale, patch.reseal(stale)[0]) == set()
+
+
+GROW_GUIDATA = ('from fireflymcf import recipe\nfrom fireflymcf.userop import UserOp\n\n\n'
+                '@recipe.op("user:hook-nop")\nclass Grow(UserOp):\n'
+                '    def build(self, ed, ctx):\n'
+                '        ctx.handles[self.spec.id] = ed.grow_guidata(b"FFMCtest", "pad")\n\n'
+                '    def check(self, data, ctx):\n        return "grown"\n')
+
+
+def test_grow_guidata_needs_guidata_declared(tmp_path, mcf_136):
+    """A GuiData growth by an op that declares only guicode is refused, naming GuiData."""
+    pf = _setup(tmp_path, "hook_nop", op_py=GROW_GUIDATA)       # touches ["guicode"]
+    proj = _project(mcf_136, ("g", "user:hook-nop"))
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert not res.ok
+    [err] = res.errors
+    assert err["code"] == "USER_OP_UNDECLARED_TOUCH" and err["op_id"] == "g"
+    assert "GuiData" in err["message"] and "guidata" in err["message"]
+
+
+def test_grow_guidata_declared_compiles(tmp_path, mcf_136):
+    """Declared, the growth passes every gate the compile runs (structure, coverage, replay) and
+    lands at the address the op was given."""
+    pf = _setup(tmp_path, "hook_nop", op_py=GROW_GUIDATA, manifest={"touches": ["guidata"]})
+    proj = _project(mcf_136, ("g", "user:hook-nop"))
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert res.ok, res.errors
+    ed = userop.Editor(res.data)
+    gd = ed.section("GuiData")
+    at = gd.offset + gd.length - 4 - 8
+    assert res.data[at:at + 8] == b"FFMCtest"
