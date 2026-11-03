@@ -389,10 +389,11 @@ def test_verify_emulate_project_keys_by_type(tmp_path, mcf_136, monkeypatch, cap
     extra.write_text("def scenario(s):\n    pass\n")
     pf = tmp_path / "p.ffproj.json"
     pf.write_text(json.dumps(_doc(mcf_136, ("a", "user:a"), ("b", "user:b"), ("c", "user:c"))))
-    seen = {}
+    seen, digests = {}, {}
 
-    def fake(image, path, timeout_s=300, *, out_dir=None, key=None):
+    def fake(image, path, timeout_s=300, *, out_dir=None, key=None, sha256=None):
         seen[key] = Path(path).read_text()
+        digests[key] = sha256
         return gate.EmuResult("passed")
     monkeypatch.setattr(gate, "run_scenario_file", fake)
     build = tmp_path / "mcf-x.bin"
@@ -404,6 +405,9 @@ def test_verify_emulate_project_keys_by_type(tmp_path, mcf_136, monkeypatch, cap
     assert set(emu) == {"user:a", "user:b", "user:c", "extra_test"}
     assert emu["user:a"]["status"] == emu["user:b"]["status"] == "passed"
     assert "# a" in seen["user:a"] and "# b" in seen["user:b"]
+    # each op's test runs only with the bytes its folder hash covered; an explicit file is unbound
+    assert digests["user:a"] == hashlib.sha256(seen["user:a"].encode()).hexdigest()
+    assert digests["extra_test"] is None
     assert emu["user:c"]["status"] == "not emulated" and "emu_test.py" in emu["user:c"]["reason"]
     assert "emulated, not flashed" not in capsys.readouterr().out    # c was not emulated
 

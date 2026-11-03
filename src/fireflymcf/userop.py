@@ -679,20 +679,33 @@ def discover_used_ops(project_path: Path, project: recipe.Project) -> list[Disco
     return found
 
 
+def _verified_snapshot(d: DiscoveredOp) -> dict[str, bytes]:
+    """`d`'s files read once, refused (BAD_USER_OP) unless they still hash to what discovery
+    saw: what was shown (and accepted) is what runs."""
+    try:
+        snap = _snapshot(d.folder)
+    except OSError as e:
+        raise _bad(d.folder, f"cannot read the op folder: {e}")
+    now = _hash_snapshot(snap)
+    if now != d.folder_sha256:
+        raise _bad(d.folder, f"its files changed since they were read (sha256 "
+                   f"{d.folder_sha256[:12]}... is now {now[:12]}...); run the command again")
+    return snap
+
+
+def verified_snapshots(discovered: list[DiscoveredOp]) -> dict[str, dict[str, bytes]]:
+    """{type: files} for each discovered op, checked against its folder hash (`verify
+    --project` takes each `emu_test.py`'s bytes from here)."""
+    return {d.type: _verified_snapshot(d) for d in discovered}
+
+
 def import_user_ops(discovered: list[DiscoveredOp]) -> list[LoadedOp]:
     """Import each discovered op's `op.py`: this runs the op's code with full Python trust, so the
     caller must hold the owner's authorization (`--allow-user-ops`). A folder whose files changed
     since discovery is refused, so what was shown (and accepted) is what runs."""
     loaded: list[LoadedOp] = []
     for d in discovered:
-        try:
-            snap = _snapshot(d.folder)     # read once: these bytes are hashed and compiled
-        except OSError as e:
-            raise _bad(d.folder, f"cannot read the op folder: {e}")
-        now = _hash_snapshot(snap)
-        if now != d.folder_sha256:
-            raise _bad(d.folder, f"its files changed since they were read (sha256 "
-                       f"{d.folder_sha256[:12]}... is now {now[:12]}...); run the command again")
+        snap = _verified_snapshot(d)       # read once: these bytes are hashed and compiled
         loaded.append(LoadedOp(d.type, _import(d.folder, d.manifest, d.folder_sha256, snap),
                                d.folder, d.manifest, d.folder_sha256))
     return loaded

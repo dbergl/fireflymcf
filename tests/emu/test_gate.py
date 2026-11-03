@@ -96,3 +96,42 @@ def test_verify_emulate_all_pass_message(mcf_136, tmp_path, capsys):
     cli.main(["verify", str(build), str(build), "--no-render", "--emulate", "--scenario", str(p)])
     assert "emulated, not flashed" in capsys.readouterr().out
     assert json.loads((tmp_path / "mcf-y.bin.json").read_text())["emulation"]["ok_test"]
+
+
+def test_worker_runs_the_source_not_a_stale_pyc(mcf_136, tmp_path):
+    """The worker compiles the scenario's bytes; a planted `__pycache__` of other source with
+    the same size and mtime (what the bytecode cache validates) does not run (final review M2)."""
+    import importlib.util
+    import os
+    import py_compile
+    p = tmp_path / "emu_test.py"
+    p.write_text("def scenario(s):\n    assert True, 'pass'\n")
+    st = p.stat()
+    py_compile.compile(str(p), cfile=importlib.util.cache_from_source(str(p)))
+    p.write_text("def scenario(s):\n    assert 0, 'source!'\n")
+    assert p.stat().st_size == st.st_size
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns))
+    res = gate.run_scenario_file(mcf_136, p, timeout_s=60)
+    assert res.status == "failed" and "source" in res.reason, res
+
+
+def test_worker_ignores_the_callers_directory(mcf_136, tmp_path, monkeypatch):
+    """A stray module in the caller's working directory does not shadow one the worker imports."""
+    marker = tmp_path / "SHADOWED"
+    cwd = tmp_path / "cwd"
+    cwd.mkdir()
+    (cwd / "json.py").write_text(f"open({str(marker)!r}, 'w').write('x')\nraise ImportError\n")
+    p = _scn(tmp_path, "pass\n")
+    monkeypatch.chdir(cwd)
+    res = gate.run_scenario_file(mcf_136, p, timeout_s=60)
+    assert res.status == "passed", res.reason
+    assert not marker.exists()
+
+
+def test_worker_refuses_a_file_changed_since_it_was_hashed(mcf_136, tmp_path):
+    import hashlib
+    p = _scn(tmp_path, "pass\n")
+    sha = hashlib.sha256(p.read_bytes()).hexdigest()
+    p.write_text(p.read_text() + "# edited\n")
+    res = gate.run_scenario_file(mcf_136, p, timeout_s=60, sha256=sha)
+    assert res.status == "failed" and "changed" in res.reason, res

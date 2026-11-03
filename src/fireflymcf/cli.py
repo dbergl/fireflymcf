@@ -893,8 +893,10 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     region, a page that fails to render, or a build name equal to stock's."""
     import json
     from . import buildcheck
+    import hashlib
     scenarios: dict = {}
     missing: dict = {}
+    digests: dict = {}
     if args.project:
         if not args.emulate:
             print("error: --project names the user ops whose emu_test.py --emulate runs; "
@@ -913,10 +915,17 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                 "USER_OPS", USER_OPS_MSG % ", ".join(d.type for d in discovered), discovered,
                 args.json, {"ok": False})
         _announce_user_ops(discovered, args.json)
+        try:
+            snaps = userop.verified_snapshots(discovered)
+        except recipe.RecipeError as exc:
+            print(f"error: {exc.code}: {exc}", file=sys.stderr)
+            return 1
         for d in discovered:
-            t = d.folder / "emu_test.py"
-            if t.is_file():
-                scenarios[d.type] = t
+            body = snaps[d.type].get("emu_test.py")
+            if body is not None:
+                # the worker runs it only if it still holds the bytes the folder hash covered
+                scenarios[d.type] = d.folder / "emu_test.py"
+                digests[d.type] = hashlib.sha256(body).hexdigest()
             else:
                 missing[d.type] = f"{d.type} has no emu_test.py in {d.folder}"
     refused = _scenario_refusal(args.scenario, args.allow_user_ops, args.json, {"ok": False})
@@ -932,7 +941,8 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     report = buildcheck.compare(stock, build, configs, roots, render_pages=not args.no_render)
     emu = None
     if args.emulate:
-        emu = _emulate_scenarios(Path(args.build), scenarios, args.emulate_timeout, missing)
+        emu = _emulate_scenarios(Path(args.build), scenarios, args.emulate_timeout, missing,
+                                 digests)
         if emu is None:
             return 2
     if args.json:
@@ -956,7 +966,8 @@ EMU_MISSING = ('emulate needs the emu extra: pip install '
                '"fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git"')
 
 
-def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: dict | None = None):
+def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: dict | None = None,
+                       digests: dict | None = None):
     """Run the scenario files ({sidecar key: file}) on `build` and record them in its sidecar,
     with a `not emulated` entry for each user op in `missing` (no emu_test.py); None (after
     saying why) when the request cannot be carried out."""
@@ -972,7 +983,7 @@ def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: 
         print(EMU_MISSING, file=sys.stderr)
         return None
     from .emu import gate
-    results = gate.run_scenarios(build, scenarios, timeout_s) if scenarios else {}
+    results = gate.run_scenarios(build, scenarios, timeout_s, digests) if scenarios else {}
     results.update({k: gate.EmuResult("not emulated", why) for k, why in missing.items()})
     gate.record(build, results)
     return results

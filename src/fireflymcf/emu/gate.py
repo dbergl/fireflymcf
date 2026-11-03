@@ -41,8 +41,23 @@ def _file_key(key: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]", "_", key)
 
 
+# `python -c` puts '' (the working directory) first on sys.path, as `-m` does; drop it before
+# anything is imported, so a stray module where the caller stands cannot shadow one the worker
+# or the scenario imports. (`-P` does the same, from Python 3.11 only.)
+_WORKER_BOOT = ("import sys; sys.path.pop(0); import runpy; "
+                "runpy.run_module('fireflymcf.emu.gate_worker', run_name='__main__')")
+
+
+def worker_command(*args: str) -> list[str]:
+    """The argv that starts `gate_worker` with `args`, the caller's directory off `sys.path`."""
+    return [sys.executable, "-c", _WORKER_BOOT, *args]
+
+
 def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
-                      out_dir: Path | None = None, key: str | None = None) -> EmuResult:
+                      out_dir: Path | None = None, key: str | None = None,
+                      sha256: str | None = None) -> EmuResult:
+    """Run one scenario file on `image` in a worker subprocess. With `sha256`, the worker runs
+    the file only if its bytes still hash to it (a user op's `emu_test.py`, read at discovery)."""
     from .scenario import supported
 
     ok, reason = supported(image)
@@ -54,8 +69,8 @@ def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
     out.mkdir(parents=True, exist_ok=True)
     img = out / f"{key}-image.bin"
     img.write_bytes(bytes(image))
-    cmd = [sys.executable, "-m", "fireflymcf.emu.gate_worker", str(img), str(path.resolve()),
-           str(timeout_s), str(out), key]
+    cmd = worker_command(str(img), str(path.resolve()), str(timeout_s), str(out), key,
+                         *([sha256] if sha256 else []))
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout_s + KILL_GRACE_S)
     except subprocess.TimeoutExpired:
@@ -76,15 +91,18 @@ def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
     return EmuResult("failed", f"worker exited {proc.returncode} without a result: {tail}")
 
 
-def run_scenarios(build: Path, scenarios, timeout_s: float = 300) -> dict[str, EmuResult]:
+def run_scenarios(build: Path, scenarios, timeout_s: float = 300,
+                  digests: dict | None = None) -> dict[str, EmuResult]:
     """Run each scenario file against the image at `build`; screenshots and frame logs go to
     `<build>.emu/`. `scenarios` is a list of files (keyed by `result_key`) or a {key: file}
-    mapping (the CLI keys a user op's `emu_test.py` by its type)."""
+    mapping (the CLI keys a user op's `emu_test.py` by its type). `digests` maps a key to the
+    sha256 its file must still have (`run_scenario_file`)."""
     if not isinstance(scenarios, dict):
         scenarios = {result_key(p): p for p in scenarios}
+    digests = digests or {}
     image = Path(build).read_bytes()
     out = Path(str(build) + ".emu")
-    return {k: run_scenario_file(image, p, timeout_s, out_dir=out, key=k)
+    return {k: run_scenario_file(image, p, timeout_s, out_dir=out, key=k, sha256=digests.get(k))
             for k, p in scenarios.items()}
 
 

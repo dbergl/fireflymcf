@@ -1,14 +1,19 @@
-"""Subprocess half of the emulator gate: `python -m fireflymcf.emu.gate_worker IMAGE SCENARIO
-TIMEOUT_S OUT_DIR KEY`. Loads the scenario file, runs its `scenario(s)`, saves a final screenshot
-and the frames log, and prints one JSON line (the result) on the real stdout. Anything the
-scenario prints goes to stderr. A hang or a unicorn crash here cannot take the CLI down."""
+"""Subprocess half of the emulator gate: `fireflymcf.emu.gate_worker IMAGE SCENARIO TIMEOUT_S
+OUT_DIR KEY [SHA256]`, started by `gate.worker_command` (which keeps the caller's working
+directory off `sys.path`). Loads the scenario file, runs its `scenario(s)`, saves a final
+screenshot and the frames log, and prints one JSON line (the result) on the real stdout. Anything
+the scenario prints goes to stderr. A hang or a unicorn crash here cannot take the CLI down.
+
+The scenario runs from the bytes read here, compiled directly (never from `__pycache__`, as
+`userop` loads `op.py`, R7), and, given SHA256, only if those bytes still hash to it."""
 from __future__ import annotations
 
 import contextlib
-import importlib.util
+import hashlib
 import json
 import sys
 import traceback
+import types
 from pathlib import Path
 
 
@@ -31,8 +36,22 @@ def _describe(exc: BaseException, scenario_file: str) -> str:
     return f"{type(exc).__name__}: {exc}{where}"
 
 
+def _load(scenario_path: str, key: str, sha256: str | None) -> types.ModuleType:
+    """The scenario module, compiled from the file's bytes as read now; no bytecode cache."""
+    source = Path(scenario_path).read_bytes()
+    if sha256 and hashlib.sha256(source).hexdigest() != sha256:
+        raise RuntimeError(f"{Path(scenario_path).name} changed since it was read (sha256 "
+                           f"{sha256[:12]}...); run the command again")
+    mod = types.ModuleType(f"emu_test_{key}")
+    mod.__file__ = scenario_path
+    sys.modules[mod.__name__] = mod
+    exec(compile(source, scenario_path, "exec", dont_inherit=True), mod.__dict__)
+    return mod
+
+
 def main(argv: list[str]) -> int:
-    image_path, scenario_path, timeout_s, out_dir, key = argv
+    image_path, scenario_path, timeout_s, out_dir, key, *rest = argv
+    sha256 = rest[0] if rest else None
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     result = {"status": "passed", "reason": "", "screenshots": [], "frames_log": ""}
@@ -41,9 +60,7 @@ def main(argv: list[str]) -> int:
         try:
             from .scenario import Scenario
 
-            spec = importlib.util.spec_from_file_location(f"emu_test_{key}", scenario_path)
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
+            mod = _load(scenario_path, key, sha256)
             s = Scenario(Path(image_path).read_bytes(), timeout_s=float(timeout_s))
             mod.scenario(s)
         except BaseException as e:  # noqa: BLE001 - every failure is a result
