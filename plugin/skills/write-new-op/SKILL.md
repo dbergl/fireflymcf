@@ -187,6 +187,7 @@ with JSON-able or bytes arguments (lists, not sets):
 | `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
 | `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); touches GuiCode and GuiData |
+| `ed.call("own_colour_cells", [[object_index, field], ...])` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells |
 | `guicode(data)`, `find_tag(data, tag)`, `tick_chain(data)` | readers: GuiCode at its runtime base; the address of a tag you put in a prefix; the tick chain |
 
 `thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strb_imm`, `cmp_imm8`, `movw`, …) and the
@@ -205,7 +206,7 @@ primitives (`emit_send_frame`); a call to any other GuiCode function needs its o
 
 The project lists the op like any other: `{"id": "my", "type": "user:<name>", "params": {...}}`.
 Put it after the ops whose results it uses; a page-header rename and `set_theme` stay last,
-except that an op calling `own_colour_cell` goes after `set_theme`, so the colour it restores is
+except that an op calling `own_colour_cell(s)` goes after `set_theme`, so the colour it restores is
 the themed one.
 
 ```bash

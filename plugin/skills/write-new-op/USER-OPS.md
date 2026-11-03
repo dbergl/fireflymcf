@@ -375,6 +375,10 @@ addr, ...)` takes it as it is. Keep these points in mind (*library*, pinned by i
   declare `guidata` in `touches`. The container header does not change.
 - Appended bytes are data nothing reads until something points at them: a record field, a
   table row, a routine's literal.
+- They spend GuiData's **tail headroom**. The coverage gate claims every GuiData byte by
+  structure; bytes after the last object that it cannot name are bounded by the size of the
+  largest object in that table (18,124 bytes left on stock 13.6, `coverage.analyse(data,
+  deep=True).tail_headroom`). An append past it is refused (`BAD_EDIT`).
 
 ### Colour cells
 
@@ -400,13 +404,28 @@ ColourCell)`** gives one record's `field`, `"border"` or `"fill"`, its own row:
 
 It rewrites the field to mode 7 (a mode-2 field grows its record by 2 bytes and the object is
 swapped back in at its own index; every other byte of every record stays as it was) and grows
-the cell table by one row, typed 10 as stock's colour rows are, on 4 fresh bytes of SRAM. The
-grow is the one `add_voltage_battery` uses for its colour word (*hardware*: flashed and verified
-2026-09-12). It moves the table to the end of GuiData and repoints the GuiCode literals that
-load it, so **declare both `guicode` and `guidata`** in `touches`. Each call adds its own row
-and its own SRAM word; the type makes all 4 bytes count as taken, so `fresh_sram` and a later
-call avoid them. Every placement of the object shares the cell: an object drawn on two pages
-changes on both.
+the cell table by one row on 4 fresh bytes of SRAM. The grow is the one `add_voltage_battery`
+uses for its colour word (*hardware*: flashed and verified 2026-09-12). It copies the table to
+the end of GuiData and repoints the GuiCode literals that load it, so **declare both `guicode`
+and `guidata`** in `touches`. Each call adds its own row and its own SRAM word, and later calls
+and `fresh_sram` avoid that word. Every placement of the object shares the cell: an object
+drawn on two pages changes on both.
+
+How the panel reads the row (*proven-from-code*, 13.6 GuiCode `0x2533B2`-`0x2533D6` in the
+record decoder `FUN_00252CB0`): it clamps the u16 row (`cmp.w r0,#0x298`; `bls`, else row 0),
+loads the row's pointer (`ldr.w r3,[DAT_002535B4,r0,lsl #2]`), takes the default colour
+literal at `0x2535AC` when the pointer is null (`cbnz`), and otherwise reads the u32 at it
+(`ldr r2,[r3]`). It never reads the type table on this path. The new row's type byte is 10,
+which matters only to the library's own SRAM reach (`sramreach`, where type 10 is 4 bytes wide).
+
+**`own_colour_cells(data, requests) -> (data, [ColourCell, ...])`** does the same for several
+fields with **one** grow. A request is `[object_index, field]`, `[object_index, field, record]`
+or `{"object": ..., "field": ..., "record": ..., "expect": ...}`. The cells are on consecutive
+rows, in request order. Every request is checked before anything changes, one refusal refuses
+them all, and the same field twice is `BAD_EDIT`. Prefer it whenever an op drives more than
+one field: each grow copies the whole table (about 5 bytes a row, some 3.3 KB on 13.6) to the
+end of GuiData. The copies are claimed by the coverage gate as tables, so they do not spend
+GuiData's tail headroom, but they do spend flash.
 
 `ColourCell` has these fields:
 
@@ -431,17 +450,22 @@ It refuses these (`RoutineKitError` codes):
 | `UNSUPPORTED_FIELD` | the widget type has no such field, or its colour-mode bytes gate it off |
 | `UNSUPPORTED_MODE` | the field inherits (mode 0, 4 or 5) or is the theme default (mode 1): there is no colour to restore |
 | `STATEFUL_RECORD` | the record watches a value slot, so its on/off state picks the fillA2/fillB2 pair (Finding 28) |
-| `INHERITED_COLOUR` | a later record of the object takes this field's colour (the colour state persists from record to record, Finding 29), or draws a child before setting it again |
+| `INHERITED_COLOUR` | a later record of the object takes this field's colour (the colour state persists from record to record, Finding 29), or draws a child before setting it again, or the object ends before any record sets it again (whatever the page draws next could inherit it) |
 | `FIRMWARE_MISMATCH` | `expect` differs from the record |
-| `NO_DISPLAY_CELL`, `BAD_EDIT` | the table could not grow, or a structural gate failed |
+| `NO_DISPLAY_CELL`, `BAD_EDIT` | the table could not grow, or a structural gate failed; a relocation failure names GuiData's tail headroom |
 
 **The cell holds garbage at power-on.** The C runtime initialises SRAM only up to `0x2000AD98`,
-and the cell is above it. Your op must install a tick routine that stores a colour into `addr`
-**on every tick, in every branch**: the new colour, or `before_word` (or the word at
-`before_cell_addr`) otherwise. That is enough for the control never to draw garbage
-(*inference*, not checked on the coach): the tick chain runs before `FUN_00247BF8`, whose
-theme-init is the only writer of the stock chrome cells, which sit in the same uninitialised
-SRAM, so no page is drawn before the chain first runs. In the emulator the outline has the
+and the cell is above it. Your op must install a tick routine of this shape:
+
+1. at entry, **unconditionally** store `before_word` (or the word at `before_cell_addr`) into
+   `addr`;
+2. then, when your condition holds, store the new colour over it.
+
+So the cell is written on every tick whatever path the routine takes. That is enough for the
+control never to draw garbage (*inference*, not checked on the coach): the tick chain runs
+before `FUN_00247BF8`, whose theme-init is the only writer of the stock chrome cells, which sit
+in the same uninitialised SRAM, so no page is drawn before the chain first runs. In the emulator
+a cell seeded with magenta before the first tick never draws magenta, and the outline has the
 routine's colour in the first screenshot of HOME (*emulator*).
 
 **A store repaints nothing.** The panel repaints a control when a cell it watches changes or its
@@ -468,6 +492,9 @@ def build(code_load_addr, tail_target):
     r = thumb.Routine({"slot": reg.slot_addr, "cell": cell.addr, "red": 0xFF0000,
                        "restore": cell.before_word}, error=routinekit.RoutineKitError)
     routinekit.emit_prologue(r)
+    r.ldr_lit(0, "cell")                                        # 1. every tick: the old colour
+    r.ldr_lit(1, "restore")
+    r.emit(2, lambda h, s: (thumb.str_imm(1, 0, 0), "str r1, [r0]"))
     r.ldr_lit(0, "slot")
     r.emit(2, lambda h, s: (thumb.ldrh_imm(1, 0, 0), "ldrh r1, [r0]"))
     r.emit(2, lambda h, s: (thumb.lsls_imm(2, 1, 24), "lsls r2, r1, #0x18"))
@@ -476,25 +503,23 @@ def build(code_load_addr, tail_target):
     r.emit(2, lambda h, s: (thumb.movs_imm(0, 10), "movs r0, #0xa"))
     r.emit(2, lambda h, s: (thumb.muls(2, 0), "muls r2, r0, r2"))
     r.emit(2, lambda h, s: (thumb.cmp_reg(2, 3), "cmp r2, r3"))
-    r.bcc("hi", "normal")                                       # above 10 %
+    r.bcc("hi", "done")                                         # above 10 %: keep it
+    r.ldr_lit(0, "cell")                                        # 2. low: red over it
     r.ldr_lit(1, "red")
-    r.b("store")
-    r.label("normal")
-    r.ldr_lit(1, "restore")
-    r.label("store")                                            # every tick, either branch
-    r.ldr_lit(0, "cell")
     r.emit(2, lambda h, s: (thumb.str_imm(1, 0, 0), "str r1, [r0]"))
+    r.label("done")
     routinekit.emit_tail(r, tail_target)
     return routinekit.assemble_tick(r, code_load_addr)
 
 routinekit.install_tick(ed, build, "fresh low outline")
 ```
 
-The library runs this routine in the emulator: the outline is red at 0 %, white at 33 %, red
-again at 0 % (the emulated G12 moves a tank one 33 % step every 10 s), and the other gauges'
-outlines never change (*emulator*). The `0xFFFF` the slot holds before any report reads as above
-10 %. A pool word and a label cannot share a name, so the restore word is not called `normal`.
-Several gauges take several calls, one row each.
+The library runs this routine in the emulator: the outline is white at 100 %, red at 0 %, white
+again at 33 % (the emulated G12 moves a tank one 33 % step every 10 s), never the magenta seeded
+into the cell before the first tick, and the other gauges' outlines never change (*emulator*).
+The `0xFFFF` the slot holds before any report reads as above 10 %. A pool word and a label cannot
+share a name. For several gauges, take every cell in one `own_colour_cells` call and drive them
+from one routine.
 
 ### Worked hints
 
