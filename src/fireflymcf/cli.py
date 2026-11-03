@@ -1594,6 +1594,19 @@ def _parse_slot_override(spec: str) -> tuple[int, int]:
         raise ValueError(f"--slot wants two integers (SLOT=VALUE), got {spec!r}")
 
 
+def _cmd_emulate(args: argparse.Namespace) -> int:
+    """Run the panel emulator (the `emu` extra) on an mcf.bin."""
+    import importlib
+
+    try:
+        importlib.import_module("fireflymcf.emu.machine")
+        emu_main = importlib.import_module("fireflymcf.emu.__main__")
+    except ImportError:
+        print('emulate needs: pip install "fireflymcf[emu]"', file=sys.stderr)
+        return 2
+    return emu_main.run(args)
+
+
 def _cmd_render(args: argparse.Namespace) -> int:
     """Render one GuiData page to an 800x480 PNG at a given coach configuration.
 
@@ -1961,6 +1974,11 @@ def main(argv: list[str] | None = None) -> int:
                    help="FAIL if any op is not hardware-verified (use for owner hand-off builds)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_validate)
+
+    p = sub.add_parser("emulate", help="boot an mcf.bin on the panel emulator (needs the emu extra)")
+    from .emu import __main__ as _emu_args       # light: no unicorn until it runs
+    _emu_args.add_arguments(p)
+    p.set_defaults(func=_cmd_emulate)
 
     p = sub.add_parser("render", help="render a GuiData page to an 800x480 PNG")
     p.add_argument("image")

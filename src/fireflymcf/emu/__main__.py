@@ -5,17 +5,21 @@ in a window and the mouse drives the GT911 touch controller.
 """
 import argparse
 import collections
+import contextlib
+import json
 import logging
 import os
+import sys
 import time
 
-from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
-
-from .machine import Machine
-from .periph.stm32f7 import CPU_HZ
+# unicorn and the machine are imported inside the functions that run it, so `add_arguments`
+# works (for `fireflymcf emulate --help`) without the `emu` extra installed.
+CPU_HZ = 160_000_000   # replaced by periph.stm32f7.CPU_HZ when the emulator runs
 
 
 def report(m, why, dt):
+    from unicorn.arm_const import UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_SP
+
     uc = m.uc
     print(f"stopped: {why or 'time limit'}")
     print(f"  pc=0x{uc.reg_read(UC_ARM_REG_PC):08x} lr=0x{uc.reg_read(UC_ARM_REG_LR):08x} "
@@ -66,8 +70,7 @@ def run_gui(m, scale):
     return why
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Spyder Controls / Firefly LCD emulator")
+def add_arguments(ap):
     ap.add_argument("mcf", help="MCF firmware package (e.g. firefly-13.6/mcf.bin)")
     ap.add_argument("--seconds", type=float, default=None, help="stop after N simulated seconds")
     ap.add_argument("--gui", action="store_true", help="show the display; mouse = touch")
@@ -103,7 +106,32 @@ def main():
     ap.add_argument("--stats", action="store_true", help="print the hottest MMIO accesses")
     ap.add_argument("-q", "--quiet", action="store_true", help="hide unmodelled-register notes")
     ap.add_argument("-v", "--verbose", action="store_true")
-    args = ap.parse_args()
+    ap.add_argument("--json", action="store_true",
+                    help="print a JSON summary (headless only); the log goes to stderr")
+
+
+def run(args, ap=None):
+    """Run the emulator for parsed `args`; returns the process exit code."""
+    if args.json and args.gui:
+        print("error: --json does not combine with --gui", file=sys.stderr)
+        return 2
+    if args.json:
+        with contextlib.redirect_stdout(sys.stderr):
+            summary = _run(args, ap)
+        if isinstance(summary, int):
+            return summary
+        print(json.dumps(summary))
+        return 0
+    result = _run(args, ap)
+    return result if isinstance(result, int) else 0
+
+
+def _run(args, ap=None):
+    global CPU_HZ
+    from .machine import Machine
+    from .periph.stm32f7 import CPU_HZ as _HZ
+
+    CPU_HZ = _HZ
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s.%(msecs)03d %(name)-7s %(message)s", datefmt="%H:%M:%S")
     if args.quiet:
@@ -118,7 +146,10 @@ def main():
     m.rfremote.battery_mv = args.remote_battery or None
     if args.can_tx:
         if not (args.can or "").startswith("ssh:"):
-            ap.error("--can-tx needs --can ssh:HOST:CHANNEL")
+            if ap is not None:
+                ap.error("--can-tx needs --can ssh:HOST:CHANNEL")
+            print("error: --can-tx needs --can ssh:HOST:CHANNEL", file=sys.stderr)
+            return 2
         args.network = "none"              # only the real coach answers
         os.makedirs(os.path.dirname(args.tx_log) or ".", exist_ok=True)
     if args.replay:
@@ -146,7 +177,9 @@ def main():
             why = m.run(None if args.seconds is None else int(args.seconds * CPU_HZ))
     except KeyboardInterrupt:
         why = "interrupted"
-    report(m, why, time.time() - t0)
+    dt = time.time() - t0
+    report(m, why, dt)
+    shot = None
     if args.screenshot:
         from PIL import Image
 
@@ -155,11 +188,20 @@ def main():
             print("  (display not configured; no screenshot)")
         else:
             Image.fromarray(img).save(args.screenshot)
+            shot = args.screenshot
             print(f"  screenshot: {args.screenshot}")
     if args.stats:
         print("hottest MMIO accesses:")
         for (name, off, kind, pc), n in m.bus.stats.most_common(15):
             print(f"  {n:9,}  {name:8} +0x{off:03x} {kind}  pc=0x{pc:08x}")
+    return {"ok": True, "stopped": why or "time limit", "seconds": round(m.cycles / CPU_HZ, 3),
+            "wall_seconds": round(dt, 3), "screenshot": shot}
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Spyder Controls / Firefly LCD emulator")
+    add_arguments(ap)
+    raise SystemExit(run(ap.parse_args(), ap))
 
 
 if __name__ == "__main__":
