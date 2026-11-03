@@ -28,6 +28,12 @@ full = ["numpy>=1.21", "capstone>=5.0", "Pillow>=10.1", "resvg-py>=0.5"]
 # Cortex-M in tests/emu.py; it is required, not optional -- routine tests fail without it.
 test = ["pytest>=7", "pytest-xdist>=3", "unicorn>=2.1", "fastapi", "httpx", "jsonschema>=4.18"]
 
+# The Spyder LCD panel emulator (`python -m fireflymcf.emu MCF`, docs/EMULATOR.md): boots an
+# mcf.bin on Unicorn with emulated STM32F7 peripherals and a simulated RV-C bus. `emu-gui` adds
+# the interactive window.
+emu = ["unicorn>=2.1.4", "capstone>=5.0", "numpy>=1.21", "Pillow>=10.1", "python-can>=4"]
+emu-gui = ["pygame>=2"]
+
 # Firefly Studio, the browser editor (`python3 -m studio` from a checkout; not packaged).
 studio = ["fastapi", "uvicorn"]
 
@@ -44,7 +50,7 @@ Documentation = "https://github.com/dbergl/fireflymcf"
 where = ["src"]
 
 [tool.setuptools.package-data]
-fireflymcf = ["py.typed", "data/*.txt"]
+fireflymcf = ["py.typed", "data/*.txt", "emu/native/*.c", "emu/symbols/*.sym"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -67,7 +67,7 @@ def pytest_report_header(config):
 def pytest_terminal_summary(terminalreporter):
     # Counted here: under xdist, collection happens in the workers.
     if _RESEARCH_MISSING:
-        left_out = [p for p in (REPO_ROOT / "tests").glob("test_*.py")
+        left_out = [p for p in (REPO_ROOT / "tests").rglob("test_*.py")
                     if any(token in p.read_text() for token in _RESEARCH_TOKENS)]
         terminalreporter.write_line(
             f"{len(left_out)} test modules not collected: they need research data "

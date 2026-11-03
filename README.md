@@ -44,6 +44,16 @@ Describe the change you want ("rename the Water Pump button to Pump"), or use
 `/fireflymcf:flash-report`. The agent builds from your own stock `mcf.bin`, checks the whole image
 against it, and tells you what has and has not been tested on a coach.
 
+## Panel emulator
+
+`fireflymcf.emu` boots an `mcf.bin` on an emulated Spyder 7" LCD panel (STM32F7 on Unicorn, with
+its display, touch, EEPROM and CAN bus) next to an emulated G12 that runs the image's own G12
+logic and a simulated RV-C network, so a build can be looked at and tapped before it is flashed.
+Install the `emu` extra (`pip install "fireflymcf[emu] @ git+https://github.com/dbergl/fireflymcf.git"`),
+then run `python -m fireflymcf.emu MCF --seconds 5 --screenshot shot.png` (`--gui` with the
+`emu-gui` extra). It is developed against firmware 13.6. See [`docs/EMULATOR.md`](docs/EMULATOR.md)
+and its findings in [`docs/EMULATOR-NOTES.md`](docs/EMULATOR-NOTES.md).
+
 ## Development
 
 ```

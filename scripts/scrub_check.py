@@ -37,6 +37,8 @@ LINE_RULES = [
         r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
         r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b")),
 ]
+# Documentation placeholders that look like what a rule forbids (an SSH target in a usage line).
+PLACEHOLDERS = {"USER@HOST:"}
 
 
 @dataclass(frozen=True)
@@ -97,7 +99,7 @@ def scan(paths: list[pathlib.Path], allow: list[str]) -> list[Finding]:
             if p.suffix.lower() in BLOB_EXTS and BLOB_RE.search(line):
                 hits.append(Finding(rel, n, "blob", "base64/hex literal >= 512 chars"))
             for rule, rx in LINE_RULES:
-                m = rx.search(line)
+                m = next((m for m in rx.finditer(line) if m.group(0) not in PLACEHOLDERS), None)
                 if m:
                     hits.append(Finding(rel, n, rule, m.group(0)))
             for m in EMAIL_RE.finditer(line):

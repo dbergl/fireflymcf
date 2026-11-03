@@ -1,0 +1,50 @@
+# Spyder Controls 7in Lite LCD firmware 13.6 (Jayco B-Van V13 package).
+# <address> <name> [comment]   -- Thumb functions, ITCM flash alias addresses.
+# Identified by REA/Ghidra decompilation; ev_* are REA evidence IDs.
+0x002104d0 Reset_Handler        startup: .data copy, .bss clear, SystemInit, libc init, main
+0x00210524 SystemInit
+0x0021eee4 __libc_init_array
+0x0021d398 main                 ev_825eb961: CubeMX init, creates 3 tasks
+0x00210a50 HAL_IncTick
+0x00210a60 HAL_GetTick
+0x00210a6c HAL_Delay
+0x00212cd2 HAL_IWDG_Refresh
+0x00217448 watchdog_kick        tail-calls HAL_IWDG_Refresh(&hiwdg)
+0x002184e8 delay_ms_kicking     ev_9def0d88: busy-wait delay that kicks the watchdog
+0x0021643c can1_init            ev_e259d96f: bxCAN init, 250 kbit/s, needs INAK still set after leaving init
+0x002194e4 prvIdleTask          yields via ICSR.PENDSVSET in a loop
+0x00218d9c osThreadCreate
+0x00218d92 osKernelStart
+0x00218dd4 osSignalSet          ev_12a64661: task notify (ISR-aware)
+0x00218e20 osSignalWait
+0x00218e7c osThreadSuspend
+0x0021d28c defaultTask
+0x0021b1b8 defaultTask_loop
+0x0021e410 defaultTask_init
+0x0021cbb8 GuiUpdateTask
+0x0021d2a0 GuiUpdateSuspendTask waits for a signal, then suspends GuiUpdateTask
+0x00219a4c PendSV_Handler
+0x002199b4 SVC_Handler
+0x0021c760 gui_datapoint_update ev_8a5f3378: GuiData 'A' table -> state values, then gui_export4
+0x0021a664 can_rx_dispatch      ev_fb60b1a7: non-config CAN frames
+0x00216688 can_read_mailbox     ev_35bb9149: frame+0x11 = FMI
+0x00218424 can_rx_enqueue       ev_9b7829f7: dispatch on FMI; FMI 0 = address conflict -> reset
+0x00217454 NVIC_SystemReset
+0x0021cac8 HAL_LTDC_LineEventCallback ev_75f9069b
+0x0021be50 display_gui_init     ev_24ec78da
+0x0021068c gt911_read_irq       ev_65e99578: HAL_I2C_Mem_Read_IT 0x814E
+0x0021e3dc HAL_GPIO_EXTI_Callback ev_e4ec4236
+0x002196ac xTaskNotifyWait      ev_8b0944e8
+0x002195d0 vTaskSuspend
+0x002199d4 vPortEnterCritical
+0x00219a20 vPortExitCritical
+# GuiCode (0x240000) -- extract GuiCode ELF with the same file; only addresses in range apply
+0x0024f1fc gui_inverter_rx       ev_113acf0b: binds inverters by SA of first 1FFD4, decodes inverter DGNs
+0x0024f6d8 gui_inverter_command  ev_1848006f: 1FFD3 enable/disable from status byte
+0x0024ef1c gui_inverter_age      ev_f964846c: freshness counters
+0x00240d20 gui_frame_decode      ev_1bfe0e9e
+0x00247bf8 gui_tick
+0x0021ce28 rf_remote_receiver   ev_4dfe4d57: UART4 RF packets (F0 0F + 10 bytes), reports remote battery/temp
+0x00216b1c uart4_isr            ev_1e27027b: RX ring 0x200002b8 (128), TX ring 0x20000278 (64)
+0x00216ae8 rf_rx_available
+0x00216afc rf_rx_byte

@@ -31,6 +31,14 @@ def test_commit_email_and_hex_literal_are_fine(tmp_path):
     assert scrub_check.scan([p], []) == []
 
 
+def test_ssh_placeholder_is_fine_but_a_real_target_on_its_line_is_not(tmp_path):
+    p = tmp_path / "usage.md"
+    p.write_text("--can ssh:USER@HOST:CHANNEL\n")
+    assert scrub_check.scan([p], []) == []
+    p.write_text("--can ssh:USER@HOST:CHANNEL, e.g. ssh:pi@box:can1\n")
+    assert [f.text for f in scrub_check.scan([p], [])] == ["pi@box:"]
+
+
 def test_allow_list_exempts(tmp_path):
     p = tmp_path / "b.md"
     p.write_text("coach2mqtt\n")
