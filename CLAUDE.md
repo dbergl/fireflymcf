@@ -177,33 +177,33 @@ twice been read as contradicting it and was wrong both times.
 | add a working button on a page | `add_button`; `add_glyph_button` + `wire_button` | flashed 2026-08-17 |
 | tap / hold / ramp / momentary gestures; hold-to-toggle; tap and hold on one control | `set_gesture`, `split_hold_region` | PC.22 |
 | install artwork as a glyph | `install_glyph` | flashed |
-| narrow a receive filter to one instance | `pin_filter_instance` | v17 |
+| narrow a receive filter to one instance | `pin_filter_instance` | flashed and verified 2026-09-04 (PC.59) |
 | subscribe the panel to a new DGN (4 bytes); transmit an unknown DGN (1 byte) | `statusbind.retarget_filter`, `newbutton.set_binding_dgn` | 2026-08-22/23 |
 | new OPTIONS row gating a channel follower; generic register follower | `add_option_follower`, `follow_channel`, `follow_register` | PC.45 |
-| show any register as a live number; feed an existing readout past a decode fence | `add_register_readout` | v17, v18 |
-| compact AES Electrical page; live Low Volts arm; inverter gear retarget | `swap_aes_electrical`, `add_aes_low_volts_trigger`, `retarget_inverter_gear` | v10-v12 |
-| Water Pump Auto Off with corner mark | `add_pump_auto_off`, `add_corner_mark`, `install_glyph` | v17, v21 |
-| pin a type-6 switch to one arm; repair a per-tick disabled control; sixth nav icon | `pin_switch_arm`, `fix_variant_gate`, `show_nav_slides_icon` | v18, v22, v17 |
-| stop the G12 claiming a tank instance | `suppress_tank_status`; `fireflymcf-tankpatch` | v22, PC.62 |
-| remove the panel-side option interlock | `remove_option_interlocks` | reference build v7, PC.21 |
+| show any register as a live number; feed an existing readout past a decode fence | `add_register_readout` | flashed and verified 2026-09-04 and 2026-09-05 (PC.59, PC.60) |
+| compact AES Electrical page; live Low Volts arm; inverter gear retarget | `swap_aes_electrical`, `add_aes_low_volts_trigger`, `retarget_inverter_gear` | flashed and verified 2026-09-01 to 2026-09-02 |
+| Water Pump Auto Off with corner mark | `add_pump_auto_off`, `add_corner_mark`, `install_glyph` | flashed and verified 2026-09-04 and 2026-09-06 (PC.59, PC.61) |
+| pin a type-6 switch to one arm; repair a per-tick disabled control; sixth nav icon | `pin_switch_arm`, `fix_variant_gate`, `show_nav_slides_icon` | flashed and verified 2026-09-05, 2026-09-07, 2026-09-04 |
+| stop the G12 claiming a tank instance | `suppress_tank_status`; `fireflymcf-tankpatch` | flashed and verified 2026-09-07, PC.62 |
+| remove the panel-side option interlock | `remove_option_interlocks` | flashed and verified 2026-08-23, PC.21 |
 | remove a control (park off-canvas) | `remove_control` | **unverified** |
-| remove one channel from a master ON/OFF control | `drop_from_master` | v26 |
-| subscribe the panel to a NEW DGN without giving up an existing one | `append_filter` | v30 |
-| BMS battery-heater button on the compact AES frame, with live heater/contactor status | `add_aes_batt_heat`, `add_aes_batt_heat_status` | v27, v32 |
-| white heater-contactor glyph on the House battery icons (HOME, ELECTRICAL) | `add_batt_heat_battery_glyph` | v33 recipe, flashed in v34a 2026-09-26 |
-| orange House-battery outline while the heater contactor is closed (replaces the glyph) | `add_batt_heat_battery_glyph` `style: "outline"` | v47, verified (outline seen 2026-10-10) |
-| LEVEL page on screen 29 fed by the level sensor (RV-C custom DGN `0x1EFBF` since v37) | `add_level_page` | v35 flashed 2026-09-27: live page, rear orientation and Blocks-carried stepper and NO SENSOR verified; v37 flashed 2026-09-28 on `0x1EFBF`; Zero Level **unverified** |
-| number readouts whose background fill cannot wipe a neighbour, in any measuring class | `readoutfill`, `metrics.worst_fill_width`; `add_level_page` `fill_safe` | v38 built |
-| hold-to-reboot the APS-500 from the ALTERNATOR SYSTEM page (RV-C `GENERAL_RESET`) | `add_alt_reboot` | v46 flashed 2026-10-05, verified |
-| claim an icon font's unused block character for new artwork; re-icon one of several icons | `install_glyph` `claim_block`; `set_icon` `current` | v38 built |
-| Inverter-card readouts (AC In V, In/Out Amps with the RV-C offset, house-battery Batt Amps in v49, inverter DC current (slot 652) in v50); Ignore Alarms BMS button with bit status | `add_card_readouts`, `add_register_readout` `sub`/`draw`; `add_aes_batt_heat` `enable_wire`/`off_wire`/`group_pool`, `add_aes_bms_button_status` | v49, v50 flashed 2026-10-15 (readouts live); v51 built |
-| ELECTRICAL as four cards (Batteries, Inverter, Auto Engine Start, Water Pump); "Battery Heater" caption; AES DISABLED half in navy | `aes_card_layout`; `add_aes_batt_heat` `text` + status `button` ref | v48 flashed 2026-10-15 (draws; three defects, fixed for v49) |
+| remove one channel from a master ON/OFF control | `drop_from_master` | flashed and verified 2026-09-14 |
+| subscribe the panel to a NEW DGN without giving up an existing one | `append_filter` | flashed and verified 2026-09-22 |
+| BMS battery-heater button on the compact AES frame, with live heater/contactor status | `add_aes_batt_heat`, `add_aes_batt_heat_status` | flashed and verified 2026-09-21, 2026-09-22 |
+| white heater-contactor glyph on the House battery icons (HOME, ELECTRICAL) | `add_batt_heat_battery_glyph` | flashed and verified 2026-09-26 |
+| orange House-battery outline while the heater contactor is closed (replaces the glyph) | `add_batt_heat_battery_glyph` `style: "outline"` | flashed, verified (outline seen 2026-10-10) |
+| LEVEL page on screen 29 fed by the level sensor (RV-C custom DGN `0x1EFBF` since 2026-09-28) | `add_level_page` | flashed 2026-09-27: live page, rear orientation and Blocks-carried stepper and NO SENSOR verified; flashed 2026-09-28 on `0x1EFBF`; Zero Level **unverified** |
+| number readouts whose background fill cannot wipe a neighbour, in any measuring class | `readoutfill`, `metrics.worst_fill_width`; `add_level_page` `fill_safe` | built 2026-09-28 |
+| hold-to-reboot the APS-500 from the ALTERNATOR SYSTEM page (RV-C `GENERAL_RESET`) | `add_alt_reboot` | flashed 2026-10-05, verified |
+| claim an icon font's unused block character for new artwork; re-icon one of several icons | `install_glyph` `claim_block`; `set_icon` `current` | built 2026-09-28 |
+| Inverter-card readouts (AC In V, In/Out Amps with the RV-C offset, house-battery Batt Amps, later inverter DC current (slot 652)); Ignore Alarms BMS button with bit status | `add_card_readouts`, `add_register_readout` `sub`/`draw`; `add_aes_batt_heat` `enable_wire`/`off_wire`/`group_pool`, `add_aes_bms_button_status` | flashed 2026-10-15 (readouts live); the caption fixes built 2026-10-15 |
+| ELECTRICAL as four cards (Batteries, Inverter, Auto Engine Start, Water Pump); "Battery Heater" caption; AES DISABLED half in navy | `aes_card_layout`; `add_aes_batt_heat` `text` + status `button` ref | flashed 2026-10-15 (draws; three defects, fixed in the next build) |
 
 **Constraints that bind:**
 
 - **A hold only works on a group GuiCode does not drive.** `newbutton.free_group_slots` lists
-  13.6's 130-139, which GuiCode sets as a block; v45's holds on 136/137 were dead. Mint hold
-  controls from `newbutton.hold_safe_groups`, and any other new group from
+  13.6's 130-139, which GuiCode sets as a block; holds on 136/137 were dead on the coach
+  (2026-09-30). Mint hold controls from `newbutton.hold_safe_groups`, and any other new group from
   `newbutton.assignable_groups` (the free list minus the GuiCode-driven groups); a compile gate
   refuses reusing a GuiCode-driven group.
 - The DGN registration cap is **83** and fails silently; 13.6 registers 66. `retarget_filter` refuses

@@ -9,3 +9,5 @@ tests/test_scrub.py:pii-email  # fixtures that must trip the gate
 tests/test_scrub.py:pii-ip  # fixtures that must trip the gate
 scrub-allow.txt:pii-home  # the Canvas.test.tsx entry above quotes its regex
 scrub-allow.txt:pii-host  # the test_g12code.py entry above quotes its label
+scripts/scrub_check.py:build-name  # the gate's own patterns
+tests/test_scrub.py:build-name  # fixtures that must trip the gate
