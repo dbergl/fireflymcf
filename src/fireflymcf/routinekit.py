@@ -5,8 +5,8 @@ routine onto the one hook at GuiCode+0xEE3C, find the receive slot a register la
 SRAM nothing else reaches, build an OPTIONS config-write frame and hand it to the host sender.
 This module exposes those steps, wrapping the library's own functions (no built-in op calls
 through here, so their bytes are unchanged) so a user op can do them without reaching into
-library internals. `docs/USER-OPS.md` ("Primitives") is the reference; the surface is
-semver-stable.
+library internals. `plugin/skills/write-new-op/USER-OPS.md` ("Primitives") is the reference;
+the surface is semver-stable.
 
 Two kinds of name:
 
@@ -46,12 +46,14 @@ from .recipe import RecipeError
 __all__ = ["PRIMITIVES", "RoutineKitError", "TickPlan", "TickInstall", "tick_install_plan",
            "install_tick_routine", "install_tick", "slot_addr", "resolve_register",
            "fresh_sram", "find_config_toggle", "config_frame", "emit_prologue", "emit_tail",
-           "emit_send_frame", "assemble_tick", "thumb", "PROLOGUE_TEXT", "EPILOGUE_TEXT"]
+           "emit_send_frame", "assemble_tick", "thumb", "PROLOGUE_TEXT", "EPILOGUE_TEXT",
+           "GuiCodeView", "guicode", "find_tag", "tick_chain"]
 
 
 class RoutineKitError(RecipeError):
     """A primitive refused. Codes: STALE_PLAN, BAD_ROUTINE, BAD_HOOK, NO_SRAM, NO_SUCH_REGISTER,
-    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT. `RoutineKitError(msg)` (one
+    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT, NO_TAG, AMBIGUOUS_TAG.
+    `RoutineKitError(msg)` (one
     argument, as `thumb.Routine(error=...)` raises it) is BAD_ROUTINE."""
 
     def __init__(self, code: str, message: str | None = None, **kw):
@@ -105,6 +107,66 @@ def _plan(data: bytes) -> TickPlan:
             "BAD_HOOK", f"GuiCode append point is {load:#x}; expected stock 13.6's "
             f"{followchannel.STOCK_APPEND_POINT:#x} or a 4-aligned point beyond it")
     return TickPlan(load, tail, followchannel.HOOK_OFF, hook_old)
+
+
+# --------------------------------------------------------------------------------------------
+# Readers (helpers, not primitives: they never change an image)
+# --------------------------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class GuiCodeView:
+    """The GuiCode section of an image, at the runtime address the panel runs it from."""
+    load_addr: int          # runtime address of body[0] (the base every primitive uses)
+    offset: int             # file offset of body[0]
+    body: bytes             # the section's bytes, trailing checksum included
+
+    def at(self, addr: int, n: int) -> bytes:
+        """`n` bytes at runtime address `addr`."""
+        i = addr - self.load_addr
+        if not 0 <= i <= len(self.body) - n:
+            raise RoutineKitError("BAD_ROUTINE", f"{addr:#x}+{n} is outside GuiCode "
+                                  f"({self.load_addr:#x}+{len(self.body):#x})")
+        return self.body[i:i + n]
+
+    def u32(self, addr: int) -> int:
+        return int.from_bytes(self.at(addr, 4), "little")
+
+
+def guicode(data: bytes) -> GuiCodeView:
+    """The image's GuiCode at its runtime base. Refuses (BAD_HOOK) a descriptor that maps it
+    anywhere but the base every primitive uses, as `tick_install_plan` does."""
+    sec = theme.guicode_section(data)
+    if theme.guicode_base(sec) != theme.GUICODE_BASE_DEFAULT:
+        raise RoutineKitError(
+            "BAD_HOOK", f"GuiCode maps at {theme.guicode_base(sec):#x}, not "
+            f"{theme.GUICODE_BASE_DEFAULT:#x}")
+    return GuiCodeView(theme.GUICODE_BASE_DEFAULT, sec.offset,
+                       bytes(data[sec.offset:sec.offset + sec.length]))
+
+
+def find_tag(data: bytes, tag: bytes) -> int:
+    """Runtime address of the one occurrence of `tag` in GuiCode: how a test or a later `check`
+    finds what an op put in its routine's prefix (`assemble_tick(..., prefix=tag + ...)`).
+    Refuses NO_TAG (absent) and AMBIGUOUS_TAG (more than once: choose a longer tag)."""
+    tag = bytes(tag)
+    if len(tag) < 4:
+        raise RoutineKitError("BAD_ROUTINE", "a tag needs at least 4 bytes")
+    g = guicode(data)
+    at = g.body.find(tag)
+    if at < 0:
+        raise RoutineKitError("NO_TAG", f"no {tag!r} in GuiCode")
+    if g.body.find(tag, at + 1) >= 0:
+        raise RoutineKitError("AMBIGUOUS_TAG", f"{tag!r} occurs more than once in GuiCode")
+    return g.load_addr + at
+
+
+def tick_chain(data: bytes) -> list[int]:
+    """The per-tick chain the hook reaches: each appended routine's entry in call order, newest
+    first, ending with the stock paint function (`followchannel.chain_from_hook`)."""
+    try:
+        return followchannel.chain_from_hook(data)
+    except followchannel.FollowChannelError as e:
+        raise RoutineKitError("BAD_HOOK", str(e)) from e
 
 
 def tick_install_plan(data: bytes) -> tuple[bytes, TickPlan]:

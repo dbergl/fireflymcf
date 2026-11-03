@@ -4,7 +4,7 @@ The smallest complete per-tick routine, written against `userop.Editor` and `rou
 draws nothing and sends nothing, so it is safe to emulate and pointless to flash: copy it as the
 shape of a real op (fresh cell, two-phase install, link contract, a tag the test can find).
 
-Routine (each link of the hook chain obeys this contract, docs/USER-OPS.md "Per-tick routines"):
+Routine (each link of the hook chain obeys this contract, ../../USER-OPS.md "Per-tick routines"):
 
     TAG "uCNT", cell address        ; prefix data at code_load_addr: emu_test.py finds the cell
     push {r0, r1, r2, r3, lr}       ; emit_prologue
@@ -17,7 +17,7 @@ Routine (each link of the hook chain obeys this contract, docs/USER-OPS.md "Per-
 """
 import struct
 
-from fireflymcf import container, followchannel, recipe, routinekit, theme, thumb
+from fireflymcf import recipe, routinekit, thumb
 from fireflymcf.userop import UserOp
 
 TAG = b"uCNT"          # 4 bytes, so the cell word after it stays 4-aligned
@@ -25,13 +25,8 @@ TAG = b"uCNT"          # 4 bytes, so the cell word after it stays 4-aligned
 
 def find_tagged(data: bytes) -> tuple[int, int]:
     """`(entry_addr, cell)` of the installed counter, found by its tag in GuiCode."""
-    gc = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
-    body = data[gc.offset:gc.offset + gc.length]
-    at = body.find(TAG)
-    if at < 0 or body.find(TAG, at + 1) >= 0:
-        raise AssertionError(f"expected exactly one {TAG!r} tag in GuiCode")
-    cell = struct.unpack_from("<I", body, at + 4)[0]
-    return theme.GUICODE_BASE_DEFAULT + at + 8, cell
+    at = routinekit.find_tag(data, TAG)            # refuses if absent or not unique
+    return at + 8, routinekit.guicode(data).u32(at + 4)
 
 
 @recipe.op("user:tick-counter")
@@ -66,6 +61,6 @@ class TickCounter(UserOp):
 
     def check(self, data, ctx):
         entry, cell = find_tagged(data)
-        chain = followchannel.chain_from_hook(data)
+        chain = routinekit.tick_chain(data)
         assert entry in chain, f"counter entry {entry:#x} is not on the tick chain {chain}"
         return f"counter at {entry:#x} adds {self.step} to {cell:#x} each tick"

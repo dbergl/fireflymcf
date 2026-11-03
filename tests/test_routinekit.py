@@ -314,3 +314,37 @@ def test_emit_send_frame_transmits(mcf_136):
     answers = [f for f in s.frames(sa=None, since=mine[0].t)
                if f.sa != PANEL_SA and len(f.data) > 2 and f.data[0] == 0x2F]
     assert answers and answers[0].t - mine[0].t <= 2.0, answers[:3]
+
+
+def test_readers_find_a_tagged_routine(mcf_136):
+    """`guicode`, `find_tag`, `tick_chain`: the stable readers a user op's check and emulator test
+    use to find what it installed (the write-new-op example relies on them)."""
+    g = routinekit.guicode(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    assert (g.load_addr, g.offset, len(g.body)) == (theme.GUICODE_BASE_DEFAULT, sec.offset,
+                                                     sec.length)
+    assert g.at(g.load_addr + followchannel.HOOK_OFF, 4) == followchannel.HOOK_STOCK
+    assert routinekit.tick_chain(mcf_136) == followchannel.chain_from_hook(mcf_136)
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        routinekit.find_tag(mcf_136, b"uTST")
+    assert e.value.code == "NO_TAG"
+    with pytest.raises(routinekit.RoutineKitError):
+        g.at(g.load_addr + len(g.body) - 2, 4)
+
+    ed = userop.Editor(mcf_136)
+    cell = ed.call("fresh_sram", 4)
+    tag = b"uTST" + struct.pack("<I", cell)
+
+    def build(code_load_addr, tail_target):
+        r = thumb.Routine({}, error=routinekit.RoutineKitError)
+        routinekit.emit_prologue(r)
+        routinekit.emit_tail(r, tail_target)
+        return routinekit.assemble_tick(r, code_load_addr, prefix=tag)
+
+    inst = routinekit.install_tick(ed, build, "tagged")
+    at = routinekit.find_tag(ed.data, b"uTST")
+    assert at == inst.load_addr and routinekit.guicode(ed.data).u32(at + 4) == cell
+    assert routinekit.tick_chain(ed.data)[0] == inst.entry_addr == at + 8
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        routinekit.find_tag(ed.data + b"", b"\x00\x00\x00\x00")
+    assert e.value.code == "AMBIGUOUS_TAG"

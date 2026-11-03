@@ -27,4 +27,6 @@ def test_emulate_without_extra_explains(monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "fireflymcf.emu.machine", None)
     rc = cli.main(["emulate", "firefly-13.6/mcf.bin", "--seconds", "1"])
     assert rc == 2
-    assert 'pip install "fireflymcf[emu]"' in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert cli.EMU_MISSING in err                    # the extra, from this repository by URL
+    assert 'fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git' in err

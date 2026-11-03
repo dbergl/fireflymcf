@@ -36,13 +36,13 @@ At the prompt of a Claude Code session:
 The plugin drives the `fireflymcf` command-line tool and installs it itself. At each session start
 its hook (`plugin/hooks/hooks.json`, `plugin/scripts/session-start.sh`) checks that the release
 matching the plugin's version is installed in a venv in the plugin's data folder, installs it from
-that release's wheel when it is not (the first session, and the first after a plugin update), and
-tells the agent where it is. It needs Python 3.10+ (`python3`, `python` or `py -3`) and, on
+that release's wheel, with the panel emulator (`[full,emu]`), when it is not (the first session,
+and the first after a plugin update), and tells the agent where it is. It needs Python 3.10+ (`python3`, `python` or `py -3`) and, on
 Windows, Git Bash, which Claude Code runs hooks in. It does not touch any other Python install.
 When it cannot install, the agent says so and gives the command to run by hand:
 
 ```
-pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"
+pip install "fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git"
 ```
 
 Describe the change you want ("rename the Water Pump button to Pump"), or use
@@ -57,7 +57,7 @@ folder of Python beside your project that the engine gates like its own ops (eve
 against the bytes it expects, replayed, and limited to the sections it declares) and that is
 tested in the panel emulator before you flash anything. A user op runs with the same trust as any
 Python you run; the gates check correctness, they are not a sandbox, so read an op someone else
-wrote before you build with it. See [`docs/USER-OPS.md`](docs/USER-OPS.md).
+wrote before you build with it. See [`plugin/skills/write-new-op/USER-OPS.md`](plugin/skills/write-new-op/USER-OPS.md).
 
 ## Panel emulator
 

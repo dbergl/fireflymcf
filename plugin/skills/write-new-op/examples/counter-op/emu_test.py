@@ -5,20 +5,18 @@ still boots to HOME and navigates.
 `fireflymcf.emu.scenario.Scenario` on the built image, not yet booted. Anything that raises is
 the failure, with its line. Write this file before op.py, and watch it fail on stock first.
 """
-import struct
-
-from fireflymcf import container
+from fireflymcf import routinekit
+from fireflymcf.routinekit import RoutineKitError
 
 TAG = b"uCNT"          # the op's prefix tag (op.py): the cell's address follows it
 
 
 def _cell(image: bytes) -> int:
-    gc = next(s for s in container.parse_container(image).sections if "GuiCode" in s.name)
-    body = image[gc.offset:gc.offset + gc.length]
-    at = body.find(TAG)
-    assert at >= 0, "no counter in this image (did the op run?)"
-    assert body.find(TAG, at + 1) < 0, "two counter tags in GuiCode"
-    return struct.unpack_from("<I", body, at + 4)[0]
+    try:
+        at = routinekit.find_tag(image, TAG)
+    except RoutineKitError as e:
+        raise AssertionError(f"no counter in this image (did the op run?): {e}") from None
+    return routinekit.guicode(image).u32(at + 4)
 
 
 def _u32(s, addr: int) -> int:

@@ -88,9 +88,9 @@ Assert crossings and counts, not single readings: "after X, exactly one frame wi
 within 5 s, and none before". Assert what the owner would see (a selector's value, a cell a widget
 draws), not only that your code ran. Anything that raises fails the test with its line.
 
-**Run every assertion on stock first.** The stock panel is not silent: in the emulator, stock
-13.6 sends a D1 config write on selector `0x9B` at boot. "Nothing was sent" is false on stock; a
-test must assert only what the op changes.
+**Run every assertion on stock first.** The stock panel is not silent: stock 13.6 sends a D1
+config write on selector `0x9B` at boot (observed in the emulator, not checked against a
+capture). "Nothing was sent" is false on stock; a test must assert only what the op changes.
 
 **What emulated means.** The emulator runs the panel's own code against a simulated G12 and RV-C
 network on 13.6 only. Any other build reports `not emulated: <reason>`, never a pass. It is not
@@ -125,8 +125,9 @@ container header can never be declared), `written_against` (a list of objects: `
 - Do not override `apply` or `verify` (they are the gate). Import sibling files with
   `from . import helper`; only the hashed source in the folder runs (no `.pyc`, no symlinks).
 
-**The primitives** (`fireflymcf.routinekit`, semver-stable; `help(fireflymcf.routinekit)` and
-`docs/USER-OPS.md` "Primitives" are the reference). Call a primitive through `ed.call(name, ...)`
+**The primitives** (`fireflymcf.routinekit`, semver-stable; [`USER-OPS.md`](USER-OPS.md) beside
+this file is the reference, with the authoring guide and worked hints, and
+`help(fireflymcf.routinekit)` has the same). Call a primitive through `ed.call(name, ...)`
 with JSON-able or bytes arguments (lists, not sets):
 
 | primitive / helper | gives |
@@ -139,10 +140,13 @@ with JSON-able or bytes arguments (lists, not sets):
 | `config_frame(selector, value, function)` | a 12-byte `0x1FED9` OPTIONS frame template (`0xD1` write, `0xD2` delta, `0xD3` read-back) |
 | `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
+| `guicode(data)`, `find_tag(data, tag)`, `tick_chain(data)` | readers: GuiCode at its runtime base; the address of a tag you put in a prefix; the tick chain |
 
 `thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strh_imm`, `cmp_imm8`, `bcc_n`, `movw`, …) build
-the routine; `Routine.assemble` checks every instruction against capstone. `docs/USER-OPS.md`
-has worked hints (writing an OPTIONS selector from a routine among them).
+the routine; `Routine.assemble` checks every instruction against capstone. Read the worked hints
+in [`USER-OPS.md`](USER-OPS.md) before writing a routine. Use only `userop`, `recipe` (`op`,
+`RecipeError`), `routinekit` and its `thumb`, and the readers USER-OPS lists: every other module
+can change in any release.
 
 **The link contract** (each routine on the tick chain): starts `push {r0, r1, r2, r3, lr}`,
 never writes r4-r7 (not checked for you), leaves through `pop.w {r0, r1, r2, r3, lr}` then `b.w`
@@ -180,10 +184,9 @@ names the file and line. Report each to the owner as "this op does not match you
 written**; it is reported, and the handover says so. Fix the op and rebuild rather than hand over
 a failing one.
 
-The emulator needs the `emu` extra, which the plugin's install leaves out. If `--emulate` says
-`emulate needs: …`, install it into the plugin's own venv with the same release the hook
-installed (`PY` is the `python` beside the hook's `fireflymcf`, `X.Y.Z` its version):
-`"$PY" -m pip install "fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git@vX.Y.Z"`.
+The emulator is the `emu` extra; the plugin's hook installs it with the rest. If the hook's line
+said it did not install, run the `pip install` command that line gives. If `--emulate` says
+`emulate needs the emu extra`, the install predates the extra: run the command it prints.
 
 ## 6. State the risk before the first build
 
@@ -246,11 +249,17 @@ the folder hash, which `op install` checks).
 
 ## Evidence rules and traps for an op author
 
-- **The capture wins.** A live CAN capture beats a reading of the file and the emulator; the
-  file has been read as contradicting the bus and was wrong both times.
+Each claim about the firmware carries its class: *hardware* (seen on a coach), *proven-from-code*
+(a cited instruction), *emulator* (seen in the emulator only), *library* (this library's code,
+pinned by its tests). `PC.N` and `Finding N` name entries in the fireflymcf repository's
+`docs/BUS-BASELINE.md` and `docs/GUICODE.md`.
+
+- **The capture wins.** A live CAN capture beats a reading of the file and the emulator. The
+  file has twice been read as contradicting a capture, and the reading was wrong both times
+  (project record, `BUS-BASELINE.md`).
 - **A register with one writer is not understood until its reader is named.** An OPTIONS value is
   written by the frame the panel sends and updates from the G12's echo; poking the cell changes
-  nothing the G12 does.
+  nothing the G12 does (*hardware*: PC.42, PC.45).
 - **An argument from absence needs a guarantee the thing would have been found.** Index-based
   reads and Thumb-1 immediates past `#imm5` defeat literal scans.
 - **Verifying only what you set is not verification.** Read `verify`'s whole report: every byte
@@ -258,24 +267,33 @@ the folder hash, which `op install` checks).
 - **Check the test can fail.** Run it on stock (or with the op's key instruction removed) and see
   it fail.
 - **Variable-table slots are index-split:** index ≤ 255 at `0x20007FC8 + 2*i`, > 255 at
-  `0x20008000 + 2*i`. The flat formula once wired a follower to the wrong slot; use `slot_addr`.
+  `0x20008000 + 2*i` (*proven-from-code*: `FUN_0021C760` at `0x0021C9B0`). The flat formula wired
+  a follower to the wrong slot (*hardware*: PC.44); use `slot_addr`.
 - **SRAM above `0x2000AD98` holds nothing unless something writes it**: the C runtime initialises
-  only below. A fresh cell is garbage at power-on: initialise it or tolerate any start value.
-- **Chain on the one hook.** Every routine shares the per-tick `bl` at GuiCode+`0xEE3C`; install
+  only below (*proven-from-code*: the reset handler's `.data`/`.bss` loops on 13.6). A fresh cell
+  is garbage at power-on: initialise it or tolerate any start value.
+- **Chain on the one hook.** Every routine shares the per-tick `bl` at GuiCode+`0xEE3C`
+  (*proven-from-code*; chains of four or more links run on the coach, *hardware*). Install
   through `install_tick`, which keeps every earlier link, and never patch the hook yourself.
 - **Switch arms must be flow-neutral, and the `0xFFFF` default arm sits at the base.** A record
   advances the layout pen by its own x, so an arm that does not put the pen back moves every later
-  record, and only when it is selected; on no match the panel draws the base only if its match
-  value is `0xFFFF`, otherwise nothing.
+  record, and only when it is selected (*library*: the layout re-walk); on no match the panel
+  draws the base only if its match value is `0xFFFF`, otherwise nothing (*proven-from-code*,
+  Finding 16).
 - **A hold only works on a group GuiCode does not drive.** Holds put on groups GuiCode sets as a
-  block were dead on the coach. The built-in ops refuse such a group; do not count on the engine
+  block (13.6: 130-139) took taps but never a hold (*hardware*, 2026-09-30; the mechanism is not
+  traced, `CONTROL-BEHAVIOR.md`). The built-in ops refuse such a group; do not count on the engine
   checking a user op's choice.
-- **The DGN registration cap is 83, and it fails silently.** Stock 13.6 registers 66; every new
-  subscription counts.
-- **Most touch actions run on release** (the finger-lifted handler), so a test taps and releases;
-  the scenario's `tap` does.
-- **A received value is drawn only if GuiCode copies its slot to a cell a widget draws.** A new
-  subscription alone shows nothing; `bus-map` says which entries reach a widget.
-- **Two publishers on one DGN: the last frame wins**; the receive filter does not see the sender.
-- **Label inference as inference.** Tell the owner which claims rest on the file or the emulator,
-  and which only the coach can settle.
+- **The DGN registration cap is 83, and overflow is silent** (*proven-from-code*: `cmp r2, #0x53`
+  at `0x0021A62A` in the registration function `FUN_0021A618`, whose refusal no caller checks).
+  Stock 13.6's variable table registers 66 (*library*: `statusbind.registered_dgns`; other call
+  sites register more, so treat it as at least 66). Every new subscription counts.
+- **Most touch actions run on release** (*proven-from-code*: the finger-lifted `0xFF` handler,
+  Finding 83), so a test taps and releases; the scenario's `tap` does.
+- **A received value is drawn only if GuiCode copies its slot to a cell a widget draws**
+  (*proven-from-code*, Finding 82). A new subscription alone shows nothing; `bus-map` says which
+  entries reach a widget.
+- **Two publishers on one DGN: the last frame wins**; the receive filter does not see the sender
+  (*hardware*: PC.46).
+- **Label inference as inference.** Tell the owner which claims rest on the file, the emulator or
+  the coach, and which only the coach can settle.

@@ -886,6 +886,12 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     return 1 if bad else 0           # a failing emulator test is reported, never an exit code
 
 
+# The emulator is the `emu` extra (the plugin's hook installs it). Never a bare-name install: a
+# PyPI package called fireflymcf would not be this project (tests/test_install_docs.py).
+EMU_MISSING = ('emulate needs the emu extra: pip install '
+               '"fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git"')
+
+
 def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: dict | None = None):
     """Run the scenario files ({sidecar key: file}) on `build` and record them in its sidecar,
     with a `not emulated` entry for each user op in `missing` (no emu_test.py); None (after
@@ -899,7 +905,7 @@ def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: 
     try:
         importlib.import_module("fireflymcf.emu.machine")
     except ImportError:
-        print('emulate needs: pip install "fireflymcf[emu]"', file=sys.stderr)
+        print(EMU_MISSING, file=sys.stderr)
         return None
     from .emu import gate
     results = gate.run_scenarios(build, scenarios, timeout_s) if scenarios else {}
@@ -1841,7 +1847,7 @@ def _cmd_emulate(args: argparse.Namespace) -> int:
         importlib.import_module("fireflymcf.emu.machine")
         emu_main = importlib.import_module("fireflymcf.emu.__main__")
     except ImportError:
-        print('emulate needs: pip install "fireflymcf[emu]"', file=sys.stderr)
+        print(EMU_MISSING, file=sys.stderr)
         return 2
     if args.scenario:
         results = _emulate_scenarios_on(Path(args.mcf), args.scenario, args.timeout)

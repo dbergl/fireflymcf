@@ -32,8 +32,9 @@ LOCK_STALE_S = 15 * 60          # a lock older than this is a crashed install, n
 
 
 def wheel_spec(version: str) -> str:
-    """The pip requirement for `version`: the release's wheel, with the `full` extra."""
-    return (f"fireflymcf[full] @ {REPO}/releases/download/v{version}/"
+    """The pip requirement for `version`: the release's wheel, with the `full` and `emu` extras
+    (`emu` is the panel emulator `verify --emulate` and the write-new-op skill need)."""
+    return (f"fireflymcf[full,emu] @ {REPO}/releases/download/v{version}/"
             f"fireflymcf-{version}-py3-none-any.whl")
 
 
@@ -136,7 +137,7 @@ def main() -> int:
         print(line)
     except Exception as e:                        # a broken plugin.json, an unwritable folder
         print(f"fireflymcf plugin hook: could not check the install ({e}). Install it by hand: "
-              f'pip install "fireflymcf[full] @ git+{REPO}.git"')
+              f'pip install "fireflymcf[full,emu] @ git+{REPO}.git"')
     return 0
 
 

@@ -120,3 +120,71 @@ def test_skills_carry_the_risk_statements_verbatim(name):
     for phrase in ("emulated, not flashed", "not emulated: <reason>",
                    "emulator test FAILED: <reason>", "--allow-user-ops"):
         assert phrase in text, phrase
+
+
+# --- every file a skill points at ships with the plugin ----------------------------------------
+# The marketplace installs `plugin/` only (`.claude-plugin/marketplace.json` `source`), and the
+# package ships no docs, so a skill's `docs/X.md` is a dead pointer on an owner's machine. A
+# reference must resolve inside the plugin tree; the only exceptions are named citations of the
+# repository's evidence docs, which must exist here.
+
+PLUGIN = ROOT / "plugin"
+SKILL_FILES = sorted(p for p in (PLUGIN / "skills").rglob("*")
+                     if p.suffix in (".md", ".py") and "__pycache__" not in p.parts)
+REPO_CITATIONS = {"docs/CHANGE-CATALOG.md", "docs/BUS-BASELINE.md", "docs/GUICODE.md",
+                  "BUS-BASELINE.md", "GUICODE.md", "CONTROL-BEHAVIOR.md"}
+_LINK = re.compile(r"\]\(([^)\s]+)\)")
+_PATHISH = re.compile(r"`([^`\s]+)`|(?<![\w/.`-])((?:\.\./|\./|examples/|docs/|plugin/)[\w./-]+"
+                      r"|[\w-]+\.md)(?![\w/`-])")
+_GENERIC = {"README.md", "SKILL.md"}          # an op folder's own README, any skill's SKILL.md
+
+
+def file_refs(text: str) -> set[str]:
+    refs = {m.group(1) for m in _LINK.finditer(text)
+            if not re.match(r"[a-z]+:|#", m.group(1))}
+    for m in _PATHISH.finditer(text):
+        tok = (m.group(1) or m.group(2)).rstrip('"\'.,;:()')
+        tok = tok.split("#")[0]
+        if tok in _GENERIC or "<" in tok or "*" in tok:
+            continue
+        if tok.endswith(".md") or tok.startswith(("examples/", "docs/", "plugin/", "../", "./")):
+            refs.add(tok)
+    return refs
+
+
+def _dangling(path: Path) -> list[str]:
+    bad = []
+    for ref in sorted(file_refs(path.read_text(encoding="utf-8"))):
+        if ref in REPO_CITATIONS:
+            name = ref if ref.startswith("docs/") else "docs/" + ref
+            if not (ROOT / name).is_file():
+                bad.append(f"{ref} (cited, but not in the repository)")
+            continue
+        target = (path.parent / ref).resolve()
+        if not (target.exists() and target.is_relative_to(PLUGIN.resolve())):
+            bad.append(ref)
+    return bad
+
+
+@pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: str(p.relative_to(PLUGIN)))
+def test_skill_file_references_ship_with_the_plugin(path):
+    assert _dangling(path) == []
+
+
+def test_the_reference_check_catches_a_dead_pointer(tmp_path):
+    f = PLUGIN / "skills" / "write-new-op" / "SKILL.md"
+    assert "docs/USER-OPS.md" in file_refs("read `docs/USER-OPS.md` first")
+    assert "../../USER-OPS.md" in file_refs('see ../../USER-OPS.md "Primitives"')
+    assert "USER-OPS.md" in file_refs("see [the guide](USER-OPS.md)")
+    probe = f.parent / "probe-not-shipped.md"
+    try:
+        probe.write_text("see `docs/USER-OPS.md` and [x](missing.md) and USER-OPS.md\n")
+        assert _dangling(probe) == ["docs/USER-OPS.md", "missing.md"]
+    finally:
+        probe.unlink()
+
+
+def test_the_cli_names_this_repository_when_the_emulator_is_missing():
+    from fireflymcf import cli
+    assert "git+https://github.com/dbergl/fireflymcf.git" in cli.EMU_MISSING
+    assert _by_name(cli.EMU_MISSING) == []
