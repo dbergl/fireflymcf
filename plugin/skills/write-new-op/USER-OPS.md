@@ -312,6 +312,10 @@ in mind:
 - The scan sees only what the image references. Two cells taken before the routine that uses
   them is installed need `taken=list(range(a, a + n))` on the second call. After the install,
   the routine's pool word makes the first cell referenced.
+- The free runs are holes between the panel's own cells, not one block (`0x20038000` to
+  `0x2003B000`): stock 13.6's longest is 44 bytes, and a build already carrying many routine
+  ops can be down to under 20 (*library*: `sramreach.free_runs` on such a build). Keep state
+  in bytes, not words, and ask for it in one call; `NO_SRAM` means it does not fit.
 - Power-on contents are garbage, because the C runtime initialises SRAM only up to `0x2000AD98`
   (*proven-from-code*: the reset handler's `.data` copy and `.bss` zero loops, bounded by the
   literals after them; 13.6). Initialise what you read.

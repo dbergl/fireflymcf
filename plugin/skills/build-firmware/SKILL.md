@@ -32,7 +32,11 @@ owner asks what they are running.
    a `candump -L` log of the bus with `--capture LOG` (the coach's own settings). Ask; if you
    cannot, render every listed floorplan, change each variant the page draws, and say so.
 3. **Whether stock is what the coach runs now.** A build replaces GuiCode and GuiData together, so
-   it erases any earlier custom build.
+   it erases any earlier custom build. If the owner says a recipe is running, compiling it from
+   their stock reproduces that build; to compare against the image they flashed, ask for its file.
+   Work only from the files the owner points you at: never search the computer for other
+   firmware, builds or captures. A file found elsewhere is not known to be this coach's, and the
+   owner did not offer it.
 4. Each request restated as one line. Anything that reads two ways (which "blue", which button)
    is a question, not a guess.
 5. **Whether the project already has user ops** (an `ops/` folder beside the `*.ffproj.json`, or

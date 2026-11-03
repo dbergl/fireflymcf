@@ -111,7 +111,10 @@ into the emulator.
 
 **One case per clause of the request.** Write down each thing the owner said the change must
 do and each thing it must *not* do, then give each its own case: every "only if", "unless",
-"but leave it when" and "if I change it by hand" is a case where the op must stay silent. For
+"but leave it when" and "if I change it by hand" is a case where the op must stay silent.
+A change by hand that is undone (on, then off again) is still a change: test the pair that ends
+where the op left things, which a routine that only compares the value with its own last write
+misses. For
 each threshold or delay, test both sides of it (a little short of it: nothing; past it: the
 action), in each direction the owner named. Where the op shares a setting or a cell with
 something else, assert that the other part is unchanged after every step.
