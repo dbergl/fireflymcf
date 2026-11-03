@@ -390,3 +390,53 @@ def test_crc_matches_the_bit_serial_reference_on_random_data():
         blob = bytes(rng.getrandbits(8) for _ in range(n))
         assert coverage.crc16_aug_ccitt(blob) == coverage._crc16_aug_ccitt_reference(blob), n
     assert coverage.crc16_aug_ccitt(b"123456789") == 0xE5CC     # the catalogue check value
+
+
+# ---------------------------------------------------------------------------
+# Cell tables a table grow appended: claimed as what they are, not as the last object.
+# ---------------------------------------------------------------------------
+
+def _grown(stock: bytes, n: int) -> bytes:
+    from fireflymcf import readout
+    for _ in range(n):
+        stock, _cells, _ = readout.allocate_fresh_cells(stock, [(4, 10)])
+    return stock
+
+
+def _labelled(report, prefix):
+    return [(s, n) for s, n, label in report.spans if label.split(":", 1)[0] == prefix]
+
+
+def test_appended_cell_tables_are_claimed(mcf_136):
+    """Two grows leave one dead copy and the live pair after GuiData's last object. Each is
+    claimed by name, the live one where the panel reads it, and the last table's trailing
+    object and headroom are stock's: the copies spend none of it."""
+    from fireflymcf import guidata
+    stock = coverage.analyse(mcf_136, deep=True)
+    data = _grown(mcf_136, 2)
+    report = coverage.analyse(data, deep=True)
+    assert report.unclaimed == []
+    gs, _ = guidata.guidata_extent(data)
+    cell_off, type_off = guidata.find_variable_tables(data)
+    assert [s - gs for s, _ in _labelled(report, "variable-cell-table")] == [cell_off]
+    assert [s - gs for s, _ in _labelled(report, "variable-type-table")] == [type_off]
+    assert len(_labelled(report, "variable-cell-table-dead")) == 1
+    assert len(_labelled(report, "variable-type-table-dead")) == 1
+    assert report.tail_headroom == stock.tail_headroom == 18124
+    last = lambda r: max(_labelled(r, "object-trailing"))[1]
+    assert last(report) == last(stock)
+
+
+@pytest.mark.parametrize("grows", [0, 2])
+def test_an_uncovered_append_is_still_refused(mcf_136, grows):
+    """Bytes nothing names, appended to GuiData, still spend the tail headroom: up to it the
+    gate accepts them (as before), one word past it refuses."""
+    from fireflymcf import guidata, relocate
+    data = _grown(mcf_136, grows)
+    room = coverage.analyse(data, deep=True).tail_headroom
+    assert room > 0 and room % 4 == 0
+    gs, ge = guidata.guidata_extent(data)
+    with pytest.raises(relocate.RelocationError, match="larger than the biggest object"):
+        relocate.relocate(data, ge - gs - 4, b"\x5a" * (room + 4))
+    out, _ = relocate.relocate(data, ge - gs - 4, b"\x5a" * room)
+    assert coverage.analyse(out, deep=True).tail_headroom == 0
