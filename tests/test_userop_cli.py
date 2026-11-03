@@ -543,13 +543,86 @@ def test_compile_result_sends_names_the_measured_change(tmp_path, mcf_136):
         res = recipe.compile_project(proj, mcf_136)
     assert res.ok, res.errors
     (gained,) = sorted(recipe.capabilities(res.data) - recipe.capabilities(mcf_136))
-    assert res.sends == {"flip": {"type": "user:cmd-flip", "lost": [], "gained": [gained]}}
+    assert res.sends == {"flip": {"type": "user:cmd-flip", "lost": [], "gained": [gained],
+                                  "frames": []}}
 
     # a user op that sends nothing new has no entry
     pf2 = _project(tmp_path / "n", mcf_136, ("nop", "user:hook-nop"))
     proj2 = recipe.Project.from_json(pf2.read_text())
     with userop.registered(userop.load_user_ops(pf2, proj2)):
         assert recipe.compile_project(proj2, mcf_136).sends == {}
+
+
+def test_measured_sends_alone_trip_the_g12_ack(tmp_path, mcf_136, capsys):
+    """A neighbouring op declares cmd-flip's gain, so the capability gate passes and cmd-flip
+    declares nothing: only the pairs its apply measured (`USER_OP_CAPS`) ask for its acceptance."""
+    probe = _project(tmp_path / "probe", mcf_136,
+                     ("flip", "user:cmd-flip", {"params": {"declare": True}}),
+                     folders=("cmd_flip",))
+    pp = recipe.Project.from_json(probe.read_text())
+    with userop.registered(userop.load_user_ops(probe, pp)):
+        (gained,) = recipe.compile_project(pp, mcf_136).sends["flip"]["gained"]
+
+    pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip"),
+                  ("decl", "user:declare-gain",
+                   {"params": {"channel": gained[0], "command": gained[1]}}),
+                  folders=("cmd_flip", "declare_gain"))
+    assert main(["op", "accept", str(pf), "user:declare-gain", "--g12"]) == 0
+    assert main(["op", "accept", str(pf), "user:cmd-flip"]) == 0     # accepted, not for the G12
+    capsys.readouterr()
+    out = tmp_path / "mcf-m.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops", "--json"]) == 1
+    msg = json.loads(capsys.readouterr().out)["errors"][0]["message"]
+    assert "G12_ACK_REQUIRED" in msg and "user:cmd-flip gains (%d, %d)" % tuple(gained) in msg
+    assert "user:declare-gain" not in msg and not out.exists()
+    assert main(["op", "accept", str(pf), "user:cmd-flip", "--g12"]) == 0
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 0
+
+
+# --- a tick routine that sends frames to the G12 needs the G12 acceptance (residual I2) ---------
+
+def test_routine_that_sends_frames_needs_g12_ack(tmp_path, mcf_136, capsys):
+    """Its manifest touches GuiCode only and no table changes, but its tick routine carries the
+    host sender's pointer and two OPTIONS config templates."""
+    pf = _project(tmp_path, mcf_136, ("tx", "user:send-frame"), folders=("send_frame",))
+    out = tmp_path / "mcf-tx.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops", "--json"]) == 1
+    (err,) = json.loads(capsys.readouterr().out)["errors"]
+    assert err["code"] == "G12_ACK_REQUIRED"
+    assert "user:send-frame sends frames" in err["message"]
+    assert "selector 0xEE write (D1)" in err["message"]
+    assert "selector 0xEE read-back (D3)" in err["message"]
+    assert not out.exists()
+    assert main(["validate", str(pf), STOCK, "--allow-user-ops"]) == 1
+    assert "G12_ACK_REQUIRED" in capsys.readouterr().err
+
+    assert main(["op", "accept", str(pf), "user:send-frame"]) == 0
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 1
+    assert main(["op", "accept", str(pf), "user:send-frame", "--g12"]) == 0
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 0
+
+
+def test_compile_result_sends_names_the_routine_frames(tmp_path, mcf_136):
+    pf = _project(tmp_path, mcf_136, ("tx", "user:send-frame"), folders=("send_frame",))
+    proj = recipe.Project.from_json(pf.read_text())
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert res.ok, res.errors
+    assert res.sends == {"tx": {"type": "user:send-frame", "lost": [], "gained": [], "frames": [
+        {"routine": "send frame", "sender": True,
+         "templates": [{"selector": 0xEE, "function": 0xD1, "kind": "write"},
+                       {"selector": 0xEE, "function": 0xD3, "kind": "read-back"}]}]}}
+
+
+def test_routine_that_sends_nothing_needs_no_g12_ack(tmp_path, mcf_136, capsys):
+    pf = _project(tmp_path, mcf_136, ("quiet", "user:send-frame", {"params": {"send": False}}),
+                  folders=("send_frame",))
+    proj = recipe.Project.from_json(pf.read_text())
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        assert recipe.compile_project(proj, mcf_136).sends == {}
+    out = tmp_path / "mcf-q.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 0
+    assert out.exists()
 
 
 # --- an acceptance is the recipient's, never the sender's (final review I3) ----------------------

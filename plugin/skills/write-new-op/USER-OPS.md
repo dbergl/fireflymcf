@@ -126,10 +126,18 @@ class MyOp(UserOp):
   `G12_ACK_REQUIRED` until then). The engine asks for it when the op's `touches` includes `g12`
   (before anything is imported), and also, after the compile and before anything is written,
   when the op changes what the panel can send: a non-empty `capability_delta`, or a
-  `(channel, command)` pair of the group and binding tables that its own build added or removed.
-  What the engine cannot see is a routine in grown GuiCode that sends frames of its own (an
-  OPTIONS config write, say): give such an op `--g12` too. The record names the folder hash, so
-  any edit to the folder voids it.
+  `(channel, command)` pair of the group and binding tables that its own build added or removed,
+  or a tick routine that sends frames of its own. A routine's frames are found in the blob of
+  each `install_tick_routine` call: the host sender's pointer (`SENDER_PTR_ADDR`, the pool word
+  `emit_send_frame` adds) or a `config_frame` template (CAN id, then `FF 96 <selector> 0F`, with
+  D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
+  the folder hash, so any edit to the folder voids it.
+- **What that detection cannot see.** It is a disclosure prompt, not a sandbox: a routine that
+  computes the sender's address in code (`movw`/`movt`) and builds its frame on the stack carries
+  neither pattern and is not found. And the table check compares sets of `(channel, command)`
+  pairs (`recipe.capabilities`), so re-pointing a binding to a pair the image already sends from
+  another control changes neither set: it trips neither the capability gate nor the prompt.
+  Give any op whose effect reaches the G12 the `--g12` acceptance whatever the engine asks.
 - `verify --emulate --project` runs each op's `emu_test.py` and records the result in the
   build's sidecar under the op's type: `passed`, `failed` with its reason, or `not emulated` with
   its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 only). It

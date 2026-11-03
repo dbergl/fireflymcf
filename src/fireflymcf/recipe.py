@@ -254,9 +254,10 @@ class CompileResult:
     # {op_id: [entry, ...]}: what each `remove_records`/`move_element` moved besides its own
     # records (`recipe_ops.shift_report`); report only, additive
     shifts: dict = dataclasses.field(default_factory=dict)
-    # {op_id: {"type", "lost", "gained"}}: each user op that changes what the panel sends, by the
-    # capability_delta it declares or by the (channel, command) pairs its own apply changed. The
-    # CLI asks the owner's G12 acceptance for these (`G12_ACK_REQUIRED`); additive
+    # {op_id: {"type", "lost", "gained", "frames"}}: each user op that changes what the panel
+    # sends, by the capability_delta it declares, by the (channel, command) pairs its own apply
+    # changed, or by the frames its tick routines send (`userop.routine_frames`). The CLI asks the
+    # owner's G12 acceptance for these (`G12_ACK_REQUIRED`); additive
     sends: dict = dataclasses.field(default_factory=dict)
 
 
@@ -454,9 +455,10 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
             m = ctx.handles.get((USER_OP_CAPS, o.spec.id)) or {}
             lo_all = set(lo) | {tuple(x) for x in m.get("lost", ())}
             ga_all = set(ga) | {tuple(x) for x in m.get("gained", ())}
-            if lo_all or ga_all:
+            frames = list(m.get("frames", ()))
+            if lo_all or ga_all or frames:
                 sends[o.spec.id] = {"type": o.spec.type, "lost": sorted(lo_all),
-                                    "gained": sorted(ga_all)}
+                                    "gained": sorted(ga_all), "frames": frames}
     stock_caps, out_caps = capabilities(stock), capabilities(data)
     _gate(stock_caps - out_caps == lost_want, "CAPABILITY_GATE",
           "capability gate: lost %s, ops declared %s" % (

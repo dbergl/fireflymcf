@@ -750,10 +750,23 @@ def _user_ops_refusal(project, discovered, allowed: bool):
     return None
 
 
+def _frames_text(f: dict) -> str:
+    """One `userop.routine_frames` entry in words."""
+    kinds = {0xD1: "D1", 0xD2: "D2", 0xD3: "D3"}
+    if f["templates"]:
+        what = "OPTIONS config frames: " + ", ".join(
+            "selector 0x%02X %s (%s)" % (t["selector"], t["kind"],
+                                         kinds.get(t["function"], hex(t["function"])))
+            for t in f["templates"])
+    else:
+        what = "frames through the host CAN sender (not decoded)"
+    return f"sends frames from its tick routine {f['routine']!r}: {what}"
+
+
 def _user_ops_sends_refusal(project, discovered, sends: dict):
     """(code, message) when a compiled user op changes what the panel sends (its declared
-    `capability_delta`, or the (channel, command) pairs its apply changed:
-    `recipe.CompileResult.sends`) and the owner has not accepted that folder with `--g12`: the
+    `capability_delta`, the (channel, command) pairs its apply changed, or the frames its tick
+    routines send: `recipe.CompileResult.sends`) and the owner has not accepted that folder with `--g12`: the
     G12 acts on what the panel sends, whatever the manifest's `touches` declares. Else None."""
     from . import userop
     by = {d.type: d for d in discovered}
@@ -764,11 +777,12 @@ def _user_ops_sends_refusal(project, discovered, sends: dict):
             pairs = need.setdefault(d.type, [])
             pairs += ["gains (%d, %d)" % tuple(x) for x in e["gained"]]
             pairs += ["loses (%d, %d)" % tuple(x) for x in e["lost"]]
+            pairs += [_frames_text(f) for f in e.get("frames", ())]
     if not need:
         return None
     what = "; ".join(f"{t} {', '.join(p)}" for t, p in need.items())
     return "G12_ACK_REQUIRED", (
-        f"G12_ACK_REQUIRED: {what} as a (channel, command) the panel sends to the G12, which "
+        f"G12_ACK_REQUIRED: {what}: what the panel sends to the G12, which "
         "the G12 acts on, and the owner has not accepted this version of it with --g12. Nothing "
         "written. Once the owner says yes, run `fireflymcf op accept PROJECT TYPE --g12` and "
         "rebuild.")

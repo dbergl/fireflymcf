@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from . import container, growsection, recipe, relocate, routinekit, theme
+from . import container, followchannel, growsection, recipe, relocate, routinekit, theme
 from .recipe import RecipeError
 
 
@@ -275,6 +275,54 @@ def touched_sections(before: bytes, after: bytes) -> set[str]:
     return set(_touched(before, after))
 
 
+# What a routine-sent frame looks like, derived from `routinekit.config_frame` itself: two
+# frames that differ only in their selector (or only in their function) locate that byte, and the
+# bytes every frame shares (CAN id, group, pad) are the template's fixed part.
+_FRAME_KINDS = {routinekit.FUNCTION_WRITE: "write", routinekit.FUNCTION_DELTA: "delta",
+                routinekit.FUNCTION_READBACK: "read-back"}
+
+
+def _frame_shape() -> tuple[int, int, int, dict]:
+    """(length, selector offset, function offset, {offset: fixed byte})."""
+    f = routinekit.config_frame
+    a, b = f(0x00, 0, routinekit.FUNCTION_WRITE), f(0xFF, 0, routinekit.FUNCTION_WRITE)
+    c = f(0x00, 0, routinekit.FUNCTION_DELTA)
+    (sel,) = [i for i in range(len(a)) if a[i] != b[i]]
+    (fn,) = [i for i in range(len(a)) if a[i] != c[i]]
+    frames = [f(s, v, k) for s in (0x00, 0xFF) for v in (0, 0xFFFF) for k in _FRAME_KINDS]
+    fixed = {i: a[i] for i in range(len(a)) if all(x[i] == a[i] for x in frames)}
+    return len(a), sel, fn, fixed
+
+
+_SENDER_WORD = followchannel.SENDER_PTR_ADDR.to_bytes(4, "little")
+
+
+def routine_frames(ledger: tuple[Step, ...]) -> list[dict]:
+    """One entry per `install_tick_routine` call whose blob carries the host CAN sender's pointer
+    (`followchannel.SENDER_PTR_ADDR`, a little-endian word, as `routinekit.emit_send_frame`'s pool
+    holds it) or a `routinekit.config_frame` template: {"routine": note, "sender": bool,
+    "templates": [{"selector", "function", "kind"}]}. A disclosure, not a sandbox: a routine
+    that computes the sender's address (movw/movt) and builds its frame in code is not found."""
+    n, sel, fn, fixed = _frame_shape()
+    out = []
+    for st in ledger:
+        if st.kind != "call" or st.args[0] != "install_tick_routine":
+            continue
+        _, args, kwargs = st.args
+        blob = bytes(args[0] if args else kwargs.get("blob", b""))
+        note = args[2] if len(args) > 2 else kwargs.get("note", "")
+        templates = []
+        for i in range(len(blob) - n + 1):
+            w = blob[i:i + n]
+            if all(w[k] == v for k, v in fixed.items()) and w[fn] in _FRAME_KINDS:
+                templates.append({"selector": w[sel], "function": w[fn],
+                                  "kind": _FRAME_KINDS[w[fn]]})
+        sender = _SENDER_WORD in blob
+        if sender or templates:
+            out.append({"routine": note, "sender": sender, "templates": templates})
+    return out
+
+
 class UserOp(recipe.Op):
     """A user-written op. Subclasses implement `build` (every write through the `Editor`) and
     `check` (returns the manifest line); they must not override `apply` or `verify`, which are
@@ -366,8 +414,10 @@ class UserOp(recipe.Op):
             raise _mark(RecipeError("USER_OP_UNDECLARED_TOUCH", f"{self.type}: its output's "
                                     f"group or binding table is unreadable ({e})",
                                     op_id=self.spec.id))
+        # and the frames its own tick routines send (`routine_frames`), which no table shows
         ctx.handles[(recipe.USER_OP_CAPS, self.spec.id)] = {
-            "lost": sorted(before - after), "gained": sorted(after - before)}
+            "lost": sorted(before - after), "gained": sorted(after - before),
+            "frames": routine_frames(ed.ledger)}
         return out
 
     def verify(self, data: bytes, ctx: recipe.Ctx) -> str:
