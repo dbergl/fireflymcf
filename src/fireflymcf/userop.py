@@ -358,6 +358,16 @@ class UserOp(recipe.Op):
                 f"{sorted(declared)} does not declare; an op may change only what it declares "
                 "(and a G12 change needs the owner's acceptance)", op_id=self.spec.id))
         ctx.edits.extend(edits)
+        # what the panel can send, before and after this op: a change asks the G12 acceptance
+        # whatever the manifest's `touches` says (`recipe.CompileResult.sends`)
+        try:
+            before, after = recipe.capabilities(data), recipe.capabilities(out)
+        except Exception as e:  # noqa: BLE001 - an unreadable table is the op's failure
+            raise _mark(RecipeError("USER_OP_UNDECLARED_TOUCH", f"{self.type}: its output's "
+                                    f"group or binding table is unreadable ({e})",
+                                    op_id=self.spec.id))
+        ctx.handles[(recipe.USER_OP_CAPS, self.spec.id)] = {
+            "lost": sorted(before - after), "gained": sorted(after - before)}
         return out
 
     def verify(self, data: bytes, ctx: recipe.Ctx) -> str:

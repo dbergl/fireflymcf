@@ -119,9 +119,14 @@ class MyOp(UserOp):
   that use different ops.
   `--allow-user-ops` admits user ops only; an unverified built-in op still needs
   `--allow-unverified`.
-- An op whose `touches` includes `g12` also needs the owner's recorded acceptance
-  (`op accept --g12`; `G12_ACK_REQUIRED` until then). The record names the folder hash, so any
-  edit to the folder voids it.
+- An op the G12 acts on also needs the owner's recorded acceptance (`op accept --g12`;
+  `G12_ACK_REQUIRED` until then). The engine asks for it when the op's `touches` includes `g12`
+  (before anything is imported), and also, after the compile and before anything is written,
+  when the op changes what the panel can send: a non-empty `capability_delta`, or a
+  `(channel, command)` pair of the group and binding tables that its own build added or removed.
+  What the engine cannot see is a routine in grown GuiCode that sends frames of its own (an
+  OPTIONS config write, say): give such an op `--g12` too. The record names the folder hash, so
+  any edit to the folder voids it.
 - `verify --emulate --project` runs each op's `emu_test.py` and records the result in the
   build's sidecar under the op's type: `passed`, `failed` with its reason, or `not emulated` with
   its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 only). It

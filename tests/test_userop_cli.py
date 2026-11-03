@@ -505,3 +505,44 @@ def test_a_used_type_with_no_good_folder_reports_the_broken_one(tmp_path, mcf_13
     assert main(["compile", str(pf), STOCK, "-o", str(tmp_path / "mcf-x.bin"),
                  "--allow-user-ops"]) == 1
     assert "BAD_USER_OP" in capsys.readouterr().err
+
+
+# --- an op that changes what the panel sends needs the G12 acceptance (final review I2) ----------
+
+def test_op_that_changes_what_the_panel_sends_needs_g12_ack(tmp_path, mcf_136, capsys):
+    """Its manifest touches guidata only, but a control now sends a new command to the G12."""
+    pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip", {"params": {"declare": True}}),
+                  folders=("cmd_flip",))
+    out = tmp_path / "mcf-flip.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops", "--json"]) == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body["errors"][0]["code"] == "G12_ACK_REQUIRED"
+    assert "user:cmd-flip gains (" in body["errors"][0]["message"]
+    assert not out.exists() and not Path(str(out) + ".json").exists()
+    assert main(["validate", str(pf), STOCK, "--allow-user-ops"]) == 1
+    assert "G12_ACK_REQUIRED" in capsys.readouterr().err
+
+    # accepting it without --g12 does not do; with --g12 it builds
+    assert main(["op", "accept", str(pf), "user:cmd-flip"]) == 0
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 1
+    assert "G12_ACK_REQUIRED" in capsys.readouterr().err and not out.exists()
+    assert main(["op", "accept", str(pf), "user:cmd-flip", "--g12"]) == 0
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops"]) == 0
+    assert main(["validate", str(pf), STOCK, "--allow-user-ops"]) == 0
+
+
+def test_compile_result_sends_names_the_measured_change(tmp_path, mcf_136):
+    pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip", {"params": {"declare": True}}),
+                  folders=("cmd_flip",))
+    proj = recipe.Project.from_json(pf.read_text())
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert res.ok, res.errors
+    (gained,) = sorted(recipe.capabilities(res.data) - recipe.capabilities(mcf_136))
+    assert res.sends == {"flip": {"type": "user:cmd-flip", "lost": [], "gained": [gained]}}
+
+    # a user op that sends nothing new has no entry
+    pf2 = _project(tmp_path / "n", mcf_136, ("nop", "user:hook-nop"))
+    proj2 = recipe.Project.from_json(pf2.read_text())
+    with userop.registered(userop.load_user_ops(pf2, proj2)):
+        assert recipe.compile_project(proj2, mcf_136).sends == {}

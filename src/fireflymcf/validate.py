@@ -9,7 +9,7 @@ what a safe-to-flash build is. Read-only: it writes no image.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import recipe
@@ -30,6 +30,7 @@ class ValidationResult:
     report: str
     unverified: list
     errors: list
+    sends: dict = field(default_factory=dict)   # CompileResult.sends of a pass
 
 
 def resolve_stock(project: "recipe.Project", repo_root: Path) -> bytes:
@@ -79,5 +80,5 @@ def validate(project: "recipe.Project", stock: bytes,
     if require_verified and result.unverified:
         return ValidationResult(
             False, body + "\nFAIL: unverified ops present and --require-verified set",
-            result.unverified, [])
-    return ValidationResult(True, body + "\nPASS", result.unverified, [])
+            result.unverified, [], result.sends)
+    return ValidationResult(True, body + "\nPASS", result.unverified, [], result.sends)

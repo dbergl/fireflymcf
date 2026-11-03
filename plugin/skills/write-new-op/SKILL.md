@@ -212,10 +212,12 @@ $F emulate build/mcf-NAME.bin --scenario ops/my-op/emu_test.py    # fast loop wh
 ```
 
 Pass `--allow-user-ops` only after the risk statement (section 6). Without it `compile`
-refuses (`USER_OPS`) and imports nothing; every op folder found in `ops/` is imported when it
-is given, used or not, so remove folders the project does not use. `--allow-user-ops` admits
-user ops only; an unverified built-in op still needs `--allow-unverified`. A G12 op also needs
-the owner's recorded yes (`G12_ACK_REQUIRED` until then). `verify --emulate --project` runs each
+refuses (`USER_OPS`) and imports nothing; with it, only the op folders whose type an enabled op
+of the project names are imported, so a folder in `ops/` the project does not use never runs.
+`--allow-user-ops` admits user ops only; an unverified built-in op still needs
+`--allow-unverified`. A G12 op also needs the owner's recorded yes (`G12_ACK_REQUIRED` until
+then); the engine asks for it for a `g12` in `touches` and for any change to what the panel's
+group and binding tables send, but not for a routine's own frames, so section 6 still decides. `verify --emulate --project` runs each
 op's `emu_test.py` and records the result in the build's sidecar (`<build>.json`, `emulation`);
 it needs `--allow-user-ops` (the test is the author's code) but not the G12 acceptance, because
 emulation touches no hardware.

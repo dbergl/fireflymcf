@@ -750,6 +750,30 @@ def _user_ops_refusal(project, discovered, allowed: bool):
     return None
 
 
+def _user_ops_sends_refusal(project, discovered, sends: dict):
+    """(code, message) when a compiled user op changes what the panel sends (its declared
+    `capability_delta`, or the (channel, command) pairs its apply changed:
+    `recipe.CompileResult.sends`) and the owner has not accepted that folder with `--g12`: the
+    G12 acts on what the panel sends, whatever the manifest's `touches` declares. Else None."""
+    from . import userop
+    by = {d.type: d for d in discovered}
+    need = {}
+    for e in sends.values():
+        d = by.get(e["type"])
+        if d is not None and (userop.acceptance(project, d) or {}).get("g12") is not True:
+            pairs = need.setdefault(d.type, [])
+            pairs += ["gains (%d, %d)" % tuple(x) for x in e["gained"]]
+            pairs += ["loses (%d, %d)" % tuple(x) for x in e["lost"]]
+    if not need:
+        return None
+    what = "; ".join(f"{t} {', '.join(p)}" for t, p in need.items())
+    return "G12_ACK_REQUIRED", (
+        f"G12_ACK_REQUIRED: {what} as a (channel, command) the panel sends to the G12, which "
+        "the G12 acts on, and the owner has not accepted this version of it with --g12. Nothing "
+        "written. Once the owner says yes, run `fireflymcf op accept PROJECT TYPE --g12` and "
+        "rebuild.")
+
+
 def _print_user_ops_refusal(code: str, msg: str, discovered, as_json: bool, shape: dict) -> int:
     if as_json:
         print(json.dumps(dict(shape, errors=[{"code": code, "message": msg}],
@@ -813,6 +837,11 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         return 1
     with userop.registered(loaded):
         res = validate.validate(project, stock, require_verified=args.require_verified)
+    refusal = _user_ops_sends_refusal(project, discovered, res.sends) if res.passed else None
+    if refusal:
+        return _print_user_ops_refusal(*refusal, discovered, args.json,
+                                       {"passed": False, "unverified": res.unverified,
+                                        "report": res.report})
     if args.json:
         body = {"passed": res.passed, "errors": res.errors,
                 "unverified": res.unverified, "report": res.report}
@@ -1152,6 +1181,9 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             for fix in err.get("offers") or []:
                 print(f"  offer: {fix}", file=sys.stderr)
         return 1
+    refusal = _user_ops_sends_refusal(project, discovered, result.sends)
+    if refusal:
+        return _print_user_ops_refusal(*refusal, discovered, args.json, {"ok": False})
     # A user op is unverified by definition and admitted by --allow-user-ops alone; this gate is
     # the built-in ops' (one flag never implies the other).
     user_types = {d.type for d in discovered}

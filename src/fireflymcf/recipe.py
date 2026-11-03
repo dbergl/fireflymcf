@@ -254,6 +254,14 @@ class CompileResult:
     # {op_id: [entry, ...]}: what each `remove_records`/`move_element` moved besides its own
     # records (`recipe_ops.shift_report`); report only, additive
     shifts: dict = dataclasses.field(default_factory=dict)
+    # {op_id: {"type", "lost", "gained"}}: each user op that changes what the panel sends, by the
+    # capability_delta it declares or by the (channel, command) pairs its own apply changed. The
+    # CLI asks the owner's G12 acceptance for these (`G12_ACK_REQUIRED`); additive
+    sends: dict = dataclasses.field(default_factory=dict)
+
+
+# ctx.handles key under which a user op's apply records the capabilities it changed
+USER_OP_CAPS = "__user_op_caps__"
 
 
 def capabilities(img: bytes) -> set:
@@ -437,10 +445,18 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     # Capability gate: the finished image must still send every (channel, command)
     # pair stock could, minus/plus exactly what the ops declare.
     lost_want, gained_want = set(), set()
+    sends = {}
     for o in ops:
         lo, ga = o.capability_delta(ctx)
         lost_want |= lo
         gained_want |= ga
+        if getattr(o, "user_op", False):
+            m = ctx.handles.get((USER_OP_CAPS, o.spec.id)) or {}
+            lo_all = set(lo) | {tuple(x) for x in m.get("lost", ())}
+            ga_all = set(ga) | {tuple(x) for x in m.get("gained", ())}
+            if lo_all or ga_all:
+                sends[o.spec.id] = {"type": o.spec.type, "lost": sorted(lo_all),
+                                    "gained": sorted(ga_all)}
     stock_caps, out_caps = capabilities(stock), capabilities(data)
     _gate(stock_caps - out_caps == lost_want, "CAPABILITY_GATE",
           "capability gate: lost %s, ops declared %s" % (
@@ -457,7 +473,7 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     shifts, texts = recipe_ops.shift_report(ops, ctx)
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
-    return CompileResult(True, data, [], manifest, unverified, shifts)
+    return CompileResult(True, data, [], manifest, unverified, shifts, sends)
 
 
 def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,

@@ -22,6 +22,8 @@ def _target(data):
 
 @recipe.op("user:cmd-flip")
 class CmdFlip(UserOp):
+    PARAMS = {"properties": {"declare": {"type": "boolean"}}, "required": []}
+
     def build(self, ed, ctx):
         b, new = _target(ed.data)
         off = guidata.guidata_extent(ed.data)[0] + b.offset + CMD
