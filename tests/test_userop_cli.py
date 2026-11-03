@@ -546,3 +546,56 @@ def test_compile_result_sends_names_the_measured_change(tmp_path, mcf_136):
     proj2 = recipe.Project.from_json(pf2.read_text())
     with userop.registered(userop.load_user_ops(pf2, proj2)):
         assert recipe.compile_project(proj2, mcf_136).sends == {}
+
+
+# --- an acceptance is the recipient's, never the sender's (final review I3) ----------------------
+
+def _with_example_project(folder: Path, stock: bytes) -> dict:
+    """An example project inside the op folder that carries its author's acceptance."""
+    doc = _doc(stock, ("nop", "user:hook-nop"),
+               user_op_acceptance={"user:hook-nop": {"folder_sha256": "0" * 64, "g12": True,
+                                                     "date": "2026-01-01"}})
+    (folder / "example.ffproj.json").write_text(json.dumps(doc))
+    return doc
+
+
+def test_pack_and_install_carry_no_acceptance(tmp_path, mcf_136, capsys):
+    pf = _project(tmp_path / "a", mcf_136, ("nop", "user:hook-nop"))
+    folder = tmp_path / "a" / "ops" / "hook_nop"
+    doc = _with_example_project(folder, mcf_136)
+    z = tmp_path / "hook_nop.zip"
+    assert main(["op", "pack", str(pf), "hook_nop", "-o", str(z), "--json"]) == 0
+    packed_sha = json.loads(capsys.readouterr().out)["folder_sha256"]
+    with zipfile.ZipFile(z) as zf:
+        packed = json.loads(zf.read("hook_nop/example.ffproj.json"))
+    assert "user_op_acceptance" not in packed
+    assert packed == {k: v for k, v in doc.items() if k != "user_op_acceptance"}
+
+    pf2 = _empty_project(tmp_path / "b", mcf_136)
+    assert main(["op", "install", str(pf2), str(z)]) == 0       # the pack's own hash checks out
+    got = tmp_path / "b" / "ops" / "hook_nop"
+    assert "user_op_acceptance" not in json.loads((got / "example.ffproj.json").read_text())
+    assert userop.folder_hash(got) == packed_sha
+    assert "user_op_acceptance" not in json.loads(pf2.read_text())
+
+    # installing straight from the author's folder strips it as well
+    pf3 = _empty_project(tmp_path / "c", mcf_136)
+    assert main(["op", "install", str(pf3), str(folder)]) == 0
+    got = tmp_path / "c" / "ops" / "hook_nop"
+    assert "user_op_acceptance" not in json.loads((got / "example.ffproj.json").read_text())
+    assert "user_op_acceptance" not in json.loads(pf3.read_text())
+
+
+def test_ops_listing_shows_the_projects_acceptance(tmp_path, mcf_136, capsys):
+    """A project file from someone else carries their acceptances; `ops --project` shows them."""
+    pf = _project(tmp_path, mcf_136, ("nop", "user:hook-nop"))
+    sha = userop.folder_hash(tmp_path / "ops" / "hook_nop")
+    doc = json.loads(pf.read_text())
+    rec = {"folder_sha256": sha, "g12": True, "date": "2026-01-01"}
+    doc["user_op_acceptance"] = {"user:hook-nop": rec}
+    pf.write_text(json.dumps(doc))
+    assert main(["ops", "--project", str(pf), "--json"]) == 0
+    (entry,) = [e for e in json.loads(capsys.readouterr().out) if e.get("user_op")]
+    assert entry["accepted"] == rec
+    assert main(["ops", "--project", str(pf)]) == 0
+    assert "accepted 2026-01-01 (G12 included)" in capsys.readouterr().out

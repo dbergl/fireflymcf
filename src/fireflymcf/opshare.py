@@ -99,11 +99,48 @@ def accept(project_path: Path, type_name: str, g12: bool, today: str | None = No
     return rec
 
 
+# --- acceptance never travels --------------------------------------------------------------------
+
+ACCEPTANCE_KEY = "user_op_acceptance"
+
+
+def _without_acceptance(rel: str, body: bytes) -> bytes:
+    """`body` with any `user_op_acceptance` record removed, when `rel` is a JSON object that
+    carries one (an example project in an op folder, say): an acceptance is the owner's yes on
+    their own computer, so a pack never sends one and an install never takes one in. Any other
+    file is returned unchanged."""
+    if not rel.lower().endswith(".json"):
+        return body
+    try:
+        doc = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return body
+    if not isinstance(doc, dict) or ACCEPTANCE_KEY not in doc:
+        return body
+    doc.pop(ACCEPTANCE_KEY)
+    return (json.dumps(doc, indent=2) + "\n").encode("utf-8")
+
+
+def _strip_acceptance_in(folder: Path) -> list[str]:
+    """Remove every acceptance record from the JSON files in `folder`; returns what changed."""
+    changed = []
+    for rel in files_of(folder):
+        p = folder / rel
+        body = p.read_bytes()
+        new = _without_acceptance(rel, body)
+        if new != body:
+            p.write_bytes(new)
+            changed.append(rel)
+    return changed
+
+
 # --- pack ----------------------------------------------------------------------------------------
 
 def pack(project_path: Path, name: str, out: Path) -> dict:
-    """Zip one op folder as `<folder name>/...` (no `__pycache__`, `*.pyc`, `.git`), with its
-    folder hash in the zip comment, which `install` checks."""
+    """Zip one op folder as `<folder name>/...` (no `__pycache__`, `*.pyc`, `.git`), with the
+    hash of what was packed in the zip comment, which `install` checks. An acceptance record in a
+    JSON file of the folder is left out (`_without_acceptance`); the hash then covers the files
+    as packed."""
     out = Path(out)
     if out.suffix.lower() != ".zip":
         raise RecipeError("BAD_PACK", f"{out}: the pack must be named *.zip")
@@ -113,7 +150,8 @@ def pack(project_path: Path, name: str, out: Path) -> dict:
     d = find(project_path, project, name)
     _no_links(name, d.folder)              # never pack a link's target (a key file, say)
     files = files_of(d.folder)
-    meta = {"folder_sha256": d.folder_sha256, "type": d.type,
+    bodies = {rel: _without_acceptance(rel, (d.folder / rel).read_bytes()) for rel in files}
+    meta = {"folder_sha256": userop._hash_snapshot(bodies), "type": d.type,
             "version": d.manifest.get("version")}
     out.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -121,7 +159,7 @@ def pack(project_path: Path, name: str, out: Path) -> dict:
             info = zipfile.ZipInfo(f"{d.folder.name}/{rel}", _ZIP_EPOCH)
             info.external_attr = 0o644 << 16
             info.compress_type = zipfile.ZIP_DEFLATED
-            zf.writestr(info, (d.folder / rel).read_bytes())
+            zf.writestr(info, bodies[rel])
         zf.comment = json.dumps(meta, sort_keys=True).encode()
     return dict(meta, out=str(out), files=files)
 
@@ -255,6 +293,9 @@ def install(project_path: Path, src: str, replace: bool = False) -> Installed:
                 raise RecipeError("BAD_SOURCE", f"{src}: its files hash to {sha[:12]}..., not "
                                   f"the folder_sha256 {expected[:12]}... it was packed with; "
                                   "it changed after packing")
+            # an acceptance in the source is the sender's yes, never the recipient's
+            if _strip_acceptance_in(stage):
+                sha = userop.folder_hash(stage)
             project.user_op_sources = dict(project.user_op_sources,
                                            **{m["type"]: {"source": src, "folder_sha256": sha}})
             text = project_text(project_path, project)

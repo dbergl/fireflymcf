@@ -1007,8 +1007,8 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         from . import recipe, userop
         try:
             project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
-            user = [_user_op_entry(d) for d in userop.discover_user_ops(Path(args.project),
-                                                                        project)]
+            user = [_user_op_entry(d, userop.acceptance(project, d))
+                    for d in userop.discover_user_ops(Path(args.project), project)]
         except recipe.RecipeError as exc:
             print(f"error: {exc.code}: {exc}", file=sys.stderr)
             return 1
@@ -1041,6 +1041,7 @@ def _cmd_ops(args: argparse.Namespace) -> int:
                       f"{', '.join(e['manifest'].get('touches', [])) or 'nothing'}  "
                       f"{textwrap.shorten(e['purpose'], 80)}")
                 print(f"    {e['folder']}  (sha256 {e['folder_sha256'][:12]}...)")
+                print(f"    {_accepted_text(e['accepted'])}")
             if not user:
                 print("  none")
         print("\n`fireflymcf ops NAME` for parameters and error codes.")
@@ -1049,6 +1050,7 @@ def _cmd_ops(args: argparse.Namespace) -> int:
         if e.get("user_op"):
             print(f"{e['name']}  (user op; verified: NO)")
             print(f"  folder: {e['folder']}  (sha256 {e['folder_sha256']})")
+            print(f"  {_accepted_text(e['accepted'])}")
             print("  manifest.json:")
             print(textwrap.indent(json.dumps(e["manifest"], indent=2), "    "))
             print("  README.md:" if e["readme"] is not None else "  README.md: none")
@@ -1080,14 +1082,24 @@ def _cmd_ops(args: argparse.Namespace) -> int:
     return 0
 
 
-def _user_op_entry(d) -> dict:
-    """A discovered user op in `ops_doc.entries` shape, plus its manifest, README and folder."""
+def _accepted_text(rec) -> str:
+    """The project file's acceptance record for this folder, as `ops --project` prints it. It is
+    whoever wrote that file's yes: a project received from someone else carries theirs."""
+    if not rec:
+        return "not accepted in this project file"
+    return (f"accepted {rec.get('date', '?')}{' (G12 included)' if rec.get('g12') else ''} "
+            "in this project file: if you did not accept it yourself, it is not your yes")
+
+
+def _user_op_entry(d, accepted=None) -> dict:
+    """A discovered user op in `ops_doc.entries` shape, plus its manifest, README, folder and the
+    project file's acceptance record for its current hash (`accepted`, None if none)."""
     readme = d.folder / "README.md"
     return {"name": d.type, "class": "user", "verified": False,
             "purpose": d.manifest.get("description", ""),
             "status": "user-written: never checked by anyone but its author",
             "params": {}, "errors": [], "user_op": True, "folder": str(d.folder),
-            "folder_sha256": d.folder_sha256, "manifest": d.manifest,
+            "folder_sha256": d.folder_sha256, "manifest": d.manifest, "accepted": accepted,
             "readme": readme.read_text(encoding="utf-8", errors="replace")
             if readme.is_file() else None}
 

@@ -283,7 +283,9 @@ manifest and every file; it never imports anything. Before any `compile --allow-
 sections its `touches` names and whether the code writes only those, what it makes the panel
 send, what its routine reads, whether it does anything a firmware op has no reason to (files,
 network, processes, other paths). If the code and the manifest disagree, or you cannot follow
-it, do not run it; say why. Then section 6, as for an op you wrote.
+it, do not run it; say why. Then section 6, as for an op you wrote. A project file received
+from someone else carries their acceptances (`user_op_acceptance`): `$F ops --project P` shows
+each one; remove those the owner did not make before building.
 
 ## 9. After the owner flashes it
 

@@ -137,6 +137,12 @@ class MyOp(UserOp):
   touches and the acceptance record.
 - `op install` never imports; it prints the manifest and every file for reading. `op pack`
   writes a deterministic zip whose comment carries the folder hash, which `op install` checks.
+- **An acceptance is recorded in the project file** (`user_op_acceptance`), so a project file
+  received from someone else carries their acceptances, not yours, and with them a build skips
+  the `G12_ACK_REQUIRED` question. `fireflymcf ops --project P.ffproj.json` shows each op's
+  record ("accepted DATE (G12 included) in this project file"; `accepted` in `--json`). Delete
+  every `user_op_acceptance` entry you did not make yourself before building. `op pack` leaves
+  acceptance records out of any JSON file in the op folder, and `op install` never takes one in.
 - After a flash, add a `provenance` entry (`kind: "flashed"`) to the manifest; that edit changes
   the folder hash, so record the acceptance again.
 
