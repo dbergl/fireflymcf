@@ -322,3 +322,38 @@ def test_routine_bcc_out_of_range_is_the_routines_error():
         r.assemble(0x259C00)
     with pytest.raises(Refused, match="unknown condition"):
         r.bcc("xx", "far")
+
+
+def test_routine_refuses_a_name_that_is_both_label_and_pool_word():
+    """Acceptance run 3: a pool constant and a label both named `giveup`; `ldr_lit` silently
+    loaded from the label's address. The routine now refuses the clash, a label defined twice,
+    and a name that is neither."""
+    class Refused(Exception):
+        pass
+
+    def routine(pool, labels, ref):
+        r = thumb.Routine(pool, error=Refused)
+        r.ldr_lit(0, ref)
+        for name in labels:
+            r.label(name)
+            r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+        return r
+
+    with pytest.raises(Refused, match="both a label and a pool word"):
+        routine({"giveup": 5}, ["giveup"], "giveup").assemble(0x259C00)
+    with pytest.raises(Refused, match="defined twice"):
+        routine({"k": 5}, ["a", "a"], "k").assemble(0x259C00)
+    with pytest.raises(Refused, match="no label or pool word"):
+        routine({"k": 5}, ["a"], "missing").assemble(0x259C00)
+    blob, _ = routine({"k": 5}, ["a"], "k").assemble(0x259C00)
+    assert blob[-4:] == (5).to_bytes(4, "little")
+
+
+def test_ldr_lit_text_at_offset_zero():
+    """A pool word right after the load: capstone prints `[pc, #0]`, which `ldr_lit` used to
+    claim as `[pc]`, so that routine could never assemble."""
+    r = thumb.Routine({"k": 7})
+    r.ldr_lit(0, "k")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    blob, dis = r.assemble(0x259C00)
+    assert dis[0][1] == "ldr r0, [pc, #0]" and blob[-4:] == (7).to_bytes(4, "little")

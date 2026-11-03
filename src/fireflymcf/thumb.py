@@ -455,7 +455,7 @@ class Routine:
         else:
             def fn(h, s):
                 off = s(name) - ((h + 4) & ~3)
-                text = f"ldr r{rt}, [pc, #{_imm(off)}]" if off else f"ldr r{rt}, [pc]"
+                text = f"ldr r{rt}, [pc, #{_imm(off)}]"         # capstone prints #0 too
                 return ldr_literal(rt, h, s(name)), text
             self.emit(2, fn)
 
@@ -483,15 +483,24 @@ class Routine:
         code_len = 0
         for item in self.stream:
             if item[0] == "lbl":
+                if item[1] in labels:
+                    raise self.error(f"label {item[1]!r} is defined twice")
                 labels[item[1]] = code_len
             else:
                 code_len += item[1]
+        clash = sorted(set(labels) & set(self.pool))
+        if clash:
+            raise self.error(f"{', '.join(map(repr, clash))} names both a label and a pool word")
         entry = code_load_addr + entry_off
         pool_off = (entry_off + code_len + 3) & ~3
         pool_abs = {n: code_load_addr + pool_off + i * 4 for i, n in enumerate(self.pool)}
 
         def sym(name):
-            return entry + labels[name] if name in labels else pool_abs[name]
+            if name in labels:
+                return entry + labels[name]
+            if name in pool_abs:
+                return pool_abs[name]
+            raise self.error(f"no label or pool word named {name!r}")
 
         code = bytearray()
         expected: list = []
