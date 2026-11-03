@@ -766,12 +766,42 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         or {"no-floorplan": None}
     roots = [_resolve_page_root(stock, n) for n in args.page] + list(args.root) or None
     report = buildcheck.compare(stock, build, configs, roots, render_pages=not args.no_render)
+    emu = None
+    if args.emulate:
+        emu = _emulate_scenarios(Path(args.build), args.scenario, args.emulate_timeout)
+        if emu is None:
+            return 2
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        body = report.to_dict()
+        if emu is not None:
+            body["emulation"] = {k: r.to_dict() for k, r in emu.items()}
+        print(json.dumps(body, indent=2))
     else:
         print(buildcheck.format_report(report))
+        if emu is not None:
+            from .emu import gate
+            for line in gate.summary_lines(emu):
+                print(line)
     bad = report.problems or report.unexplained or any(p.error for p in report.pages)
-    return 1 if bad else 0
+    return 1 if bad else 0           # a failing emulator test is reported, never an exit code
+
+
+def _emulate_scenarios(build: Path, scenarios: list[str], timeout_s: float):
+    """Run the named scenario files on `build` and record them in its sidecar; None (after
+    saying why) when the request cannot be carried out."""
+    import importlib
+    if not scenarios:
+        print("error: --emulate needs at least one --scenario FILE", file=sys.stderr)
+        return None
+    try:
+        importlib.import_module("fireflymcf.emu.machine")
+    except ImportError:
+        print('emulate needs: pip install "fireflymcf[emu]"', file=sys.stderr)
+        return None
+    from .emu import gate
+    results = gate.run_scenarios(build, [Path(s) for s in scenarios], timeout_s)
+    gate.record(build, results)
+    return results
 
 
 def _cmd_coach_config(args: argparse.Namespace) -> int:
@@ -1604,7 +1634,21 @@ def _cmd_emulate(args: argparse.Namespace) -> int:
     except ImportError:
         print('emulate needs: pip install "fireflymcf[emu]"', file=sys.stderr)
         return 2
+    if args.scenario:
+        results = _emulate_scenarios_on(Path(args.mcf), args.scenario, args.timeout)
+        if args.json:
+            print(json.dumps({k: r.to_dict() for k, r in results.items()}, indent=2))
+        else:
+            from .emu import gate
+            for line in gate.summary_lines(results):
+                print(line)
+        return 0 if all(r.status == "passed" for r in results.values()) else 1
     return emu_main.run(args)
+
+
+def _emulate_scenarios_on(image: Path, scenarios: list[str], timeout_s: float):
+    from .emu import gate
+    return gate.run_scenarios(image, [Path(s) for s in scenarios], timeout_s)
 
 
 def _cmd_render(args: argparse.Namespace) -> int:
@@ -1927,6 +1971,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", action="append", default=[], type=int, metavar="N",
                    help="render only this root object (repeatable)")
     p.add_argument("--no-render", action="store_true", help="bytes and objects only")
+    p.add_argument("--emulate", action="store_true",
+                   help="also run the --scenario emulator tests on the build and record them "
+                        "in its sidecar (a failure is reported, not an exit code)")
+    p.add_argument("--scenario", action="append", default=[], metavar="FILE",
+                   help="with --emulate: an emulator test file (repeatable)")
+    p.add_argument("--emulate-timeout", type=float, default=300.0, metavar="SECONDS",
+                   help="with --emulate: wall-clock limit per scenario (default 300)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_verify)
 
@@ -1978,6 +2029,11 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("emulate", help="boot an mcf.bin on the panel emulator (needs the emu extra)")
     from .emu import __main__ as _emu_args       # light: no unicorn until it runs
     _emu_args.add_arguments(p)
+    p.add_argument("--scenario", action="append", default=[], metavar="FILE",
+                   help="run this emulator test (a file defining scenario(s)) on the image "
+                        "instead of the interactive emulator (repeatable); exit 1 unless all pass")
+    p.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
+                   help="wall-clock limit per scenario (default 300)")
     p.set_defaults(func=_cmd_emulate)
 
     p = sub.add_parser("render", help="render a GuiData page to an 800x480 PNG")
