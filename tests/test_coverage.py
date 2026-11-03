@@ -427,16 +427,46 @@ def test_appended_cell_tables_are_claimed(mcf_136):
     assert last(report) == last(stock)
 
 
-@pytest.mark.parametrize("grows", [0, 2])
-def test_an_uncovered_append_is_still_refused(mcf_136, grows):
-    """Bytes nothing names, appended to GuiData, still spend the tail headroom: up to it the
-    gate accepts them (as before), one word past it refuses."""
-    from fireflymcf import guidata, relocate
+@pytest.mark.parametrize("fill", [0x5A, 0x00], ids=["5a", "zero"])
+@pytest.mark.parametrize("grows", [0, 1, 2])
+def test_an_uncovered_append_is_still_refused(mcf_136, grows, fill):
+    """Bytes nothing names, appended to GuiData, still spend the tail headroom, zeros included:
+    up to it the gate accepts them (as before), one word past it refuses, before and after a
+    cell table copy sits at the end."""
+    from fireflymcf import userop
     data = _grown(mcf_136, grows)
     room = coverage.analyse(data, deep=True).tail_headroom
     assert room > 0 and room % 4 == 0
-    gs, ge = guidata.guidata_extent(data)
-    with pytest.raises(relocate.RelocationError, match="larger than the biggest object"):
-        relocate.relocate(data, ge - gs - 4, b"\x5a" * (room + 4))
-    out, _ = relocate.relocate(data, ge - gs - 4, b"\x5a" * room)
-    assert coverage.analyse(out, deep=True).tail_headroom == 0
+    with pytest.raises(userop.EditorError, match="larger than the biggest object") as e:
+        userop.Editor(data).grow_guidata(bytes([fill]) * (room + 4), "too much")
+    assert e.value.code == "BAD_EDIT"
+    with pytest.raises(userop.EditorError, match="larger than the biggest object"):
+        userop.Editor(data).grow_guidata(bytes([fill]) * 65536, "64 KB")
+    ed = userop.Editor(data)
+    ed.grow_guidata(bytes([fill]) * room, "exactly the headroom")
+    assert coverage.analyse(ed.data, deep=True).tail_headroom == 0
+
+
+def _fake_copy(data: bytes, rows: int) -> bytes:
+    """A table pair shaped like a grow's copy, starting with the live tables' first 16 bytes of
+    each, every type and cell plausible, but not the live rows."""
+    from fireflymcf import guidata
+    gs, _ = guidata.guidata_extent(data)
+    cell_off, type_off = guidata.find_variable_tables(data)
+    types = bytes(data[gs + type_off:gs + type_off + 16]) + bytes([3]) * (rows - 16)
+    cells = bytes(data[gs + cell_off:gs + cell_off + 16]) + \
+        struct.pack("<I", 0x20038000) * (rows - 4)
+    return types + bytes(-len(types) % 4) + cells
+
+
+def test_a_fake_copy_is_not_claimed(mcf_136):
+    """Shape alone does not make a copy: the rows must be the live table's."""
+    from fireflymcf import userop
+    data = _grown(mcf_136, 1)
+    small = userop.Editor(data)
+    small.grow_guidata(_fake_copy(data, 669), "fake, small")          # fits the headroom
+    report = coverage.analyse(small.data, deep=True)
+    assert len(_labelled(report, "variable-cell-table-dead")) == 0
+    assert report.tail_headroom < coverage.analyse(data, deep=True).tail_headroom
+    with pytest.raises(userop.EditorError, match="larger than the biggest object"):
+        userop.Editor(data).grow_guidata(_fake_copy(data, 20001), "fake, 100 KB")

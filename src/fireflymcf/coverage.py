@@ -393,8 +393,8 @@ def _claim_guidata(report: CoverageReport, data: bytes, start: int, end: int) ->
         sizes = [b - a for a, b in zip(distinct, distinct[1:])]
         # Copies of the display-cell table pair a table grow appended after GuiData's last
         # object (`_cell_table_copies`) are claimed as themselves; the bytes around them that
-        # nothing names (the trailing object, then anything appended after a copy) share the
-        # bound. Only the last region is searched: that is where a grow appends, and the stock
+        # nothing names (the trailing object, then anything appended after a copy, padding or
+        # not) share the bound. Only the last region is searched: that is where a grow appends, and the stock
         # pair, inside an earlier region, stays in the claim it has always had.
         copies = (_cell_table_copies(data, start, distinct[-1], region_end)
                   if region_end == end else [])
@@ -404,8 +404,7 @@ def _claim_guidata(report: CoverageReport, data: bytes, start: int, end: int) ->
             cursor = cell_at + 4 * rows
         unnamed.append((cursor, region_end))
         trailing_end = unnamed[0][1]
-        tails = [(a, b) for a, b in unnamed[1:]
-                 if b > a and not is_padding(data[a:b])]
+        tails = [(a, b) for a, b in unnamed[1:] if b > a]      # zeros count too
         trailing = trailing_end - distinct[-1] + sum(b - a for a, b in tails)
         if len(set(sizes)) == 1:
             # Uniform-stride table: the trailing record must be exactly one stride.
@@ -461,13 +460,19 @@ def _cell_table_copies(data: bytes, start: int, lo: int,
     with the reference's first 16; the cell table starts at the type table's end rounded up to
     4, with zero padding between; `rows` is the one row count in that rounding window that
     `rows - 1` is Thumb-encodable for (tablegrow's choice), or the count the next copy's start
-    or `hi` fixes exactly; every type is a variable type (`guidata.VARIABLE_TYPE_MAX`); every
-    cell is 0 or an SRAM address (`guidata.SRAM_LOW`..`SRAM_HIGH`)."""
+    or `hi` fixes exactly; and its first rows, as many as it has up to the live table's row
+    count, equal the live table's byte for byte, in both tables (a grow copies the old rows
+    verbatim). Rows past the live count are the newest grow's own: each must only be well
+    formed, a variable type (`guidata.VARIABLE_TYPE_MAX`) and a cell that is 0 or an SRAM
+    address (`guidata.SRAM_LOW`..`SRAM_HIGH`)."""
     from . import guidata, tablegrow
     try:
         cell_off, type_off = guidata.find_variable_tables(data)
+        live_rows = tablegrow.find_index_bound(data, 0x90000000 + cell_off)
     except Exception:
         return []
+    live_types = bytes(data[start + type_off:start + type_off + live_rows])
+    live_cells = bytes(data[start + cell_off:start + cell_off + 4 * live_rows])
     tp = bytes(data[start + type_off:start + type_off + _COPY_PREFIX])
     cp = bytes(data[start + cell_off:start + cell_off + _COPY_PREFIX])
     if len(tp) < _COPY_PREFIX or len(cp) < _COPY_PREFIX:
@@ -500,7 +505,10 @@ def _cell_table_copies(data: bytes, start: int, lo: int,
             continue
         types = data[type_at:type_at + rows]
         cells = struct.unpack_from(f"<{rows}I", data, cell_at)
-        if (max(types) > guidata.VARIABLE_TYPE_MAX or any(data[type_at + rows:cell_at])
+        same = min(rows, live_rows)
+        if (types[:same] != live_types[:same]
+                or data[cell_at:cell_at + 4 * same] != live_cells[:4 * same]
+                or max(types) > guidata.VARIABLE_TYPE_MAX or any(data[type_at + rows:cell_at])
                 or any(c and not guidata.SRAM_LOW <= c < guidata.SRAM_HIGH for c in cells)):
             continue
         found.append((type_at, cell_at, rows, cell_at - start == cell_off))
