@@ -245,3 +245,25 @@ def test_set_tank_raw_before_boot(mcf_136):
     s.boot()
     fresh = [f for f in s.frames(sa=None, dgn=G12_TANK_LEVEL_SENSOR) if f.data[0] == 1]
     assert fresh and all(f.data[1:3] == (63000).to_bytes(2, "little") for f in fresh)
+
+
+def test_goto_from_a_rail_less_page_says_so(mcf_136):
+    """On a six-icon build the rail is found only on a page that draws it; from one that does not
+    (the terms page), goto says the page has no rail, not just "no known path" (final review)."""
+    img = _compile(mcf_136, [("nav", "show_nav_slides_icon", {"screen": 29})])
+    for image in (img, mcf_136):
+        s = Scenario(image, timeout_s=300)
+        s.boot(accept_terms=False)
+        with pytest.raises(ScenarioError, match="draws no navigation rail"):
+            s.goto("LIGHTS")
+
+
+def test_set_tank_raw_checks_the_sensor(mcf_136):
+    """Sensors are 1-4, before boot and after (final review)."""
+    s = Scenario(mcf_136, timeout_s=240)
+    for bad in (0, 5):
+        with pytest.raises(ScenarioError, match="sensor"):
+            s.set_tank_raw(bad, 1000)
+    s.boot()
+    with pytest.raises(ScenarioError, match="sensor"):
+        s.set_tank_raw(7, 1000)

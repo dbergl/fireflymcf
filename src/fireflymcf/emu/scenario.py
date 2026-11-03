@@ -71,6 +71,7 @@ from . import rvc
 from .canbus import Peer
 
 PANEL_SA = 0x9F
+TANK_SENSORS = frozenset({1, 2, 3, 4})  # set_tank_raw: fresh, grey, black, grey 2
 CHUNK_S = 0.25                   # simulated seconds per run slice between wall-clock checks
 PRESS_S = 1 / 6                  # a tap's press, as tools/drive.py
 RELEASE_S = 0.5                  # run after the release so its 0xFF handler and sends complete
@@ -431,9 +432,17 @@ class Scenario:
         if self._screen_id() in targets:
             return
         root = self._root()
-        live = self._rail_ids(self._regions(self._placed(root))) if root is not None else {}
+        regions = self._regions(self._placed(root)) if root is not None else []
+        live = self._rail_ids(regions) if root is not None else {}
         rail_ids = live or self._rail
         rail = targets & set(rail_ids)
+        on_page = {t for _, t, _ in regions}
+        if (targets & set(range(5)) and not live
+                and not (rail and rail_ids[next(iter(rail))] in on_page)):
+            # No rail here: on a six-icon build there is no static rail to fall back on either
+            raise ScenarioError(f"goto {page!r}: the page showing ({self.page!r}) draws no "
+                                "navigation rail; leave it by its own controls first (the "
+                                "terms page: boot() accepts it)")
         if rail:
             sid = rail.pop()
             self._tap_touch_id(rail_ids[sid], page)
@@ -589,6 +598,8 @@ class Scenario:
         """Set the G12's raw tank sensor `sensor` (1 fresh, 2 grey, 3 black, 4 grey 2; high =
         empty). The G12 reads it into its cells once a second. Before `boot()`, the coach comes
         up with that reading (a tank already past a threshold at power-on)."""
+        if sensor not in TANK_SENSORS:
+            raise ScenarioError(f"tank sensor {sensor!r} is not one of {sorted(TANK_SENSORS)}")
         if not 0 <= raw <= 0xFFFF:
             raise ScenarioError(f"tank raw value {raw} is not a u16")
         if not self._booted:
