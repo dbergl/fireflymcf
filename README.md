@@ -4,6 +4,12 @@ Tools and a Claude Code plugin for reading, rendering and safely modifying **Fir
 MCF** firmware: the configuration bundle (`mcf.bin`) for the Firefly G12 / Spyder panel RV
 multiplex system found in Jayco and other coaches.
 
+> **Unofficial, no warranty.** Not affiliated with or endorsed by Firefly Integrations, Jayco or
+> any coach or component maker. Modifying and flashing panel firmware can switch the wrong load,
+> stop a control working or misreport a tank or battery, and an op you or someone else wrote has
+> been checked by nobody but its author. You use this entirely at your own risk, and you decide
+> which risks are acceptable. See [Disclaimer](#disclaimer).
+
 > **Status: early.** One coach (a Jayco on firmware 13.6) has run every build the tools have made;
 > other coaches and firmware versions are where the work is least proven. See
 > [`ROADMAP.md`](ROADMAP.md).
@@ -43,6 +49,15 @@ Describe the change you want ("rename the Water Pump button to Pump"), or use
 `/fireflymcf:inspect`, `/fireflymcf:coach-profile`, `/fireflymcf:build` and
 `/fireflymcf:flash-report`. The agent builds from your own stock `mcf.bin`, checks the whole image
 against it, and tells you what has and has not been tested on a coach.
+
+### Writing your own op
+
+When no existing op does what you want, the plugin's `write-new-op` skill writes a **user op**: a
+folder of Python beside your project that the engine gates like its own ops (every write checked
+against the bytes it expects, replayed, and limited to the sections it declares) and that is
+tested in the panel emulator before you flash anything. A user op runs with the same trust as any
+Python you run; the gates check correctness, they are not a sandbox, so read an op someone else
+wrote before you build with it. See [`docs/USER-OPS.md`](docs/USER-OPS.md).
 
 ## Panel emulator
 

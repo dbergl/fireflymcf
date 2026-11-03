@@ -1,0 +1,24 @@
+{
+  "name": "counter-op",
+  "type": "user:tick-counter",
+  "version": "1.0.0",
+  "author": "fireflymcf examples",
+  "description": "Count the panel's ticks in a fresh SRAM cell: a per-tick routine that changes nothing the panel draws or sends (the write-new-op skill's worked example)",
+  "touches": ["guicode"],
+  "written_against": [
+    {
+      "build_name": "stock 13.6",
+      "base_sha256": "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382",
+      "recipe_ops_required": []
+    }
+  ],
+  "provenance": [
+    {
+      "kind": "emulated",
+      "base_sha256": "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382",
+      "date": "2026-11-03",
+      "by": "fireflymcf examples",
+      "note": "emu_test.py passed on stock 13.6 through `fireflymcf verify --emulate`; never flashed"
+    }
+  ]
+}

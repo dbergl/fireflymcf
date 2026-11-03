@@ -1,14 +1,135 @@
 # User ops
 
 A user op is a recipe op you write yourself: a folder with a `manifest.json` and an `op.py` whose
-`UserOp` subclass changes the image only through a `userop.Editor`. This page is the reference for
-the building blocks such an op has. The authoring guide comes later.
+`UserOp` subclass changes the image only through a `userop.Editor`. This page is the authoring
+guide ("Writing a user op") and the reference for the building blocks such an op has
+("Primitives"). The plugin's `write-new-op` skill (`plugin/skills/write-new-op/SKILL.md`) is the
+procedure an agent follows, and `plugin/skills/write-new-op/examples/counter-op/` is a complete,
+tested example op.
+
+fireflymcf is unofficial (not affiliated with Firefly Integrations or any coach maker) and comes
+without warranty of any kind. A user op has been checked by nobody but its author.
 
 **Trust.** A user op runs with the same trust as any Python you run: importing its `op.py`
 executes it, with your permissions, before any check runs. The engine replays the op's `Editor`
 ledger against its input and refuses an image the ledger does not account for. That replay is a
 correctness gate. It is not a sandbox, and it cannot stop an op from doing anything else Python
 can do. Read an op before you allow it (`--allow-user-ops`).
+The same holds for its `emu_test.py`, which the emulator gate runs. Before running anything
+from an op someone else wrote, read every file in it and know what it touches.
+
+## Writing a user op
+
+### The folder
+
+One op is one folder, found in `ops/` beside the `*.ffproj.json` or listed in the project's
+`ext_ops` (paths relative to the project file):
+
+```
+ops/my-op/
+  manifest.json   # what it is and what it touches
+  op.py           # the UserOp subclass
+  emu_test.py     # scenario(s): the emulator test
+  README.md       # what it does, for the person who receives it
+```
+
+`manifest.json` fields, all required:
+
+| field | type | meaning |
+|---|---|---|
+| `name` | string | the folder name |
+| `type` | string | `user:<name>`; the recipe's op type. A built-in's name is refused |
+| `version` | string | the op's own version |
+| `author`, `description` | string | who wrote it; one line of what it does |
+| `touches` | list of strings | every section the op changes: `guicode`, `guidata`, `g12`, `lcd` |
+| `written_against` | list of objects | `{build_name, base_sha256, recipe_ops_required}` per base it was written for |
+| `provenance` | list of objects | `{kind: "emulated" or "flashed", base_sha256, date, by, note}` |
+
+The engine compares the op's input and output section by section and refuses
+(`USER_OP_UNDECLARED_TOUCH`) a change to a section `touches` does not name. A section's
+descriptor counts as part of it; the container header (build name, pointers) can never be
+declared, and resealing a checksum alone touches nothing.
+
+### `op.py`
+
+```python
+from fireflymcf import recipe, routinekit, thumb
+from fireflymcf.userop import UserOp
+
+
+@recipe.op("user:my-op")
+class MyOp(UserOp):
+    PARAMS = {"properties": {"step": {"type": "integer"}}, "required": []}
+
+    def validate(self):                       # params; raise RecipeError("BAD_PARAMS", ...)
+        self.step = self._param("step", 1, int)
+
+    def build(self, ed, ctx):                 # every write through the Editor `ed`
+        cell = ed.call("fresh_sram", 4)
+        routinekit.install_tick(ed, lambda load, tail: ..., "my routine")
+
+    def check(self, data, ctx) -> str:        # on the finished image: prove it, return a line
+        return "..."
+```
+
+- **`Editor`**: `patch(off, expected, new, note)` and `patch_addr(marker, addr, expected, new,
+  note)` replace bytes of the same length after checking the bytes expected there (a mismatch
+  is `FIRMWARE_MISMATCH`, "this op does not match your firmware"); `grow_guicode(payload, note)`
+  appends to GuiCode; `call(name, ...)` runs a primitive; `section(marker)`, `offset_of(marker,
+  addr)` and `data` read. Every step lands in a ledger; the engine replays it on the op's input
+  and refuses (`USER_OP_TAMPERED`) an output the replay does not reproduce.
+- **Handles**: `ctx.handles[op_id]` holds what earlier ops published, so a param
+  `{"ref": "<op id>"}` can name one; `ctx.handles[self.spec.id] = {...}` publishes yours.
+- **Do not override** `apply` or `verify` (the gate) or set `hardware_verified` (always False).
+  A crash anywhere in the op becomes `USER_OP_CRASHED` naming the file and line.
+- **Imports**: `from . import helper` loads a sibling file. Only the source the folder hash
+  covers runs: no `.pyc`, no symlinks, no plain `import helper`.
+- **`capability_delta(ctx)`** is the one other hook an op may define: an op that changes what a
+  binding sends returns `(lost, gained)` sets of `(channel, command)` pairs, as built-in ops do.
+
+### Building, testing, sharing
+
+| step | command |
+|---|---|
+| list the project's user ops (manifests only, nothing runs) | `fireflymcf ops --project P.ffproj.json` |
+| one op's manifest and README | `fireflymcf ops user:my-op --project P.ffproj.json` |
+| run the test while writing (fails on stock first) | `fireflymcf emulate MCF --scenario ops/my-op/emu_test.py` |
+| gate and build | `fireflymcf compile P.ffproj.json STOCK -o build/mcf-NAME.bin --allow-user-ops` |
+| record the owner's acceptance | `fireflymcf op accept P.ffproj.json user:my-op [--g12]` |
+| verify and emulate | `fireflymcf verify build/mcf-NAME.bin STOCK --emulate --project P.ffproj.json --allow-user-ops` |
+| share | `fireflymcf op pack P.ffproj.json my-op -o my-op.zip` |
+| receive | `fireflymcf op install P.ffproj.json SRC` (a folder, a `.zip` or a git URL) |
+
+- `compile` and `validate` refuse a project with user ops (`USER_OPS`) without `--allow-user-ops`
+  and import nothing. With it, every op folder they find is imported, used or not.
+  `--allow-user-ops` admits user ops only; an unverified built-in op still needs
+  `--allow-unverified`.
+- An op whose `touches` includes `g12` also needs the owner's recorded acceptance
+  (`op accept --g12`; `G12_ACK_REQUIRED` until then). The record names the folder hash, so any
+  edit to the folder voids it.
+- `verify --emulate --project` runs each op's `emu_test.py` and records the result in the
+  build's sidecar under the op's type: `passed`, `failed` with its reason, or `not emulated` with
+  its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 only). It
+  needs `--allow-user-ops`, because the test is the author's code, but not the G12 acceptance:
+  emulation touches no hardware. A failing test is reported; it never stops the image being
+  written. A gate failure (expected bytes, replay, touches, `verify`) does.
+- The sidecar's `user_ops` names every op the project uses: type, version, folder hash, source,
+  touches and the acceptance record.
+- `op install` never imports; it prints the manifest and every file for reading. `op pack`
+  writes a deterministic zip whose comment carries the folder hash, which `op install` checks.
+- After a flash, add a `provenance` entry (`kind: "flashed"`) to the manifest; that edit changes
+  the folder hash, so record the acceptance again.
+
+### The emulator test
+
+`emu_test.py` defines `scenario(s)`; `s` is a `fireflymcf.emu.scenario.Scenario` on the built
+image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page=)`,
+`s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`, `s.frames(dgn=,
+sa=, since=)`, `s.read_mem(addr, n)`, `s.screen`, `s.page`, `s.screenshot(path)` and `s.image` are
+its surface; its docstrings are the reference. Anything that raises fails the test with its line.
+Write it first and run it on the image without the op: it must fail there. Assert only what the op
+changes: in the emulator, stock 13.6 itself sends a D1 config write on selector `0x9B` at boot, so
+"the panel sent nothing" is false without any op.
 
 ## Primitives
 
@@ -178,6 +299,24 @@ index of the existing config-toggle group on OPTIONS `selector`, or `None`
 (`optionrow.find_config_toggle`, which `add_pump_auto_off` uses to adopt `add_option_follower`'s
 Pump Link toggle, PC.45). It refuses (`AMBIGUOUS_TOGGLE`) when several groups qualify, as on a
 build carrying `add_pump_auto_off`: the 0xEE ±5 stepper groups match too.
+
+### Worked hints
+
+- **Find what an earlier op built from the image, not from its params.** A routine's cells are
+  chosen at build time (`fresh_sram`), so an `emu_test.py` cannot know them in advance: put a
+  short tag in the routine's prefix (`assemble_tick(..., prefix=TAG + cell)`) and have the test
+  find the tag in GuiCode (`examples/counter-op`). A later op can read an earlier one's
+  `ctx.handles` instead.
+- **Writing an OPTIONS selector from a routine: send your own frame.** On a build carrying
+  Auto Off (`add_pump_auto_off`), `find_config_toggle(0xEE)` is ambiguous (`AMBIGUOUS_TOGGLE`):
+  the ±5 stepper groups on the same selector match too. An op that writes an OPTIONS selector
+  should build its own `config_frame` (the function, `0xD1` or `0xD2`, and the value the build's
+  encoding of that selector needs), put it in its routine's prefix, and send it with
+  `emit_send_frame`, rather than reuse a toggle group. The register then updates from the G12's
+  echo; read it with `resolve_register`, never write it.
+- **Read what earlier ops left.** An op appended to a project meets the output of the ops before
+  it, not stock: compile the project without it and inspect that image (`bus-map`, `options`,
+  `slot-source`) before deciding what to expect at a site.
 
 ### Readers
 
