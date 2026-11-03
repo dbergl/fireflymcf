@@ -7,6 +7,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -416,3 +417,37 @@ def test_pack_refuses_a_symlink(tmp_path, mcf_136, capsys):
     z = tmp_path / "out.zip"
     assert main(["op", "pack", str(pf), "hook_nop", "-o", str(z)]) == 1
     assert "symbolic link" in capsys.readouterr().err and not z.exists()
+
+
+# --- the engine's gates refuse a user op as structured errors (final review I1) ------------------
+
+def test_capability_gate_is_a_structured_refusal(tmp_path, mcf_136, capsys):
+    """A guidata-only user op that changes a binding's command byte without declaring the gain:
+    the capability gate refuses it as JSON with a code, and nothing is written."""
+    pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip"), folders=("cmd_flip",))
+    out = tmp_path / "mcf-flip.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--allow-user-ops", "--json"]) == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body["ok"] is False
+    err = body["errors"][0]
+    assert err["code"] == "CAPABILITY_GATE" and "gained" in err["message"]
+    assert not out.exists() and not Path(str(out) + ".json").exists()
+
+    assert main(["validate", str(pf), STOCK, "--allow-user-ops", "--json"]) == 1
+    body = json.loads(capsys.readouterr().out)
+    assert body["passed"] is False and body["errors"][0]["code"] == "CAPABILITY_GATE"
+
+
+def test_gates_hold_under_python_O(tmp_path, mcf_136):
+    """`python -O` strips `assert`: the gates must not be asserts, or the image is written."""
+    pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip"), folders=("cmd_flip",))
+    out = tmp_path / "mcf-o.bin"
+    stock = Path(__file__).resolve().parent.parent / STOCK
+    proc = subprocess.run(
+        [sys.executable, "-O", "-c", "import sys; from fireflymcf.cli import main; "
+         "sys.exit(main(sys.argv[1:]))", "compile", str(pf), str(stock), "-o", str(out),
+         "--allow-user-ops", "--json"],
+        capture_output=True, text=True, cwd=tmp_path, timeout=600)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    assert json.loads(proc.stdout)["errors"][0]["code"] == "CAPABILITY_GATE"
+    assert not out.exists()

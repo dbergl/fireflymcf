@@ -33,6 +33,17 @@ class RecipeError(ValueError):
                 "message": str(self), "offers": self.offers}
 
 
+class GateError(RecipeError, AssertionError):
+    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`).
+    Raised explicitly, never by `assert`, so `python -O` cannot remove a gate. It is also an
+    AssertionError, the type these gates raised before they were explicit."""
+
+
+def _gate(ok, code: str, message) -> None:
+    if not ok:
+        raise GateError(code, str(message))
+
+
 @dataclasses.dataclass
 class OpSpec:
     id: str
@@ -259,18 +270,20 @@ def capabilities(img: bytes) -> set:
 
 def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
     ok, reason = relocate._boundary_oracle(data)
-    assert ok, reason
+    _gate(ok, "STRUCTURAL_GATE", reason)
     ok, reason = relocate._verify_record_geometry(data)
-    assert ok, reason
-    assert coverage.analyse(data, deep=True).unclaimed == []
+    _gate(ok, "STRUCTURAL_GATE", reason)
+    unclaimed = coverage.analyse(data, deep=True).unclaimed
+    _gate(unclaimed == [], "STRUCTURAL_GATE",
+          "deep coverage found %d unclaimed byte run(s): %r" % (len(unclaimed), unclaimed[:4]))
     for lit_off, tgt in theme.guicode_guidata_pointers(data):
-        assert struct.unpack_from("<I", data, lit_off)[0] == 0x90000000 + tgt, \
-            "stale GuiCode->GuiData pointer at %#x" % lit_off
+        _gate(struct.unpack_from("<I", data, lit_off)[0] == 0x90000000 + tgt, "STRUCTURAL_GATE",
+              "stale GuiCode->GuiData pointer at %#x" % lit_off)
     if ctx.insertions:
         # Check the LOWEST insertion — the most conservative `at`, since the gate
         # refuses if the separately-flashed LCD Firmware points anywhere ABOVE it.
         lcd_ok, lcd_why = relocate._verify_no_stranded_lcd_pointers(data, min(ctx.insertions))
-        assert lcd_ok, lcd_why
+        _gate(lcd_ok, "STRUCTURAL_GATE", lcd_why)
 
     _assert_authored_cells_fresh(ctx)
     _assert_reserved_groups_intact(ctx.stock, data)
@@ -294,9 +307,10 @@ def _assert_reserved_groups_intact(stock: bytes, data: bytes) -> None:
         slice_ = range(sg[g].start, sg[g].start + sg[g].count)
         if not all(sb[i].dgn_low == dgn_low for i in slice_):
             continue
-        assert dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_), \
-            "reserved group %d (the stock %#x inverter/charger template) was changed" % (
-                g, 0x10000 | dgn_low)
+        _gate(dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_),
+              "STRUCTURAL_GATE",
+              "reserved group %d (the stock %#x inverter/charger template) was changed" % (
+                  g, 0x10000 | dgn_low))
 
 
 def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
@@ -309,8 +323,9 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     selected = newbutton.guicode_selected_groups(stock)
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
     bad = [g for g in selected if g < len(sg) and g < len(dg) and dg[g].start != sg[g].start]
-    assert not bad, ("group(s) %s were reused, but GuiCode drives them by number "
-                     "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
+    _gate(not bad, "STRUCTURAL_GATE",
+          "group(s) %s were reused, but GuiCode drives them by number "
+          "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
 
 
 def _assert_authored_cells_fresh(ctx: Ctx) -> None:
@@ -333,11 +348,11 @@ def _assert_authored_cells_fresh(ctx: Ctx) -> None:
     except Exception:
         return
     reused = sorted(i for i in ctx.authored_cells if i < stock_len)
-    assert not reused, (
+    _gate(not reused, "STRUCTURAL_GATE", (
         "op authored display cell index(es) %r below the stock cell-table row count (%d) -- a "
         "private cell must be a freshly grown index, never a reused +0x44BC8 index (on 13.6 every "
         "reusable index is read by an object in another GuiData object table: the coach-48V "
-        "background-bar aliasing). Use readout.allocate_fresh_cells." % (reused, stock_len))
+        "background-bar aliasing). Use readout.allocate_fresh_cells." % (reused, stock_len)))
 
 
 def _build_ops(specs: list) -> tuple:
@@ -427,16 +442,16 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
         lost_want |= lo
         gained_want |= ga
     stock_caps, out_caps = capabilities(stock), capabilities(data)
-    assert stock_caps - out_caps == lost_want, \
-        "capability gate: lost %s, ops declared %s" % (
-            sorted(stock_caps - out_caps), sorted(lost_want))
-    assert out_caps - stock_caps == gained_want, \
-        "capability gate: gained %s, ops declared %s" % (
-            sorted(out_caps - stock_caps), sorted(gained_want))
+    _gate(stock_caps - out_caps == lost_want, "CAPABILITY_GATE",
+          "capability gate: lost %s, ops declared %s" % (
+              sorted(stock_caps - out_caps), sorted(lost_want)))
+    _gate(out_caps - stock_caps == gained_want, "CAPABILITY_GATE",
+          "capability gate: gained %s, ops declared %s" % (
+              sorted(out_caps - stock_caps), sorted(gained_want)))
 
     manifest = [o.verify(data, ctx) for o in ops]
     res, ch = patch.reseal(data)
-    assert res == data, "image not sealed after verify: %s" % ch
+    _gate(res == data, "NOT_SEALED", "image not sealed after verify: %s" % ch)
     unverified = [o.spec.id for o in ops if not o.hardware_verified]
     # An op's shift report joins its own line: the manifest stays one entry per op
     shifts, texts = recipe_ops.shift_report(ops, ctx)
@@ -449,9 +464,17 @@ def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
                       ops: list) -> CompileResult:
     """`_finish`, except that a user op's refusal (`userop` tags it `user_op`) surfacing in its
     verify or capability_delta comes back as a failed CompileResult, the shape every other
-    user-op failure has. A built-in op's or the project's RecipeError still raises as before."""
+    user-op failure has, and so does a whole-image gate's refusal (`GateError`) in a build that
+    holds a user op. A built-in op's or the project's RecipeError, and a gate's in a build of
+    built-in ops alone, still raises as before."""
     try:
         return _finish(project, stock, data, ctx, ops)
+    except GateError as e:
+        # A whole-image gate names no op; with a user op in the build it is most likely the
+        # user op's doing, and it comes back in the same shape as the user op's own refusals.
+        if not any(getattr(o, "user_op", False) for o in ops):
+            raise
+        return CompileResult(False, None, [e.to_json()], [], [])
     except RecipeError as e:
         if not getattr(e, "user_op", False):
             raise
