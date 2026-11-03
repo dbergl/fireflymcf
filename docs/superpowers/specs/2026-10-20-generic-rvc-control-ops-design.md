@@ -68,7 +68,7 @@ flash: nothing on the binding path computes a byte at send time.
 live variant fire. A group whose byte 1 is `0x80` does not cycle its variant on release. An
 external setter chooses it: `setVariant(group, v)` through the function pointer at `0x20039908`
 (`FUN_0021B5E8`). The Low Volts bridge (`followchannel.build_display_bridge`) drives group 129
-this way every tick. It was proven on the coach for tap and, in LV-hold, for hold.
+this way every tick. It was proven on the coach for tap and, in a reference build flashed 2026-10-19, for hold.
 
 **Stock uses the same mechanism for Climate.** `fireflymcf bus-map --dgn 1FFE2 --detail` on stock
 13.6 shows GuiCode reading var 13 (THERMOSTAT_STATUS_1, instance 0) and calling the setter for
@@ -78,8 +78,8 @@ hold.** `newbutton.guicode_selected_groups` already excludes them, as it does 13
 **Per-tick routines.** Appended GuiCode chains on the one hook at GuiCode+`0xEE3C`
 (`followchannel.hook_state`). `bitcombine` folds receive slots into a display cell, and
 `switchbuild.author_switch` draws a wtype-6 switch over arms on that cell. Both are coach-proven
-(the v32 heater status). The arms must each draw the whole control, caption included, or a repaint
-loses it (v31).
+(the heater status, verified 2026-09-22). The arms must each draw the whole control, caption
+included, or a repaint loses it (seen on the coach the same day).
 
 **Receive entries.** An entry matches on the 18-bit DGN only, then on `payload[+5 low nibble] ==
 +4` unless `+4` is `0xFF` (`FUN_0021C760`). It extracts by mode (`statusbind.LIVE_MODES`: whole
@@ -130,7 +130,7 @@ A button that sends RV-C frames on any page.
 
 At least one of `tap`, `hold` or `toggle` is required. The group comes from the pool's first slot
 and never from 68/69 (`levelcontrols.RESERVED_GROUPS`). A pool of `"free"` with `hold` or `toggle`
-is refused: a hold or toggle on a GuiCode-driven group is dead (v45).
+is refused: a hold or toggle on a GuiCode-driven group is dead (coach, 2026-09-30).
 
 **Placement.** By default the records are pasted as a new object at absolute `x, y` under a clone
 of `parent`'s first wtype-5 attach. This is `move_control`'s paste path (`insert.insert_object` +

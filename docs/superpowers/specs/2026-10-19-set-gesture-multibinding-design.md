@@ -150,7 +150,7 @@ When all five hold, apply `set_phases(PHASE_HELD)` to every live binding in the 
 - Tests: at least (1) group 129 on the stock fixture gives exactly the expected 6 byte edits
   (1 hold, 1 repeat, 4 phases); (2) groups 169/229 give the same output as before; (3) each
   premise 1–5 refusing on a synthesised group; (4) the coach project with
-  `lv-hold {"group": 129, …}` validates and `verify` accounts for every run.
+  a Low Volts hold op `{"group": 129, …}` validates and `verify` accounts for every run.
 - Updating `ops_doc` / `fireflymcf ops set_gesture` text, and `docs/CONTROL-BEHAVIOR.md` if
   it says multi-binding groups can't be converted.
 
@@ -159,7 +159,7 @@ When all five hold, apply `set_phases(PHASE_HELD)` to every live binding in the 
 When it's done: the fireflymcf commit, a note that the owner's environment needs
 reinstalling, and the result of `fireflymcf validate` on the coach project
 (the owner's project file, which already contains
-`lv-hold {"target": 285, "group": 129, "kind": "hold_to_toggle", "seconds": 3}`). The owner's
+a Low Volts hold op `{"target": 285, "group": 129, "kind": "hold_to_toggle", "seconds": 3}`). The owner's
 session will then compile, verify and hand over the flashable build.
 
 ## Outcome (2026-10-19)

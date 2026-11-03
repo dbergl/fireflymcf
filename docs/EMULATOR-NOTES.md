@@ -123,7 +123,7 @@ The earlier hypothesis (missing network data) was wrong. Causes, in order:
     Floorplan button ~3.2 s, Proceed. Selecting a model sends the spec's 12-selector
     transaction F5, D7, E5, E9, E4, EF, E6, EC, E3, EB, 15, F7 with values equal to
     rvc2mqtt's FLOORPLAN_OPTION_DEFAULTS (checked for RD), and turns off nine output
-    channels. F5 codes (V13 build): 1 RT, 2 RA, 3 RD, 4 SY, 5 TB, 6 CB, 7 WA, 8 WD,
+    channels. F5 codes (13.6 package): 1 RT, 2 RA, 3 RD, 4 SY, 5 TB, 6 CB, 7 WA, 8 WD,
     9 WT, 10 RY. LIGHTS/ELECTRICAL then show that floorplan's layout.
   * F1/F2: the spec calls them unidentified floorplan-adjacent values (coach 0x0D,
     0x06). The panel displays them as "Logic Controller Version: F1.F2"

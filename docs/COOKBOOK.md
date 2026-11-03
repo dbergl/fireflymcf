@@ -93,7 +93,7 @@ A project file is an ordered list of typed ops; `docs/RECIPE-OPS.md` lists them 
 {
   "schema": 1,
   "base_sha256": "<sha256sum mcf.bin>",
-  "build_name": "Jayco B-Van V13 mine v1",
+  "build_name": "Jayco B-Van V13 mine",
   "ops": [
     {"id": "vent", "type": "rename_label",
      "params": {"object": 247, "old": "Bath Fan", "new": "Vent Fan"}},
@@ -106,25 +106,25 @@ A project file is an ordered list of typed ops; `docs/RECIPE-OPS.md` lists them 
 ```
 
 ```bash
-fireflymcf compile mine.ffproj.json mcf.bin -o build/mcf-mine-v1.bin
+fireflymcf compile mine.ffproj.json mcf.bin -o build/mcf-mine.bin
 ```
 
 Refuses a stock whose hash is not `base_sha256`, refuses a name not matching `mcf-*.bin`, refuses to
 overwrite, and writes nothing if any op fails. Refuses a project with an op whose mechanism has
 never run on a coach unless you pass `--allow-unverified` (you are then the first to run it; flash
 with stock on the stick). Prints the manifest (one line per op). Writes
-`build/mcf-mine-v1.bin.json` with the hash, manifest and unverified list.
+`build/mcf-mine.bin.json` with the hash, manifest and unverified list.
 
 Check the whole build against stock before flashing:
 
 ```bash
-fireflymcf verify build/mcf-mine-v1.bin mcf.bin --config coach.json
+fireflymcf verify build/mcf-mine.bin mcf.bin --config coach.json
 ```
 
 ## Preview before you flash
 
 ```bash
-fireflymcf render build/mcf-mine-v1.bin home.png --root 4 --config coach.json
+fireflymcf render build/mcf-mine.bin home.png --root 4 --config coach.json
 ```
 
 - `--page home|lights|electrical|climate|settings|options|outputs|floorplan` resolves by header text

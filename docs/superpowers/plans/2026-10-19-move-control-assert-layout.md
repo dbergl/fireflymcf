@@ -23,7 +23,7 @@
 ## Global Constraints
 
 - **Branch.** Work on `move-control` in `../fireflymcf`. Build recipes go on a
-  new branch `lv-move-control` in `../firefly-firmware`. Never rebase, merge or
+  new feature branch in `../firefly-firmware`. Never rebase, merge or
   delete a branch with a worktree attached.
 - **Commits** end with:
   - `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
@@ -105,43 +105,43 @@
   - `describe(deltas) -> str`: one line per delta, `key wtype 'label' kind (dx,dy) before→after`.
 
 - [ ] **Step 1: Write the failing tests** in `tests/test_pagewalk.py`. They need the module
-  fixture `lv_hold`: the compiled image of the v52 recipe `builds/mcf-13.6-low-volts-move.ffproj.json` with its last three ops (`lv-off-elec`, `lv-gear`, `lv-aes-settings`) dropped, skipped when
+  fixture `hold_build`: the compiled image of the unflashed Low Volts move recipe `builds/mcf-13.6-low-volts-move.ffproj.json` with its last three ops (`lv-off-elec`, `lv-gear`, `lv-aes-settings`) dropped, skipped when
   `builds/` is absent.
 
 ```python
-def test_walk_has_the_gear_with_its_box(lv_hold):
-    recs = pagewalk.walk_records(lv_hold, 5)
+def test_walk_has_the_gear_with_its_box(hold_build):
+    recs = pagewalk.walk_records(hold_build, 5)
     gear = [r for r in recs if r.obj == 1427 and r.wtype == 33]
     assert gear[0].box[:2] == (110, 134)
 
-def test_walk_lists_containers(lv_hold):
-    recs = pagewalk.walk_records(lv_hold, 5)
+def test_walk_lists_containers(hold_build):
+    recs = pagewalk.walk_records(hold_build, 5)
     assert any(r.obj == 1427 and r.wtype == 5 and r.label is None for r in recs)
 
-def test_reaching_roots_of_the_compact_card(lv_hold):
-    assert pagewalk.reaching_roots(lv_hold, 1427) == [5, 39]
+def test_reaching_roots_of_the_compact_card(hold_build):
+    assert pagewalk.reaching_roots(hold_build, 1427) == [5, 39]
 
-def test_identical_walks_diff_empty(lv_hold):
-    a = pagewalk.walk_records(lv_hold, 5)
-    assert pagewalk.diff(a, pagewalk.walk_records(lv_hold, 5)) == []
+def test_identical_walks_diff_empty(hold_build):
+    a = pagewalk.walk_records(hold_build, 5)
+    assert pagewalk.diff(a, pagewalk.walk_records(hold_build, 5)) == []
 
-def test_a_move_element_is_one_moved_delta(lv_hold, compile_on):
-    out = compile_on(lv_hold, move_element(1427, {"wtype": 33, "nth": 1}, {"y": 30}))
-    d = pagewalk.diff(pagewalk.walk_records(lv_hold, 5), pagewalk.walk_records(out, 5))
+def test_a_move_element_is_one_moved_delta(hold_build, compile_on):
+    out = compile_on(hold_build, move_element(1427, {"wtype": 33, "nth": 1}, {"y": 30}))
+    d = pagewalk.diff(pagewalk.walk_records(hold_build, 5), pagewalk.walk_records(out, 5))
     assert d and d[0].kind == "moved" and (d[0].dx, d[0].dy) == (0, 1)
 
 def test_remap_drops_removed_and_shifts_later():
     assert pagewalk.remap_after_removal(((5, 0), (1427, 7)), 1427, {3, 4}) == ((5, 0), (1427, 5))
     assert pagewalk.remap_after_removal(((5, 0), (1427, 3), (285, 0)), 1427, {3}) is None
 
-def test_trace_off_leaves_walk_unchanged(lv_hold):
-    a = layout.Screen(lv_hold).walk(5)
-    b = layout.Screen(lv_hold); b.walk(5, trace=[])
+def test_trace_off_leaves_walk_unchanged(hold_build):
+    a = layout.Screen(hold_build).walk(5)
+    b = layout.Screen(hold_build); b.walk(5, trace=[])
     assert [p.__dict__ for p in a] == [p.__dict__ for p in b.placed]
 ```
 
   - The gear selector, nth 1 above, must match whatever `lv-gear` uses in
-    the v52 recipe: wtype 33, nth 1. The y step of +1 is from `y: 29 → 30`.
+    the Low Volts move recipe: wtype 33, nth 1. The y step of +1 is from `y: 29 → 30`.
     Read the current value first and use `expect`.
   - `compile_on(image, *specs)` is a test helper. It applies op specs to a non-stock image by
     instantiating the ops directly, as the engine's apply loop does.
@@ -189,15 +189,15 @@ def test_trace_off_leaves_walk_unchanged(lv_hold):
   - **Error codes:** `BAD_PARAMS`, `NO_MATCH`, `AMBIGUOUS`, `LAYOUT_MISMATCH` (expect form) and
     `LAYOUT_MOVED` (unchanged form). Each message includes `pagewalk.describe` output.
 
-- [ ] **Step 1: Write the failing tests** (`lv_move` is the compiled v52 recipe, `builds/mcf-13.6-low-volts-move.ffproj.json`):
+- [ ] **Step 1: Write the failing tests** (`moved_build` is the compiled Low Volts move recipe, `builds/mcf-13.6-low-volts-move.ffproj.json`):
 
 ```python
-def test_expect_passes_on_the_flashed_gear(...):  # gear at x 55, y 134 in LV-move
-    r = run(lv_move, al(root=5, expect=[{"select": {"key": GEAR_KEY}, "x": 55, "y": 134}]))
-    assert r.ok and r.data == lv_move
+def test_expect_passes_on_the_flashed_gear(...):  # gear at x 55, y 134 in the flashed three-op move
+    r = run(moved_build, al(root=5, expect=[{"select": {"key": GEAR_KEY}, "x": 55, "y": 134}]))
+    assert r.ok and r.data == moved_build
 
 def test_expect_mismatch_names_the_record_and_delta(...):
-    r = run(lv_move, al(root=5, expect=[{"select": {"key": GEAR_KEY}, "x": 110}]))
+    r = run(moved_build, al(root=5, expect=[{"select": {"key": GEAR_KEY}, "x": 110}]))
     assert r.errors[0].code == "LAYOUT_MISMATCH" and "-55" in r.errors[0].message
 
 def test_snapshot_then_unchanged_passes(...)          # nothing between → ok, image unchanged
@@ -213,7 +213,7 @@ def test_comparing_nothing_breaks_the_tests(monkeypatch):  # monkeypatch pagewal
                                                       # catches-a-move case must then pass wrongly: assert it does
 ```
 
-  - `GEAR_KEY` is read once from `pagewalk.walk_records(lv_move, 5)`, the wtype-33 record of 1427
+  - `GEAR_KEY` is read once from `pagewalk.walk_records(moved_build, 5)`, the wtype-33 record of 1427
     whose label-sibling is "AES". Pin it as a literal after the first run.
 - [ ] **Step 2: Run the tests and confirm they fail.** Expected: unknown op `assert_layout`.
 - [ ] **Step 3: Implement `AssertLayout`, the ops_doc entry and the CHANGE-CATALOG row.** The
@@ -260,7 +260,7 @@ def test_comparing_nothing_breaks_the_tests(monkeypatch):  # monkeypatch pagewal
   That op is not refactored in this plan.
 
 - [ ] **Step 1: Write the failing tests.**
-  - For each supported wtype, take a real record from the LV-hold image (1427, 1425, 315, 285).
+  - For each supported wtype, take a real record from the Low Volts hold image (1427, 1425, 315, 285).
     Re-encode it at (300, 200), place it in a scratch object appended to a page root via
     `insert.insert_object`, and walk it.
     - It decodes (`records.decode_record` round-trips its size).
@@ -356,7 +356,7 @@ def test_comparing_nothing_breaks_the_tests(monkeypatch):  # monkeypatch pagewal
 - The manifest line reads
   `move_control: N record(s) from object F to object T at (x, y); source compensated by K edit(s); UNVERIFIED on a coach`.
 
-- [ ] **Step 1: Write the failing tests** (`lv_hold` fixture as in Task 1):
+- [ ] **Step 1: Write the failing tests** (`hold_build` fixture as in Task 1):
 
 ```python
 LV = [{"selector": {"wtype": 5, "nth": 1}, "child": 285},
@@ -365,8 +365,8 @@ LV = [{"selector": {"wtype": 5, "nth": 1}, "child": 285},
 def mc(**kw): return spec("mv", "move_control", {"from": 1427, "to": 1425,
                           "records": LV, "at": {"x": 618, "y": 89}, **kw})
 
-def test_moves_low_volts_and_restores_the_gear(lv_hold):
-    r = run(lv_hold, mc())
+def test_moves_low_volts_and_restores_the_gear(hold_build):
+    r = run(hold_build, mc())
     assert r.ok, r.errors
     for root in (5, 39):
         gear = box_of(r.data, root, obj=1427, wtype=33)
@@ -377,29 +377,29 @@ def test_moves_low_volts_and_restores_the_gear(lv_hold):
     assert lv_box(r.data, AES_SETTINGS_ROOT)[:2] == (618, 89)
     assert r.unverified == ["move_control"]   # or the engine's form of the unverified list
 
-def test_source_page_otherwise_unchanged(lv_hold)        # diff(before, after, remap) == [] on 5 and 39
-def test_destination_otherwise_unchanged(lv_hold)        # only appeared entries, all under `new`
-def test_moved_face_repaints_from_cell_45(lv_hold)       # the attach carries value_slot 45 (OBJECT-HIERARCHY 1a)
-def test_without_compensation_it_refuses(lv_hold, monkeypatch):
+def test_source_page_otherwise_unchanged(hold_build)        # diff(before, after, remap) == [] on 5 and 39
+def test_destination_otherwise_unchanged(hold_build)        # only appeared entries, all under `new`
+def test_moved_face_repaints_from_cell_45(hold_build)       # the attach carries value_slot 45 (OBJECT-HIERARCHY 1a)
+def test_without_compensation_it_refuses(hold_build, monkeypatch):
     # stub the compensation write to a no-op → LAYOUT_MOVED naming the gear, dy -29
-def test_from_equals_to_is_bad_params(lv_hold)
-def test_later_structural_op_still_verifies(lv_hold)     # mc() then remove_records on 315 → ok
-def test_unreachable_destination_is_no_root(lv_hold)     # `to` = a fresh unattached object → NO_ROOT
+def test_from_equals_to_is_bad_params(hold_build)
+def test_later_structural_op_still_verifies(hold_build)     # mc() then remove_records on 315 → ok
+def test_unreachable_destination_is_no_root(hold_build)     # `to` = a fresh unattached object → NO_ROOT
 @pytest.mark.parametrize("change, code", [
     ({"at": {"x": 790, "y": 89}}, "OFF_CANVAS"),
     ({"at": <over an existing 1425 touch box>}, "TOUCH_OVERLAP"),
     ({"records": [{"selector": {"wtype": 9, "nth": 0}, "child": ...}]}, "UNSUPPORTED_RECORD"),
     ({"records": [<the 1427 records with child 286>]}, "EXPECT_MISMATCH"),
 ])
-def test_register_dependency(lv_hold)   # synthetic: move a record with out_regs read later (find one
+def test_register_dependency(hold_build)   # synthetic: move a record with out_regs read later (find one
                                         # with pagewalk on 1425; if none on these pages, build one
                                         # with move_element-free byte pokes on a scratch copy)
-def test_state_changed(lv_hold)         # synthetic: a removed record that sets the font a later
+def test_state_changed(hold_build)         # synthetic: a removed record that sets the font a later
                                         # survivor inherits (scratch object built for the test)
-def test_cannot_compensate(lv_hold)     # synthetic: the shifted record has no y field (touch region in a card)
+def test_cannot_compensate(hold_build)     # synthetic: the shifted record has no y field (touch region in a card)
 ```
 
-  Read the TOUCH_OVERLAP coordinates from `pagewalk.walk_records(lv_hold, 31)` (root 31's
+  Read the TOUCH_OVERLAP coordinates from `pagewalk.walk_records(hold_build, 31)` (root 31's
   wtype-12 boxes) and pin them.
 - [ ] **Step 2: Run the tests and confirm they fail.** Expected: unknown op `move_control`.
 - [ ] **Step 3: Factor out `_remove_records`.** Confirm `tests/test_recipe_ops.py -k
@@ -419,8 +419,8 @@ def test_cannot_compensate(lv_hold)     # synthetic: the shifted record has no y
 
 ### Task 5: The proof build (firefly-firmware)
 
-**Files** (in `../firefly-firmware`, branch `lv-move-control`):
-- Create: `builds/<owner>-lv-mc.ffproj.json`. It is LV-hold's ops (minus `hdr`), then:
+**Files** (in `../firefly-firmware`, on a feature branch):
+- Create: `builds/<owner>-move-proof.ffproj.json`. It is the Low Volts hold build's ops (minus `hdr`), then:
   - `mv`: `move_control` with `mc()`'s params;
   - `lv-gear-centre`: `move_element` on 1427 with `{wtype: 33, nth: 1}`, `set {x: 55}`,
     `expect {x: 110}`;
@@ -428,33 +428,33 @@ def test_cannot_compensate(lv_hold)     # synthetic: the shifted record has no y
   - `hdr`.
 
   Its build name is given at dispatch (the private repo's naming).
-- Create: `builds/mcf-<owner>-lv-mc.bin` (+ `.json` sidecar), compiled with `--allow-unverified`.
-- Create: `tests/test_recipe_<owner>_lv_mc.py`
+- Create: `builds/mcf-<owner>-move-proof.bin` (+ `.json` sidecar), compiled with `--allow-unverified`.
+- Create: `tests/test_recipe_<owner>_move_proof.py`
 - Modify: `docs/BUILD-LOG.md`, a "built, not flashed" entry.
 
 **Interfaces:**
-- Consumes: Tasks 2 and 4. `the existing LV-move pin test`'s `_load` and `_res` pattern.
+- Consumes: Tasks 2 and 4. `the existing three-op move pin test`'s `_load` and `_res` pattern.
 
 - [ ] **Step 1: Write the failing tests.**
-  - **Composition:** LV-hold's ops, then `[("mv","move_control"),("lv-gear-centre","move_element"),("al","assert_layout")]`,
+  - **Composition:** the Low Volts hold build's ops, then `[("mv","move_control"),("lv-gear-centre","move_element"),("al","assert_layout")]`,
     then `hdr` last.
-  - **Unverified list:** LV-hold's plus `move_control`.
-  - **Pages 5, 39 and 31:** `pagewalk.walk_records(mc, root)` equals `walk_records(lv_move,
+  - **Unverified list:** the Low Volts hold build's plus `move_control`.
+  - **Pages 5, 39 and 31:** `pagewalk.walk_records(mc, root)` equals `walk_records(moved_build,
     root)` key-for-key, box-for-box and state-for-state. There is one exception: the
-    `"Triggers:"` title, which LV-move has and this build does not.
+    `"Triggers:"` title, which the three-op move build has and this build does not.
     - Keys under the new child differ in object index. Compare those by (wtype, label, box,
       state).
   - **Reproduction:** the committed image reproduces from the recipe (sha256 of the compile ==
     the committed file).
 - [ ] **Step 2: Run the tests and confirm they fail.** Expected: a missing recipe file.
 - [ ] **Step 3: Write the recipe and compile it.** Use
-  `.venv/bin/fireflymcf compile builds/<owner>-lv-mc.ffproj.json firefly-13.6/mcf.bin -o builds/mcf-<owner>-lv-mc.bin --allow-unverified`,
+  `.venv/bin/fireflymcf compile builds/<owner>-move-proof.ffproj.json firefly-13.6/mcf.bin -o builds/mcf-<owner>-move-proof.bin --allow-unverified`,
   then run `fireflymcf verify` with `--config build/coach-wd.json`.
 - [ ] **Step 4: Run the tests.** Run `.venv/bin/python -m pytest tests/ -q -n auto`.
   Expected: 34 + new tests pass.
 - [ ] **Step 5: Render roots 5 and 31 for the owner.** Use `fireflymcf render ... --root N
-  --config build/coach-wd.json`. They should look like LV-move, without "Triggers:".
+  --config build/coach-wd.json`. They should look like the three-op move build, without "Triggers:".
 - [ ] **Step 6: Commit** the recipe, image, sidecar, test and build-log entry, with the message
-  `LV-mc: LV-hold plus move_control, the proof build for a coach flash (not flashed)`.
+  `move_control proof build: the Low Volts hold build plus move_control, for a coach flash (not flashed)`.
 
 The flash, and marking `move_control` `hardware_verified`, are the owner's call after this plan.

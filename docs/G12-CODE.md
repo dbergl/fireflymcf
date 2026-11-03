@@ -1363,8 +1363,8 @@ confined to the **independently flashable** G12 section, and one byte-pair per i
 revert. The rule records are left intact, so the image still describes what it would send. On
 13.6 that is file `0x10360E`, `0x103614`, `0x103E52`, `0x103E78`; nothing is hardcoded, and the
 sites are re-derived per build from table `0x62` by DGN plus the instruction boundaries
-`g12code.analyse` establishes. Shipped as the `suppress_tank_status` recipe op in **Experimental
-v22**.
+`g12code.analyse` establishes. Shipped as the `suppress_tank_status` recipe op, flashed and verified
+2026-09-07 (PC.62).
 
 **Build-general, checked:** the twelve-byte `1FFB7` records are **byte-identical on 11.23, 13.6
 and 14.7** — same kind `0x81`, same mask, same resolution 3, same level cells `B5`/`B6`/`B7`/`B8`,

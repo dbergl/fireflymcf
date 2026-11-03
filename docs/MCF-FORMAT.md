@@ -1007,7 +1007,7 @@ one the `tbb` actually dispatches (narrowing a mode-0 entry changes nothing obse
 refuses to re-point a filter that is already live, and refuses to write `0xFF` — it only ever
 narrows. Widening, or moving the compare to a different payload byte, is `retarget_filter`.
 
-> **Not yet hardware-confirmed.** reference build v5 pins the coach's three charger
+> **Not yet hardware-confirmed.** A reference build pins the coach's three charger
 > entries (vars 115/260/261, `1FFC7`/`1FEA3`/`1FF99`) to the alternator DC charger's instance
 > `0x31`, ahead of a second charger joining that bus. With only one charger transmitting, the
 > correct result is **no visible change at all**, which is a weak oracle: it confirms the compare
@@ -1137,15 +1137,15 @@ stand; only the conclusion drawn from them at the time has been superseded (see 
 * **The index is not computable from the channel.** The `18+(n-1)` / `66+(n-24)` formula
   is only the table's position and *breaks* above channel 44 — channel 61 is variable 173,
   not 103 — so a widget cannot derive its slot.
-* **By-channel resolution is disproven against the flashed v9/v10 bytes.** The button reads
-  a *fixed* slot 82; resolving its post-remap channel (38) would read variable 80, whose
-  slot is filled in *both* builds — yet v10's button is dead. Not channel-derived at render
+* **By-channel resolution is disproven against the bytes of two flashed remap
+  probes.** The button reads a *fixed* slot 82; resolving its post-remap channel (38) would read
+  variable 80, whose slot is filled in *both* builds — yet the second probe's button is dead. Not channel-derived at render
   or parse. (`BUS-BASELINE.md` PC.13–15.)
 * **The control object stores its group, not its variable.** Diffing four structurally
   identical single-icon controls (groups 22/26/80/205) isolates a byte that tracks the
   group; the variable index (39/68/19/75) is absent from the object in raw or `×2` form.
 * **The button reads the display-list variable (82), not its standalone one (184).** Moving
-  82 lights it (v9); moving only 184 does nothing (v10). 184's purpose is still unknown.
+  82 lights it (PC.14); moving only 184 does nothing (the second probe). 184's purpose is still unknown.
 * **The parser establishes no linkage** — `FUN_0021BE50`'s init loop writes `0xFFFF` to
   every slot and registers each DGN for reception, nothing more.
 
@@ -2479,7 +2479,7 @@ Carried forward from the design spec, plus what this work added. The spec's own
     **Automated 2026-09-10.** `set_channel`'s default now retargets the control's own
     indicator records at the new pin's colour and bool cells (`McfPatcher._retarget_indicator`)
     and moves no status variable, so every G12 OUTPUTS row stays honest; `move_display_list`
-    keeps PC.14's v9. It refuses the four 13.6 controls whose indicator names none of its own
+    keeps PC.14's coach-proven path. It refuses the four 13.6 controls whose indicator names none of its own
     pin's cells. Tooling-verified, hardware-unverified.
 12. The interiors of the `LCD Firmware`, `GuiCode` and `G12` sections (the standing
     disassembly frontier). **The `0x8F7E6D5C` sub-container is now mapped (2026-09-10, §4.2,

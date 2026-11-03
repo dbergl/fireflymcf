@@ -63,8 +63,8 @@ reachable from no page, and their `value_slot` is a **type-1/type-0 config gate*
 tank heater fitted?") rather than a status cell — so §1's phrase "a `value_slot` on the box"
 describes a *field*, not a working indicator. Clone one unchanged and you get a button whose
 box repaints in place on a status change while its **caption vanishes** until a full page
-render. That is not hypothetical: it was flashed as pin-15 build v7. Setting all three fields
-to one status cell (v8) fixed it on the coach.
+render. That is not hypothetical: it was flashed in a pin-15 probe (2026-08-17). Setting all
+three fields to one status cell fixed it on the coach.
 
 So 278-281 remain good donors — the shipped `newbutton.py` uses **279** — provided the clone's
 box `fillA`, box `value_slot` and caption `value_slot` are all rewritten to the chosen status

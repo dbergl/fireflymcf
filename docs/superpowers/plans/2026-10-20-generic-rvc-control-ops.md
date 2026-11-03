@@ -488,7 +488,7 @@ def wrap_button(data: bytes, *, object_index: int, value_slot: int, donors: byte
     already wrapped.
   - `test_ge_requires_valid_max`.
   - `test_bad_ref`, `test_no_body_colour`.
-  - `test_heater_switch_unchanged`: the v32 heater-status compile has the same sha256 before and
+  - `test_heater_switch_unchanged`: the heater-status reference compile has the same sha256 before and
     after (golden).
 - [ ] **Step 2:** the tests fail.
 - [ ] **Step 3: Implement.**
