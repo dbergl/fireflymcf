@@ -90,8 +90,9 @@ class MyOp(UserOp):
 - **`Editor`**: `patch(off, expected, new, note)` and `patch_addr(marker, addr, expected, new,
   note)` replace bytes of the same length after checking the bytes expected there (a mismatch
   is `FIRMWARE_MISMATCH`, "this op does not match your firmware"); `grow_guicode(payload, note)`
-  appends to GuiCode; `call(name, ...)` runs a primitive; `section(marker)`, `offset_of(marker,
-  addr)` and `data` read. Every step lands in a ledger; the engine replays it on the op's input
+  appends to GuiCode and `grow_guidata(payload, note)` to GuiData ("Growing a section", below);
+  `call(name, ...)` runs a primitive; `section(marker)`, `offset_of(marker, addr)` and `data`
+  read. Every step lands in a ledger; the engine replays it on the op's input
   and refuses (`USER_OP_TAMPERED`) an output the replay does not reproduce.
 - **Handles**: `ctx.handles[op_id]` holds what earlier ops published, so a param
   `{"ref": "<op id>"}` can name one; `ctx.handles[self.spec.id] = {...}` publishes yours.
@@ -354,6 +355,147 @@ index of the existing config-toggle group on OPTIONS `selector`, or `None`
 Pump Link toggle, PC.45). It refuses (`AMBIGUOUS_TOGGLE`) when several groups qualify, as on a
 build carrying `add_pump_auto_off`: the 0xEE ±5 stepper groups match too (*library*).
 
+### Growing a section
+
+**`ed.grow_guicode(payload, note) -> int`** appends `payload` (a multiple of 4 bytes, or it
+refuses `BAD_EDIT`) to GuiCode and returns the runtime address of its first byte.
+
+**`ed.grow_guidata(payload, note) -> int`** appends `payload` to GuiData and returns the **panel
+address** of its first byte: GuiData's mapped base, `0x90000000` on 11.23, 13.6 and 14.7, plus the
+offset. `ed.offset_of("GuiData", addr)` turns it into a file offset, and `patch_addr("GuiData",
+addr, ...)` takes it as it is. Keep these points in mind (*library*, pinned by its tests):
+
+- The bytes go where GuiData's checksum word was (section offset `length - 4`; the checksum
+  moves after them), padded with zeros to a multiple of 4, so the address is 4-aligned and no
+  earlier GuiData byte moves. An empty payload is refused (`BAD_EDIT`).
+- It is the GuiData append the library's table-growing ops use (`relocate.relocate`): GuiData's
+  descriptor length and the later sections' file offsets grow, every checksum is resealed, and
+  the relocator's self-check gates run on the result.
+- The step is recorded padded, so replay appends the same bytes. It changes GuiData only:
+  declare `guidata` in `touches`. The container header does not change.
+- Appended bytes are data nothing reads until something points at them: a record field, a
+  table row, a routine's literal.
+
+### Colour cells
+
+A colour field in **mode 7** names a row of the display-cell table, and the row holds an SRAM
+address: the renderer paints the u32 it finds there as RGB888 `0x00RRGGBB` (*proven-from-code*:
+the theme-init in `FUN_00247BF8` stores such words into these cells, Finding 18). A field in
+mode 2 (white), 3 (an inline colour) or 6 (a palette entry) is a constant. So a control whose
+colour should change at run time needs its field in mode 7 on a row nothing else names. Most
+rows are shared: on stock 13.6 every tank well's interior names row 161, the button colour.
+
+**`own_colour_cell(data, object_index, field, *, record=None, expect=None) -> (data,
+ColourCell)`** gives one record's `field`, `"border"` or `"fill"`, its own row:
+
+- `object_index` is an object-table index (`fireflymcf labels`, `bus-map`, `records`), never a
+  screen id. `record` is the record's index in the object's record list; without it the object
+  must have exactly one record with that field (`AMBIGUOUS_RECORD` names the candidates).
+- Fields by widget type (*proven-from-code*, `FUN_00256C54`'s box dispatch, Finding 28): wtype
+  3 (rounded box) and 32 (tank well) draw the border in fillA and the interior in fillB; wtype
+  33 (a solid panel, button or level fill) draws one rect in fillA, its `"fill"`. Other types
+  are refused (`UNSUPPORTED_FIELD`).
+- `expect` is the record's bytes as you wrote the op against them; other bytes refuse
+  `FIRMWARE_MISMATCH`.
+
+It rewrites the field to mode 7 (a mode-2 field grows its record by 2 bytes and the object is
+swapped back in at its own index; every other byte of every record stays as it was) and grows
+the cell table by one row, typed 10 as stock's colour rows are, on 4 fresh bytes of SRAM. The
+grow is the one `add_voltage_battery` uses for its colour word (*hardware*: flashed and verified
+2026-09-12). It moves the table to the end of GuiData and repoints the GuiCode literals that
+load it, so **declare both `guicode` and `guidata`** in `touches`. Each call adds its own row
+and its own SRAM word; the type makes all 4 bytes count as taken, so `fresh_sram` and a later
+call avoid them. Every placement of the object shares the cell: an object drawn on two pages
+changes on both.
+
+`ColourCell` has these fields:
+
+- `addr`, `width` (4) and `encoding` (`"rgb888"`): store the colour with `str` as `0x00RRGGBB`.
+- `cell_index`: the new row.
+- `before` (`(r, g, b)`), `before_word` (`0x00RRGGBB`) and `before_mode`: the colour the field
+  drew before, read from the image as it stands, after every earlier op. A mode-7 field's
+  colour is known only when the theme-init sets its row (`theme.mode7_palette`); otherwise
+  `before` is `None`.
+- `before_cell_addr`: for a field that named a row before (mode 7), that row's SRAM word. Copy
+  it at run time to follow whatever writes it.
+- `object_index`, `record`, `role` (`"fillA"` or `"fillB"`), and `initialised_at_boot`, which
+  is always `False`.
+
+It refuses these (`RoutineKitError` codes):
+
+| code | when |
+|---|---|
+| `BAD_OBJECT` | the index is outside the object table |
+| `NO_COLOUR_FIELD` | no record of the object has the field, or `record` is out of range |
+| `AMBIGUOUS_RECORD` | several records have it; pass `record=` |
+| `UNSUPPORTED_FIELD` | the widget type has no such field, or its colour-mode bytes gate it off |
+| `UNSUPPORTED_MODE` | the field inherits (mode 0, 4 or 5) or is the theme default (mode 1): there is no colour to restore |
+| `STATEFUL_RECORD` | the record watches a value slot, so its on/off state picks the fillA2/fillB2 pair (Finding 28) |
+| `INHERITED_COLOUR` | a later record of the object takes this field's colour (the colour state persists from record to record, Finding 29), or draws a child before setting it again |
+| `FIRMWARE_MISMATCH` | `expect` differs from the record |
+| `NO_DISPLAY_CELL`, `BAD_EDIT` | the table could not grow, or a structural gate failed |
+
+**The cell holds garbage at power-on.** The C runtime initialises SRAM only up to `0x2000AD98`,
+and the cell is above it. Your op must install a tick routine that stores a colour into `addr`
+**on every tick, in every branch**: the new colour, or `before_word` (or the word at
+`before_cell_addr`) otherwise. That is enough for the control never to draw garbage
+(*inference*, not checked on the coach): the tick chain runs before `FUN_00247BF8`, whose
+theme-init is the only writer of the stock chrome cells, which sit in the same uninitialised
+SRAM, so no page is drawn before the chain first runs. In the emulator the outline has the
+routine's colour in the first screenshot of HOME (*emulator*).
+
+**A store repaints nothing.** The panel repaints a control when a cell it watches changes or its
+page is drawn, and no container watches a colour row. The new colour shows at the control's next
+repaint. Drive it from the input that repaints the control (a tank gauge repaints when its level
+changes), and read that input from its receive slot (`resolve_register`), which the routine sees
+before `FUN_00247BF8` copies it on (*inference*; *emulator*: the fresh gauge's outline turns red
+and back with its level).
+
+**Theme.** `before` is read when your op runs. Put the op after `set_theme` in the project, so the
+colour you restore is the themed one; a header rename can still come last.
+
+**Worked pattern: a tank gauge's outline turns red when the tank is low.** On stock 13.6 the
+gauges are the objects whose percent readout a `TANK_STATUS` (`0x1FFB7`) receive entry paints and
+whose first record is a wtype-32 well: `fireflymcf bus-map MCF --dgn 0x1FFB7` names them (fresh
+721, black 719, grey 723, grey 2 725). The well's border is fillA in mode 2, white. The receive
+slot holds the level in its low byte and the resolution in its high byte.
+
+```python
+cell = ed.call("own_colour_cell", 721, "border")             # manifest: guicode, guidata
+reg = ed.call("resolve_register", dgn=0x1FFB7, instance=0)   # fresh
+
+def build(code_load_addr, tail_target):
+    r = thumb.Routine({"slot": reg.slot_addr, "cell": cell.addr, "red": 0xFF0000,
+                       "restore": cell.before_word}, error=routinekit.RoutineKitError)
+    routinekit.emit_prologue(r)
+    r.ldr_lit(0, "slot")
+    r.emit(2, lambda h, s: (thumb.ldrh_imm(1, 0, 0), "ldrh r1, [r0]"))
+    r.emit(2, lambda h, s: (thumb.lsls_imm(2, 1, 24), "lsls r2, r1, #0x18"))
+    r.emit(2, lambda h, s: (thumb.lsrs_imm(2, 2, 24), "lsrs r2, r2, #0x18"))   # level
+    r.emit(2, lambda h, s: (thumb.lsrs_imm(3, 1, 8), "lsrs r3, r1, #8"))       # resolution
+    r.emit(2, lambda h, s: (thumb.movs_imm(0, 10), "movs r0, #0xa"))
+    r.emit(2, lambda h, s: (thumb.muls(2, 0), "muls r2, r0, r2"))
+    r.emit(2, lambda h, s: (thumb.cmp_reg(2, 3), "cmp r2, r3"))
+    r.bcc("hi", "normal")                                       # above 10 %
+    r.ldr_lit(1, "red")
+    r.b("store")
+    r.label("normal")
+    r.ldr_lit(1, "restore")
+    r.label("store")                                            # every tick, either branch
+    r.ldr_lit(0, "cell")
+    r.emit(2, lambda h, s: (thumb.str_imm(1, 0, 0), "str r1, [r0]"))
+    routinekit.emit_tail(r, tail_target)
+    return routinekit.assemble_tick(r, code_load_addr)
+
+routinekit.install_tick(ed, build, "fresh low outline")
+```
+
+The library runs this routine in the emulator: the outline is red at 0 %, white at 33 %, red
+again at 0 % (the emulated G12 moves a tank one 33 % step every 10 s), and the other gauges'
+outlines never change (*emulator*). The `0xFFFF` the slot holds before any report reads as above
+10 %. A pool word and a label cannot share a name, so the restore word is not called `normal`.
+Several gauges take several calls, one row each.
+
 ### Worked hints
 
 - **Find what an earlier op built from the image, not from its params.** A routine's cells are
@@ -392,5 +534,6 @@ safe; only an `Editor` writes. The reader names below are part of the stable sur
   offset of one field of a decoded record, which is what an `Editor.patch` needs.
 - `relocate.object_table_bounds(data, index)` gives an object's record span.
 
-Growing GuiData (`relocate`) is not a primitive yet. It will be added, with its own test, when a
-user op first needs it.
+`ed.grow_guidata` appends to GuiData, and `own_colour_cell` grows the cell table; growing any
+other GuiData table (inserting inside the section) is not a primitive yet. It will be added, with
+its own test, when a user op first needs it.
