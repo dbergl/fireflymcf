@@ -6,6 +6,7 @@ itself, not under the box's parent 899: 899's attaches carry value_slot 0, which
 records would inherit (`recipe_ops._pasted_inherited_slots`), so 899 refuses.
 """
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -21,7 +22,8 @@ SHA = "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382"
 HOME_ROOT = 4
 LABEL_PARENT = HOME_ROOT
 CLIMATE_PARENT = 899             # refuses: its attaches carry value_slot 0
-LEAK_PARENT = 924                # root 18: without the restore record the font leaks
+LEAK_PARENT = 924                # root 18: without the restore record the font leaks; the colours
+                                 # the arms leak past it cannot be restored, so it is refused
 VALUES = {"0": "Off", "1": "Cool", "3": "Auto", "4": "Fan", "6": "Dry"}
 TEXTS = ["Off", "Cool", "Auto", "Fan", "Dry", "--"]
 STALE = followchannel.STALE_SENTINEL
@@ -305,13 +307,33 @@ def test_refused_when_the_entering_state_is_unknown(monkeypatch, states, why):
     assert "LABEL_REFUSED" in err and why in err, err
 
 
+def _refusal(op):
+    res = _compile([op])
+    assert not res.ok
+    return res.errors[0]["code"], res.errors[0]["message"]
+
+
+def _font_changes(msg):
+    """The delta keys in a refusal message whose font/align differ before -> after."""
+    out = []
+    for line in msg.split("\n")[1:]:
+        sides = re.findall(r"font=(\S+) align=(\S+)", line)
+        if len(sides) == 2 and sides[0] != sides[1]:
+            out.append(line.split(" ")[0])
+    return out
+
+
 def test_layout_gate_refuses_a_leak(monkeypatch):
     """Under 924 (root 18) the label's font reaches the next switch (`18:5/1088:3`) unless the
-    restore record hands it back: with it the placement passes, without it it is refused."""
-    assert _compile([_op(parent=LEAK_PARENT)]).ok
+    restore record hands it back. The colour state is shared past the label's object (GUICODE
+    Finding 29) and the colours the arms leak there cannot be written back, so the placement is
+    refused either way; with the restore no font change is left among the deltas."""
+    code, msg = _refusal(_op(parent=LEAK_PARENT))
+    assert code == "LABEL_REFUSED" and "besides its own" in msg and "18:5/1088" in msg, msg
+    assert _font_changes(msg) == []
     monkeypatch.setattr(recipe_ops.AddEnumLabel, "_restore", lambda self, placed, parent: None)
-    err = _errors(_op(parent=LEAK_PARENT))
-    assert "LABEL_REFUSED" in err and "besides its own" in err and "18:5/1088" in err, err
+    code, msg = _refusal(_op(parent=LEAK_PARENT))
+    assert code == "LABEL_REFUSED" and "18:5/1088:3" in _font_changes(msg), msg
 
 
 def test_climate_parent_refuses_the_inherited_slot():

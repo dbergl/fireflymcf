@@ -192,6 +192,20 @@ class _State:
                                  # depth-first decode order (containers included), like font/align.
 
 
+def _color_state(state: "_State") -> tuple:
+    """The persistent colour state as `((role, value), ...)` over the four roles, sorted: `value`
+    is "T" while the role's transparent flag is set (its slot value cannot be observed then: a
+    mode-0 field reads transparent, and only an explicit write, which replaces the slot, clears
+    the flag), else the slot's `(mode, value)`, or None when nothing has written it."""
+    out = []
+    for role in ("fillA", "fillA2", "fillB", "fillB2"):
+        if state.fill_transparent.get(role):
+            out.append((role, "T"))
+        else:
+            out.append((role, state.fill_slots.get(role)))
+    return tuple(out)
+
+
 def _apply_colors(state: "_State", rec_colors: list) -> list:
     """Update the persistent colour slots from `rec_colors` and return the record's EFFECTIVE
     colours (mode-0/5 fields substituted by what they inherit). GUICODE Finding 29.
@@ -585,11 +599,12 @@ class Screen:
 
         `trace`, when given, receives one entry per record walked, containers (wtype 5/6/0x2e)
         included and listed before their children: `(key, obj_index, record_index, rec, box,
-        font, align, colors)`. `key` is `path + ((obj_index, record_index),)`, the chain from
+        font, align, colors, color_state)`. `key` is `path + ((obj_index, record_index),)`, the chain from
         the walk's root to the record, with `record_index` the record's position in
         `records.object_records`; `box` is `(x0, y0, x1, y1)` after the align block (as
         `Placed` carries it); `font`/`align` are the persistent `state.font`/`state.align` after
-        the record; `colors` its effective colours (`_apply_colors`). The entry is appended
+        the record; `colors` its effective colours (`_apply_colors`); `color_state` the colour
+        state after it (`_color_state`). The entry is appended
         after the box and state are computed and before any recursion; it reads the walk and
         never changes it (`pagewalk` builds on it).
         """
@@ -653,7 +668,8 @@ class Screen:
             key = path + ((obj_index, rec_index),)
             if trace is not None:
                 trace.append((key, obj_index, rec_index, rec, (c[0], c[1], c[2], c[3]),
-                              state.font, state.align, tuple(eff_colors)))
+                              state.font, state.align, tuple(eff_colors),
+                              _color_state(state)))
 
             if (rec.wtype in (5, 6, 0x2e)
                     and rec.child_index is not None and rec.child_index < len(self.table)):
@@ -677,17 +693,14 @@ class Screen:
                     if val is not None:
                         child = self._switch_child(child, val, rec.count)
                 if child is not None:                # None = the switch's 0xFFFF no-op (nothing)
-                    # colour slots are parent-scoped: a child inherits the parent's colour (set by
-                    # this container record just above), but the child's own colour writes must NOT
-                    # leak to this container's LATER siblings. Save/restore around the recursion --
-                    # without it the header's red (idx4) leaked across the whole tree into unrelated
-                    # boxes (e.g. ELECTRICAL Start/Stop rendered red instead of their own colour).
-                    saved_fill = dict(state.fill_slots)
-                    saved_transp = dict(state.fill_transparent)
+                    # The child shares this state, colour slots included, and nothing is
+                    # restored after it: `FUN_00258330`'s 0x98-byte state snapshot is gated on
+                    # a save flag the dispatch passes as 0 (`0x257ac2 movs r2,#0`). A child's
+                    # colour writes therefore reach the container's later siblings (GUICODE
+                    # Finding 29). The parent-scoped save/restore this walk once did was a fit
+                    # to one photo; the firefly-emulator running 13.6 shows the shared state.
                     self.walk(child, state, depth + 1, switch_values, slot_values,
                               trace, key)
-                    state.fill_slots = saved_fill
-                    state.fill_transparent = saved_transp
             else:
                 self.placed.append(Placed(          # c[0]/c[2] already aligned above
                     wtype=rec.wtype, label=rec.label,

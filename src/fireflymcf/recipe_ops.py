@@ -2259,8 +2259,8 @@ def _isolate_cell(data: bytes, ctx, index: int, width: int, vtype, note: str):
 # in_lower_right`): a record's x/y geometry is a DELTA off the position the previous FLOW-GATED
 # record committed (`layout._in_flow_gate`; wtype 5/11 both gate, wtype 33 does not), not an
 # absolute or container-relative offset -- and a container's subtree recursion
-# (`layout.Screen.walk`) does not save/restore the flow-origin registers around it, only the
-# fill-colour ones. So after a wt-5 attach recurses into its child object, the flow origin for
+# (`layout.Screen.walk`) does not save/restore the flow-origin registers around it, nor the
+# fill-colour ones (GUICODE Finding 29). So after a wt-5 attach recurses into its child object, the flow origin for
 # whatever comes NEXT in the parent's own record stream is whatever the child's own LAST
 # flow-gated leaf left it at (empirically, the battery graphic's trailing 'V' unit label) --
 # not the attach's own committed position. Two consequences drive this op's layout:
@@ -3395,6 +3395,14 @@ def _check_select(sel, op_id):
 
 def _tupled(v):
     return tuple(_tupled(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+
+def _restore_colours_ok(rec, cols) -> bool:
+    """A restore record carries the colours its handle recorded (`enumlabel.restore_colors`);
+    `cols` is `[]` for a handle from before colours were restored, else `[{role: [mode, v]}]`."""
+    want = {role: tuple(mv) for role, mv in (cols[0] if cols else {}).items()}
+    got = {role: (mode, value) for role, mode, value in rec.colors if role in want}
+    return got == want
 
 
 def _walk_to_json(walk):
@@ -7830,7 +7838,8 @@ class AddCardReadouts(Op):
 
     Another `parent` takes the paste path instead (`insert.insert_object`, a clone of the
     parent's first wtype-5 attach appended as its last record), the object ended by an empty
-    label that hands back the font and align the walk carried in (`enumlabel.restore_state`).
+    label that hands back the font, align and colours the walk carried in
+    (`enumlabel.restore_state`).
     Every page root reaching `parent`, in every switch-arm set, is then walked before and after
     (`enumlabel.foreign_deltas`), as `add_enum_label` and `add_rvc_button` do: the readouts
     are absolute, but the flow origin they leave is not restored, so on some parents every
@@ -8455,7 +8464,8 @@ class AddEnumLabel(_LabelBox, Op):
     declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
     `background` fill when one is given. The switch is absolute at `x, y`, in a new object
     attached under `parent` (`insert.insert_object`), ended by an empty label that hands back
-    the font and align the page walk carried in (`enumlabel.restore_record`). The cell is always
+    the font, align and colours the page walk carried in (`enumlabel.restore_record`). The cell
+    is always
     freshly grown (`readout.allocate_fresh_cells`, recorded in `ctx.authored_cells`). After
     placement every page root reaching `parent`, in every switch-arm set, is walked before and
     after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses, and
@@ -8656,9 +8666,10 @@ class AddEnumLabel(_LabelBox, Op):
         if h["restore"] is None:
             assert len(recs) == 1, "the label object holds %d records, not its switch" % len(recs)
         else:
-            font, align = h["restore"]
+            font, align, *cols = h["restore"]
             assert len(recs) == 2 and recs[1].wtype == 11 and not recs[1].label \
-                and recs[1].font == font and recs[1].align == align, \
+                and recs[1].font == font and recs[1].align == align \
+                and _restore_colours_ok(recs[1], cols), \
                 "the label object does not end with the (font %r, align %d) restore" % (font,
                                                                                         align)
         assert status_map.cell_table(data)[h["slot"]] == h["cell_addr"]
@@ -8889,9 +8900,10 @@ class AddTextLabel(_LabelBox, Op):
             "the label does not draw %r in its %dx%d box at (%d, %d), font %d, ink %d as built" \
             % (h["text"], h["w"], h["h"], h["x"], h["y"], h["font"], h["colour_index"])
         if tail:
-            font, align = h["restore"]
+            font, align, *cols = h["restore"]
             r = recs[-1]
-            assert not r.label and r.font == font and r.align == align, \
+            assert not r.label and r.font == font and r.align == align \
+                and _restore_colours_ok(r, cols), \
                 "the label object does not end with the (font %r, align %d) restore" % (font,
                                                                                         align)
         # the walk leaves the object in the state it entered with, on every page reaching it
@@ -8924,7 +8936,8 @@ class AddRvcButton(Op):
     `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
     and a wtype-12 touch region whose id is the group. They are pasted as one new object under a
     clone of `parent`'s first wtype-5 attach (`rvcbutton.place`, `move_control`'s paste path),
-    ended by an empty label that hands back the font and align the walk carried in. Every page
+    ended by an empty label that hands back the font, align and colours the walk carried in.
+    Every page
     root reaching `parent`, in every switch-arm set, is walked before and after: the new touch
     region must meet no existing one, no new record may leave the canvas, nothing else may
     change (`enumlabel.foreign_deltas`), and no pasted record may inherit a value slot from a

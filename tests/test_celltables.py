@@ -51,8 +51,8 @@ _FLAGGED_INTS = {0x44BC8, 0x4492C}
 # definition/re-export, or a genuine relocation-detecting identity check, belongs here -- never
 # an offset computation (`gs + ...`, or any arithmetic/indexing use).
 _ALLOW = {
-    ("src/fireflymcf/layout.py", 266): "VAR_DPTR_TABLE_136's own definition (the stock constant)",
-    ("src/fireflymcf/layout.py", 267): "VAR_TYPE_TABLE_136's own definition (the stock constant)",
+    ("src/fireflymcf/layout.py", 280): "VAR_DPTR_TABLE_136's own definition (the stock constant)",
+    ("src/fireflymcf/layout.py", 281): "VAR_TYPE_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/status_map.py", 37): "CELL_TABLE_OFF's own definition (the stock constant)",
     ("src/fireflymcf/readout.py", 38):
         "VAR_TYPE_TABLE_OFF re-exports layout.VAR_TYPE_TABLE_136 -- kept, per the task brief, "

@@ -660,6 +660,18 @@ def climate_placements(data: bytes) -> list[Placement]:
 _FILL_A = ("fillA", "fillA2")
 
 
+def _block_a_roles(p: "object") -> tuple:
+    """The block-A roles to read a fill or border from: fillA alone when its effective mode is an
+    explicit colour (1/2/3/4/6/7), else the fillA/fillA2 pair. The colour state is shared across
+    the whole walk (`layout.Screen`, GUICODE Finding 29), so a record's fillA2 often carries a
+    value inherited from an unrelated record; it must not stand in for a fillA the record sets
+    itself but whose cell the palette cannot resolve (the HOME battery's runtime idx 206)."""
+    for role, mode, _ in getattr(p, "colors", []):
+        if role == "fillA" and mode not in (0, 5):
+            return ("fillA",)
+    return _FILL_A
+
+
 def _inline_fill(p: "object", roles: tuple = _FILL_A):
     """The widget's mode-3 inline fill colour as an RGB tuple, or None. `roles` selects which
     style-field pair to read -- the default fillA/fillA2, or fillB/fillB2 for the off/second
@@ -1341,7 +1353,7 @@ def screen_placements(data: bytes, root: int,
             # the fill overflow the ring on one side.)
             r = max(1, p.coord4 or 0)
             fill, fsrc = _decoded_fill(p, palette, roles=("fillB", "fillB2"))
-            border, bsrc = _decoded_fill(p, palette, roles=("fillA", "fillA2"), border=True)
+            border, bsrc = _decoded_fill(p, palette, roles=_block_a_roles(p), border=True)
             if border is None:
                 border = _mode2_white(p)
                 bsrc = "decoded" if border is not None else "heuristic"
@@ -1448,7 +1460,7 @@ def screen_placements(data: bytes, root: int,
             # also collapses two abutting boxes' shared vertical edge to a single line (they overlap
             # at the shared x). The earlier rounded/top-rounded render was a mis-fit to the photo.
             interior, isrc = _decoded_fill(p, palette, roles=("fillB", "fillB2"))
-            border, bsrc = _decoded_fill(p, palette, roles=("fillA", "fillA2"), border=True)
+            border, bsrc = _decoded_fill(p, palette, roles=_block_a_roles(p), border=True)
             # ...and the two colour modes `_decoded_fill` does not cover. It resolves mode 3
             # (inline) and mode 7 (theme index) only, so a border in mode 6 (the GuiData palette)
             # or mode 2 (the hardcoded white) fell through as `None` and the box drew NOTHING.
@@ -1456,8 +1468,9 @@ def screen_placements(data: bytes, root: int,
             # never reached them. That is what hid `SLIDES/AWNINGS`'s grey frame -- fillA mode 6
             # index 3, the same grey as the levelling diamond it encloses.
             if border is None:
-                m6 = _mode6_fill(p, gd_palette)
-                border, bsrc = (m6, "decoded") if m6 is not None else (_mode2_white(p), "decoded")
+                m6 = _mode6_fill(p, gd_palette, roles=_block_a_roles(p))
+                border, bsrc = ((m6, "decoded") if m6 is not None
+                                else (_mode2_white(p, roles=_block_a_roles(p)), "decoded"))
                 if border is None:
                     bsrc = "heuristic"
             if interior is None:
@@ -1490,9 +1503,9 @@ def screen_placements(data: bytes, root: int,
         if is_label:
             color, color_src = _decoded_fill(p, palette, roles=("fillB", "fillB2"))
         else:
-            color, color_src = _decoded_fill(p, palette)
+            color, color_src = _decoded_fill(p, palette, roles=_block_a_roles(p))
             if color is None:
-                m6 = _mode6_fill(p, gd_palette)          # GuiData-palette fill (mode 6)
+                m6 = _mode6_fill(p, gd_palette, roles=_block_a_roles(p))   # GuiData palette (mode 6)
                 if m6 is not None:
                     color, color_src = m6, "decoded"
             if color is None:

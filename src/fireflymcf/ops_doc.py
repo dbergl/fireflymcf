@@ -296,8 +296,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
         "at the font's cell pitch), optionally on a fill and inside a 1 px section frame, "
         "absolute at x, y in a new object "
-        "attached under `parent`, ended by a restore record that hands back the font and align "
-        "the page walk carried in; refused if anything else on the page would change.",
+        "attached under `parent`, ended by a restore record that hands back the font, align and "
+        "colours the page walk carried in; refused if anything else on the page would change.",
         "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
         "two-line label spaces its lines by the font's cell, and every other control on the "
         "page draws as before, its text in its own font, and a `frame` draws as the stock "

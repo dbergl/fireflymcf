@@ -287,7 +287,10 @@ def test_wtype_2_records_draw_as_lines(mcf_136):
     # RIGHT/REAR. Signed deltas, so the sign carries the direction.
     diag = lines(32)
     assert len(diag) == 4 and all(abs(w) == abs(h) == 80 for _, _, w, h, _, _ in diag)
-    assert {c for *_, c, _ in diag} == {(128, 130, 133)}
+    # white, not the frame's grey: the diamond's lines are mode 0 and follow FRONT/LEFT/RIGHT/
+    # REAR's white-ink labels in the shared colour state (GUICODE Finding 29). The 13.6 panel
+    # in firefly-emulator draws them white beside a (128,130,133) frame.
+    assert {c for *_, c, _ in diag} == {(255, 255, 255)}
 
     assert all(src == "decoded" for *_, src in lines(27) + lines(28)), \
         "a line with no decodable colour must not be painted"
@@ -363,15 +366,13 @@ def test_a_mode_6_border_resolves_on_a_type_3_box(mcf_136):
     """`_decoded_fill` handles mode 3 and mode 7 only. The wtype-3 branch called it and returned
     early, so a border in mode 6 (the GuiData palette) or mode 2 (white) fell through as None and
     the box drew nothing -- the grey frame around `SLIDES/AWNINGS`'s levelling controls, whose
-    fillA is mode 6 index 3: the same grey as the diamond it encloses."""
+    fillA is mode 6 index 3. The diamond it encloses is white (`test_wtype_2_records_draw_as_
+    lines`)."""
     from fireflymcf import render
 
     frames = [(q.x, q.y, q.w, q.h, q.color) for pl in render.screen_placements(mcf_136, 32)
               for q in pl.prims if q.kind == "rect" and q.outline and q.w > 300]
     assert (350, 50, 420, 412, (128, 130, 133)) in frames
-    diag = {q.color for pl in render.screen_placements(mcf_136, 32)
-            for q in pl.prims if q.kind == "line"}
-    assert diag == {(128, 130, 133)}, "frame and diamond must share the mode-6 grey"
 
 
 def test_wtype_19_is_correctly_invisible():

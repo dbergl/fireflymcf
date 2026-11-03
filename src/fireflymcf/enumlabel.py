@@ -45,11 +45,13 @@ outscore the real one, and the grow refuses itself ("the match table moved while
 A descending band carries no such run.
 
 **Persistent state.** The layout engine shares one state across a container's recursion
-(`FUN_00258330` with the save flag clear; `layout.Screen.walk`): colour slots are restored after
-a child, but the R38 font and the align byte are not. The arm's label writes both, so a record
-the walk reaches after the label object, one that inherits its font, would draw in the label's
-font. `entering_state` measures the `(font, align)` the walk carries to the attach point, and
-`place(restore=...)` ends the object with an empty label (`restore_record`) that writes them back.
+(`FUN_00258330` with the save flag clear; `layout.Screen.walk`): nothing is restored after a
+child -- not the R38 font, not the align byte, not the colour slots (GUICODE Finding 29). The
+arm's label writes all three, so a record the walk reaches after the label object, one that
+inherits its font or a colour, would draw in the label's. `entering_state` and
+`entering_colors` measure what the walk carries to the attach point, and `place(restore=...)`
+ends the object with an empty label (`restore_record`) that writes them back
+(`restore_state`, `restore_colors`).
 The flow origin and frame the object leaves are not restored; `foreign_deltas` is the whole-page
 check that nothing after the label depends on them.
 
@@ -61,7 +63,8 @@ from __future__ import annotations
 
 import struct
 
-from . import cornermark, guidata, insert, pagedraw as pd, pagewalk, records, switchbuild
+from . import (cornermark, guidata, insert, pagedraw as pd, pagewalk, recordedit, records,
+               switchbuild)
 
 ALIGNS = {"left": 1, "centre": 2, "right": 3}     # R49 h_align (`pagedraw.label`)
 FILL_RADIUS = 1
@@ -158,11 +161,11 @@ def blank_arm(data: bytes, *, w: int, h: int, bg_index: int | None) -> bytes:
         raise EnumLabelError(str(e)) from e
 
 
-def restore_record(font: int | None, align: int) -> bytes:
+def restore_record(font: int | None, align: int, colors: dict | None = None) -> bytes:
     """An empty wtype-11 label (`cornermark.build_empty_record(0, 0)`: draws nothing, leaves the
     flow origin where the arm left it) that writes the persistent font `font` (None: leave it)
     and header align `align` (0: leave it; the decoder never stores a 0 align, `FUN_00252CB0`
-    0x2531FE)."""
+    0x2531FE), and the colour fields `colors` ({role: (mode, value)}, `restore_colors`)."""
     frag = cornermark.build_empty_record(0, 0)
     if font is not None:
         rec = records.decode_record(frag, 0)
@@ -171,11 +174,27 @@ def restore_record(font: int | None, align: int) -> bytes:
         frag = bytes(buf)
     if align:
         frag = pd._set_align(frag, align)
+    for role, (mode, value) in sorted((colors or {}).items()):
+        try:
+            frag = recordedit.with_color(frag, records.decode_record(frag, 0), role, mode,
+                                         _encodable(mode, value))
+        except recordedit.RecordEditError as e:
+            raise EnumLabelError(f"the restore record cannot carry {role} mode {mode}: {e}") from e
     r = records.decode_record(frag, 0)
+    want = {role: (mode, _encodable(mode, value) and value) for role, (mode, value)
+            in (colors or {}).items()}
+    got = {role: (mode, value) for role, mode, value in r.colors if role in want}
     if not (r.wtype == 11 and not r.label and r.size == len(frag) and r.font == font
-            and r.align == align and r.base_modes[:4] == [1, 1, 1, 1]):
+            and r.align == align and r.base_modes[:4] == [1, 1, 1, 1] and got == want):
         raise EnumLabelError(f"authored restore record failed its self-decode: {frag.hex()}")
     return frag
+
+
+def _encodable(mode, value):
+    """`value` as `recordedit.with_color` takes it: mode 3's decoded 0xRRGGBB as (r, g, b)."""
+    if mode == 3:
+        return ((value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF)
+    return value if mode in (6, 7) else None
 
 
 def entering_state(data: bytes, parent: int, attach_index: int) -> set:
@@ -199,6 +218,82 @@ def entering_state(data: bytes, parent: int, attach_index: int) -> set:
         if found:
             break
     return found
+
+
+def entering_colors(data: bytes, parent: int, attach_index: int) -> set:
+    """The colour state (`layout._color_state`) each walk carries INTO record `attach_index` of
+    `parent`, walked as `entering_state` walks. The decoder's colour state is one state shared by
+    the whole page (GUICODE Finding 29), so an object's colour writes reach every later record
+    that inherits, inside its parent or past it."""
+    roots = pagewalk.reaching_roots(data, parent)
+    found: set = set()
+    for sets in ([{}], pagewalk.switch_arm_sets(data, roots)):
+        for root in roots:
+            for values in sets:
+                walk = pagewalk.walk_records(data, root, switch_values=values or None)
+                for i, r in enumerate(walk):
+                    if r.obj == parent and r.index == attach_index and i:
+                        found.add(walk[i - 1].color_state)
+        if found:
+            break
+    return found
+
+
+def written_roles(data: bytes, obj: int) -> set:
+    """The colour roles any record of object `obj`, or of any object it reaches (containers and
+    every switch arm), writes: an explicit mode, or mode 5 (it sets the transparent flag)."""
+    gs, _ = guidata.guidata_extent(data)
+    tab = guidata.object_tables(data)[1]
+    try:
+        match_off = guidata.find_match_table(data)
+    except guidata.MatchTableNotFound:
+        match_off = None
+    roles: set = set()
+    seen: set = set()
+    todo = [obj]
+    while todo:
+        o = todo.pop()
+        if o in seen or not 0 <= o < len(tab):
+            continue
+        seen.add(o)
+        for rec in records.object_records(data, gs + tab[o]):
+            roles |= {role for role, mode, _ in rec.colors if mode != 0}
+            if rec.wtype in (5, 6, 0x2E) and rec.child_index is not None:
+                todo.append(rec.child_index)
+                if rec.wtype != 5:
+                    todo += [c for _, c in guidata.switch_candidates(data, rec, match_off)]
+    return roles
+
+
+_BLOCK_B = ("fillB", "fillB2")
+
+
+def restore_colors(placed: bytes, parent: int, attach: int, obj: int) -> dict:
+    """{role: (mode, value)} a restore record must write so the walk leaves object `obj` (just
+    attached as `parent`'s record `attach`) with the colour state it carried in, for each role
+    the object writes (`written_roles`). An entering transparent fillB/fillB2 is restored by mode
+    5: while the flag is set the slot value cannot be seen. An entering explicit fillA/fillA2 is
+    written back as itself: on an empty label fillA is the ink of no text, and fillA2 draws
+    nothing. Any other role is left as the object leaves it -- one nothing has written yet, an
+    explicit box colour (the restore would paint it), a transparent fillA/fillA2 (block A has no
+    mode 5, GUICODE Finding 29) -- and so are all of them when the pages reaching `parent` enter
+    with different colour states: whether a later record reads such a role is the whole-page
+    check's to say (`foreign_deltas`), which every caller runs."""
+    roles = written_roles(placed, obj)
+    if not roles:
+        return {}
+    states = entering_colors(placed, parent, attach)
+    if len(states) != 1:
+        return {}
+    entering = dict(next(iter(states)))
+    out = {}
+    for role in sorted(roles):
+        v = entering.get(role)
+        if v == "T" and role in _BLOCK_B:
+            out[role] = (5, None)
+        elif v not in (None, "T") and role not in _BLOCK_B:
+            out[role] = v
+    return out
 
 
 def place(data: bytes, *, parent: int, x: int, y: int, arms: list[bytes], default: bytes,
@@ -285,16 +380,19 @@ def leaving_state(data: bytes, parent: int, attach_index: int) -> set:
 
 
 def restore_state(placed: bytes, parent: int, leaving: "tuple[int | None, int]"
-                  ) -> "tuple[int | None, int] | None":
-    """The `(font, align)` a restore record (`restore_record`) must write after an object just
-    attached as `parent`'s last record, or None when the object already leaves `leaving` equal
-    to the state the walk carried in (`entering_state`). Shared by `add_enum_label` (which
-    leaves its own font and `ALIGN_NO_SHIFT`) and `rvcbutton.place` (which measures it).
+                  ) -> "tuple[int | None, int, dict] | None":
+    """The `(font, align, colors)` a restore record (`restore_record`) must write after an object
+    just attached as `parent`'s last record, or None when the object already leaves `leaving`
+    equal to the state the walk carried in (`entering_state`) and writes no colour
+    (`restore_colors`). Shared by `add_enum_label` (which leaves its own font and
+    `ALIGN_NO_SHIFT`) and `rvcbutton.place` (which measures it).
     Raises `EnumLabelError` when the entering state cannot be measured or written back: no page
-    reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored) or the align
+    reaches `parent`, pages disagree, no font is set yet (0xFF cannot be restored), the align
     is 0 (the decoder never stores a 0 align)."""
     gs, _ = guidata.guidata_extent(placed)
-    attach = len(records.object_records(placed, gs + guidata.object_tables(placed)[1][parent])) - 1
+    tab = guidata.object_tables(placed)[1]
+    parent_recs = records.object_records(placed, gs + tab[parent])
+    attach = len(parent_recs) - 1
     states = entering_state(placed, parent, attach)
     if len(states) > 1:
         raise EnumLabelError(
@@ -311,7 +409,9 @@ def restore_state(placed: bytes, parent: int, leaving: "tuple[int | None, int]"
             "align %d cannot be written back to that" % (parent, font, align, *leaving))
     font = None if font == leaving[0] else font
     align = 0 if align == leaving[1] else align
-    return None if font is None and not align else (font, align)
+    obj = parent_recs[attach].child_index
+    colors = restore_colors(placed, parent, attach, obj) if obj is not None else {}
+    return None if font is None and not align and not colors else (font, align, colors)
 
 
 def foreign_deltas(before: bytes, after: bytes, parent: int, label_object: int) -> list:

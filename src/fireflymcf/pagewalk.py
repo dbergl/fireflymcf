@@ -44,6 +44,7 @@ class WalkRec:
     value_slot: int | None
     in_regs: tuple
     out_regs: tuple
+    color_state: tuple = ()    # the persistent colour state after this record (`layout._color_state`)
 
 
 def walk_records(data: bytes, root: int, switch_values: dict | None = None,
@@ -54,10 +55,10 @@ def walk_records(data: bytes, root: int, switch_values: dict | None = None,
     layout.Screen(data).walk(root, switch_values=switch_values, slot_values=slot_values,
                              trace=trace)
     return [WalkRec(key=key, wtype=rec.wtype, label=rec.label, obj=obj, index=index,
-                    box=box, font=font, align=align, colors=colors,
+                    box=box, font=font, align=align, colors=colors, color_state=cstate,
                     value_slot=rec.value_slot, in_regs=tuple(rec.in_regs),
                     out_regs=tuple(rec.out_regs))
-            for key, obj, index, rec, box, font, align, colors in trace]
+            for key, obj, index, rec, box, font, align, colors, cstate in trace]
 
 
 @memo.content_cached

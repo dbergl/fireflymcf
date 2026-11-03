@@ -6,6 +6,7 @@ new object attached under `parent`, ended by the restore record that hands back 
 align the walk carried in (`enumlabel.restore_record`).
 """
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -18,7 +19,9 @@ STOCK = REPO / "firefly-13.6/mcf.bin"
 SHA = "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382"
 CLIMATE_ROOT = 7
 SLOT_PARENT = 899                # its attaches carry value_slot 0: the label would inherit it
-LEAK_PARENT = 924                # root 18: without the restore record the font leaks
+LEAK_PARENT = 924                # root 18: without the restore record the font leaks; with it
+                                 # the label's fillA2/fillB still reach 18:5/1088, which no
+                                 # restore can undo (nothing wrote fillA2 before; fillB would paint)
 X, Y = 86, 206
 
 
@@ -87,11 +90,10 @@ def test_fan_speed_on_climate(request, font, w, h, fixture, restore):
     assert lab.h_align == enumlabel.ALIGNS["left"] and lab.value_slot is None
     white = theme.resolve_fill_index(data, color=(255, 255, 255))
     assert ("fillA", 7, white) in lab.colors
-    if restore is None:
-        assert len(recs) == 1, "a restore record where none is needed"
-    else:
-        assert len(recs) == 2 and recs[1].wtype == 11 and not recs[1].label, "no restore record"
-        assert (recs[1].font, recs[1].align) == (restore, 0)
+    # the label writes colours, and the colour state is shared past its object (GUICODE
+    # Finding 29), so a restore record follows it whether or not the font needs one
+    assert len(recs) == 2 and recs[1].wtype == 11 and not recs[1].label, "no restore record"
+    assert (recs[1].font, recs[1].align) == (restore, 0)
     walk = pagewalk.walk_records(data, CLIMATE_ROOT)
     drawn = [r for r in walk if r.obj == obj and r.label]
     assert [(r.label, r.box) for r in drawn] == [("FAN SPEED", (X, Y, X + w, Y + h))]
@@ -108,6 +110,11 @@ def test_restore_hands_back_the_entering_state(request, fixture):
     obj, _recs = _label_object(built)
     after = [r for r in pagewalk.walk_records(built, CLIMATE_ROOT) if r.obj == obj]
     assert (after[-1].font, after[-1].align) == (walk[last].font, walk[last].align)
+    # every colour role the walk had written comes back; a role nothing had written (None)
+    # cannot be written back, and `foreign_deltas` checks nothing after the label reads it
+    was, now = dict(walk[last].color_state), dict(after[-1].color_state)
+    assert {r: v for r, v in now.items() if was[r] is not None} == \
+        {r: v for r, v in was.items() if v is not None}, "the label's colours leak past it"
 
 
 def test_two_lines():
@@ -242,11 +249,27 @@ def test_inherited_slot_refused():
     assert code == "LAYOUT_REFUSED" and "inherits value_slot 0" in msg, msg
 
 
-def test_leak_refused_without_the_restore(monkeypatch):
-    assert _compile([_op(parent=LEAK_PARENT)]).ok
+def _font_changes(msg):
+    """The delta keys in a LAYOUT_REFUSED message whose font/align differ before -> after."""
+    out = []
+    for line in msg.split("\n")[1:]:
+        sides = re.findall(r"font=(\S+) align=(\S+)", line)
+        if len(sides) == 2 and sides[0] != sides[1]:
+            out.append(line.split(" ")[0])
+    return out
+
+
+def test_restore_undoes_the_font_leak_not_the_colour_leak(monkeypatch):
+    """Under 924 the restore record hands back the font: without it the refusal lists the font
+    reaching 18:5/1088:3. The colour state is shared past the label's object (GUICODE Finding
+    29), and the colours it leaks there cannot be written back, so the label is refused either
+    way -- but with the restore no font change is left among the deltas."""
+    code, msg = _errors(_op(parent=LEAK_PARENT))
+    assert code == "LAYOUT_REFUSED" and "besides its own" in msg and "18:5/1088" in msg, msg
+    assert _font_changes(msg) == []
     monkeypatch.setattr(enumlabel, "restore_state", lambda *_a: None)
     code, msg = _errors(_op(parent=LEAK_PARENT))
-    assert code == "LAYOUT_REFUSED" and "besides its own" in msg, msg
+    assert code == "LAYOUT_REFUSED" and "18:5/1088:3" in _font_changes(msg), msg
 
 
 @pytest.mark.parametrize("states,why", [

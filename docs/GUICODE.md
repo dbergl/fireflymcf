@@ -2367,7 +2367,7 @@ is the structural twin, resting **inferred** (computed-address store not isolate
 omits both (multi-constant cells, ambiguity guard), so `render._RESTING_FILLS` supplies the resting
 value labelled `src="resting"` — never the runtime on/off/unavailable branches (defensible negative).
 
-## Finding 29 — mode-0/5 colour inheritance: persistent, parent-scoped slots
+## Finding 29 — mode-0/5 colour inheritance: persistent slots, one state for the whole walk
 
 `proven-from-code`, 2026-08-16 (GuiCode dig), with one render-side refinement (parent scoping)
 forced by the photo oracle. Resolves the mode-0 "inherit" boxes (open thread 1): EXT/RET, the
@@ -2383,15 +2383,37 @@ slots +0x64 fillA / +0x68 fillB / +0x6C fillA2 / +0x70 fillB2). Each field's dec
 - explicit modes 1/2/3/4/6/7 write the slot (Finding 28's table).
 The function head does not reset the colour slots, so "previous value" spans records.
 
-**Parent scoping (render-side, required by the oracle).** A pure "global last write, never reset"
-replay leaks colours across the whole tree — e.g. the header's red (idx4) propagated into ELECTRICAL
-Start/Stop, which the coach shows not-red. The render therefore treats the slots as **parent-scoped**:
-a child inherits the parent container's colour (set by the container record just before it recurses),
-but the child's own writes are **restored after the recursion** so they do not leak into the parent's
-LATER siblings. This matches every photo with **zero regressions** (0 existing boxes changed/removed
-across all five pages; only previously-unpainted mode-0 boxes newly paint). Whether the hardware does
-an explicit save/restore or relies on each real box's wrapper always re-setting its colour, the
-parent-scoped model is the byte-faithful render behaviour; the pure-global model is not.
+**One shared state (corrected 2026-11-02).** The slots are not scoped to a container. The
+container dispatch passes `FUN_00258330` a save flag of 0 (`0x257ac2 movs r2,#0`), so its 0x98-byte
+state snapshot is never taken: a child's colour writes stay in the state and reach the container's
+LATER siblings, exactly as the font (Finding 14c) and the align byte (Finding 24) do. Three
+observations of 13.6's own code running in firefly-emulator agree, and each contradicts the
+parent-scoped model this finding used to state:
+
+- ELECTRICAL 'Engine' (353:5, fillA mode 0) draws **white**, inherited from the 'Stop' caption
+  (251:2) inside the container 353:3 recursed into just before it. The parent-scoped model gave
+  it the Stop button's idx 168 (brown in v54 Saffron, whose 'Engine' the emulator draws white).
+  The coach agrees: `render.py` records "Engine Not Running" as plain white text on the coach.
+- SLIDES/AWNINGS' levelling diamond (367:6-9, wtype 2, fillA mode 0) draws **white**, after the
+  FRONT/LEFT/RIGHT/REAR labels' white ink, beside a (128,130,133) frame; the parent-scoped model
+  gave it the frame's grey.
+- A build that gave the nav rail's icon boxes explicit fillB colours (v54 LCARS2/3) painted the
+  last icon's colour behind every later mode-0 fillB label on the page -- the inverter status
+  'DC Voltage' among them -- where the stock state was transparent.
+
+The parent-scoped save/restore was a render-side fit to one photo (ELECTRICAL Start/Stop drawn
+red under a pure global replay of the time). That red no longer reproduces under the shared
+state: later fixes to the walk (mode-5 transparency, Finding 38; the switch arms) removed it. A
+mode-0 field with nothing yet written to its slot on the page still resolves to nothing (left
+unpainted), since what it holds is whatever an earlier screen left.
+
+Two consequences in the code. `render` reads a fill or border from fillA alone when the record's
+fillA is an explicit colour (`_block_a_roles`): with the state shared, fillA2 often carries an
+unrelated record's value and must not stand in for a fillA whose cell the palette cannot resolve
+(HOME's battery strip, runtime idx 206). And an op that attaches records under an existing parent
+ends them with a restore record that writes back the colours as well as the font and align
+(`enumlabel.restore_colors`); a colour it cannot write back without drawing is left for the
+whole-page gate (`foreign_deltas`) to judge.
 
 **Resolved boxes (13.6).** EXT (0x97865) / RET (0x96c69): fillA mode-0 inherits their wrapper's
 mode-7 idx131/133 → runtime-state cells whose RESTING branch copies idx15 = **(65,81,163)**
@@ -2400,9 +2422,9 @@ idx8=(39,40,98); battery body/nub idx3=(21,24,58); Inverter mode-3 black. All st
 the runtime state VARIATION (pressed/disabled/active) stays a defensible negative.
 
 **render.py/layout.py:** `_State.fill_slots` + `layout._apply_colors` apply each record's colour
-fields in decode order (mode-0 substituted by the inherited slot, mode-5 left transparent); `walk`
-save/restores `fill_slots` around each container recursion; `render._decoded_fill` resolves the
-substituted colour unchanged.
+fields in decode order (mode-0 substituted by the inherited slot, mode-5 left transparent), over
+one state for the whole walk; the walk's trace carries the state after each record
+(`pagewalk.WalkRec.color_state`); `render._decoded_fill` resolves the substituted colour unchanged.
 
 ## Finding 30 — a label's own alignment is its R49 h/v-align bytes, not the header align byte
 
@@ -2906,7 +2928,7 @@ turned the hand-entered list into the thing deciding what paints, and it was inc
 Their construction is the EXT/RET shape of Finding 29, one level deeper. Each button is a
 **wt-5 wrapper record** in object 19 carrying `fillA` mode-7 idx **24..34** and a `child_index`
 to a two-record object — `[wt-33 box 130×50 r5 with fillA **mode 0**, wt-11 caption]`. The box
-inherits the wrapper's index through the parent-scoped colour slots, so the colour is entirely
+inherits the wrapper's index through the shared colour slots, so the colour is entirely
 byte-derived; nothing was missing but the palette lookup.
 
 | idx | button | resting master | constant |
@@ -3229,8 +3251,8 @@ the colour and paint it". That is wrong in exactly one situation, and the ALTERN
 the `CLEAR EEPROM` caption (obj 24 rec 20) carries fillB **mode 0** and follows tab captions
 carrying fillB **mode 5**, so the render resolved its background to the inherited quadrant navy and
 painted it **over** the olive (idx 40) button box underneath. `ALTERNATOR-SYSTEM.jpg` shows olive
-with text on it and no navy. `_State.fill_transparent` now carries the flag with the same
-parent-scoped save/restore as `fill_slots`.
+with text on it and no navy. `_State.fill_transparent` now carries the flag alongside
+`fill_slots`, in the same shared state (Finding 29).
 
 ### Wrapping — RESOLVED, and the gate this section first shipped is RETRACTED
 
