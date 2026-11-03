@@ -82,7 +82,7 @@ def test_retarget_command_points_clone_group_at_channel_15_with_a_toggle(retarge
     # Every tap sends command 5 and the G12 alternates the output -- the proven single-command-5
     # light-button pattern, with no state-dependent off-vs-toggle selection (the Water Pump's
     # two-binding smart toggle sent only OFF on the coach because instance 15 has no tracked
-    # status; CAN capture v5, 2026-08-17). The wire command is binding byte[4] (byte[3]=0x0a is
+    # status; CAN capture, 2026-08-17). The wire command is binding byte[4] (byte[3]=0x0a is
     # metadata). (Hardcoded 15/5 to catch a constant regression, not track it.)
     assert group.count == 1, f"single command-5 toggle is one binding, got {group.count}"
     assert bindings[0].channel == 15, (
@@ -97,7 +97,8 @@ def test_retarget_indicator_satisfies_the_live_redraw_invariant():
     name the SAME cell (MCF-FORMAT.md Sec.6.0a). Every live button on 13.6 obeys this; the donor
     (a template object) does not, so retarget_indicator has to establish it on all three fields.
 
-    This is the assertion that would have caught v7, whose box painted from cell 145 while both
+    This is the assertion that would have caught a probe (2026-08-17) whose box painted from cell
+    145 while both
     value_slots said 32 -- on the coach the box repainted in place but the caption vanished until
     the page was re-entered."""
     from fireflymcf import insert
@@ -292,7 +293,7 @@ def test_inserted_build_still_locates_the_match_table(built):
     assert scr.match_table_off == off
 
 
-def test_build_home_button_reproduces_the_hardware_verified_v8(built):
+def test_build_home_button_reproduces_the_hardware_verified_pin15_button(built):
     """The whole pipeline must still produce the exact image that was flashed and confirmed
     working on the coach (2026-08-17): toggles instance 15, caption stays visible, and the
     button repaints in place on a status change without leaving HOME.
@@ -333,7 +334,7 @@ def test_build_home_button_reproduces_the_hardware_verified_v8(built):
 
 
 def test_a_glyph_button_can_be_cloned_resized_and_disarmed() -> None:
-    """The HOME glyph-button capability (`build/build-home-glyph-v12.py`): clone the Bath Fan
+    """The HOME glyph-button capability (a research-repo build script): clone the Bath Fan
     button (obj 247 -- box + icon + caption + touch), resize it to the Water Pump / Tank Heater
     box with same-size geometry edits, and repoint its command group so it commands nothing.
 
@@ -344,8 +345,8 @@ def test_a_glyph_button_can_be_cloned_resized_and_disarmed() -> None:
       else's pin the first time it is tapped.
     * **The clone must satisfy the live-redraw invariant.** 247 is one of the unattached template
       objects (MCF-FORMAT §6.0a) whose `value_slot` is a config gate, not a status cell -- its box
-      carries `fillA` idx 144 against `value_slot` 101. Left alone that is the v7 caption-vanishing
-      bug, so all three fields are rewritten to one cell.
+      carries `fillA` idx 144 against `value_slot` 101. Left alone that is the 2026-08-17 probe's
+      caption-vanishing bug, so all three fields are rewritten to one cell.
     """
     import struct
     from fireflymcf import guidata, insert, records, relocate, newbutton, cli
@@ -449,7 +450,8 @@ def test_retarget_indicator_honours_an_explicit_colour_index():
 def test_retarget_indicator_covers_every_text_record_not_just_the_first():
     """A button with two wtype-11 records (icon + caption) must have BOTH retargeted.
 
-    Retargeting only the box is what v7 did: the box repainted in place on the coach and the
+    Retargeting only the box is what a probe did (2026-08-17): the box repainted in place on the
+    coach and the
     caption vanished until a full page render. Leaving a *second* text record on the donor's
     config gate is the same defect one record further along.
 

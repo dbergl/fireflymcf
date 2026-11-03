@@ -2,7 +2,8 @@
 and DM_RV reaches the screen only through three source-address-keyed frame parsers in GuiCode, one
 of them a solar-controller branch inside `FUN_00240D20`.
 
-Everything is read from the 13.6 image (and, for the slot-read negative, the running v32 image
+Everything is read from the 13.6 image (and, for the slot-read negative, the heater-status reference
+image
 too), so the finding stays anchored to bytes rather than to prose.
 """
 import struct

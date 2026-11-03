@@ -236,7 +236,7 @@ def test_a_record_that_differs_from_the_corpus_fails_only_the_softer_signal(stoc
 def test_an_already_suppressed_image_audits_clean_and_says_so(stock):
     """The four NOPs remove every slot-8 tank call, so the family derivation cannot run.
 
-    That is not a damaged build and must not read as one: v22 is on the coach.
+    That is not a damaged build and must not read as one: it is on the coach (PC.62).
     """
     patched, _ = tankbroadcast.suppress(stock)
     report = tankbroadcast.audit(patched)

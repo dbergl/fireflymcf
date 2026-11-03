@@ -506,7 +506,8 @@ def test_grow_match_table_takes_the_values_the_locator_accepts(value):
 
 
 def test_grow_match_table_after_a_prior_append_still_lands_on_the_right_object_indices():
-    """v16 (aescompact.swap_electrical_to_compact) calls `grow_match_table` AFTER other objects
+    """The Pump Link switch shape (aescompact.swap_electrical_to_compact) calls `grow_match_table`
+    AFTER other objects
     have already been appended (aes_body/engine/cluster clones) -- objects `insert.py` never
     gives a match-table entry (`find_match_table`'s own docstring: appending grows object-table
     1 but not this table), so the table's own physical width can already lag behind the object
@@ -579,7 +580,8 @@ def test_grow_match_table_pads_an_odd_gap_with_one_trailing_sentinel():
 
 def test_grow_match_table_overwrites_a_pre_covering_trailer_on_the_next_grow():
     """The trailer a grow adds after an odd gap leaves the table ONE entry wider than the object
-    count once its own objects are appended -- a legal state (v32's Batt Heat switch left it, and
+    count once its own objects are appended -- a legal state (the Batt Heat status switch left it,
+    and
     the next grow in the same build was refused, 2026-09-24). The next grow must overwrite that
     pre-covering 0xFFFF in place and insert only the rest, so its values still land on the NEXT
     appended objects."""
@@ -624,7 +626,7 @@ def test_grow_match_table_refuses_a_match_table_wider_than_the_object_count():
 
 
 # ---------------------------------------------------------------------------------------------
-# The fifth gate's scan-artifact rule (2026-09-06, building v21)
+# The fifth gate's scan-artifact rule (2026-09-06, building the boxed corner mark)
 # ---------------------------------------------------------------------------------------------
 # `_verify_guicode_pointers` used to require the two literal SETS to be equal. They are produced
 # by a linear disassembly sweep, and this project's standing rule is that instruction bytes
@@ -657,7 +659,8 @@ def _fake_scan(monkeypatch, before_map, after_map):
 
 
 def test_the_pointer_gate_allows_a_phantom_below_the_insertion_point(monkeypatch):
-    """The v21 case. A position only one scan sees, whose word did not change and whose target is
+    """The boxed corner mark's case. A position only one scan sees, whose word did not change and
+    whose target is
     below `at`, cannot be a missed relocation: content below `at` does not move, so a pointer to
     it must NOT be bumped and is correct however the sweep classified it."""
     data = bytes(0x40)

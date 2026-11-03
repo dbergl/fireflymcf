@@ -42,7 +42,7 @@ def _reboot_group(data):
 
 
 def test_op_is_hardware_verified(built):
-    """Coach-verified on v46 (2026-10-05): the hold sent one GENERAL_RESET and the APS-500
+    """Coach-verified 2026-10-05: the hold sent one GENERAL_RESET and the APS-500
     rebooted."""
     _stock, res = built
     assert "reboot" not in res.unverified
@@ -105,8 +105,9 @@ def test_refuses_a_build_whose_object_24_is_another_page():
 
 
 def test_the_reserved_inverter_groups_gate_refuses_a_build_that_claims_them(monkeypatch):
-    """v44's first build took group 68 (a stock 1FFD3 inverter template). With the op's own
-    exclusion removed and 68 first in the free list (as it was on v43) it would again, and the
+    """The reboot button's first build took group 68 (a stock 1FFD3 inverter template). With the
+    op's own
+    exclusion removed and 68 first in the free list (as it was then) it would again, and the
     compile-time gate must refuse it."""
     from fireflymcf import levelcontrols
     monkeypatch.setattr(levelcontrols, "RESERVED_GROUPS", frozenset())
@@ -116,8 +117,9 @@ def test_the_reserved_inverter_groups_gate_refuses_a_build_that_claims_them(monk
 
 
 def test_guicode_selected_groups_finds_13_6s_130_139_block():
-    """13.6 GuiCode sets the variant of 130-139 as a block (0x24AC66-0x24ACB0); v45 reused 136/137
-    and their holds failed on the coach. The scan must see the whole block."""
+    """13.6 GuiCode sets the variant of 130-139 as a block (0x24AC66-0x24ACB0); a build of
+    2026-09-30
+    reused 136/137 and their holds failed on the coach. The scan must see the whole block."""
     sel = newbutton.guicode_selected_groups(open(STOCK, "rb").read())
     assert set(range(130, 140)) <= sel
     assert not {96, 126, 127, 46} & sel          # the slots whose holds worked on the coach

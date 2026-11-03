@@ -1,4 +1,4 @@
-"""The Ignore Alarms button (v49): `add_aes_batt_heat` as a generic BMS command button --
+"""The Ignore Alarms button: `add_aes_batt_heat` as a generic BMS command button --
 `enable_wire` / `off_wire` / `text` / `group_pool` -- and `add_aes_bms_button_status`."""
 import json
 from pathlib import Path

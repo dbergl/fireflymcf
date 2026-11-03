@@ -111,7 +111,7 @@ def test_cpu_fault_raises(mcf_136):
 
 
 def test_renamed_home_header_still_home(mcf_136):
-    """Pages are screen ids: a build whose HOME header is renamed (a-reference-build's `hdr` op, one
+    """Pages are screen ids: a build whose HOME header is renamed (a renamed HOME header: one
     `rename_label` on object 4) still boots to HOME, and goto finds HOME and the rail by it."""
     import hashlib
 
@@ -120,25 +120,25 @@ def test_renamed_home_header_still_home(mcf_136):
     project = recipe.Project(
         base_sha256=hashlib.sha256(mcf_136).hexdigest(), build_name=None,
         ops=[recipe.OpSpec(id="hdr", type="rename_label",
-                           params={"object": 4, "old": "   HOME", "new": "   MYCOACHNAME",
+                           params={"object": 4, "old": "   HOME", "new": "   MY COACH",
                                    "allow_grow": True})])
     built = recipe.compile_project(project, mcf_136)
     assert built.ok, built.errors
     s = Scenario(built.data, timeout_s=240)
     s.boot()
-    assert s.screen == 0 and s.page == "MYCOACHNAME"
+    assert s.screen == 0 and s.page == "MY COACH"
     s.goto("LIGHTS")
     assert s.screen == 2
     s.goto("HOME")
     assert s.screen == 0
-    s.goto("MYCOACHNAME")                       # the drawn header is an alias of screen 0
+    s.goto("MY COACH")                       # the drawn header is an alias of screen 0
     assert s.screen == 0
 
 
 # --- support detection -----------------------------------------------------------------------
 
-def _compiled_saffron_substitute(stock):
-    """v54-Saffron stand-in (`builds/` is not linked): option follower, pump auto off, readout."""
+def _compiled_routine_build(stock):
+    """A reference-style build (`builds/` is not linked): follower, pump auto off, readout."""
     import hashlib
     import json
 
@@ -165,7 +165,7 @@ def _compiled_saffron_substitute(stock):
 def test_supported_136_stock_and_builds(mcf_136):
     from fireflymcf.emu.scenario import supported
     assert supported(mcf_136) == (True, "supported: 13.6")
-    ok, reason = supported(_compiled_saffron_substitute(mcf_136))
+    ok, reason = supported(_compiled_routine_build(mcf_136))
     assert ok and reason == "supported: 13.6"
 
 

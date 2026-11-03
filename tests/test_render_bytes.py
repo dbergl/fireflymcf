@@ -52,11 +52,13 @@ def test_render_screen_image_accepts_kwarg():
 
 
 # ---------------------------------------------------------------------------------------------
-# Boxless wtype-11/13 text: the shape v20 shipped, which the renderer used to draw in full
+# Boxless wtype-11/13 text: the shape the first corner mark shipped, which the renderer used to draw
+# in full
 # ---------------------------------------------------------------------------------------------
 
-def _v20_shaped_mark(data, *, dx=80, dy=26, char="A", font=13):
-    """Object 295 with a corner mark built the v20 way: a wtype-11 label with coordinates 0 and 1
+def _boxless_mark(data, *, dx=80, dy=26, char="A", font=13):
+    """Object 295 with a corner mark built the first flash's way: a wtype-11 label with coordinates
+    0 and 1
     only and NO declared width -- `aescompact._flow_anchor`'s shape, which is for records that
     never draw. The coach drew a single column of the glyph; the renderer drew it whole."""
     import struct
@@ -86,7 +88,7 @@ def _v20_shaped_mark(data, *, dx=80, dy=26, char="A", font=13):
 
 
 def test_a_boxless_record_draws_nothing(mcf_136):
-    """v20's mark, previewed the way the coach actually showed it: not at all.
+    """The first corner mark, previewed the way the coach actually showed it: not at all.
 
     `FUN_002559A0` clips its text to `box ∩ enclosing clip` and the rectangle is INCLUSIVE, so a
     record whose box collapsed to `x0 == x1, y0 == y1` gets a 1x1 clip -- its glyph's top-left
@@ -99,7 +101,7 @@ def test_a_boxless_record_draws_nothing(mcf_136):
     """
     from fireflymcf import render
 
-    data, base = _v20_shaped_mark(mcf_136, char="A")
+    data, base = _boxless_mark(mcf_136, char="A")
     slots = {5: 8, 6: 1, 37: 3, 112: 1, 113: 0, 217: 900}
     marks = [q for pl in render.screen_placements(data, 4, slot_values=slots)
              for q in pl.prims if q.text == "A" and q.kind in ("glyph", "text")]
@@ -115,10 +117,11 @@ def test_a_boxless_record_draws_nothing(mcf_136):
 
 
 def test_a_boxed_mark_IS_drawn(mcf_136):
-    """The contrast: the same mark WITH a box renders in full, which is what v21 ships.
+    """The contrast: the same mark WITH a box renders in full, which is what the verified build
+    ships.
 
     Uses `A`, a character font 13 already carries, because this fixture builds on STOCK where
-    v21's char 141 is still the shared placeholder."""
+    the verified build's char 141 is still the shared placeholder."""
     from fireflymcf import cornermark, render
 
     data, info = cornermark.add_mark(mcf_136, object_index=295, value_slot=217, dx=80, dy=26,

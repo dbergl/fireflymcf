@@ -26,7 +26,7 @@ def labels_of(data, obj_index):
 
 
 def _pump_feature_ops():
-    """The op list the reference coach's `golden-v22-anchor` recipe composes for the whole Water Pump
+    """The op list the reference coach's Water Pump recipe composes for the whole Water Pump
     feature -- a fresh list of `recipe.OpSpec` every call, since callers mutate `.params`
     freely:
 
@@ -134,8 +134,8 @@ def test_rename_invalid_align(stock, stock_hash):
 
 
 def test_rename_center_align_splits_the_pad(stock, stock_hash):
-    """A centred record must not take its slack all at the end -- that is the reference build v1/v2
-    caption defect, where the panel centred 'Valve   ' and drew the word 9 px left."""
+    """A centred record must not take its slack all at the end -- that is the first reference
+    builds' caption defect, where the panel centred 'Valve   ' and drew the word 9 px left."""
     r = compile_ops(stock, stock_hash,
                     recipe.OpSpec(id="a", type="rename_label",
                                   params={"object": 35, "old": "28 - ",
@@ -542,7 +542,7 @@ def test_remap_channel(stock, stock_hash):
     assert moved_cmds, "remap moved nothing off channel 40"
     assert all((38, cmd) in caps_after for cmd in moved_cmds)
     # The default retargets the indicator, which has not been on the coach; PC.13-16 proved
-    # the move_display_list path (v9).
+    # the move_display_list path (PC.14).
     assert r.unverified == ["a"]
 
 def test_remap_channel_move_display_list_is_the_verified_path(stock, stock_hash):
@@ -643,7 +643,7 @@ def test_add_button(stock, stock_hash):
     assert cap.font == 13
     assert cap.label == "Overflow\n  Valve ", (
         "a centred caption must take its pad on both sides of the last line -- "
-        "trailing-only pad is what put reference build v1/v2's 'Valve' 9 px left of centre")
+        "trailing-only pad is what put the first reference builds' 'Valve' 9 px left of centre")
     # capability gate accepted exactly (28, 5)
     assert recipe.capabilities(r.data) - recipe.capabilities(stock) == {(28, 5)}
 
@@ -849,7 +849,7 @@ def test_install_glyph_claim_block_refuses_a_drawn_block(stock, stock_hash):
 
 
 def test_install_glyph_warns_off_convention_bearing(stock, stock_hash):
-    # y != (cell - h) / 2 is the v20 '33 px too high' mistake -- refuse unless
+    # y != (cell - h) / 2 is the 2026-08-19 '33 px too high' mistake -- refuse unless
     # explicitly overridden (v-align-1 records are the legitimate exception).
     r = compile_ops(stock, stock_hash,
                     recipe.OpSpec(id="g", type="install_glyph",
@@ -1616,8 +1616,9 @@ def test_swap_aes_electrical_refuses_the_pump_section_ref_when_ordered_second(st
 
 
 # ======================================================================================
-# Task 5 (v16): swap_aes_electrical's link_indicator param -- wires the Pump Link switch to
-# add_option_follower's 0/1 display cell instead of the pre-v16 box reading the (AES-frozen)
+# Task 5 (the switch shape): swap_aes_electrical's link_indicator param -- wires the Pump Link
+# switch to
+# add_option_follower's 0/1 display cell instead of the static box reading the (AES-frozen)
 # Low Volts cell 45.
 # ======================================================================================
 
@@ -1658,7 +1659,7 @@ def test_swap_with_link_indicator_wires_the_pump_link_switch_to_the_bridge_cell(
     assert all(a[1].label == "Pump Link" for a in arms)
     # nothing on the page reads cell 45 for the Pump Link any more
     assert not any(x.wtype == 33 and x.colors and x.colors[0] == ("fillA", 7, 45)
-                   for x in recs[7:]), "the v15 box that read the Low Volts cell is gone"
+                   for x in recs[7:]), "the static box that read the Low Volts cell is gone"
     # The Pump Link switch (this test's own subject) was itself hardware-verified 2026-09-04
     # (checklist items 5-7), so "aes" no longer reports unverified.
     assert "aes" not in r.unverified
@@ -1844,7 +1845,7 @@ def test_add_pump_auto_off_minutes_default_mismatch_refuses_at_construction(stoc
 # Fix round, item 1: this used to read `"y": 560` -- past the panel's 480 px canvas height --
 # and only a human caught it before it reached the coach. `AddRegisterReadout.validate` now
 # refuses any out-of-panel (x, y) outright (see the dedicated regression test below), so the
-# fixture itself has to stay in-bounds; (300, 357) is v17's own flashed-not-yet position.
+# fixture itself has to stay in-bounds; (300, 357) is PC.59's own position, before it was flashed.
 READOUT_PARAMS = {"register": {"dgn": "DGN_CONFIG", "selector": 0xEE}, "mask": 0xFF,
                   "width_bytes": 1, "page": 4, "x": 300, "y": 357,
                   "format": {"width": 2, "places": 0, "zero_pad": False}}
@@ -1875,7 +1876,7 @@ def test_add_register_readout_refuses_an_x_outside_the_panel(stock, stock_hash):
 
 
 def test_add_register_readout_on_stock_draws_the_minutes_on_home(stock, stock_hash):
-    """On stock this lands on tier 1 (cell 211, `fresh=False`) -- the same tier class as v17's
+    """On stock this lands on tier 1 (cell 211, `fresh=False`) -- the same tier class as PC.59's
     own `minutes-home` (tier 2, also not fresh), which was FLASHED AND VERIFIED 2026-09-04
     (`docs/BUS-BASELINE.md` PC.59), so
     `AddRegisterReadout`'s class default is `hardware_verified = True` and a non-fresh cell
@@ -1919,7 +1920,7 @@ def _readout_claimed_image(stock):
 
 
 def test_add_register_readout_tier_2_cell_reports_verified(stock, stock_hash):
-    """A tier-2 cell (an odd spare byte, `fresh=False`) is exactly what v17's `minutes-home`
+    """A tier-2 cell (an odd spare byte, `fresh=False`) is exactly what PC.59's `minutes-home`
     used on the coach -- cell 219 @ 0x20039f51 (FLASHED AND
     VERIFIED 2026-09-04, `docs/BUS-BASELINE.md` PC.59). Forcing tier 1 to refuse
     (`_readout_claimed_image`) and asking for a width-1 readout lands on tier 2, and the op's
@@ -2159,9 +2160,9 @@ def test_drop_from_master_removes_bath_light_from_light_master(stock, stock_hash
     lm = {c.label: c.channels for c in guidata.find_control_groups(res.data)
           if c.screen_title == "Light Master"}
     assert lm == {"ON": [22, 24, 26, 32, 34, 35], "OFF": [22, 24, 26, 32, 34, 35]}
-    # FLASHED AND VERIFIED 2026-09-14 (v26): the coach's bath light no longer follows
+    # FLASHED AND VERIFIED 2026-09-14: the coach's bath light no longer follows
     # Light Master, so the op reports verified.
-    assert "d" not in res.unverified, "drop_from_master is hardware-verified since v26"
+    assert "d" not in res.unverified, "drop_from_master is hardware-verified since 2026-09-14"
 
 
 def test_drop_from_master_declares_the_master_only_pairs_it_loses(stock, stock_hash):
@@ -2195,7 +2196,8 @@ def test_retarget_action_leaf_is_guarded(stock):
 
 
 def test_no_op_reads_two_params_into_one_attribute():
-    """v43's first build assigned a new boolean param `refresh` to `self.refresh`, which the LEVEL
+    """The refresh build's first compile assigned a new boolean param `refresh` to `self.refresh`,
+    which the LEVEL
     op already used for its staleness class; the class silently became 0 in every rebuild. Every
     op's `validate` must read each attribute from exactly one param name."""
     import ast

@@ -105,7 +105,8 @@ def test_appends_rather_than_taking_over_a_subscription():
 
 
 def test_switch_watches_a_cell_fed_from_both_variables():
-    """THE GUARD for the v28/v29 defect: a switch's value_slot indexes the CELL table, so it must
+    """THE GUARD for the variable-index defect (2026-09-21/22): a switch's value_slot indexes the
+    CELL table, so it must
     resolve to an address a GuiCode routine writes from the variables' receive slots. Pointing a
     switch straight at a variable index renders identically and never moves on the coach."""
     _stock, res = _build()
@@ -137,10 +138,11 @@ def test_one_switch_drives_the_button_and_it_is_enrolled():
 
 
 def test_every_arm_redraws_the_whole_button():
-    """THE GUARD for the two repaint defects the owner reported on v31 (2026-09-22).
+    """THE GUARD for the two repaint defects the owner reported on 2026-09-22.
 
     The panel repaints only the arm a switch selects, so an arm that omits an element leaves the
-    outgoing arm's pixels on the glass. v31 shipped two switches: enabling the heater painted the
+    outgoing arm's pixels on the glass. That build shipped two switches: enabling the heater painted
+    the
     body arm over the sibling 'Batt Heat' caption with nothing to redraw it, and disabling the
     contactor selected an arm that drew nothing, leaving the red glyph lit. Every arm here must
     carry the full-size opaque capsule in its own state's colour AND the caption; only the
@@ -177,7 +179,8 @@ def test_registry_stays_under_cap():
 
 
 def test_op_is_hardware_verified():
-    """Coach-verified 2026-09-22: receive half on v31, drawing half on v32 -- injected 18FF70C0
+    """Coach-verified 2026-09-22: receive half on one build, drawing half on the next -- injected
+    18FF70C0
     frames transitioned through every edge and the caption and glyph repainted correctly."""
     _stock, res = _build()
     assert "status" not in res.unverified

@@ -165,8 +165,8 @@ def test_op_compiles_grows_guicode_and_detours_hook():
     assert txt[txt.index("pop.w {r0, r1, r2, r3, lr}") + 1] == "b.w #0x247bf8"
 
 
-def test_op_reports_verified_after_v25():
-    # coach-verified 2026-09-12 (v25 flashed; number/fill/colour update live on HOME and
+def test_op_reports_verified_after_the_coach_flash():
+    # coach-verified 2026-09-12 (flashed; number/fill/colour update live on HOME and
     # ELECTRICAL), so add_voltage_battery is hardware_verified=True and no longer reported
     # unverified -- even though it grows fresh tier-3 cells.
     res = _compile({"donor": 443, "parent": 902, "x": 690, "y": 334})

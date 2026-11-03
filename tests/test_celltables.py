@@ -21,7 +21,8 @@ def test_stock_offsets_are_the_known_constants():
 def test_the_live_table_is_the_one_a_gui_code_base_literal_actually_loads(path):
     """Spec §8's other half of "resolve the live table from the descriptor": refuse to have
     resolved a table copy no GuiCode reader/writer literal actually points at. On stock and on
-    v33 (tables relocated), `0x90000000 + celltables.cell_table_off/type_table_off` must each be
+    the heater-glyph build (tables relocated), `0x90000000 +
+    celltables.cell_table_off/type_table_off` must each be
     the target of at least one GuiCode base literal (`tablegrow.find_base_refs`, the same
     reference-finder `allocate_fresh_cells` uses to find the surfaces it must repoint when it
     grows the table)."""

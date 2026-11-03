@@ -121,7 +121,7 @@ def test_setup_na():
     assert (c["height"], c["tol"], c["auto"]) == (NA, NA, NA)           # stale
 
 
-# ---- repaint-on-change (v43) -----------------------------------------------------------------------
+# ---- repaint-on-change ---------------------------------------------------------------------------
 
 def test_repaint_toggle_flips_only_when_a_value_changes():
     """Tick by tick on one memory image: the first tick normalises junk toggles to 0/1; a repeat

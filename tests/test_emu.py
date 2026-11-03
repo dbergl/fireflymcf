@@ -1,6 +1,6 @@
 # tests/test_emu.py
 """tests/emu.py runs authored routines on Unicorn. Its known answer is bitcombine, whose fold is
-coach-verified on v32 (the Batt Heat status); the guards make stray memory access and runaway
+coach-verified 2026-09-22 (the Batt Heat status); the guards make stray memory access and runaway
 loops fail rather than pass silently."""
 import pytest
 

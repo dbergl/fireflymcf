@@ -16,7 +16,8 @@ def stock() -> bytes:
 
 def _claimed_image(stock: bytes) -> bytes:
     """Stock with every halfword-safe spare cell claimed by a fake pool word, so tier 1 fails
-    the way it does on v15 (211/213/215/217 all referenced by appended routines)."""
+    the way it does on the 2026-09-04 build (211/213/215/217 all referenced by appended
+    routines)."""
     import struct
     from fireflymcf import theme, patch
     cells = status_map.cell_table(stock)

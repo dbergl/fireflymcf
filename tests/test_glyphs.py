@@ -43,7 +43,7 @@ SLOT_23_ICONS = (0x30, 0x44, 3118, 3139)      # the one holding the signal arcs 
 SLOT_15_TEXT = (0x20, 0xFF, 2209, 2433)       # the caption's text font
 
 # Characters in 13.6 slot 24 whose glyph is the shared placeholder -- the filled block the
-# panel drew when '[' was put on the button in the v5 probe.
+# panel drew when '[' was put on the button in a probe (2026-08-17).
 SLOT_24_PLACEHOLDERS = ("?", "@", "A", "K", "Y", "Z", "[", "]")
 
 
@@ -106,7 +106,7 @@ def test_signal_arc_font_is_slot_23(image_136: bytes) -> None:
 
 
 def test_out_of_range_character_returns_the_fallback(image_136: bytes) -> None:
-    """The behaviour that produced the filled square in the v5 hardware probe.
+    """The behaviour that produced the filled square in a hardware probe (2026-08-17).
 
     Slot 24 stops at `0x5E`, and `'['` (0x5B) is inside it but maps to the placeholder;
     `0x60` is outside and takes the fallback. Neither fails -- both draw something.

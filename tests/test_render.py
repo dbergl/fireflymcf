@@ -2113,7 +2113,8 @@ def test_a_centred_line_keeps_its_trailing_pad(mcf_136) -> None:
     and the panel centred the padded string, putting the visible word 9 px left of centre.
 
     `render.py` rstripped every line before measuring, so it drew the caption correctly centred
-    and the preview disagreed with the panel -- which is how this shipped in v1 and v2. Stock
+    and the preview disagreed with the panel -- which is how this shipped in the first two reference
+    builds. Stock
     object 8 has the same shape (`'Cleaning\\nMode '`, centre-aligned, one trailing space), so it
     pins the behaviour without depending on a build.
 

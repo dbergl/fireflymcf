@@ -205,7 +205,7 @@ def test_tank_rows_agree_with_the_hand_checked_gate_emulator(stock):
 
 
 def test_the_widened_tank_gates_read_back_from_a_patched_image(stock):
-    """`tankgates.widen` (flashed as v10, confirmed all four rows on WD, PC.18b): the same
+    """`tankgates.widen` (flashed 2026-08-18, confirmed all four rows on WD, PC.18b): the same
     emulation reads the patched whitelists off the patched bytes."""
     patched, _ = tankgates.widen(stock)
     wd = outputs.named_outputs(patched, floorplan="WD")

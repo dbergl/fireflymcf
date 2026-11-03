@@ -287,7 +287,7 @@ def test_set_binding_dgn_is_two_bytes_and_keeps_the_payload(stock):
 
 
 def test_set_binding_dgn_guards_the_lost_capability(stock):
-    """Moving off DC_DIMMER_COMMAND_2 drops a channel capability -- v11 and v18 both shipped
+    """Moving off DC_DIMMER_COMMAND_2 drops a channel capability -- two reference builds shipped
     having lost a real control exactly this way, so it must be asked for."""
     from fireflymcf import newbutton
     idx = next(b.index for b in guidata.binding_table(stock) if b.channel == 22)

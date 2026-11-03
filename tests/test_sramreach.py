@@ -42,8 +42,10 @@ def test_base_offset_reaches_addresses_no_pool_word_names(data: bytes) -> None:
 
 def test_every_scratch_cell_the_shipping_builds_use_survives_the_base_offset_trace(data: bytes) -> None:
     """The four halfword-safe spare cells on stock — 211/213/215/217, which the follower, the Low
-    Volts bridge and the pump routine allocate on v10-v15 — are reached by NO base+offset form,
-    so the unflashed v15's scratch allocation stands under a stronger scan than it was made with."""
+    Volts bridge and the pump routine allocate in the builds of 2026-09-01 to 2026-09-04 — are
+    reached by NO
+    base+offset form, so the newest, unflashed one's scratch allocation stands under a stronger scan
+    than it was made with."""
     r = sramreach.reach(data)
     cells = status_map.cell_table(data)
     for idx in (211, 213, 215, 217):

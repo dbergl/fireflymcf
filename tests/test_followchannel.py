@@ -92,7 +92,8 @@ def test_resolve_derives_known_136_addresses(mcf_136):
     plan = followchannel.resolve(mcf_136, watch_channel=25, target_channel=44,
                                  on_level=200, gate_option="Heat Pump")
     # Receive-filter slot for status var 67 (ch25): STATUS_SLOT_BASE 0x20007FC8 + 67*2 (§5.4c).
-    # NOT the variable-pointer cell 0x20039E4A -- the v1 bug the coach exposed (never written by
+    # NOT the variable-pointer cell 0x20039E4A -- the first follower's bug the coach exposed (never
+    # written by
     # the receive filter, so the follower never saw the light change).
     assert plan.watch_addr == 0x2000804E
     # Firmware-faithful on-decode: the light is on iff (slot & on_mask) == on_value. ch25's own
@@ -684,7 +685,8 @@ def _three_branch_gates(mcf):
 def test_unmasked_multi_gate_blob_is_byte_identical(mcf_136):
     """FINDING 2: the sha256 pins in tests/test_registers.py only ever exercise ONE of the four
     branches of the shared emitter (`mask == 0xFFFF, value <= 0xFF` -> a single `cmp r0,#imm8`),
-    because the reference coach's `golden-v22-anchor` recipe carries no `follow_register` op. Pin the other three
+    because the reference coach's Water Pump recipe carries no `follow_register` op. Pin the other
+    three
     against bytes captured from the pre-Task-13 tree, so the refactor's whole surface has durable
     byte cover and not just disassembly-text assertions."""
     watch, gates = _three_branch_gates(mcf_136)
