@@ -35,7 +35,7 @@ class EditorError(RecipeError):
 
 @dataclass(frozen=True)
 class Step:
-    kind: Literal["patch", "grow", "call"]
+    kind: Literal["patch", "grow", "grow_guidata", "call"]
     args: tuple
     note: str
 
@@ -123,6 +123,31 @@ class Editor:
         self._ledger.append(Step("grow", (payload,), note))
         return theme.GUICODE_BASE_DEFAULT + load_off
 
+    def grow_guidata(self, payload: bytes, note: str) -> int:
+        """Append `payload` to GuiData; return the panel address of its first byte.
+
+        The bytes go where GuiData's checksum word was (`ge - gs - 4`), padded with zeros to a
+        multiple of 4, so the address is 4-aligned and nothing before it moves. `relocate.relocate`
+        does the insertion (the GuiData append every table-growing op uses): GuiData's descriptor
+        length and the later sections' file offsets grow, the checksums are resealed, and the
+        relocator's self-check gates run on the result. The address is GuiData's mapped base (its
+        descriptor's flash destination, `0x90000000` on 11.23, 13.6 and 14.7) plus the offset, the
+        coordinates `patch_addr("GuiData", ...)` takes. Recorded padded, so replay appends exactly
+        the same bytes. Refuses (BAD_EDIT) an empty payload."""
+        payload = bytes(payload)
+        if not payload:
+            raise EditorError("BAD_EDIT", "grow_guidata needs at least one byte")
+        payload += bytes(-len(payload) % 4)
+        gd = self.section("GuiData")
+        at = gd.length - 4
+        try:
+            out, _ = relocate.relocate(self._buf, at, payload)
+        except relocate.RelocationError as e:
+            raise EditorError("BAD_EDIT", str(e)) from e
+        self._buf = out
+        self._ledger.append(Step("grow_guidata", (payload,), note))
+        return theme.guicode_base(gd) + at
+
     def call(self, name: str, *args, **kwargs):
         fn = routinekit.PRIMITIVES.get(name)
         if fn is None:
@@ -155,6 +180,11 @@ def _replay(data: bytes, ledger: tuple[Step, ...]) -> tuple[bytes, list]:
             gc = ed.section("GuiCode")
             at = gc.offset + gc.length - 4          # where `grow_section` inserts
             ed.grow_guicode(*st.args, st.note)
+            edits.append(relocate.Edit(at, b"", bytes(st.args[0]), "user op", st.note))
+        elif st.kind == "grow_guidata":
+            gd = ed.section("GuiData")
+            at = gd.offset + gd.length - 4          # where `grow_guidata` inserts
+            ed.grow_guidata(*st.args, st.note)
             edits.append(relocate.Edit(at, b"", bytes(st.args[0]), "user op", st.note))
         elif st.kind == "call":
             name, args, kwargs = st.args

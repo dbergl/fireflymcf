@@ -98,3 +98,56 @@ def test_call_arguments_are_copied(mcf_136, monkeypatch):
     ed.ledger[0].args[1][0].append(3)       # reaching through the ledger
     assert ed.ledger[0].args == ("eat", ([1, 2],), {"opt": {"k": []}})
     assert replay(mcf_136, ed.ledger) == ed.data
+
+
+# --- grow_guidata -------------------------------------------------------------------------------
+
+def _guidata(data):
+    return next(s for s in container.parse_container(data).sections if "GuiData" in s.name)
+
+
+@pytest.mark.parametrize("payload", [bytes(range(8)), b"\x5a" * 5])
+def test_grow_guidata_appends_before_the_checksum(mcf_136, payload):
+    """The new bytes land where the checksum was (`ge - gs - 4`), padded with zeros to a multiple
+    of 4; the returned panel address is where `offset_of` finds them; the section and the image
+    are sealed; nothing before the append point moved."""
+    from fireflymcf import patch
+    gd = _guidata(mcf_136)
+    ed = Editor(mcf_136)
+    addr = ed.grow_guidata(payload, "table")
+    padded = payload + bytes(-len(payload) % 4)
+    assert addr == theme.guicode_base(gd) + gd.length - 4 and addr % 4 == 0
+    off = ed.offset_of("GuiData", addr)
+    assert off == gd.offset + gd.length - 4
+    assert ed.data[off:off + len(padded)] == padded
+    new = _guidata(ed.data)
+    assert new.length == gd.length + len(padded) and new.length % 4 == 0
+    assert ed.data[gd.offset:off] == mcf_136[gd.offset:off]     # GuiData before it in place
+    assert patch.reseal(ed.data)[1] == []                       # every checksum already right
+    assert len(ed.data) == len(mcf_136) + len(padded)
+
+
+def test_grow_guidata_ledger_replays(mcf_136):
+    ed = Editor(mcf_136)
+    ed.grow_guidata(b"\x01\x02\x03", "first")
+    a2 = ed.grow_guidata(b"\x04" * 4, "second")
+    assert [s.kind for s in ed.ledger] == ["grow_guidata", "grow_guidata"]
+    assert ed.ledger[0].args == (b"\x01\x02\x03\x00",)          # recorded as appended
+    assert replay(mcf_136, ed.ledger) == ed.data
+    replayed, edits = userop._replay(mcf_136, ed.ledger)
+    assert [(e.old, e.new) for e in edits] == [(b"", b"\x01\x02\x03\x00"), (b"", b"\x04" * 4)]
+    assert edits[1].file_offset == ed.offset_of("GuiData", a2)
+
+
+def test_grow_guidata_touches_only_guidata(mcf_136):
+    """GuiData's payload and descriptor change, and the sections after it move in the file; the
+    container header does not (it is never declarable)."""
+    ed = Editor(mcf_136)
+    ed.grow_guidata(bytes(16), "pad")
+    assert userop._touched(mcf_136, ed.data) == {"guidata": _guidata(mcf_136).name}
+
+
+def test_grow_guidata_refuses_empty(mcf_136):
+    with pytest.raises(EditorError) as e:
+        Editor(mcf_136).grow_guidata(b"", "nothing")
+    assert e.value.code == "BAD_EDIT"
