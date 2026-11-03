@@ -293,7 +293,8 @@ _CACHE_ACTIVE = [False]
 
 
 def _compile_through_cache(project, stock, *args, **kwargs):
-    if args or kwargs or not _CACHE_ACTIVE[0] or \
+    # A compile with user ops loaded (`userop.registered`) reads op folders the key cannot see.
+    if args or kwargs or not _CACHE_ACTIVE[0] or _recipe._user_ops() or \
             hashlib.sha256(stock).hexdigest() != project.base_sha256:
         return _UNCACHED_COMPILE(project, stock, *args, **kwargs)
     entry, failed = _cached_entry(project, stock)

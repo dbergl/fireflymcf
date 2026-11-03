@@ -1,0 +1,10 @@
+{
+  "name": "crash",
+  "type": "user:crash",
+  "version": "1.0.0",
+  "author": "fireflymcf tests",
+  "description": "A build that raises (a loader fixture)",
+  "touches": ["guicode"],
+  "written_against": ["13.6"],
+  "provenance": ["followchannel.HOOK_OFF holds followchannel.HOOK_STOCK on stock 13.6"]
+}

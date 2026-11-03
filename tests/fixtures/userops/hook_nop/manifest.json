@@ -1,0 +1,10 @@
+{
+  "name": "hook_nop",
+  "type": "user:hook-nop",
+  "version": "1.0.0",
+  "author": "fireflymcf tests",
+  "description": "Replace the per-tick hook call with two nops (a loader fixture, never flash it)",
+  "touches": ["guicode"],
+  "written_against": ["13.6"],
+  "provenance": ["followchannel.HOOK_OFF holds followchannel.HOOK_STOCK on stock 13.6"]
+}

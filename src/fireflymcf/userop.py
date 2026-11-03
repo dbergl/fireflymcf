@@ -12,11 +12,18 @@ the offset within the section.
 """
 from __future__ import annotations
 
+import contextlib
 import copy
+import hashlib
+import importlib.util
+import json
+import sys
+import traceback
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
-from . import container, growsection, routinekit, theme
+from . import container, growsection, recipe, relocate, routinekit, theme
 from .recipe import RecipeError
 
 
@@ -131,15 +138,282 @@ class Editor:
 
 
 def replay(data: bytes, ledger: tuple[Step, ...]) -> bytes:
-    ed = Editor(data)
+    return _replay(data, ledger)[0]
+
+
+def _replay(data: bytes, ledger: tuple[Step, ...]) -> tuple[bytes, list]:
+    """`replay`, plus one `relocate.Edit` per patch and grow step (output-image offsets)."""
+    ed, edits = Editor(data), []
     for st in ledger:
         if st.kind == "patch":
-            ed.patch(*st.args, st.note)
+            off, expected, new = st.args
+            ed.patch(off, expected, new, st.note)
+            edits.append(relocate.Edit(off, bytes(expected), bytes(new), "user op", st.note))
         elif st.kind == "grow":
+            gc = ed.section("GuiCode")
+            at = gc.offset + gc.length - 4          # where `grow_section` inserts
             ed.grow_guicode(*st.args, st.note)
+            edits.append(relocate.Edit(at, b"", bytes(st.args[0]), "user op", st.note))
         elif st.kind == "call":
             name, args, kwargs = st.args
             ed.call(name, *args, **kwargs)
         else:
             raise EditorError("BAD_EDIT", f"unknown step kind {st.kind!r}")
-    return ed.data
+    return ed.data, edits
+
+
+# ---------------------------------------------------------------------------------------------
+# UserOp and the loader
+# ---------------------------------------------------------------------------------------------
+
+TOUCHES = frozenset({"guicode", "guidata", "g12", "lcd"})
+MANIFEST_FIELDS = {"name": str, "type": str, "version": str, "author": str,
+                   "description": str, "touches": list, "written_against": list,
+                   "provenance": list}
+PREFIX = "user:"
+
+
+def _where(exc: BaseException, folder: Path | None = None) -> str:
+    """`file:line` of the frame that raised: the deepest frame inside the op's folder when there
+    is one (a crash inside a library call is reported where the op made it), else the deepest."""
+    if isinstance(exc, SyntaxError) and exc.filename:
+        return f"{_rel(exc.filename, folder)}:{exc.lineno}"
+    frames = traceback.extract_tb(exc.__traceback__)
+    if not frames:
+        return "?"
+    mine = [f for f in frames if folder is not None and _inside(f.filename, folder)]
+    f = (mine or frames)[-1]
+    return f"{_rel(f.filename, folder)}:{f.lineno}"
+
+
+def _inside(filename: str, folder: Path) -> bool:
+    try:
+        Path(filename).resolve().relative_to(folder.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _rel(filename: str, folder: Path | None) -> str:
+    if folder is not None and _inside(filename, folder):
+        return Path(filename).resolve().relative_to(folder.resolve()).as_posix()
+    return filename
+
+
+def _crashed(type_name: str, exc: BaseException, folder: Path | None, op_id=None) -> RecipeError:
+    return RecipeError("USER_OP_CRASHED", f"{type_name}: {type(exc).__name__}: {exc} "
+                       f"(at {_where(exc, folder)})", op_id=op_id)
+
+
+class UserOp(recipe.Op):
+    """A user-written op. Subclasses implement `build` (every write through the `Editor`) and
+    `check` (returns the manifest line); they must not override `apply` or `verify`, which are
+    the gate: the engine replays the Editor's ledger against the op's input and refuses any byte
+    the ledger does not account for. Always `hardware_verified = False`."""
+    hardware_verified = False
+    user_op = True
+    manifest: dict = {}                                   # set by the loader
+    folder_sha256: str = ""
+    folder: Path | None = None
+
+    def __init__(self, spec: recipe.OpSpec):
+        try:
+            super().__init__(spec)          # runs the subclass's validate()
+        except RecipeError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise _crashed(self.type, e, self.folder, spec.id) from e
+
+    def build(self, ed: Editor, ctx: recipe.Ctx) -> None:
+        raise NotImplementedError
+
+    def check(self, data: bytes, ctx: recipe.Ctx) -> str:
+        raise NotImplementedError
+
+    def apply(self, data: bytes, ctx: recipe.Ctx) -> bytes:
+        ed = Editor(data)
+        try:
+            self.build(ed, ctx)
+        except RecipeError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a user op's crash is a structured refusal
+            raise _crashed(self.type, e, self.folder, self.spec.id) from e
+        out = ed.data
+        try:
+            replayed, edits = _replay(data, ed.ledger)
+        except RecipeError as e:
+            raise RecipeError("USER_OP_TAMPERED", f"{self.type}: its ledger does not replay "
+                              f"on its input ({e.code}: {e})", op_id=self.spec.id) from e
+        if replayed != out:
+            diff = next((i for i, (a, b) in enumerate(zip(replayed, out)) if a != b),
+                        min(len(replayed), len(out)))
+            raise RecipeError("USER_OP_TAMPERED", f"{self.type}: its output differs from the "
+                              f"replay of its ledger (first at file offset {diff:#x}): a byte "
+                              "was written outside the Editor", op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        return out
+
+    def verify(self, data: bytes, ctx: recipe.Ctx) -> str:
+        try:
+            line = self.check(data, ctx)
+        except RecipeError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise _crashed(self.type, e, self.folder, self.spec.id) from e
+        if not isinstance(line, str):
+            raise RecipeError("USER_OP_CRASHED", f"{self.type}: check returned "
+                              f"{type(line).__name__}, not a manifest line", op_id=self.spec.id)
+        return "user op %s v%s (%s): %s" % (self.type, self.manifest.get("version", "?"),
+                                            self.folder_sha256[:12], line)
+
+
+@dataclass
+class LoadedOp:
+    type: str
+    cls: type
+    folder: Path
+    manifest: dict
+    folder_sha256: str
+
+
+def folder_hash(folder: Path) -> str:
+    """sha256 over the folder's files, sorted by posix relative path (path, NUL, length, bytes
+    per file), ignoring `__pycache__` and `*.pyc`."""
+    folder = Path(folder)
+    h = hashlib.sha256()
+    files = sorted((p.relative_to(folder).as_posix(), p) for p in folder.rglob("*")
+                   if p.is_file() and p.suffix != ".pyc"
+                   and "__pycache__" not in p.relative_to(folder).parts)
+    for rel, p in files:
+        body = p.read_bytes()
+        h.update(rel.encode() + b"\0" + len(body).to_bytes(8, "little"))
+        h.update(body)
+    return h.hexdigest()
+
+
+def _bad(folder: Path, why: str) -> RecipeError:
+    return RecipeError("BAD_USER_OP", f"{folder}: {why}")
+
+
+def _read_manifest(folder: Path) -> dict:
+    mf = folder / "manifest.json"
+    if not mf.is_file():
+        raise _bad(folder, "no manifest.json")
+    if not (folder / "op.py").is_file():
+        raise _bad(folder, "no op.py")
+    try:
+        m = json.loads(mf.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise _bad(folder, f"manifest.json is not valid JSON: {e}")
+    if not isinstance(m, dict):
+        raise _bad(folder, "manifest.json must be an object")
+    for k, kind in MANIFEST_FIELDS.items():
+        if not isinstance(m.get(k), kind):
+            raise _bad(folder, f"manifest field {k!r} must be a {kind.__name__}, "
+                       f"got {m.get(k)!r}")
+    bad = [t for t in m["touches"] if t not in TOUCHES]
+    if bad:
+        raise _bad(folder, f"manifest 'touches' has {bad}; allowed: {sorted(TOUCHES)}")
+    t = m["type"]
+    if not t.startswith(PREFIX) or len(t) == len(PREFIX):
+        raise RecipeError("USER_OP_NAME", f"{folder}: user op type {t!r} must start with "
+                          f"{PREFIX!r} and name the op")
+    if t in recipe.REGISTRY:
+        raise RecipeError("USER_OP_NAME", f"{folder}: {t!r} is a built-in op")
+    return m
+
+
+def _import(folder: Path, manifest: dict, sha: str) -> type:
+    name = f"fireflymcf_userop_{sha[:12]}"
+    spec = importlib.util.spec_from_file_location(name, folder / "op.py")
+    module = importlib.util.module_from_spec(spec)
+    captured: dict = {}
+    token = recipe._CAPTURE.set(captured)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:  # noqa: BLE001 - a broken op.py is a structured refusal
+        sys.modules.pop(name, None)
+        raise _bad(folder, f"importing op.py failed: {type(e).__name__}: {e} "
+                   f"(at {_where(e, folder)})") from e
+    finally:
+        recipe._CAPTURE.reset(token)
+    t = manifest["type"]
+    cls = captured.get(t)
+    if cls is None or not (isinstance(cls, type) and issubclass(cls, UserOp)):
+        raise _bad(folder, f"op.py defines no UserOp subclass decorated @recipe.op({t!r}) "
+                   f"(it registers {sorted(captured)})")
+    extra = sorted(set(captured) - {t})
+    if extra:
+        raise _bad(folder, f"op.py registers {extra} besides its manifest type {t!r}")
+    for gate in ("apply", "verify"):
+        if getattr(cls, gate) is not getattr(UserOp, gate):
+            raise _bad(folder, f"{cls.__name__} overrides {gate}(), which is the engine's "
+                       "gate; implement build() and check()")
+    if cls.__dict__.get("hardware_verified", False) is not False:
+        raise _bad(folder, "a user op cannot declare hardware_verified")
+    cls.hardware_verified = False
+    cls.manifest = manifest
+    cls.folder_sha256 = sha
+    cls.folder = folder
+    return cls
+
+
+def _folders(project_path: Path, project: recipe.Project) -> list[Path]:
+    project_path = Path(project_path)
+    base = project_path if project_path.is_dir() else project_path.parent
+    out: list[Path] = []
+    ops_dir = base / "ops"
+    if ops_dir.is_dir():
+        out += sorted(p for p in ops_dir.iterdir()
+                      if p.is_dir() and not p.name.startswith((".", "__")))
+    for entry in project.ext_ops:
+        p = Path(entry)
+        p = p if p.is_absolute() else base / p
+        if not p.is_dir():
+            raise RecipeError("BAD_USER_OP", f"ext_ops entry {entry!r} is not a folder "
+                              f"({p})")
+        out.append(p)
+    seen, unique = set(), []
+    for p in out:
+        r = p.resolve()
+        if r not in seen:
+            seen.add(r)
+            unique.append(r)
+    return unique
+
+
+def load_user_ops(project_path: Path, project: recipe.Project) -> list[LoadedOp]:
+    """Every op folder beside the project (`<project dir>/ops/*/`) and in `project.ext_ops`,
+    validated and imported. Nothing enters `recipe.REGISTRY`: compile inside
+    `with registered(loaded):`. Raises RecipeError (`BAD_USER_OP`, `USER_OP_NAME`,
+    `USER_OP_DUPLICATE`) on the first bad folder."""
+    loaded: list[LoadedOp] = []
+    by_type: dict[str, Path] = {}
+    for folder in _folders(project_path, project):
+        m = _read_manifest(folder)
+        if m["type"] in by_type:
+            raise RecipeError("USER_OP_DUPLICATE", f"user op type {m['type']!r} is defined "
+                              f"in both {by_type[m['type']]} and {folder}")
+        by_type[m["type"]] = folder
+        sha = folder_hash(folder)
+        loaded.append(LoadedOp(m["type"], _import(folder, m, sha), folder, m, sha))
+    return loaded
+
+
+@contextlib.contextmanager
+def registered(loaded: list[LoadedOp]):
+    """Make `loaded` resolvable by `recipe.compile_project`/`compile_cached` for the block's
+    duration (this thread/context only); the previous overlay is restored on exit."""
+    overlay = {}
+    for lo in loaded:
+        if lo.type in recipe.REGISTRY or not lo.type.startswith(PREFIX):
+            raise RecipeError("USER_OP_NAME", f"{lo.type!r} is not a user op type")
+        if lo.type in overlay:
+            raise RecipeError("USER_OP_DUPLICATE", f"user op type {lo.type!r} given twice")
+        overlay[lo.type] = lo
+    token = recipe._USER_OPS.set(overlay)
+    try:
+        yield overlay
+    finally:
+        recipe._USER_OPS.reset(token)

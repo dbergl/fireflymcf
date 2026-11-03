@@ -65,3 +65,10 @@ def test_a_good_project_passes(validator):
 def test_what_the_engine_refuses_the_schema_refuses(validator, op, why):
     errors = list(validator.iter_errors(_doc(op)))
     assert errors and any(why in e.message for e in errors), [e.message for e in errors]
+
+
+def test_user_op_fields_and_types_pass(validator):
+    doc = dict(_doc({"id": "u", "type": "user:hook-nop", "params": {"anything": 1}}),
+               ext_ops=["../shared/op"], user_op_acceptance={"user:hook-nop": {}})
+    assert list(validator.iter_errors(doc)) == []
+    assert list(validator.iter_errors(dict(_doc(), ext_ops="x")))

@@ -6,6 +6,7 @@ own. `compile_project` is pure and deterministic: same project, byte-identical b
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import dataclasses
 import hashlib
@@ -53,6 +54,11 @@ class Project:
     # file. `_prefix_key` does not read it, so a preview change can never invalidate
     # a compile or alter an output byte; `tests/test_recipe.py` pins that.
     preview: dict = dataclasses.field(default_factory=dict)
+    # User-op folders outside `<project dir>/ops/` (paths relative to the project file), and the
+    # owner's acceptance records for user ops (`userop`; the CLI fills it). Both are written only
+    # when non-empty, so a project without user ops serialises exactly as before.
+    ext_ops: list = dataclasses.field(default_factory=list)
+    user_op_acceptance: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
     def from_json(cls, text: str) -> "Project":
@@ -89,18 +95,31 @@ class Project:
         if not isinstance(preview, dict):
             raise RecipeError("BAD_PROJECT", "field 'preview' must be an object, got %r"
                               % (preview,))
+        ext_ops = doc.get("ext_ops") or []
+        if not (isinstance(ext_ops, list) and all(isinstance(x, str) for x in ext_ops)):
+            raise RecipeError("BAD_PROJECT", "field 'ext_ops' must be a list of paths, got %r"
+                              % (ext_ops,))
+        acceptance = doc.get("user_op_acceptance") or {}
+        if not isinstance(acceptance, dict):
+            raise RecipeError("BAD_PROJECT", "field 'user_op_acceptance' must be an object, "
+                              "got %r" % (acceptance,))
         return cls(base_sha256=doc["base_sha256"], build_name=doc["build_name"], ops=ops,
-                   preview=preview)
+                   preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance)
 
     def to_json(self) -> str:
-        return json.dumps({
+        doc = {
             "schema": self.schema,
             "base_sha256": self.base_sha256,
             "build_name": self.build_name,
             "ops": [{"id": o.id, "type": o.type, "params": o.params,
                      "enabled": o.enabled, "note": o.note} for o in self.ops],
             "preview": self.preview,
-        }, indent=2)
+        }
+        if self.ext_ops:
+            doc["ext_ops"] = self.ext_ops
+        if self.user_op_acceptance:
+            doc["user_op_acceptance"] = self.user_op_acceptance
+        return json.dumps(doc, indent=2)
 
 
 @dataclasses.dataclass
@@ -116,14 +135,36 @@ class Ctx:
 
 REGISTRY: dict[str, type] = {}
 
+# User ops (`userop`) never enter REGISTRY. `userop.registered(...)` sets this overlay for the
+# duration of a compile, so a loaded op cannot outlive the block or leak into another thread's (or
+# test's) compile; `_lookup` consults REGISTRY first, and the loader refuses a built-in's name.
+# Values are `userop.LoadedOp`.
+_USER_OPS: contextvars.ContextVar = contextvars.ContextVar("fireflymcf_user_ops", default=None)
+# While the loader imports an `op.py`, `@op` registers into this dict instead of REGISTRY, so a
+# user op naming a built-in can never replace it, not even between import and refusal.
+_CAPTURE: contextvars.ContextVar = contextvars.ContextVar("fireflymcf_op_capture", default=None)
+
 
 def op(name: str):
     """Class decorator: register an Op subclass under its project-file type name."""
     def register(cls):
         cls.type = name
-        REGISTRY[name] = cls
+        target = _CAPTURE.get()
+        (REGISTRY if target is None else target)[name] = cls
         return cls
     return register
+
+
+def _user_ops() -> dict:
+    return _USER_OPS.get() or {}
+
+
+def _lookup(type_name: str):
+    cls = REGISTRY.get(type_name)
+    if cls is None:
+        loaded = _user_ops().get(type_name)
+        cls = loaded.cls if loaded is not None else None
+    return cls
 
 
 class Op:
@@ -296,7 +337,7 @@ def _build_ops(specs: list) -> tuple:
     raising, so the caller can collect every problem in one pass."""
     ops, errors = [], []
     for spec in specs:
-        cls = REGISTRY.get(spec.type)
+        cls = _lookup(spec.type)
         if cls is None:
             errors.append(RecipeError("UNKNOWN_OP", "no op type %r" % spec.type,
                                       op_id=spec.id))
@@ -424,7 +465,11 @@ def _prefix_key(base_hash: str, specs: list) -> str:
     `base_hash`'s stock. Keyed on (id, type, params) only — `enabled`/`note` never
     reach here since callers always filter to the enabled list first, and `note` has
     no effect on the compiled bytes."""
-    doc = [(s.id, s.type, s.params) for s in specs]
+    user = _user_ops()
+    # A user op's bytes come from its folder, not the package: its folder hash joins the key, so
+    # an edited op misses. Built-in entries keep their 3-tuple, so their keys are unchanged.
+    doc = [(s.id, s.type, s.params) + ((user[s.type].folder_sha256,) if s.type in user else ())
+           for s in specs]
     return hashlib.sha256((base_hash + json.dumps(doc, sort_keys=True))
                           .encode()).hexdigest()
 
