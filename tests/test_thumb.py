@@ -264,3 +264,61 @@ def test_auto_off_encoders_refuse_bad_operands():
         thumb.ldr_imm12(0, 15, 4)      # rN=pc is a literal load, a different instruction
     with pytest.raises(ValueError, match="bad register"):
         thumb.ldr_imm12(15, 4, 4)      # and rT=pc is a branch
+
+
+# --- the helpers a user op's routine uses (acceptance runs 1-2 wrote their own) -----------------
+# Checked against capstone, the independent decoder `Routine.assemble` itself trusts.
+
+def _dis(raw, at=0x259C00):
+    return [t for _a, t in thumb.disassemble(raw, at)]
+
+
+@pytest.mark.parametrize("rt,rn,imm", [(1, 0, 0), (2, 0, 5), (7, 3, 31)])
+def test_strb_imm_t1(rt, rn, imm):
+    raw = thumb.strb_imm(rt, rn, imm)
+    assert len(raw) == 2
+    want = f"strb r{rt}, [r{rn}, #{thumb._imm(imm)}]" if imm else f"strb r{rt}, [r{rn}]"
+    assert _dis(raw) == [want]
+    assert _dis(thumb.ldrb_imm(rt, rn, imm)) == [want.replace("strb", "ldrb")]
+
+
+@pytest.mark.parametrize("rd,rm,n", [(2, 2, 8), (0, 1, 1), (7, 7, 31)])
+def test_lsls_imm_t1(rd, rm, n):
+    assert _dis(thumb.lsls_imm(rd, rm, n)) == [f"lsls r{rd}, r{rm}, #{thumb._imm(n)}"]
+
+
+def test_strb_lsls_refuse_what_t1_cannot_say():
+    for bad in (lambda: thumb.strb_imm(8, 0, 0), lambda: thumb.strb_imm(0, 0, 32),
+                lambda: thumb.lsls_imm(0, 0, 0), lambda: thumb.lsls_imm(0, 9, 1)):
+        with pytest.raises(ValueError):
+            bad()
+
+
+@pytest.mark.parametrize("cond", ["eq", "ne", "cs", "hs", "cc", "lo", "hi", "ls", "ge", "lt"])
+def test_routine_branches_carry_capstones_spelling(cond):
+    """`Routine.bcc` writes the text capstone prints (`cc` is `blo`, `cs` is `bhs`), so an
+    author never has to know it; `b` likewise."""
+    r = thumb.Routine({})
+    r.bcc(cond, "out")
+    r.b("out")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("out")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    blob, dis = r.assemble(0x259C00)
+    assert dis[0][1] == f"b{thumb.COND_TEXT[cond]} #0x259c06"
+    assert dis[1][1] == "b #0x259c06"
+    assert thumb.bcc_n(0, 6, cond) == thumb.bcc_n(0, 6, {"hs": "cs", "lo": "cc"}.get(cond, cond))
+
+
+def test_routine_bcc_out_of_range_is_the_routines_error():
+    class Refused(Exception):
+        pass
+    r = thumb.Routine({}, error=Refused)
+    r.bcc("eq", "far")
+    for _ in range(200):
+        r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("far")
+    with pytest.raises(Refused, match="out of range"):
+        r.assemble(0x259C00)
+    with pytest.raises(Refused, match="unknown condition"):
+        r.bcc("xx", "far")

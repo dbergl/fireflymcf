@@ -32,7 +32,10 @@ from .theme import CapstoneUnavailable
 
 # Condition codes, ARM encoding.
 COND = {"eq": 0x0, "ne": 0x1, "cs": 0x2, "cc": 0x3, "mi": 0x4, "pl": 0x5, "vs": 0x6,
-        "vc": 0x7, "hi": 0x8, "ls": 0x9, "ge": 0xA, "lt": 0xB, "gt": 0xC, "le": 0xD}
+        "vc": 0x7, "hi": 0x8, "ls": 0x9, "ge": 0xA, "lt": 0xB, "gt": 0xC, "le": 0xD,
+        "hs": 0x2, "lo": 0x3}                  # capstone's names for cs and cc
+# How capstone spells each condition (`cs`/`cc` print as `hs`/`lo`).
+COND_TEXT = {c: {"cs": "hs", "cc": "lo"}.get(c, c) for c in COND}
 
 NOP2 = bytes.fromhex("00bf")
 NOP4 = bytes.fromhex("aff30080")
@@ -278,6 +281,28 @@ def strh_imm(rt: int, rn: int, imm5: int) -> bytes:
     return struct.pack("<H", 0x8000 | ((imm5 >> 1) << 6) | (rn << 3) | rt)
 
 
+def strb_imm(rt: int, rn: int, imm5: int) -> bytes:
+    """`strb rT,[rN,#imm5]` — T1, 2 bytes, low registers; `imm5` is a byte offset (0..31).
+    The mirror of `ldrb_imm` (base 0x7000 vs 0x7800)."""
+    for r in (rt, rn):
+        if not 0 <= r <= 7:
+            raise ValueError(f"strb T1 needs low registers, got r{r}")
+    if not 0 <= imm5 <= 31:
+        raise ValueError(f"strb T1 imm5 out of range: {imm5}")
+    return struct.pack("<H", 0x7000 | (imm5 << 6) | (rn << 3) | rt)
+
+
+def lsls_imm(rd: int, rm: int, imm5: int) -> bytes:
+    """`lsls rD,rM,#imm5` — T1 logical shift left, 2 bytes, low registers; `imm5` is 1..31
+    (0 would be `movs rD,rM`, so it is refused)."""
+    for r in (rd, rm):
+        if not 0 <= r <= 7:
+            raise ValueError(f"lsls T1 needs low registers, got r{r}")
+    if not 1 <= imm5 <= 31:
+        raise ValueError(f"lsls T1 imm5 out of range (1..31): {imm5}")
+    return struct.pack("<H", (imm5 << 6) | (rm << 3) | rd)
+
+
 def lsrs_imm(rd: int, rm: int, imm5: int) -> bytes:
     """`lsrs rD,rM,#imm5` — T1 logical shift right, 2 bytes, low registers; `imm5` is 1..31.
 
@@ -433,6 +458,25 @@ class Routine:
                 text = f"ldr r{rt}, [pc, #{_imm(off)}]" if off else f"ldr r{rt}, [pc]"
                 return ldr_literal(rt, h, s(name)), text
             self.emit(2, fn)
+
+    def b(self, name: str) -> None:
+        """`b label`: T2 narrow unconditional branch (+-2 KB), with capstone's text."""
+        self.emit(2, lambda h, s: (b_n(h, s(name)), f"b #{s(name):#x}"))
+
+    def bcc(self, cond: str, name: str) -> None:
+        """`b<cond> label`: T1 narrow conditional branch (+-256 B). `cond` is any key of
+        `COND` (`cs`/`hs` and `cc`/`lo` are the same); the text is capstone's spelling. Out of
+        range is the routine's error: branch over a `b` to reach further."""
+        if cond not in COND:
+            raise self.error(f"unknown condition {cond!r}")
+        text = COND_TEXT[cond]
+
+        def fn(h, s):
+            try:
+                return bcc_n(h, s(name), cond), f"b{text} #{s(name):#x}"
+            except ValueError as e:
+                raise self.error(str(e)) from None
+        self.emit(2, fn)
 
     def assemble(self, code_load_addr: int, entry_off: int = 0) -> tuple[bytes, list]:
         labels: dict = {}
