@@ -1,0 +1,110 @@
+"""The Scenario API: drive the emulated panel by control name and simulated bus value.
+
+Each test boots stock 13.6 on the emulator with the demo network, so each costs a few seconds
+of wall time; every scenario runs only as long as its assertion needs.
+"""
+import numpy as np
+import pytest
+
+pytest.importorskip("unicorn")
+
+from fireflymcf.emu.scenario import Frame, Scenario, ScenarioError  # noqa: E402
+
+NEEDS_RESEARCH_DATA = "boots the 13.6 corpus image in the emulator"
+
+DC_DIMMER_COMMAND_2 = 0x1FEDB
+G12_TANK_LEVEL_SENSOR = 0x0BFC1
+G12_SA = 0x9C
+HEAT_PUMP_SELECTOR = 0xEB      # `fireflymcf bus-map --name "Heat Pump"`: touch 0x843 -> 1FED9 sel EB
+
+
+@pytest.fixture
+def booted(mcf_136):
+    s = Scenario(mcf_136, timeout_s=240)
+    s.boot()
+    return s
+
+
+def test_boot_reaches_home(mcf_136, booted, tmp_path):
+    terms = Scenario(mcf_136, timeout_s=120)
+    terms.boot(accept_terms=False)
+    assert terms.page.startswith("Thank you for being part of the Firefly family!")
+    terms_img = terms.screenshot(tmp_path / "terms.png")
+    with pytest.raises(ScenarioError):          # HOME's header is not on the terms page
+        terms.control_box("HOME")
+
+    assert booted.page == "HOME"
+    x0, y0, x1, y1 = booted.control_box("HOME")
+    assert x1 > x0 and y1 > y0
+    home_img = booted.screenshot(tmp_path / "home.png")
+    assert home_img.shape == terms_img.shape == (480, 800, 3)
+    assert (tmp_path / "home.png").stat().st_size > 0
+    # The terms page's I ACCEPT button region, compared pixel for pixel: HOME draws something else.
+    bx0, by0, bx1, by1 = terms.control_box("I ACCEPT")
+    assert not np.array_equal(home_img[by0:by1, bx0:bx1], terms_img[by0:by1, bx0:bx1])
+
+
+def test_tap_light_sends_dimmer_command(booted):
+    t0 = booted.now
+    assert booted.frames(dgn=DC_DIMMER_COMMAND_2, since=t0) == []
+    booted.tap("Main Ceiling")                 # HOME's 'Main\nCeiling', whitespace-normalised
+    booted.run(2.0 - (booted.now - t0))
+    sent = booted.frames(dgn=DC_DIMMER_COMMAND_2, since=t0)
+    assert sent, "tapping Main Ceiling sent no DC_DIMMER_COMMAND_2"
+    assert all(isinstance(f, Frame) and f.sa == 0x9F and f.t - t0 <= 2.0 for f in sent)
+
+
+def test_tank_raw_reaches_g12_frames(booted):
+    t0 = booted.now
+    booted.set_tank_raw(1, 63000)
+    booted.run(5.0)
+    raw = (63000).to_bytes(2, "little")
+    hits = [f for f in booted.frames(sa=None, dgn=G12_TANK_LEVEL_SENSOR, since=t0)
+            if f.data[0] == 1 and f.data[1:3] == raw]
+    assert hits and all(f.sa == G12_SA for f in hits)
+    # the panel itself never sends that DGN: the default sa filter (0x9F) sees none
+    assert booted.frames(dgn=G12_TANK_LEVEL_SENSOR, since=t0) == []
+
+
+def test_option_tap_updates_g12_selector(booted):
+    booted.goto("OPTIONS")
+    assert booted.page == "OPTIONS"
+    before = booted.g12_selector(HEAT_PUMP_SELECTOR)
+    t0 = booted.now
+    booted.tap("Heat Pump")
+    booted.run(1.0)
+    after = booted.g12_selector(HEAT_PUMP_SELECTOR)
+    assert after is not None and after != before
+    writes = [f for f in booted.frames(dgn=0x1FED9, since=t0) if f.data[1:3] == b"\x96\xeb"]
+    assert writes, "no 1FED9 group-0x96 write to selector EB from the panel"
+
+
+def test_ambiguous_label_refused(booted):
+    # HOME draws a "V" unit after both the House (object 443) and Chassis (440) voltages.
+    with pytest.raises(ScenarioError, match="ambiguous") as e:
+        booted.tap("V")
+    assert "440" in str(e.value) and "443" in str(e.value)
+    t0 = booted.now
+    with pytest.raises(ScenarioError, match="no control labelled"):
+        booted.tap("No Such Control")
+    assert booted.now == t0 and booted.frames(since=t0, sa=None) == []   # refused before tapping
+
+
+def test_unknown_page_refused(booted):
+    with pytest.raises(ScenarioError, match="no known path to page"):
+        booted.goto("CLEAR EEPROM")
+
+
+def test_read_mem_and_timeout(mcf_136):
+    s = Scenario(mcf_136, timeout_s=0.5)
+    with pytest.raises(ScenarioError, match="timeout"):
+        s.boot()
+    assert len(s.read_mem(0x20000000, 16)) == 16
+
+
+def test_cpu_fault_raises(mcf_136):
+    s = Scenario(mcf_136)
+    s._booted = True                                 # fault injection: no boot needed
+    s._m.run = lambda cycles: "unmapped read 0x00000000 (size 4) at pc=0x00000000"
+    with pytest.raises(ScenarioError, match="fault: unmapped read"):
+        s.run(0.1)

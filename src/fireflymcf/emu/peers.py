@@ -401,7 +401,10 @@ def demo_network(bus, guidata, g12_version=None, g12_path=None, ambient=None):
     dimmers = sorted({p.match_value for p in data_points(guidata)
                       if p.pgn == rvc.DC_DIMMER_STATUS_3 and p.match_value != 0xFF})
     mcf_data = getattr(bus.m, "mcf_data", None)
-    inputs = dict(DEMO_G12_INPUTS, **({} if ambient is None else {"ambient": ambient}))
+    # The tanks dict is copied too: a caller that moves a sensor (Scenario.set_tank_raw) must
+    # not move it for every later network built in the same process.
+    inputs = dict(DEMO_G12_INPUTS, tanks=dict(DEMO_G12_INPUTS["tanks"]),
+                  **({} if ambient is None else {"ambient": ambient}))
     g12 = from_mcf(mcf_data, path=g12_path, inputs=inputs,
                    cells=DEMO_G12_CELLS) if mcf_data else None
     if g12 is None:
