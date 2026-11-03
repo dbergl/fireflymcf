@@ -35,6 +35,7 @@ from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
+from fireflymcf import recordedit
 from fireflymcf import rvcbutton
 from fireflymcf import statelights
 from fireflymcf import statusfold
@@ -304,6 +305,333 @@ class MoveElement(Op):
             assert struct.unpack_from("<H", data, off)[0] == val, \
                 "move_element: obj %d %s != %d" % (obj, key, self.written["set"][key])
         return "move: object %d %s" % (obj, self.written["set"])
+
+
+# The widgets whose fifth geometry slot (`geom[4]` -> state +0x32) the shape renderer
+# `FUN_00256C54` reads as a corner radius (`records.WRecord.corner_radius`).
+_ROUNDED_WTYPES = (0x03, 0x10, 0x20, 0x21)
+
+
+@op("set_corner_radius")
+class SetCornerRadius(Op):
+    """Set the corner radius of one rounded widget (button body, capsule, gauge well, dot).
+
+    The radius is the record's fifth geometry slot (`geom[4]`), a u16 the shape renderer
+    `FUN_00256C54` reads at state +0x32 (`records.WRecord.corner_radius`, RENDER.md "The corner
+    radius is byte-derived"). Writing half the shorter side turns a rounded rectangle into a
+    pill (`radius: "pill"`). A same-size edit: the record must already carry the slot.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element` (wtype, label, nth)
+      radius: int 0..255, or "pill" -- min(|w|, |h|) // 2 from the record's own w/h slots
+      expect: int (optional) -- the radius the record must hold before the write
+
+    Error codes:
+      BAD_PARAMS -- radius is neither an int in 0..255 nor "pill", or expect is not an int
+      NO_SUCH_RECORD -- no record matches selector
+      NOT_ROUNDED -- the record is not a rounded widget (wtype 3, 0x10, 0x20 or 0x21)
+      NO_FIELD -- the record carries no radius slot, or "pill" and it has no w/h slots
+      EXPECT_MISMATCH -- the record's radius differs from `expect`
+
+    The object is drawn wherever it is attached: an object shared by several pages changes on
+    all of them.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "radius": {"type": ["integer", "string"],
+                       "description": "corner radius in px (0..255), or \"pill\" for half the shorter side"},
+            "expect": {"type": "integer",
+                       "description": "the radius the record must hold before the write"},
+        },
+        "required": ["target", "selector", "radius"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.radius = self._param("radius")
+        self.expect = self._param("expect", None)
+        r = self.radius
+        if not (r == "pill" or (isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= 255)):
+            raise RecipeError("BAD_PARAMS", "set_corner_radius radius %r is neither an int in "
+                              "0..255 nor \"pill\"" % (r,), op_id=self.spec.id)
+        if self.expect is not None and (not isinstance(self.expect, int)
+                                        or isinstance(self.expect, bool)):
+            raise RecipeError("BAD_PARAMS", "set_corner_radius expect %r is not an int"
+                              % (self.expect,), op_id=self.spec.id)
+
+    def _site(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if rec.wtype not in _ROUNDED_WTYPES:
+            raise RecipeError("NOT_ROUNDED", "object %d record %r is wtype %#x (%s), not a "
+                              "rounded widget" % (obj, self.selector, rec.wtype,
+                                                  records.wtype_name(rec.wtype)),
+                              op_id=self.spec.id)
+        off = records.geom_offset(data, rec, 4)
+        if off is None:
+            raise RecipeError("NO_FIELD", "object %d record %r carries no corner-radius slot"
+                              % (obj, self.selector), op_id=self.spec.id)
+        return obj, rec, off
+
+    def _value(self, obj, rec):
+        if self.radius != "pill":
+            return self.radius
+        w, h = rec.geom[2], rec.geom[3]
+        if w is None or h is None:
+            raise RecipeError("NO_FIELD", "object %d record %r has no w/h slots to size a pill"
+                              % (obj, self.selector), op_id=self.spec.id)
+        return min(abs(layout._s16(w)), abs(layout._s16(h))) // 2
+
+    def apply(self, data, ctx):
+        obj, rec, off = self._site(data, ctx)
+        if self.expect is not None and rec.corner_radius != self.expect:
+            raise RecipeError("EXPECT_MISMATCH", "object %d radius is %d, project expected %d"
+                              % (obj, rec.corner_radius, self.expect), op_id=self.spec.id)
+        value = self._value(obj, rec)
+        buf = bytearray(data)
+        _put16(buf, off, value, ctx, "set_corner_radius obj %d %d -> %d"
+               % (obj, rec.corner_radius, value))
+        out, _ = patch.reseal(bytes(buf))
+        ctx.handles[self.spec.id] = {"object": obj, "radius": value, "was": rec.corner_radius}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        _, rec, _ = self._site(data, ctx)
+        assert rec.corner_radius == h["radius"], \
+            "set_corner_radius: obj %d radius %r != %d" % (h["object"], rec.corner_radius,
+                                                           h["radius"])
+        return "corner radius: object %d %d -> %d" % (h["object"], h["was"], h["radius"])
+
+
+# colour spelling -> (mode, value) for set_record_color (GUICODE Findings 28/38)
+_NAMED_COLOR_MODES = {"inherit": 0, "dark": 1, "white": 2, "transparent": 5}
+
+
+def _color_mode(color, op_id):
+    """A `set_record_color` colour -> (decoder mode, inline value)."""
+    if isinstance(color, str) and color in _NAMED_COLOR_MODES:
+        return _NAMED_COLOR_MODES[color], None
+    if (isinstance(color, list) and len(color) == 3
+            and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255
+                    for v in color)):
+        return 3, tuple(color)
+    if isinstance(color, dict) and len(color) == 1:
+        (k, v), = color.items()
+        if isinstance(v, int) and not isinstance(v, bool):
+            if k == "index" and 0 <= v <= 0xFFFF:
+                return 7, v
+            if k == "palette" and 0 <= v <= 0xFF:
+                return 6, v
+    raise RecipeError("BAD_PARAMS", "color %r is not [r,g,b], {\"index\": n}, {\"palette\": n} "
+                      "or one of %s" % (color, sorted(_NAMED_COLOR_MODES)), op_id=op_id)
+
+
+@op("set_record_color")
+class SetRecordColor(Op):
+    """Set one colour field of a record to any colour mode, adding the inline value if the
+    field has none.
+
+    A colour field is 3 mode bits in the header plus, for modes 3/6/7, an inline value
+    (`recordedit`). On a text label `fillA` is the INK and `fillB` the box background (the
+    CLIMATE title bar is a wtype-11 fillB); on a fill or capsule `fillA` is the body. So this op
+    darkens a caption (`"dark"`: mode 1, the colour at GuiCode `0x2535AC`, `0x322B42`, with no
+    inline bytes), or paints a label's box (`fillB` `[r,g,b]`). A change between valueless modes
+    is same-size; a change that adds or resizes a value grows the object through
+    `relocate.replace_object_records`.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element` (wtype, label, nth)
+      role: "fillA"|"fillB"|"fillA2"|"fillB2" (default "fillA")
+      color: [r,g,b] (mode 3) | {"index": n} (mode 7) | {"palette": n} (mode 6) |
+             "dark" (1) | "white" (2) | "transparent" (5) | "inherit" (0)
+      every: bool (default false) -- every record the selector matches, not only `nth`
+      from_mode: int (optional) -- only records whose field currently has this mode
+
+    Error codes:
+      BAD_PARAMS -- an unknown role or colour spelling, or `from_mode` without `every`
+      NO_SUCH_RECORD -- nothing matches
+      NO_FIELD -- the record's type (or its colour-mode bytes) gives it no such field
+      POINTER_INSIDE -- a GuiCode/LCD literal points into the object after the edited record
+      RELOCATE_REFUSED -- the relocation gates refused the grown object
+
+    `set_theme` runs after it and remaps an inline colour equal to a theme colour, as it does
+    every inline field.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "role": {"type": "string", "enum": ["fillA", "fillB", "fillA2", "fillB2"],
+                     "default": "fillA", "description": "the colour field (fillA = a label's ink)"},
+            "color": {"type": ["array", "object", "string"],
+                      "description": "[r,g,b], {\"index\": n}, {\"palette\": n}, or dark/white/transparent/inherit"},
+            "every": {"type": "boolean", "default": False,
+                      "description": "every record the selector matches"},
+            "from_mode": {"type": "integer",
+                          "description": "only records whose field holds this mode now"},
+        },
+        "required": ["target", "selector", "color"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.role = self._param("role", "fillA")
+        self.every = self._param("every", False)
+        self.from_mode = self._param("from_mode", None)
+        if self.role not in recordedit.ROLES:
+            raise RecipeError("BAD_PARAMS", "role %r is not one of %s"
+                              % (self.role, recordedit.ROLES), op_id=self.spec.id)
+        if self.from_mode is not None and not self.every:
+            raise RecipeError("BAD_PARAMS", "from_mode filters an `every` selection",
+                              op_id=self.spec.id)
+        self.mode, self.value = _color_mode(self._param("color"), self.spec.id)
+
+    def _targets(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        if not self.every:
+            rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+            recs = records.object_records(data, gs + tab[obj])
+            return obj, [next(i for i, r in enumerate(recs) if r.offset == rec.offset)]
+        wtype, label = self.selector.get("wtype"), self.selector.get("label")
+        out = []
+        for i, r in enumerate(records.object_records(data, gs + tab[obj])):
+            if wtype is not None and r.wtype != wtype:
+                continue
+            if label is not None and (r.label or "").strip() != label.strip():
+                continue
+            have = dict((c[0], c[1]) for c in r.colors)
+            if self.role not in have:
+                continue
+            if self.from_mode is not None and have[self.role] != self.from_mode:
+                continue
+            out.append(i)
+        if not out:
+            raise RecipeError("NO_SUCH_RECORD", "object %d has no record matching %r with a %s "
+                              "field%s" % (obj, self.selector, self.role,
+                                           "" if self.from_mode is None
+                                           else " in mode %d" % self.from_mode),
+                              op_id=self.spec.id)
+        return obj, out
+
+    def apply(self, data, ctx):
+        obj, idxs = self._targets(data, ctx)
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[obj])
+        new = {}
+        try:
+            for i in idxs:
+                new[i] = recordedit.with_color(data, recs[i], self.role, self.mode, self.value)
+            out, edits = recordedit.replace_records(data, obj, new)
+        except recordedit.PointerInside as err:
+            raise RecipeError("POINTER_INSIDE", str(err), op_id=self.spec.id)
+        except relocate.RelocationError as err:
+            raise RecipeError("RELOCATE_REFUSED", str(err), op_id=self.spec.id)
+        except recordedit.RecordEditError as err:
+            raise RecipeError("NO_FIELD", str(err), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.handles[self.spec.id] = {"object": obj, "records": idxs}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[h["object"]])
+        want = recordedit._decoded_value(self.mode, self.value)
+        for i in h["records"]:
+            got = dict((c[0], (c[1], c[2])) for c in recs[i].colors)[self.role]
+            assert got == (self.mode, want), \
+                "set_record_color: object %d record %d %s is %r" % (h["object"], i,
+                                                                    self.role, got)
+        return "record color: object %d record(s) %s %s -> mode %d%s" % (
+            h["object"], h["records"], self.role, self.mode,
+            "" if self.value is None else " %r" % (self.value,))
+
+
+@op("fill_to_capsule")
+class FillToCapsule(Op):
+    """Turn a plain fill (wtype 4) into a capsule (wtype 0x21) with a corner radius.
+
+    The two types decode the same fields (`recordedit.with_wtype_radius`), and the capsule case
+    of `FUN_00256C54` draws a solid rounded rectangle in fillA where the fill case draws a square
+    one, so the colour and box are unchanged and only the corners round. The radius slot
+    (geometry slot 4) is added when the fill has none, which grows the object by 2 bytes.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element`; it must name a wtype-4 record
+      radius: int 0..255
+
+    Error codes:
+      BAD_PARAMS -- radius out of range
+      NO_SUCH_RECORD -- nothing matches
+      NOT_A_FILL -- the record is not wtype 4
+      POINTER_INSIDE / RELOCATE_REFUSED -- as `set_record_color`
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "radius": {"type": "integer", "description": "corner radius in px (0..255)"},
+        },
+        "required": ["target", "selector", "radius"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.radius = self._param("radius")
+        if (not isinstance(self.radius, int) or isinstance(self.radius, bool)
+                or not 0 <= self.radius <= 255):
+            raise RecipeError("BAD_PARAMS", "radius %r is not an int in 0..255" % (self.radius,),
+                              op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if rec.wtype != 0x04:
+            raise RecipeError("NOT_A_FILL", "object %d record %r is wtype %#x, not a fill"
+                              % (obj, self.selector, rec.wtype), op_id=self.spec.id)
+        recs = records.object_records(data, gs + tab[obj])
+        idx = next(i for i, r in enumerate(recs) if r.offset == rec.offset)
+        try:
+            new = recordedit.with_wtype_radius(data, rec, 0x21, self.radius)
+            out, edits = recordedit.replace_records(data, obj, {idx: new})
+        except recordedit.PointerInside as err:
+            raise RecipeError("POINTER_INSIDE", str(err), op_id=self.spec.id)
+        except relocate.RelocationError as err:
+            raise RecipeError("RELOCATE_REFUSED", str(err), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.handles[self.spec.id] = {"object": obj, "index": idx}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        rec = records.object_records(data, gs + tab[h["object"]])[h["index"]]
+        assert rec.wtype == 0x21 and rec.corner_radius == self.radius, \
+            "fill_to_capsule: object %d record %d is wtype %#x radius %r" % (
+                h["object"], h["index"], rec.wtype, rec.corner_radius)
+        return "fill to capsule: object %d record %d, radius %d" % (h["object"], h["index"],
+                                                                     self.radius)
 
 
 @op("move_attach")
@@ -1931,8 +2259,8 @@ def _isolate_cell(data: bytes, ctx, index: int, width: int, vtype, note: str):
 # in_lower_right`): a record's x/y geometry is a DELTA off the position the previous FLOW-GATED
 # record committed (`layout._in_flow_gate`; wtype 5/11 both gate, wtype 33 does not), not an
 # absolute or container-relative offset -- and a container's subtree recursion
-# (`layout.Screen.walk`) does not save/restore the flow-origin registers around it, only the
-# fill-colour ones. So after a wt-5 attach recurses into its child object, the flow origin for
+# (`layout.Screen.walk`) does not save/restore the flow-origin registers around it, nor the
+# fill-colour ones (GUICODE Finding 29). So after a wt-5 attach recurses into its child object, the flow origin for
 # whatever comes NEXT in the parent's own record stream is whatever the child's own LAST
 # flow-gated leaf left it at (empirically, the battery graphic's trailing 'V' unit label) --
 # not the attach's own committed position. Two consequences drive this op's layout:
@@ -3067,6 +3395,14 @@ def _check_select(sel, op_id):
 
 def _tupled(v):
     return tuple(_tupled(x) for x in v) if isinstance(v, (list, tuple)) else v
+
+
+def _restore_colours_ok(rec, cols) -> bool:
+    """A restore record carries the colours its handle recorded (`enumlabel.restore_colors`);
+    `cols` is `[]` for a handle from before colours were restored, else `[{role: [mode, v]}]`."""
+    want = {role: tuple(mv) for role, mv in (cols[0] if cols else {}).items()}
+    got = {role: (mode, value) for role, mode, value in rec.colors if role in want}
+    return got == want
 
 
 def _walk_to_json(walk):
@@ -7502,7 +7838,8 @@ class AddCardReadouts(Op):
 
     Another `parent` takes the paste path instead (`insert.insert_object`, a clone of the
     parent's first wtype-5 attach appended as its last record), the object ended by an empty
-    label that hands back the font and align the walk carried in (`enumlabel.restore_state`).
+    label that hands back the font, align and colours the walk carried in
+    (`enumlabel.restore_state`).
     Every page root reaching `parent`, in every switch-arm set, is then walked before and after
     (`enumlabel.foreign_deltas`), as `add_enum_label` and `add_rvc_button` do: the readouts
     are absolute, but the flow origin they leave is not restored, so on some parents every
@@ -8127,7 +8464,8 @@ class AddEnumLabel(_LabelBox, Op):
     declared `w` x `h` box (the panel clips text to it, `GUICODE.md` Findings 69-70), after a
     `background` fill when one is given. The switch is absolute at `x, y`, in a new object
     attached under `parent` (`insert.insert_object`), ended by an empty label that hands back
-    the font and align the page walk carried in (`enumlabel.restore_record`). The cell is always
+    the font, align and colours the page walk carried in (`enumlabel.restore_record`). The cell
+    is always
     freshly grown (`readout.allocate_fresh_cells`, recorded in `ctx.authored_cells`). After
     placement every page root reaching `parent`, in every switch-arm set, is walked before and
     after (`enumlabel.foreign_deltas`): any change besides the label's own records refuses, and
@@ -8328,9 +8666,10 @@ class AddEnumLabel(_LabelBox, Op):
         if h["restore"] is None:
             assert len(recs) == 1, "the label object holds %d records, not its switch" % len(recs)
         else:
-            font, align = h["restore"]
+            font, align, *cols = h["restore"]
             assert len(recs) == 2 and recs[1].wtype == 11 and not recs[1].label \
-                and recs[1].font == font and recs[1].align == align, \
+                and recs[1].font == font and recs[1].align == align \
+                and _restore_colours_ok(recs[1], cols), \
                 "the label object does not end with the (font %r, align %d) restore" % (font,
                                                                                         align)
         assert status_map.cell_table(data)[h["slot"]] == h["cell_addr"]
@@ -8561,9 +8900,10 @@ class AddTextLabel(_LabelBox, Op):
             "the label does not draw %r in its %dx%d box at (%d, %d), font %d, ink %d as built" \
             % (h["text"], h["w"], h["h"], h["x"], h["y"], h["font"], h["colour_index"])
         if tail:
-            font, align = h["restore"]
+            font, align, *cols = h["restore"]
             r = recs[-1]
-            assert not r.label and r.font == font and r.align == align, \
+            assert not r.label and r.font == font and r.align == align \
+                and _restore_colours_ok(r, cols), \
                 "the label object does not end with the (font %r, align %d) restore" % (font,
                                                                                         align)
         # the walk leaves the object in the state it entered with, on every page reaching it
@@ -8596,7 +8936,8 @@ class AddRvcButton(Op):
     `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
     and a wtype-12 touch region whose id is the group. They are pasted as one new object under a
     clone of `parent`'s first wtype-5 attach (`rvcbutton.place`, `move_control`'s paste path),
-    ended by an empty label that hands back the font and align the walk carried in. Every page
+    ended by an empty label that hands back the font, align and colours the walk carried in.
+    Every page
     root reaching `parent`, in every switch-arm set, is walked before and after: the new touch
     region must meet no existing one, no new record may leave the canvas, nothing else may
     change (`enumlabel.foreign_deltas`), and no pasted record may inherit a value slot from a
@@ -10426,6 +10767,17 @@ class AddLevelPage(Op):
         gs, tab = _gs_tab(data)
         return records.object_records(data, gs + tab[self.ROOT])
 
+    @staticmethod
+    def _structure_hex(data, r):
+        """A kept root record's bytes with its four colour-mode fields masked (header byte 3
+        bits 0-5, byte 5 bits 1-6): a later op may switch a valueless colour mode (dark ink on
+        the title, `set_record_color`) without the frame counting as changed. Anything that
+        moves, resizes or re-types the record still shows."""
+        raw = bytearray(data[r.offset:r.end])
+        raw[3] &= 0xC0
+        raw[5] &= 0x81
+        return raw.hex()
+
     def apply(self, data, ctx):
         root = self._root_records(data)
         body_ref = root[self.KEPT_ROOT_RECORDS] if len(root) > self.KEPT_ROOT_RECORDS else None
@@ -10433,7 +10785,7 @@ class AddLevelPage(Op):
             raise RecipeError("PAGE_REFUSED", "root %d record %d does not name object %d"
                               % (self.ROOT, self.KEPT_ROOT_RECORDS, self.BODY),
                               op_id=self.spec.id)
-        kept = [data[r.offset:r.end].hex() for r in root[:self.KEPT_ROOT_RECORDS]]
+        kept = [self._structure_hex(data, r) for r in root[:self.KEPT_ROOT_RECORDS]]
         slot, char = self.arrow
         try:
             font = glyphs.font_for_slot(data, slot)
@@ -10742,7 +11094,7 @@ class AddLevelPage(Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         root = self._root_records(data)
-        got = [data[r.offset:r.end].hex() for r in root[:self.KEPT_ROOT_RECORDS]]
+        got = [self._structure_hex(data, r) for r in root[:self.KEPT_ROOT_RECORDS]]
         assert got == h["root_records"], "root %d records 0-%d changed" % (
             self.ROOT, self.KEPT_ROOT_RECORDS - 1)
         assert root[self.KEPT_ROOT_RECORDS].child_index == self.BODY, \

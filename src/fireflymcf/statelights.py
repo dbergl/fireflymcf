@@ -200,9 +200,9 @@ def _remap(key: tuple, obj: int, cap: int, end: int):
 def _inert_colour_delta(d, object_index: int) -> bool:
     """A delta the wrap makes by construction and nothing can see: an EMPTY label of the
     button's own object (the `enumlabel.restore_record` after the touch region) inheriting
-    different colours. The layout engine restores the colour slots after a container
-    (`enumlabel` module docstring), so the colours the caption set no longer leave the switch;
-    an empty label draws no pixels, and its font, align and box are compared as before."""
+    different colours: the switch's arms write different colours than the body records they
+    replace, and the colour state is shared (`enumlabel` module docstring). An empty label draws
+    no pixels, and its font, align and box are compared as before."""
     b, a = d.before, d.after
     return (d.kind == "state" and b is not None and a is not None and b.obj == object_index
             and b.wtype == 11 and not b.label and not a.label

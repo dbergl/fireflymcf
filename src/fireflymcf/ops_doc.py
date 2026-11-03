@@ -51,6 +51,22 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Set one record's geometry fields (x, y, width, height) inside an object. "
         + _SHIFT_NOTE,
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
+    "set_corner_radius": ("same-size",
+        "Set a rounded widget's corner radius (its fifth geometry slot); `\"pill\"` sizes it to "
+        "half the shorter side. An object shared by several pages changes on all of them.",
+        "UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME "
+        "(2026-11-02, the LCARS HOME build).", "`docs/HARDWARE-VERIFIED.md`"),
+    "set_record_color": ("structural",
+        "Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), "
+        "a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. "
+        "Same-size between valueless modes; adding a value grows the object.",
+        "UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments "
+        "draw (2026-11-02).", "`docs/HARDWARE-VERIFIED.md`"),
+    "fill_to_capsule": ("structural",
+        "Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding "
+        "the radius slot.",
+        "UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02).",
+        "`docs/HARDWARE-VERIFIED.md`"),
     "move_attach": ("same-size",
         "Move where a page attaches a child object (its wtype-5 attach record).",
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
@@ -280,8 +296,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
         "at the font's cell pitch), optionally on a fill and inside a 1 px section frame, "
         "absolute at x, y in a new object "
-        "attached under `parent`, ended by a restore record that hands back the font and align "
-        "the page walk carried in; refused if anything else on the page would change.",
+        "attached under `parent`, ended by a restore record that hands back the font, align and "
+        "colours the page walk carried in; refused if anything else on the page would change.",
         "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
         "two-line label spaces its lines by the font's cell, and every other control on the "
         "page draws as before, its text in its own font, and a `frame` draws as the stock "

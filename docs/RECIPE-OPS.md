@@ -48,6 +48,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
 | [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** |
+| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build). | **no** |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
@@ -68,12 +69,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
-| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). | **no** |
+| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
+| [`fill_to_capsule`](#fill_to_capsule) | structural | Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding the radius slot. | UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02). | **no** |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`). | yes |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
+| [`set_record_color`](#set_record_color) | structural | Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object. | UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02). | **no** |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
 | [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
@@ -377,6 +380,29 @@ Error codes:
 - `BAD_PARAMS` — a byte outside 0..7, a value outside 0..255, an empty `set`, or `bindings` neither "all" nor positions inside the group.
 - `EXPECT_MISMATCH` — a binding's DGN or a `from` byte differs; the message carries the binding's current wire payload.
 - `NO_SUCH_GROUP` — `group` is not in the group table.
+
+### set_corner_radius
+
+Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them.
+
+- **Hardware status:** UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build).
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
+- **Implementation:** `recipe_ops.SetCornerRadius`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `target` | integer\|object | yes |  | object index or {"ref": op_id} |
+| `selector` | object | yes |  | record selector: wtype (int\|None), label (str\|None), nth (int) |
+| `radius` | integer\|string | yes |  | corner radius in px (0..255), or "pill" for half the shorter side |
+| `expect` | integer |  |  | the radius the record must hold before the write |
+
+Error codes:
+
+- `BAD_PARAMS` — radius is neither an int in 0..255 nor "pill", or expect is not an int
+- `NO_SUCH_RECORD` — no record matches selector
+- `NOT_ROUNDED` — the record is not a rounded widget (wtype 3, 0x10, 0x20 or 0x21)
+- `NO_FIELD` — the record carries no radius slot, or "pill" and it has no w/h slots
+- `EXPECT_MISMATCH` — the record's radius differs from `expect`
 
 ### set_font
 
@@ -871,7 +897,7 @@ Error codes:
 
 ### add_text_label
 
-Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font and align the page walk carried in; refused if anything else on the page would change.
+Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change.
 
 - **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock).
 - **Proof:** `enumlabel.py`, `pagedraw.py`
@@ -935,6 +961,26 @@ Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table
 Error codes:
 
 - `APPEND_REFUSED` — appendfilter refused (bad entry, registry cap, no arena room, a gate).
+
+### fill_to_capsule
+
+Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding the radius slot.
+
+- **Hardware status:** UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02).
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
+- **Implementation:** `recipe_ops.FillToCapsule`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `target` | integer\|object | yes |  | object index or {"ref": op_id} |
+| `selector` | object | yes |  | record selector: wtype (int\|None), label (str\|None), nth (int) |
+| `radius` | integer | yes |  | corner radius in px (0..255) |
+
+Error codes:
+
+- `BAD_PARAMS` — radius out of range
+- `NO_SUCH_RECORD` — nothing matches
+- `NOT_A_FILL` — the record is not wtype 4 POINTER_INSIDE / RELOCATE_REFUSED -- as `set_record_color`
 
 ### install_glyph
 
@@ -1022,6 +1068,31 @@ Error codes:
 - `EXPECT_MISMATCH` — a record's child_index or touch id is not what the entry asserts.
 - `POINTER_INSIDE` — a GuiCode or LCD literal points into the part of the object that would move.
 - `RELOCATE_REFUSED` — `relocate.replace_object_records` refused (a gate failed).
+
+### set_record_color
+
+Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object.
+
+- **Hardware status:** UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02).
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
+- **Implementation:** `recipe_ops.SetRecordColor`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `target` | integer\|object | yes |  | object index or {"ref": op_id} |
+| `selector` | object | yes |  | record selector: wtype (int\|None), label (str\|None), nth (int) |
+| `role` | string {"fillA", "fillB", "fillA2", "fillB2"} |  | "fillA" | the colour field (fillA = a label's ink) |
+| `color` | array\|object\|string | yes |  | [r,g,b], {"index": n}, {"palette": n}, or dark/white/transparent/inherit |
+| `every` | boolean |  | false | every record the selector matches |
+| `from_mode` | integer |  |  | only records whose field holds this mode now |
+
+Error codes:
+
+- `BAD_PARAMS` — an unknown role or colour spelling, or `from_mode` without `every`
+- `NO_SUCH_RECORD` — nothing matches
+- `NO_FIELD` — the record's type (or its colour-mode bytes) gives it no such field
+- `POINTER_INSIDE` — a GuiCode/LCD literal points into the object after the edited record
+- `RELOCATE_REFUSED` — the relocation gates refused the grown object
 
 ### split_hold_region
 

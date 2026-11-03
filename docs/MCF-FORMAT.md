@@ -1752,7 +1752,7 @@ codes at values 11–14 do not appear, confirming that claim from the screen's o
 
 Each button is a **wtype-5 wrapper** carrying `fillA` mode-7 idx **24..34** and a `child_index`
 to a two-record object `[wt-33 box 130×50 r5, fillA **mode 0**; wt-11 caption]`. The box
-inherits the wrapper's colour through the parent-scoped slots (`GUICODE.md` Finding 29), so the
+inherits the wrapper's colour through the shared colour slots (`GUICODE.md` Finding 29), so the
 button fill is fully byte-derived. Ten resolve to `(65,81,163)` button blue; **`Ship Mode`
 (idx 28) resolves to `(0,174,239)` cyan** — the highlight colour. `proven-from-code` as a
 statement about the **resting** value (`GUICODE.md` Finding 34 addendum).

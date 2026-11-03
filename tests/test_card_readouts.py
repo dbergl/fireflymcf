@@ -68,7 +68,9 @@ def test_parent_default_is_byte_identical(monkeypatch):
     assert msgs[0] == msgs[1] and "aes_card_layout" in msgs[0]
 
 
-PASTE_PARENT = 793     # roots 5, 16, 39, 45: a slot-free attach, and the restore is needed
+PASTE_PARENT = 9       # root 9's last record: a slot-free attach the readouts can take
+RESTORE_PARENT = 793   # roots 5, 16, 39, 45: the restore is needed for the font, and the box
+                       # colour the rows leave transparent (fillB) cannot be written back
 
 
 def test_parent_other_object():
@@ -85,14 +87,32 @@ def test_parent_other_object():
     assert "cr" in res.unverified
 
 
+def _font_changes(msg):
+    """The delta keys in a LAYOUT_REFUSED message whose font/align differ before -> after."""
+    import re
+    out = []
+    for line in msg.split("\n")[1:]:
+        sides = re.findall(r"font=(\S+) align=(\S+)", line)
+        if len(sides) == 2 and sides[0] != sides[1]:
+            out.append(line.split(" ")[0])
+    return out
+
+
 def test_paste_needs_the_restore(monkeypatch):
-    """Without the restore record the rows' font and align reach every later record on the
-    pages reaching 793 (538 deltas): the whole-page gate refuses it."""
+    """Under 793 the restore record hands back the font and align: without it the rows' font
+    reaches later records on the pages reaching 793. The colour state is shared past the
+    object too (GUICODE Finding 29): the rows leave fillB transparent where the walk entered
+    with the card's explicit idx 8, and an empty restore record cannot write a box colour back
+    without painting it, so 793 is refused either way -- with no font change left among the
+    deltas once the restore is there."""
     from fireflymcf import enumlabel
+    res = _with_readouts({"parent": RESTORE_PARENT})
+    assert not res.ok and res.errors[0]["code"] == "LAYOUT_REFUSED", res.errors
+    assert _font_changes(res.errors[0]["message"]) == []
     monkeypatch.setattr(enumlabel, "restore_state", lambda *a, **k: None)
-    res = _with_readouts({"parent": PASTE_PARENT})
+    res = _with_readouts({"parent": RESTORE_PARENT})
     assert not res.ok
-    assert res.errors[0]["code"] == "LAYOUT_REFUSED" and "changes" in res.errors[0]["message"]
+    assert res.errors[0]["code"] == "LAYOUT_REFUSED" and _font_changes(res.errors[0]["message"])
 
 
 def test_parent_whose_attach_carries_a_slot_refuses():
