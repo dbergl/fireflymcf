@@ -231,6 +231,13 @@ recorded, so replay never runs `build` again.
   (`thumb.assert_disassembles_to`) before it returns.
 
 `routinekit.thumb` is the assembler (`thumb.Routine`, its encoders, `assert_disassembles_to`).
+Every instruction is emitted with the text capstone prints for it, and `assemble` refuses a
+mismatch. `r.b(label)` and `r.bcc(cond, label)` write a narrow branch with that text for you
+(capstone prints `cc`/`cs` as `blo`/`bhs`; either name is accepted); `r.ldr_lit(rt, name)` loads
+a pool word. The encoders cover the T1 loads and stores (`ldr_imm`, `str_imm`, `ldrb_imm`,
+`strb_imm`, `ldrh_imm`, `strh_imm`, and `strb_imm12` for `strb.w`), `movs_imm`, `movw`,
+`cmp_imm8`, `cmp_reg`, `adds_imm8`, `subs_imm8`, `adds_reg`, `subs_reg`, `ands_reg`, `lsls_imm`,
+`lsrs_imm` and `muls`; capstone prints an immediate in decimal below 10 and in hex from 10.
 Use `thumb.Routine(pool, error=routinekit.RoutineKitError)`, so an assembly failure is reported
 as the op's refusal.
 

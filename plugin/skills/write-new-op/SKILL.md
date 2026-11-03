@@ -55,6 +55,18 @@ $F g12-inputs $M                              # G12 input pins and their receive
 $F gestures $M --group 129                    # how a group answers tap, hold and release
 ```
 
+**A value the owner names by where they read it** (a "raw" number, a diagnostic reading, a
+setting's name) is found from that place: the page that shows it (`pages`, `labels
+--containing` on its caption; diagnostics pages show values no gauge does), then the cell
+behind the widget and the message that fills it (`bus-map --name`, `bus-map --dgn X --detail`,
+`slot-source`). The emulator's own model of the G12 and its peers (`fireflymcf.emu`, in the
+installed package) says what it sends, which a test needs anyway.
+
+**Ask the owner only what no tool can answer**: what they want, what they see on their coach,
+whether to go ahead. Which message, which bytes, which slot are yours to find in their file,
+the library's docstrings and the emulator's model. Ask for a capture only after those, and say
+what you tried.
+
 Most take `--json`. At build time, resolve what you found through the primitives, not literals:
 `ed.call("resolve_register", dgn=..., instance=..., selector=...)` gives a receive slot on the
 image being built, so the op still works on the next build. **Scanning the image yourself:**
@@ -103,6 +115,13 @@ do and each thing it must *not* do, then give each its own case: every "only if"
 each threshold or delay, test both sides of it (a little short of it: nothing; past it: the
 action), in each direction the owner named. Where the op shares a setting or a cell with
 something else, assert that the other part is unchanged after every step.
+
+**A threshold on a sensor reading needs a hold time.** Readings wander, and a tank sloshes. A
+band between an off and an on threshold stops an op switching back and forth at one threshold,
+but not a single stray reading that reaches past one. Count a crossing only once the reading
+has stayed past the threshold for a hold time, restart the count on any reading back on the near
+side, make the hold time a parameter, and tell the owner the default you chose and why. Test a
+crossing shorter than the hold time, in each direction: nothing is sent.
 
 Assert crossings and counts, not single readings: "after X, exactly one frame with payload P
 within 5 s, and none before". When asserting that nothing was sent, count every frame the op
@@ -164,8 +183,9 @@ with JSON-able or bytes arguments (lists, not sets):
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
 | `guicode(data)`, `find_tag(data, tag)`, `tick_chain(data)` | readers: GuiCode at its runtime base; the address of a tag you put in a prefix; the tick chain |
 
-`thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strh_imm`, `cmp_imm8`, `bcc_n`, `movw`, …) build
-the routine; `Routine.assemble` checks every instruction against capstone. Read the worked hints
+`thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strb_imm`, `cmp_imm8`, `movw`, …) and the
+routine's `r.b(label)` / `r.bcc(cond, label)` build the routine; `Routine.assemble` checks every
+instruction against capstone (USER-OPS lists the encoders and how capstone spells things). Read the worked hints
 in [`USER-OPS.md`](USER-OPS.md) before writing a routine. Use only `userop`, `recipe` (`op`,
 `RecipeError`), `routinekit` and its `thumb`, and the readers USER-OPS lists: every other module
 can change in any release.
