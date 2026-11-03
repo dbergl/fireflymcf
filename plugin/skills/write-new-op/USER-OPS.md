@@ -113,7 +113,10 @@ class MyOp(UserOp):
 | receive | `fireflymcf op install P.ffproj.json SRC` (a folder, a `.zip` or a git URL) |
 
 - `compile` and `validate` refuse a project with user ops (`USER_OPS`) without `--allow-user-ops`
-  and import nothing. With it, every op folder they find is imported, used or not.
+  and import nothing. They gate and import only the op folders whose type an enabled op of the
+  project names: a folder beside it that the project does not use is never run, never needs an
+  acceptance, and, even broken, never blocks the build. So one folder can hold several projects
+  that use different ops.
   `--allow-user-ops` admits user ops only; an unverified built-in op still needs
   `--allow-unverified`.
 - An op whose `touches` includes `g12` also needs the owner's recorded acceptance

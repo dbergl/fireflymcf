@@ -630,6 +630,45 @@ def discover_user_ops(project_path: Path, project: recipe.Project) -> list[Disco
     return found
 
 
+def used_types(project: recipe.Project) -> set[str]:
+    """The user op types an enabled op of `project` names: the only ones its build runs."""
+    return {s.type for s in project.ops if s.enabled and s.type.startswith(PREFIX)}
+
+
+def discover_used_ops(project_path: Path, project: recipe.Project) -> list[DiscoveredOp]:
+    """`discover_user_ops`, narrowed to the folders whose type an enabled op of `project` names
+    (`used_types`): what compile, validate and verify gate, accept-check and import. A folder
+    the project does not use is left alone, broken or not, so one folder of projects can hold an
+    op that only some of them use. A broken folder is still reported when a used type is found in
+    no good folder (it may be that op's folder). Never imports `op.py`."""
+    want = used_types(project)
+    if not want:
+        return []
+    found: list[DiscoveredOp] = []
+    by_type: dict[str, Path] = {}
+    broken: list[RecipeError] = []
+    for folder in _folders(project_path, project):
+        try:
+            m = _read_manifest(folder)
+        except RecipeError as e:
+            broken.append(e)
+            continue
+        if m["type"] not in want:
+            continue
+        if m["type"] in by_type:
+            raise RecipeError("USER_OP_DUPLICATE", f"user op type {m['type']!r} is defined "
+                              f"in both {by_type[m['type']]} and {folder}")
+        by_type[m["type"]] = folder
+        try:
+            sha = folder_hash(folder)
+        except OSError as e:
+            raise _bad(folder, f"cannot read the op folder: {e}")
+        found.append(DiscoveredOp(m["type"], folder, m, sha))
+    if broken and want - set(by_type):
+        raise broken[0]
+    return found
+
+
 def import_user_ops(discovered: list[DiscoveredOp]) -> list[LoadedOp]:
     """Import each discovered op's `op.py`: this runs the op's code with full Python trust, so the
     caller must hold the owner's authorization (`--allow-user-ops`). A folder whose files changed

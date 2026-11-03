@@ -792,7 +792,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     discovered = []
     try:
         project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
-        discovered = userop.discover_user_ops(Path(args.project), project)
+        discovered = userop.discover_used_ops(Path(args.project), project)
         refusal = _user_ops_refusal(project, discovered, args.allow_user_ops)
         if refusal:
             return _print_user_ops_refusal(*refusal, discovered, args.json,
@@ -842,7 +842,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         from . import recipe, userop
         try:
             project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
-            discovered = userop.discover_user_ops(Path(args.project), project)
+            discovered = userop.discover_used_ops(Path(args.project), project)
         except recipe.RecipeError as exc:
             print(f"error: {exc.code}: {exc}", file=sys.stderr)
             return 1
@@ -1125,7 +1125,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     try:
         project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
         # R6: discovery reads manifests only; nothing is imported until the owner has authorised it
-        discovered = userop.discover_user_ops(Path(args.project), project)
+        discovered = userop.discover_used_ops(Path(args.project), project)
         refusal = _user_ops_refusal(project, discovered, args.allow_user_ops)
         if refusal:
             return _print_user_ops_refusal(*refusal, discovered, args.json, {"ok": False})

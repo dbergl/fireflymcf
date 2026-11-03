@@ -377,7 +377,8 @@ def test_verify_emulate_project_keys_by_type(tmp_path, mcf_136, monkeypatch, cap
     no emu_test.py is recorded `not emulated`; an explicit --scenario still keys by stem."""
     pytest.importorskip("unicorn")
     from fireflymcf.emu import gate
-    for n, t in (("a", "user:a"), ("b", "user:b"), ("c", "user:c")):
+    # d is beside the project but unused: its emu_test.py never runs (final review I4)
+    for n, t in (("a", "user:a"), ("b", "user:b"), ("c", "user:c"), ("d", "user:d")):
         dst = tmp_path / "ops" / n
         shutil.copytree(FIX / "hook_nop", dst)
         m = json.loads((dst / "manifest.json").read_text())
@@ -387,7 +388,7 @@ def test_verify_emulate_project_keys_by_type(tmp_path, mcf_136, monkeypatch, cap
     extra = tmp_path / "extra_test.py"
     extra.write_text("def scenario(s):\n    pass\n")
     pf = tmp_path / "p.ffproj.json"
-    pf.write_text(json.dumps(_doc(mcf_136)))
+    pf.write_text(json.dumps(_doc(mcf_136, ("a", "user:a"), ("b", "user:b"), ("c", "user:c"))))
     seen = {}
 
     def fake(image, path, timeout_s=300, *, out_dir=None, key=None):
@@ -451,3 +452,56 @@ def test_gates_hold_under_python_O(tmp_path, mcf_136):
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert json.loads(proc.stdout)["errors"][0]["code"] == "CAPABILITY_GATE"
     assert not out.exists()
+
+
+# --- only the op folders the project uses are gated and imported (final review I4) --------------
+
+def _unused_folder(tmp_path: Path, name: str, type_: str, marker: Path, touches=("guicode",)):
+    dst = tmp_path / "ops" / name
+    shutil.copytree(FIX / "hook_nop", dst)
+    m = json.loads((dst / "manifest.json").read_text())
+    (dst / "manifest.json").write_text(json.dumps(dict(m, name=name, type=type_,
+                                                       touches=list(touches))))
+    (dst / "op.py").write_text(_marker_op_py(marker).replace("user:hook-nop", type_))
+
+
+def test_unused_op_folders_are_left_alone(tmp_path, mcf_136, capsys):
+    """A folder of projects can hold an op only some of them use: a project that does not name it
+    is not refused, not asked for a G12 acceptance, and never runs its code."""
+    pf = tmp_path / "p.ffproj.json"
+    pf.write_text(json.dumps(_doc(mcf_136, ("tank", "tank_heater_names"))))
+    marker = tmp_path / "IMPORTED"
+    _unused_folder(tmp_path, "other", "user:other", marker, touches=("guicode", "g12"))
+    broken = tmp_path / "ops" / "broken"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text("{not json")
+    (broken / "op.py").write_text("raise SystemExit('never')\n")
+
+    out = tmp_path / "mcf-b.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out)]) == 0
+    assert "user_ops" not in json.loads(Path(str(out) + ".json").read_text())
+    assert main(["validate", str(pf), STOCK]) == 0
+    assert not marker.exists()
+
+    # a project that uses hook-nop imports that folder only; the G12 neighbour asks for nothing
+    shutil.copytree(FIX / "hook_nop", tmp_path / "ops" / "hook_nop")
+    pf.write_text(json.dumps(_doc(mcf_136, ("nop", "user:hook-nop"))))
+    out2 = tmp_path / "mcf-u.bin"
+    capsys.readouterr()
+    assert main(["compile", str(pf), STOCK, "-o", str(out2), "--allow-user-ops"]) == 0
+    printed = capsys.readouterr().out
+    assert "user:other" not in printed and not marker.exists()
+    side = json.loads(Path(str(out2) + ".json").read_text())
+    assert [u["type"] for u in side["user_ops"]] == ["user:hook-nop"]
+
+
+def test_a_used_type_with_no_good_folder_reports_the_broken_one(tmp_path, mcf_136, capsys):
+    pf = tmp_path / "p.ffproj.json"
+    pf.write_text(json.dumps(_doc(mcf_136, ("nop", "user:hook-nop"))))
+    broken = tmp_path / "ops" / "hook_nop"
+    broken.mkdir(parents=True)
+    (broken / "manifest.json").write_text("{not json")
+    (broken / "op.py").write_text("")
+    assert main(["compile", str(pf), STOCK, "-o", str(tmp_path / "mcf-x.bin"),
+                 "--allow-user-ops"]) == 1
+    assert "BAD_USER_OP" in capsys.readouterr().err
