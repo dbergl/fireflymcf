@@ -2281,3 +2281,56 @@ def test_remove_records_refuses_a_pointer_into_the_moving_part(stock, stock_hash
                     recipe.OpSpec(id="rm", type="remove_records",
                                   params={"target": 315, "records": _LV}))
     assert not r.ok and r.errors[0]["code"] == "POINTER_INSIDE"
+
+
+# --- set_corner_radius: HOME's Light Master body (object 380, record 0) is a capsule, 301x45, r5.
+
+def _radius(data, obj, nth=0, wtype=0x21):
+    gs, tab = _gs_tab_t(data)
+    return [r for r in records.object_records(data, gs + tab[obj])
+            if r.wtype == wtype][nth].corner_radius
+
+
+def _corner(stock, stock_hash, **params):
+    return compile_ops(stock, stock_hash, recipe.OpSpec(id="r", type="set_corner_radius", params={
+        "target": 380, "selector": {"wtype": 0x21}, **params}))
+
+
+def test_set_corner_radius_pill_is_half_the_shorter_side(stock, stock_hash):
+    assert _radius(stock, 380) == 5
+    r = _corner(stock, stock_hash, radius="pill", expect=5)
+    assert r.ok, r.errors
+    assert len(r.data) == len(stock)
+    assert _radius(r.data, 380) == 45 // 2
+    assert _radius(r.data, 380, nth=1) == 5          # the ON cap beside it is untouched
+    assert r.manifest == ["corner radius: object 380 5 -> 22"], r.manifest
+
+
+def test_set_corner_radius_writes_two_bytes_of_guidata(stock, stock_hash):
+    r = _corner(stock, stock_hash, radius=12)
+    assert r.ok, r.errors
+    gs, ge = guidata.guidata_extent(stock)
+    diff = [i for i in range(gs, ge - 4) if stock[i] != r.data[i]]
+    assert len(diff) == 1 and _radius(r.data, 380) == 12, diff   # 5 -> 12: the low byte only
+
+
+def test_set_corner_radius_expect_mismatch(stock, stock_hash):
+    r = _corner(stock, stock_hash, radius=10, expect=9)
+    assert not r.ok and r.errors[0]["code"] == "EXPECT_MISMATCH", r.errors
+
+
+def test_set_corner_radius_refuses_a_record_that_is_not_rounded(stock, stock_hash):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="r", type="set_corner_radius", params={
+        "target": 380, "selector": {"label": "Light Master"}, "radius": 10}))
+    assert not r.ok and r.errors[0]["code"] == "NOT_ROUNDED", r.errors
+
+
+@pytest.mark.parametrize("radius", [-1, 256, "round", 2.5, True])
+def test_set_corner_radius_bad_params(stock, stock_hash, radius):
+    r = _corner(stock, stock_hash, radius=radius)
+    assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS", r.errors
+
+
+def test_set_corner_radius_is_unverified(stock, stock_hash):
+    from fireflymcf import recipe_ops
+    assert recipe_ops.SetCornerRadius.hardware_verified is False

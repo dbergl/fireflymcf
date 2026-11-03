@@ -67,6 +67,7 @@
             "rename_label",
             "retarget_inverter_gear",
             "set_binding_bytes",
+            "set_corner_radius",
             "set_font",
             "set_gesture",
             "set_icon",
@@ -701,6 +702,52 @@
                   "group",
                   "dgn",
                   "set"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "set_corner_radius"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "object index or {\"ref\": op_id}"
+                  },
+                  "selector": {
+                    "type": "object",
+                    "description": "record selector: wtype (int|None), label (str|None), nth (int)"
+                  },
+                  "radius": {
+                    "type": [
+                      "integer",
+                      "string"
+                    ],
+                    "description": "corner radius in px (0..255), or \"pill\" for half the shorter side"
+                  },
+                  "expect": {
+                    "type": "integer",
+                    "description": "the radius the record must hold before the write"
+                  }
+                },
+                "required": [
+                  "target",
+                  "selector",
+                  "radius"
                 ]
               }
             }

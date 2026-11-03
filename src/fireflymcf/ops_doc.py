@@ -51,6 +51,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Set one record's geometry fields (x, y, width, height) inside an object. "
         + _SHIFT_NOTE,
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),
+    "set_corner_radius": ("same-size",
+        "Set a rounded widget's corner radius (its fifth geometry slot); `\"pill\"` sizes it to "
+        "half the shorter side. An object shared by several pages changes on all of them.",
+        "UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME "
+        "(2026-11-02, the LCARS HOME build).", "`docs/HARDWARE-VERIFIED.md`"),
     "move_attach": ("same-size",
         "Move where a page attaches a child object (its wtype-5 attach record).",
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),

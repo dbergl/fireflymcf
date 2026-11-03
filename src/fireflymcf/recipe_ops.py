@@ -306,6 +306,111 @@ class MoveElement(Op):
         return "move: object %d %s" % (obj, self.written["set"])
 
 
+# The widgets whose fifth geometry slot (`geom[4]` -> state +0x32) the shape renderer
+# `FUN_00256C54` reads as a corner radius (`records.WRecord.corner_radius`).
+_ROUNDED_WTYPES = (0x03, 0x10, 0x20, 0x21)
+
+
+@op("set_corner_radius")
+class SetCornerRadius(Op):
+    """Set the corner radius of one rounded widget (button body, capsule, gauge well, dot).
+
+    The radius is the record's fifth geometry slot (`geom[4]`), a u16 the shape renderer
+    `FUN_00256C54` reads at state +0x32 (`records.WRecord.corner_radius`, RENDER.md "The corner
+    radius is byte-derived"). Writing half the shorter side turns a rounded rectangle into a
+    pill (`radius: "pill"`). A same-size edit: the record must already carry the slot.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element` (wtype, label, nth)
+      radius: int 0..255, or "pill" -- min(|w|, |h|) // 2 from the record's own w/h slots
+      expect: int (optional) -- the radius the record must hold before the write
+
+    Error codes:
+      BAD_PARAMS -- radius is neither an int in 0..255 nor "pill", or expect is not an int
+      NO_SUCH_RECORD -- no record matches selector
+      NOT_ROUNDED -- the record is not a rounded widget (wtype 3, 0x10, 0x20 or 0x21)
+      NO_FIELD -- the record carries no radius slot, or "pill" and it has no w/h slots
+      EXPECT_MISMATCH -- the record's radius differs from `expect`
+
+    The object is drawn wherever it is attached: an object shared by several pages changes on
+    all of them.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "radius": {"type": ["integer", "string"],
+                       "description": "corner radius in px (0..255), or \"pill\" for half the shorter side"},
+            "expect": {"type": "integer",
+                       "description": "the radius the record must hold before the write"},
+        },
+        "required": ["target", "selector", "radius"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.radius = self._param("radius")
+        self.expect = self._param("expect", None)
+        r = self.radius
+        if not (r == "pill" or (isinstance(r, int) and not isinstance(r, bool) and 0 <= r <= 255)):
+            raise RecipeError("BAD_PARAMS", "set_corner_radius radius %r is neither an int in "
+                              "0..255 nor \"pill\"" % (r,), op_id=self.spec.id)
+        if self.expect is not None and (not isinstance(self.expect, int)
+                                        or isinstance(self.expect, bool)):
+            raise RecipeError("BAD_PARAMS", "set_corner_radius expect %r is not an int"
+                              % (self.expect,), op_id=self.spec.id)
+
+    def _site(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if rec.wtype not in _ROUNDED_WTYPES:
+            raise RecipeError("NOT_ROUNDED", "object %d record %r is wtype %#x (%s), not a "
+                              "rounded widget" % (obj, self.selector, rec.wtype,
+                                                  records.wtype_name(rec.wtype)),
+                              op_id=self.spec.id)
+        off = records.geom_offset(data, rec, 4)
+        if off is None:
+            raise RecipeError("NO_FIELD", "object %d record %r carries no corner-radius slot"
+                              % (obj, self.selector), op_id=self.spec.id)
+        return obj, rec, off
+
+    def _value(self, obj, rec):
+        if self.radius != "pill":
+            return self.radius
+        w, h = rec.geom[2], rec.geom[3]
+        if w is None or h is None:
+            raise RecipeError("NO_FIELD", "object %d record %r has no w/h slots to size a pill"
+                              % (obj, self.selector), op_id=self.spec.id)
+        return min(abs(layout._s16(w)), abs(layout._s16(h))) // 2
+
+    def apply(self, data, ctx):
+        obj, rec, off = self._site(data, ctx)
+        if self.expect is not None and rec.corner_radius != self.expect:
+            raise RecipeError("EXPECT_MISMATCH", "object %d radius is %d, project expected %d"
+                              % (obj, rec.corner_radius, self.expect), op_id=self.spec.id)
+        value = self._value(obj, rec)
+        buf = bytearray(data)
+        _put16(buf, off, value, ctx, "set_corner_radius obj %d %d -> %d"
+               % (obj, rec.corner_radius, value))
+        out, _ = patch.reseal(bytes(buf))
+        ctx.handles[self.spec.id] = {"object": obj, "radius": value, "was": rec.corner_radius}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        _, rec, _ = self._site(data, ctx)
+        assert rec.corner_radius == h["radius"], \
+            "set_corner_radius: obj %d radius %r != %d" % (h["object"], rec.corner_radius,
+                                                           h["radius"])
+        return "corner radius: object %d %d -> %d" % (h["object"], h["was"], h["radius"])
+
+
 @op("move_attach")
 class MoveAttach(Op):
     """Reposition wtype-5 attach records by updating their geometry coordinates.

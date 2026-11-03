@@ -48,6 +48,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
 | [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** |
+| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build). | **no** |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
@@ -377,6 +378,29 @@ Error codes:
 - `BAD_PARAMS` — a byte outside 0..7, a value outside 0..255, an empty `set`, or `bindings` neither "all" nor positions inside the group.
 - `EXPECT_MISMATCH` — a binding's DGN or a `from` byte differs; the message carries the binding's current wire payload.
 - `NO_SUCH_GROUP` — `group` is not in the group table.
+
+### set_corner_radius
+
+Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them.
+
+- **Hardware status:** UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build).
+- **Proof:** `docs/HARDWARE-VERIFIED.md`
+- **Implementation:** `recipe_ops.SetCornerRadius`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `target` | integer\|object | yes |  | object index or {"ref": op_id} |
+| `selector` | object | yes |  | record selector: wtype (int\|None), label (str\|None), nth (int) |
+| `radius` | integer\|string | yes |  | corner radius in px (0..255), or "pill" for half the shorter side |
+| `expect` | integer |  |  | the radius the record must hold before the write |
+
+Error codes:
+
+- `BAD_PARAMS` — radius is neither an int in 0..255 nor "pill", or expect is not an int
+- `NO_SUCH_RECORD` — no record matches selector
+- `NOT_ROUNDED` — the record is not a rounded widget (wtype 3, 0x10, 0x20 or 0x21)
+- `NO_FIELD` — the record carries no radius slot, or "pill" and it has no w/h slots
+- `EXPECT_MISMATCH` — the record's radius differs from `expect`
 
 ### set_font
 
