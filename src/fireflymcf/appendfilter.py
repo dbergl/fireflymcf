@@ -22,7 +22,8 @@ against the 13.6 bytes on 2026-09-21 (`proven-from-code`):
 * **The placement.** The table ends where the 12-byte tag-0x42 table begins, and after that is a
   ~52 KB zero padding arena up to the image sub-container pinned at GuiData+0x10000. The growth
   uses the SAME in-place window rewrite as `optionrow._grow_bindings` -- which the coach already
-  runs (v27's binding growth shifted this very table 0x2A70 -> 0x2B00): insert the new entries at
+  runs (the Batt Heat button's binding growth shifted this very table 0x2A70 -> 0x2B00): insert the
+  new entries at
   the table end, shift the in-window tables down, trim the same number of padding bytes, fix the
   descriptors. Nothing at or after 0x10000 moves.
 * **The registry.** `FUN_0021A618` silently drops DGNs past 83 distinct (`statusbind.REGISTRY_CAP`);

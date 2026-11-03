@@ -269,7 +269,7 @@ def capabilities(img: bytes) -> set:
     """Every (channel, wire command) pair the image's group/binding tables can send.
 
     Lifted from the original build script's capability gate (added 2026-08-19 after a
-    repurposed group silently ate the awning: v11 lost (3,1), v18 lost that plus
+    repurposed group silently ate the awning: one build lost (3,1), a later one lost that plus
     channel 86 — both flashed before anyone noticed)."""
     gt, bt = guidata.group_table(img), guidata.binding_table(img)
     return {(bt[j].channel, bt[j].raw[4]) for g in gt
@@ -303,7 +303,8 @@ def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
 # 69 hold the stock `1FFD3` / `1FFC5` inverter/charger enable/disable templates that the
 # PD-inverter bridge brief (`docs/HARDWARE-VERIFIED.md`) names as the route it will drive. The gate
 # keys on those DGNs in the stock image, so another build (whose 68/69 are something else) is not
-# gated. v44's first build overwrote 68 with the APS-500 reboot group; this is what catches it.
+# gated. The reboot button's first build overwrote 68 with the APS-500 reboot group; this is what
+# catches it.
 RESERVED_GROUPS = {68: 0xFFD3, 69: 0xFFC5}
 
 
@@ -324,7 +325,8 @@ def _assert_reserved_groups_intact(stock: bytes, data: bytes) -> None:
 
 def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     """A group an op REUSES (its binding slice moved, so it now sends new bindings) must not be one
-    GuiCode drives by number (`newbutton.guicode_selected_groups`). v45 reused 136 and 137 from
+    GuiCode drives by number (`newbutton.guicode_selected_groups`). A build of 2026-09-30 reused 136
+    and 137 from
     13.6's 130-139 block: a tap on 136 worked, but its hold never repeated, and 137's hold-only
     reboot never fired, on the coach 2026-09-30. Edits that keep a group's slice (a gesture or a
     binding byte on an existing control) are not reuse and are not gated."""

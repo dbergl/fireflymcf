@@ -387,7 +387,7 @@ export default function Inspector(p: Props) {
           {/* remap_channel's two status paths. Unchecked (the default) retargets the
               button's own indicator at the new pin and leaves every G12 OUTPUTS row
               honest, but has not been on the coach. Checked moves the status variable
-              instead: coach-proven (PC.14, v9), and the old channel's diagnostics row
+              instead: coach-proven (PC.14), and the old channel's diagnostics row
               reports the new one from then on. Worded from the trade-off, not the flag. */}
           <label className="inline">
             <input type="checkbox" checked={moveDisplayList}

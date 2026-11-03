@@ -8,13 +8,16 @@ its own, without the records drawn before it in the same object. So any label or
 earlier in the object that lies inside the readout's widest possible fill can be wiped at any
 later redraw.
 
-v37 shipped exactly that: the wheel tiles' layers readout filled from about x0+12 on the coach and
+A LEVEL build flashed 2026-09-28 shipped exactly that: the wheel tiles' layers readout filled from
+about x0+12 on the coach and
 wiped the up arrow drawn before it, while the renderer's kerned model placed the fill at x0+43.
-v38 narrowed the field to one character, which bounds the fill at 25 px in every class this
-module could model, and the arrow was still wiped. v40 painted the fills green and blue: both tile
+The next narrowed the field to one character, which bounds the fill at 25 px in every class this
+module could model, and the arrow was still wiped. A diagnostic (2026-09-29) painted the fills green
+and blue: both tile
 readouts filled about 50 px left of their pens, whatever the field width. So the width model
 below is NOT a bound on the coach. Inside a capsule tile, the fill is instead taken as able to
-reach anywhere from the tile's left edge to the pen (`observed-on-hardware`, v40). The rule it
+reach anywhere from the tile's left edge to the pen (`observed-on-hardware`, 2026-09-29). The rule
+it
 leaves is to draw a tile's decorations after its readouts (`add_level_page` `arrow_last`).
 `conflicts` finds this class of defect from the bytes, before a flash.
 
@@ -25,7 +28,7 @@ What is checked, per object, walking its records in order:
 * each wt-8's worst-case fill: `metrics.worst_fill_width` columns, anchored at its pen by its
   header align (`metrics.aligned_x0`), rows from `pen_y - font[0x0b]` for `font[0x07]` rows;
 * when the object's first record is a capsule (wt-33, a tile), the fill is widened to the band
-  from the capsule's left edge to the pen (v40);
+  from the capsule's left edge to the pen (2026-09-29);
 * it must not intersect an earlier label/glyph (wt 0/11/13: its measured text's columns, its
   glyphs' inked rows) or the worst-case fill of an earlier readout in the same object.
 

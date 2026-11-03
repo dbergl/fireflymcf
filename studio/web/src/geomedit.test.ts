@@ -98,7 +98,7 @@ describe("resizeControlDrafts", () => {
   it("writes every record of the control from one width and height", () => {
     const drafts = resizeControlDrafts(1422, control(), { w: 120, h: 60, x: 39 });
     expect(drafts).toHaveLength(3);
-    // Exactly reference build v1's l-geom / l-cap / l-touch.
+    // Exactly the first reference build's l-geom / l-cap / l-touch.
     expect(drafts[0].params.set).toEqual({ x: 39, w: 120, h: 60 });
     expect(drafts[1].params.set).toEqual({ w: 120, h: 60 });
     expect(drafts[2].params.set).toEqual({ w: 120, h: 60 });

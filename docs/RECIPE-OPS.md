@@ -48,11 +48,11 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
 | [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
 | [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** |
-| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build). | **no** |
+| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, a restyled HOME). | **no** |
 | [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
 | [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
 | [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
-| [`set_theme`](#set_theme) | same-size | Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only. | Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner). | yes |
+| [`set_theme`](#set_theme) | same-size | Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only. | Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed. | yes |
 | [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04. | yes |
 | [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
 | [`add_aes_batt_heat`](#add_aes_batt_heat) | structural | Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`). | Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged. | yes |
@@ -385,7 +385,7 @@ Error codes:
 
 Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them.
 
-- **Hardware status:** UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, the LCARS HOME build).
+- **Hardware status:** UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, a restyled HOME).
 - **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.SetCornerRadius`
 
@@ -443,7 +443,7 @@ Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, o
 Error codes:
 
 - `BAD_PARAMS` — kind is not one of "latch"/"hold_to_toggle"
-- `NOT_SUPPORTED` — kind="latch" was requested on a group whose current `.kind` is not already "latch"; v1 has no latch-conversion primitive. offers=["disable_gesture_op"] — the fix is to remove/disable whichever earlier op made the group non-latch, not to fit a new edit here.
+- `NOT_SUPPORTED` — kind="latch" was requested on a group whose current `.kind` is not already "latch"; there is no latch-conversion primitive. offers=["disable_gesture_op"] — the fix is to remove/disable whichever earlier op made the group non-latch, not to fit a new edit here.
 - `NO_SUCH_GROUP` — the group could not be resolved at all: `group` (or the group `target` resolves to via `newbutton.object_group`) is out of range (`gestures.describe_group` raises a bare `IndexError`), or `target` names an object with no `IMAGE_OPCODE` record to read a group off of (`newbutton.object_group` raises a bare `ValueError`). Both are mapped here rather than left to crash `compile_project` unstructured; a `RecipeError` raised underneath (e.g. `resolve_target`'s own `BAD_REF`, which subclasses `ValueError`) is never remapped — it is re-raised as-is.
 - `GESTURE_REFUSED` — `gestures.make_hold_to_toggle` raised `GestureEditError`: a single-entry group's binding is not a `DC_DIMMER_COMMAND_2` command-5 toggle or carries the repeat bit; a multi-binding group fails one of the five premises (no repeat bit, one DGN/selector target, variants agreeing on a release toggle, variants that write 0 and 1 or all command-5 toggles, no variant cycling on release); the group has no live binding; or `seconds` does not fit the hold-threshold nibble.
 
@@ -473,7 +473,7 @@ Error codes:
 
 Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only.
 
-- **Hardware status:** Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner).
+- **Hardware status:** Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed.
 - **Proof:** `docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`
 - **Implementation:** `recipe_ops.SetTheme`
 
@@ -938,7 +938,7 @@ No parameters.
 
 Error codes:
 
-- `WRONG_SHAPE` — 829 or the cluster is not the v47 shape (cardlayout.CardLayoutError).
+- `WRONG_SHAPE` — 829 or the cluster is not the pre-card compact shape (cardlayout.CardLayoutError).
 - `REPLACE_REFUSED` — a record stream could not be relocated.
 
 ### append_filter

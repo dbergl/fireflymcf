@@ -22,12 +22,14 @@ paints every pixel of its area: its full capsule or navy fill first (spec sectio
 "blocks" is always plural: a live switch on `layers == 1` is not worth a fifth arm.
 
 Orientation (`ORIENTATIONS`, owner 2026-09-26):
-`"rear"` (the default from v35 on) draws the page as seen by someone facing the van's rear -- the
+`"rear"` (the default since 2026-09-27) draws the page as seen by someone facing the van's rear --
+the
 van rotated 180 degrees in place (`_rot`: about the body's own centre, `x -> 2*cx - x`,
 `y -> body_top + body_bot - y`), "FRONT" below it, and each wheel's tile at the position nearest
 its rotated tyre (`tile_slot`: FL bottom-right, FR bottom-left, RL top-right, RR top-left). Text
 stays upright; the attitude words and the sensor contract do not change. `"front"` is the original
-drawing (v34a/v34b), which v34b's project pins so it still rebuilds to its committed image. Every
+drawing (the first LEVEL builds, 2026-09-26), which their projects pin so they still rebuild to
+their committed images. Every
 tile placement, preview and live, goes through `tile_slot`, so the two cannot disagree.
 """
 from __future__ import annotations
@@ -36,7 +38,8 @@ from . import metrics, pagedraw as pd, switchbuild
 
 NAVY, BODY, GREY, WHITE = (0x15, 0x18, 0x3A), (0x26, 0x2C, 0x60), (0x80, 0x82, 0x85), (0xFF, 0xFF, 0xFF)
 GREEN, AMBER, RED, DIV = (0x2B, 0xB6, 0x73), (0xE6, 0xA0, 0x28), (0xBE, 0x1E, 0x2D), (0x3C, 0x40, 0x6E)
-# The "needs blocks" accent (wheel tiles and SHORT ON BLOCKS). AMBER is what v34a flashed with (it
+# The "needs blocks" accent (wheel tiles and SHORT ON BLOCKS). AMBER is what the first flash used
+# (it
 # was this module's only default at the time); on the panel it reads as a pale yellow and white text
 # on it washes out (owner photo, 2026-09-26). ORANGE is the static palette's own orange (mode-6 index
 # 7, #F15A29) and is the default since. A project that pins neither `accent` nor `orientation`
@@ -65,7 +68,8 @@ _TW, _TH = 130, 74                       # tile box (mock2 `bw, bh`)
 
 # ---- orientation ----------------------------------------------------------------------------
 ORIENTATIONS = ("front", "rear", "rear-low")
-# "rear-low" is v35's rear-facing layout exactly (the van group sitting low, FRONT 7 px off the
+# "rear-low" is the first rear-facing layout (2026-09-27) exactly (the van group sitting low, FRONT
+# 7 px off the
 # page bottom). "rear" (default) is the same drawing with the whole left group -- van, tiles, Zero
 # Level and FRONT -- raised 20 px so the space above the van and below FRONT are even (26/27 px;
 # owner-approved mockup, 2026-09-27). The right-hand column never moves.
@@ -216,13 +220,14 @@ WORDS = {"pitch_word": ("nose up", "nose down"),
 
 
 # The up arrow: a 20x14 triangle installed by the recipe's `install_glyph` op (font slot 13, a
-# character whose stub falls back to the placeholder on 13.6 and v33; slot 23, the brief's first
+# character whose stub falls back to the placeholder on 13.6 and the heater-glyph build; slot 23,
+# the brief's first
 # choice, has no free character). Font 13's cell is 21 px, so the bearing is (21 - 14) // 2 = 3.
 ARROW = (13, "\x8f")
 ARROW_W, ARROW_H = 20, 14
 ARROW_CELL = 21
 # The wheel tiles' readout field widths, in characters. The panel fills a readout's background
-# across its MEASURED text, and the measuring class varies at runtime (v37 on the coach: the
+# across its MEASURED text, and the measuring class varies at runtime (the coach, 2026-09-28: the
 # two-character layers field " 7" filled from x0+14 -- a fixed 25 px per character, font 17's
 # `font[6]` -- and wiped the arrow). `readoutfill` bounds every class (`metrics.worst_fill_width`):
 #   * layers, font 17: 1 character fills at most 25 px, from x0+39, clear of the arrow
@@ -230,9 +235,10 @@ ARROW_CELL = 21
 #   * lift, font 15: 3 characters fill at most 66 px, from x0+1, inside the tile; 4 reach x0-21.
 # A value wider than its field is drawn as that many dashes (`render.format_cell_value`, the
 # width-dash loop at 0x002529A4), so `fill_safe` shows 10+ layers as "-" and 10.0+ in as "---".
-# v34b-v37 were built with (2, 4); `add_level_page` keeps that as the default so their projects
+# The builds before `fill_safe` used (2, 4); `add_level_page` keeps that as the default so their
+# projects
 # rebuild byte-identically.
-FIELDS_V37 = {"layers": 2, "lift": 4}
+FIELDS_DEFAULT = {"layers": 2, "lift": 4}
 FIELDS_FILL_SAFE = {"layers": 1, "lift": 3}
 ARROW_CLEARANCE = 2                     # px between the arrow's box and any two-digit layers value
 BLOCKS_GAP = 4                          # px between any two-digit layers value and "blocks"
@@ -299,14 +305,15 @@ def recipe_ops(preview: bool, accent=ACCENT, orientation="rear",
                controls=False, dgn=None, stepper_dgn=None, fill_safe=False,
                arrow_probe=False, arrow_probe2=False, arrow_last=False,
                setup=False, refresh=False) -> list[dict]:
-    """The three ops a LEVEL build appends to v33's recipe, in order: the title rename (root 32's
+    """The three ops a LEVEL build appends to its base recipe, in order: the title rename (root 32's
     own wt-11 title, record 32[3], so screens 12 and 27 keep theirs), the arrow glyph, and the page.
     Task 9's build projects are generated from this, so tests and builds cannot diverge.
     `controls` true adds the Blocks-carried stepper and Zero Level (`add_level_page`'s
-    `controls` param); false leaves the param out, so v34a/v34b's projects are unchanged.
+    `controls` param); false leaves the param out, so the first LEVEL builds' projects are
+    unchanged.
     `dgn` (the sensor's status DGN) and `stepper_dgn` (the - / + DGN) are emitted only when
-    given, so v34a-v36's projects are unchanged; v37 passes RV-C's custom DGN 0x1EFBF for
-    both."""
+    given, so the earlier LEVEL builds' projects are unchanged; the reference coach passes RV-C's
+    custom DGN 0x1EFBF for both."""
     _check_orientation(orientation)
     slot, char = ARROW
     params = {"preview": bool(preview), "arrow": {"slot": slot, "char": char},
@@ -474,7 +481,8 @@ def _tile_grey(data, key, orientation) -> list[bytes]:
             _centre(data, "--", x0, _TW, yc - (h + 1) // 2, font=F_TILE_NA, rgb=WHITE)]
 
 
-# `arrow_probe` (v39, a diagnostic): v37 and v38 drew the arrow as its leftmost six columns on the
+# `arrow_probe` (a diagnostic, flashed 2026-09-28): the LEVEL builds before it drew the arrow as its
+# leftmost six columns on the
 # coach, cut at x0+13, which neither the text drawer's clip nor the renderer explains
 # (`GUICODE.md` Finding 78). One flash separates the hypotheses. Keys are the rear-facing tiles the
 # owner's 2026-09-28 photo shows amber: rr (top-left) keeps the arrow as it is, the control; rl
@@ -484,7 +492,8 @@ def _tile_grey(data, key, orientation) -> list[bytes]:
 ARROW_PROBE = {"rl": ("wide", 4, 30, 2), "fr": ("left", 8, 19, 1)}   # (name, x offset, w, h-align)
 ARROW_PROBE_STATIC = (135, 288, 19, 20)
 
-# `arrow_probe2` (v40, a diagnostic): v39 showed only the static arrow whole, so the cut is inside
+# `arrow_probe2` (a diagnostic, flashed 2026-09-29): `arrow_probe` showed only the static arrow
+# whole, so the cut is inside
 # the tile arm, and the banners (a label right after a capsule) show it is not the capsule. The
 # suspect is the layers readout's background, whose ~50 px width did not follow the field width.
 # rr (top-left) is the control; rl (top-right) draws the arrow LAST in the arm; fr (bottom-left)
@@ -517,10 +526,10 @@ def _lift_in_x(data, x0) -> tuple[int, int]:
 
 
 def _tile_amber(data, key, arrow, *, layers, lift, orientation, accent=ACCENT,
-                fields=FIELDS_V37, probe=False) -> list[bytes]:
+                fields=FIELDS_DEFAULT, probe=False) -> list[bytes]:
     """`layers`/`lift`: a display-cell index (live readout) or a str (preview text). `probe` 1 is
-    v39's `ARROW_PROBE`, 2 is v40's `ARROW_PROBE2_*`, 3 is `arrow_last`: the arrow drawn after
-    both readouts, whose backgrounds otherwise paint over it (v40 on the coach)."""
+    `ARROW_PROBE`, 2 is `ARROW_PROBE2_*`, 3 is `arrow_last`: the arrow drawn after
+    both readouts, whose backgrounds otherwise paint over it (the coach, 2026-09-29)."""
     x0, yc = _tile_xy(key, orientation)
     last = probe == 3 or (probe == 2 and key == ARROW_PROBE2_LAST)
     paint = probe == 2 and key == ARROW_PROBE2_COLOURS[0]
@@ -706,7 +715,7 @@ def _preview(data: bytes, arrow, accent=ACCENT, orientation="rear",
 
 
 def _live_arms(data: bytes, cells: dict, arrow, accent=ACCENT, orientation="rear",
-               fields=FIELDS_V37, probe=False) -> list[tuple[str, int, list, list]]:
+               fields=FIELDS_DEFAULT, probe=False) -> list[tuple[str, int, list, list]]:
     """[(cell name, switch placement key, arm record lists, match values)], default arm first."""
     groups = []
     for key in ("fl", "fr", "rl", "rr"):
@@ -744,7 +753,7 @@ def build_body(data: bytes, *, cells: "dict[str, int] | None",
     stepper in place of the Carried row (the carried value moves into its centre panel) and the
     Zero Level button, and appends the three wt-12 touch regions (`CONTROLS`) LAST in the static
     body, in `CONTROL_NAMES` order -- never inside a switch arm. `None` draws exactly the body
-    without them (v34b's bytes). `fill_safe` narrows the wheel tiles' readout fields
+    without them (the first live page's bytes). `fill_safe` narrows the wheel tiles' readout fields
     (`FIELDS_FILL_SAFE`) so no background fill can cover the arrow or leave the tile.
 
     `setup` (with `controls`) moves the stepper and Zero Level into the LEVEL SETUP popup
@@ -782,7 +791,7 @@ def build_body(data: bytes, *, cells: "dict[str, int] | None",
             else:
                 recs += live
         groups = _live_arms(data, cells, arrow, accent, orientation,
-                            FIELDS_FILL_SAFE if fill_safe else FIELDS_V37,
+                            FIELDS_FILL_SAFE if fill_safe else FIELDS_DEFAULT,
                             3 if arrow_last else 2 if arrow_probe2 else 1 if arrow_probe else 0)
         groups += wrapped
         if arrow_probe:

@@ -382,7 +382,7 @@ def emit_tail(r: thumb.Routine, tail_target: int) -> None:
 
 def emit_send_frame(r: thumb.Routine, template_addr: int, *, value_in_r3: bool = False) -> None:
     """Transmit the 12-byte frame at `template_addr` through the host CAN sender: pumpauto's
-    send sequence (Finding 7; flashed v14 onward), instruction for instruction.
+    send sequence (Finding 7; flashed since 2026-09-04), instruction for instruction.
 
     `sub sp,#0x14` keeps sp 8-aligned at the `blx` given the prologue's five pushed words; the
     frame is copied to the stack with r0-r2 and `r0 = sp` is the argument. With `value_in_r3`,

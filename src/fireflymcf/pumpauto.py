@@ -12,7 +12,8 @@ minutes LOW, a flag borrow (`-0x0100` while already 0) lands as 0xFF in the FLAG
 while the user's minutes survive. The reverse layout corrupts both fields at once and
 silently moves the minutes off-grid. Do not swap them.
 
-**The minute steps DO cross the byte boundary at the floor, and that is new in v20.** This
+**The minute steps DO cross the byte boundary at the floor, and that is new with the 0 floor
+(2026-09-06).** This
 paragraph used to end "the ±5 minute steps can never cross 0 or 255, so they cannot disturb
 the flag", which was true only while the floor was 5: `-` from 5 landed exactly on 0. Making
 0 the disabled setting puts a `-` press at the floor, and `0x0000 - 5` borrows straight into
@@ -24,7 +25,8 @@ alone), which still holds.
 `minutes * 60`, so a count of 0 arms to `DISARMED` and a timer that is not running never
 starts -- that part is arithmetic. But `arm` re-reads the minute count only at `armit`, which
 is reached only when the countdown is already 0, so a countdown ALREADY RUNNING when the user
-stepped down to 0 kept counting and would have fired. Observed on the coach (v20 round 2), and
+stepped down to 0 kept counting and would have fired. Observed on the coach (2026-09-06, round 2),
+and
 closed by a minutes-is-zero test at the top of `arm` that disarms whatever the pump is doing.
 
 Because the G12 clamps nothing here, `clamp` is the whole guard, and the per-tick routine
@@ -33,7 +35,7 @@ applies it BEFORE anything reads the value (see `build`).
 
 from __future__ import annotations
 
-MINUTES_MIN = 5                # the SHIPPED floor (v14-v19). `minutes_min=0` -- what the
+MINUTES_MIN = 5                # the SHIPPED floor (before 2026-09-06). `minutes_min=0` -- what the
                                # `allow_disable` op param passes -- makes 0 a legal setting that
                                # disables Auto Off; see `clamp`'s borrow rule for its one cost.
 MINUTES_MAX = 60
@@ -92,7 +94,7 @@ def _round_to_step(minutes: int, minutes_min: int = MINUTES_MIN) -> int:
 def clamp(word: int, minutes_min: int = MINUTES_MIN) -> int | None:
     """The corrected word, or `None` when `word` is already valid.
 
-    `minutes_min` is the floor the caller's build ships. At the shipped 5 this is the v14-v19
+    `minutes_min` is the floor the caller's build ships. At the shipped 5 this is the earlier
     function unchanged, byte for byte in the emitted code too. At 0 it additionally undoes the
     byte borrow a `-` press at the floor now produces -- see the block below.
 
@@ -147,7 +149,7 @@ def clamp(word: int, minutes_min: int = MINUTES_MIN) -> int | None:
 
     # 0xFF is a byte no arrow can produce even at the floor (`-` at 0 gives `BORROW_MINUTES`,
     # `-` at 5 gives 0), so the word is CORRUPT -> the default. 0x00 is NOT corrupt: it is the
-    # disabled setting itself, and since v20 a resting value rather than an underflow.
+    # disabled setting itself, and since 2026-09-06 a resting value rather than an underflow.
     if minutes == 0xFF:
         default = pack(MINUTES_DEFAULT, False)
         return None if word == default else default
@@ -314,7 +316,7 @@ def resolve(data: bytes, *, config: "_register.Register",
     the hook and its current tail -- comes out of the image.
 
     `minutes_min` is the minute floor the built routine will enforce: `MINUTES_MIN` (5, the
-    v14-v19 behaviour and the default) or 0, which makes 0 a legal setting that disables Auto
+    earlier behaviour and the default) or 0, which makes 0 a legal setting that disables Auto
     Off and turns on the borrow recovery `clamp` documents. Nothing else is accepted -- the
     grid below 5 has no other legal point, and a floor of, say, 10 would silently make the
     stored 5 unreachable.
@@ -494,7 +496,7 @@ def build(plan: PumpAutoPlan, code_load_addr: int) -> tuple[bytes, list]:
     # 0xFF -> OFF by the borrow-signature rule, which is what `0xFEFB + 5 = 0xFF00` means too.
     # ...and only when the floor is 0. At the shipped floor of 5 no arrow press can put
     # `BORROW_MINUTES` in the byte, so the branch would be unreachable -- and emitting it anyway
-    # would move every instruction after it, changing the bytes of v14-v19's routine and breaking
+    # would move every instruction after it, changing the bytes of the earlier routine and breaking
     # the byte-stability pins that make those flashed images reproducible. The feature is opt-in
     # in the machine code exactly as it is in `clamp`.
     if minutes_min == 0:
@@ -512,7 +514,9 @@ def build(plan: PumpAutoPlan, code_load_addr: int) -> tuple[bytes, list]:
     # `BORROW_MINUTES` and `-` at 5 gives 0 -- so the word is CORRUPT: seed the whole default
     # rather than keep a flag decoded from bytes we have just declared untrustworthy (`clamp`'s
     # own rule). A minute byte of 0x00 IS producible and is now the disabled setting itself; it
-    # falls through with its flag intact -- v15 defect 2, and v20's Off state.
+    # falls through with its flag intact -- the first Auto Off flash's defect 2 (2026-09-04), and
+    # the
+    # Off state.
     emit(2, lambda h, s: (thumb.cmp_imm8(2, 0xFF), "cmp r2, #0xff"))
     emit(2, lambda h, s: (thumb.bcc_n(h, s("default"), "eq"), f"beq #{s('default'):#x}"))
     # The flag byte: 0 or the 0xFF borrow signature recovers as OFF, anything else as ON. The
@@ -664,7 +668,8 @@ def build(plan: PumpAutoPlan, code_load_addr: int) -> tuple[bytes, list]:
     emit(2, lambda h, s: (thumb.ldr_literal(0, h, s("cd")), ldrlit_text(0, h, s("cd"))))
     emit(2, lambda h, s: (thumb.ldrh_imm(1, 0, 0), "ldrh r1, [r0]"))
     # A 0-MINUTE SETTING DISARMS A RUNNING COUNTDOWN, not just a stopped one -- and this is the
-    # v20 round-2 fix, found on the coach. Everything else about "0 disables" is arithmetic:
+    # round-2 fix of 2026-09-06, found on the coach. Everything else about "0 disables" is
+    # arithmetic:
     # `armit` stores `minutes * 60`, so 0 arms to DISARMED and a timer that is not running never
     # starts. But `arm` re-reads the minute count ONLY at `armit`, which is reached only when the
     # countdown is already 0 -- so a countdown that was ALREADY running when the user stepped down

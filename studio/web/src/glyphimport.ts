@@ -33,7 +33,7 @@ export function rowsFromRGBA(rgba: Uint8ClampedArray, width: number,
  * The y-bearing convention every shipped icon font in this corpus follows:
  * `(cell_height - glyph_height) / 2`, floored. The engine refuses anything else with
  * BEARING_OFF_CONVENTION unless `force_y` is set — a logo authored with y = 0 in a
- * 128-cell font drew 33 px above its button on real hardware (the v20 mistake), so the
+ * 128-cell font drew 33 px above its button on real hardware (the 2026-08-19 mistake), so the
  * importer computes it rather than letting anyone type it.
  */
 export function conventionalBearing(cellHeight: number, glyphHeight: number): number {

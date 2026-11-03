@@ -76,7 +76,8 @@ class RenameLabel(Op):
       align: "right"|"left"|"center" (default "right") — where the same-size pad goes.
              "right" preserves the indent a LEFT-aligned label draws from. Use "center" for a
              record whose R49 h-align byte is 2: it centres each line by the padded width, so
-             trailing pad drags the text left (reference build v1/v2's caption sat 9 px off; owner,
+             trailing pad drags the text left (the first reference builds' caption sat 9 px off;
+             owner,
              2026-08-21)
       allow_grow: bool (default False) — permit a relocating grow when `new` does not
                  fit the field `old` was found in
@@ -1109,7 +1110,7 @@ class RemapChannel(Op):
     **The indicator, two ways.** By default the control's own records are pointed at the
     new pin's status cells (`McfPatcher._retarget_indicator`) and no status variable
     moves, so every G12 OUTPUTS row stays honest. That path has not been on the coach:
-    the op is flagged in `CompileResult.unverified`. `move_display_list` takes PC.14's v9
+    the op is flagged in `CompileResult.unverified`. `move_display_list` takes PC.14's coach-proven
     instead — the status variable moves, proven on the coach, and the old channel's
     diagnostics row reports the new channel from then on.
 
@@ -1118,7 +1119,7 @@ class RemapChannel(Op):
              comparison, so a literal newline in the label need not be typed)
       channel: int — destination G12 channel (0-255)
       move_display_list: bool (default False) — move the status variable instead of
-                         retargeting the indicator: the coach-proven path (PC.14, v9), at
+                         retargeting the indicator: the coach-proven path (PC.14), at
                          the cost of the old channel's G12 OUTPUTS row, which then
                          reports the new channel
       allow_capability_change: bool (default False) — forwarded to set_channel's own
@@ -2802,7 +2803,7 @@ class InstallGlyph(Op):
     `CONTROL-BEHAVIOR.md` "Where a glyph lands vertically". `rows` carries the pixels
     as *data* -- one hex digit (4bpp coverage, 0..f) per pixel, one hex string per row,
     all rows equal length -- so compiling a project needs no rasteriser at all; a
-    PNG-import GUI step (deferred to v1.x) can build this same `rows` list later
+    PNG-import GUI step (deferred to a later release) can build this same `rows` list later
     without this op changing.
 
     Params:
@@ -2811,7 +2812,7 @@ class InstallGlyph(Op):
       y: int — the glyph's y-bearing (glyph header byte `+0xc`). Must equal the
          **convention** `(cell_height - glyph_height) // 2` -- the invariant every
          shipped icon font in this corpus follows -- unless `force_y` is set, because a
-         bearing off that formula is exactly the v20 mistake: a logo authored with
+         bearing off that formula is exactly the 2026-08-19 mistake: a logo authored with
          `y=0` in a 128-cell font drew 33 px above its button. `force_y` exists for the
          legitimate exception -- a v-align-1 record, where the bearing is a plain
          offset from the box top, not a centring term.
@@ -3007,7 +3008,7 @@ class InstallGlyph(Op):
         return chr(font.first + gi - font.base) not in drawn
 
     def verify(self, data, ctx):
-        # The glyph pixel read-back: the gate that caught the v13/v14/v15 silent
+        # The glyph pixel read-back: the gate that caught three probe flashes' silent
         # bottom-row corruption. Never skip it.
         g = glyphs.decode_glyph(data, ctx.handles[self.spec.id]["gi"])
         assert (g.width, g.height) == (self.width, self.height), \
@@ -3021,7 +3022,7 @@ class InstallGlyph(Op):
 
 @op("set_gesture")
 class SetGesture(Op):
-    """Change one control group's interaction model. v1 supports exactly one
+    """Change one control group's interaction model. This version supports exactly one
     direction: converting a toggle group to hold-to-toggle
     (`gestures.make_hold_to_toggle`). A single-entry command-5 toggle is
     hardware-confirmed (2026-08-19, the pin-29 Starlink button). A variant-selected
@@ -3050,7 +3051,7 @@ class SetGesture(Op):
     Error codes:
       BAD_PARAMS — kind is not one of "latch"/"hold_to_toggle"
       NOT_SUPPORTED — kind="latch" was requested on a group whose current `.kind`
-                     is not already "latch"; v1 has no latch-conversion primitive.
+                     is not already "latch"; there is no latch-conversion primitive.
                      offers=["disable_gesture_op"] — the fix is to remove/disable
                      whichever earlier op made the group non-latch, not to fit a
                      new edit here.
@@ -4184,9 +4185,10 @@ class MoveControl(Op):
                       went, or a pasted record is not at its translated box.
       INSERT_REFUSED -- `insert.insert_object` refused (no wtype-5 template on `to`, or a gate).
 
-    `hardware_verified = True`: COACH-VERIFIED 2026-10-20 (owner), the LV-mc proof build. It
+    `hardware_verified = True`: COACH-VERIFIED 2026-10-20 (owner), on a proof build. It
     moved Low Volts from the compact AES card (object 1427) to the AES settings page (1425),
-    finding the gear button's compensation itself; the card draws as LV-move did, nothing else
+    finding the gear button's compensation itself; the card draws as the earlier three-op move
+    did, nothing else
     moved, and the moved button arms and disarms on its 3 s hold and repaints with its status.
     Registers `ctx.handles[op_id]`; `{'ref': op_id}` resolves to the new object.
     """
@@ -4719,7 +4721,7 @@ class RemoveControl(Op):
     group and status binding are left completely intact, so `recipe.capabilities`
     is unchanged -- there is no capability delta to declare and none is declared.
     A real detach (freeing the group, retargeting the status cell) is out of scope
-    for v1; parking is the same-size, reviewable move.
+    for now; parking is the same-size, reviewable move.
 
     Params:
       object: int — the object index to remove (the *child*, not the parent that
@@ -5015,7 +5017,8 @@ class AddLowVoltsControl(Op):
         NAMES the same status cell its fillA mode-7 index resolves to. On the AGS panel child 285
         is wrapped by a wtype-5 switch (obj 315 rec[8]) carrying `value_slot=45`, which 285's box
         and caption INHERIT -- that binding is what puts the fill's colour cell in the live-redraw
-        set (OBJECT-HIERARCHY.md 1a; the pin-15 v7->v8 coach fix). The shrink path draws the box
+        set (OBJECT-HIERARCHY.md 1a; the pin-15 probe's coach fix, 2026-08-17). The shrink path
+        draws the box
         inline (no wtype-5 parent), so it must carry the value-slot itself to satisfy the invariant
         `fillA mode-7 index == box value_slot == caption value_slot`.
 
@@ -5049,7 +5052,8 @@ class AddLowVoltsControl(Op):
         `value_slot` (when set) adds the R42 value-slot field (header byte4 bit 0x20). The
         live-redraw invariant (OBJECT-HIERARCHY.md 1a) wants the caption to name the SAME status
         cell as the box's fillA mode-7 index; giving only the box a value-slot repaints the box
-        but drops the caption on a status change (the pin-15 v7 defect). Both carry it here."""
+        but drops the caption on a status change (the pin-15 probe's defect, 2026-08-17). Both carry
+        it here."""
         tb = text.encode("ascii")
         # b0=0x0b (no aux bytes); b1=0x50 base-modes [0,0,1,1]; b2=0x0f geom0..3; b3=0x2a
         # (fillA/fillB modes as 285's rec[1], both inherit; align bits 0); b4 0x20 -> R42 value-slot.
@@ -5560,7 +5564,8 @@ class AddOptionFollower(Op):
     compile's capability gate confirms it.
 
     Gate mask (Task 13). The gate test defaults to the whole halfword `== 1`, which is what the
-    hardware-verified v9..v13 builds emit -- omitting `gate_mask`/`gate_on_value` must therefore
+    hardware-verified builds of 2026-08-31 to 2026-09-02 emit -- omitting
+    `gate_mask`/`gate_on_value` must therefore
     stay byte-identical for ever (the research repository's tests pin those images; they are on
     a vehicle). But a selector whose word carries TWO fields breaks that test: the pump-auto-off
     work widens `0xEE` to `minutes | link_flag << 8`, so the slot is never 1 and an unmasked gate
@@ -6085,7 +6090,8 @@ class FollowRegister(Op):
     """Generic register-follower: watch ANY register for an edge and drive a channel, gated by
     ANY register condition(s). The superset of follow_channel/add_option_follower, minus the
     on-screen checkbox. Watch/gate refs name a resolve_register op id (or inline
-    {dgn, instance|selector}). The authored routine is the hardware-verified v9 follower with
+    {dgn, instance|selector}). The authored routine is the hardware-verified Pump Link follower
+    (2026-08-31) with
     generalized inputs; a coach check is warranted the first time a NEW watch register is used."""
     PARAMS = {
         "properties": {
@@ -6349,7 +6355,8 @@ class AddRegisterReadout(Op):
             raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
         if cell.fresh:
             # tier 3: a spare index repointed at fresh SRAM no stock instruction names. The
-            # class default (True) covers tiers 1/2, which v17's coach run vouches for; a fresh
+            # class default (True) covers tiers 1/2, which the 2026-09-04 coach run (PC.59) vouches
+            # for; a fresh
             # address is unprecedented on hardware regardless, so this instance stays
             # unverified until ITS tier has its own coach photo.
             self.hardware_verified = False
@@ -6567,18 +6574,21 @@ class SwapAesElectrical(Op):
                     earlier in the project's op list; if it has not run yet (or `pump_section`
                     names an id that never ran), this op refuses (`BAD_REF`) instead of wiring
                     the section to stale or absent ids.
-      off_at_zero: bool (default `False`) -- v20. Replace the Auto Off numeric readout with a
+      off_at_zero: bool (default `False`) -- verified 2026-09-06. Replace the Auto Off numeric
+      readout with a
                     wtype-6 switch over two arms, so minute count 0 (the disabled setting since
                     `pumpauto.MINUTES_MIN` became 0) reads **'Off'** and every other count reads
                     the number + 'Min' as before. Requires `pump_section`; refuses `BAD_PARAMS`
                     without it, since there is no readout to switch.
       link_indicator: `{"ref": op_id}` (default `None`) -- an `add_option_follower` op's id
-                    (v16). Requires `pump_section`. When given, `swap_electrical_to_compact`
+                    (the stock-pattern switch). Requires `pump_section`. When given,
+                    `swap_electrical_to_compact`
                     is called with that op's `display_slot` handle field as
                     `link_display_slot`: the section's static Pump Link box+label collapses
                     into a wtype-6 switch reading the bridge's 0/1 display cell over its own
                     dark/lit arm objects (`aescompact.append_link_arms` +
-                    `build_pump_section`'s v16 shape), instead of the pre-v16 box that read
+                    `build_pump_section`'s switch shape), instead of the earlier static box that
+                    read
                     the (frozen, in AES) Low Volts cell 45. Same refuse-rather-than-wire-stale
                     discipline as `pump_section`: a ref with no `display_slot` handle refuses
                     `BAD_REF`.
@@ -6743,7 +6753,7 @@ class SwapAesElectrical(Op):
         # records when pump_section was given.
         recs = records.object_records(data, gs + tab[aescompact.ELECTRICAL_AES_BODY])
         # Records are found by ROLE (`aescompact.frame_roles`), not by index: a later op may
-        # prepend its own records (v48's cards), which shifts every index but no role.
+        # prepend its own records (the card layout's cards), which shifts every index but no role.
         try:
             roles = aescompact.frame_roles(data, recs)
         except ValueError as e:
@@ -6765,7 +6775,7 @@ class SwapAesElectrical(Op):
         else:
             link_id, plus_id, minus_id, readout_slot = h["pump_section_ids"]
             section_len = 14 if h["link_display_slot"] is not None else 15
-            # v20: `off_at_zero` folds the (number, 'Min') pair into ONE wtype-6 switch, so the
+            # `off_at_zero` folds the (number, 'Min') pair into ONE wtype-6 switch, so the
             # section is a record shorter and the numeric readout has moved into an arm object.
             section_len -= 1 if h["off_at_zero"] else 0
             assert roles["pump"] is not None and len(recs) - roles["pump"] >= section_len, \
@@ -6938,7 +6948,8 @@ class AddAesLowVoltsTrigger(Op):
     the only mode object 829 is ever on screen for -- so the shipped AGS Low Volts button, if
     copied to this page, cannot recolor (CLAUDE.md open item 4). But the live 0x2F arm state is
     NOT frozen: its DGN_CONFIG receive-filter entry (var 42) writes slot 0x2000801C in every
-    mode. This op reuses that un-frozen slot with the hardware-proven v9 follower toolchain to
+    mode. This op reuses that un-frozen slot with the hardware-proven Pump Link follower toolchain
+    to
     build a display-only arm indicator that works in AES -- with NO gate surgery (the Mechanism-C
     in-place `nop` of the freeze gate is the documented alternative, deliberately not taken).
 
@@ -7299,7 +7310,8 @@ class AddAesBattHeat(Op):
             "Batt Heat touch id %d not on the compact frame (has %s)" % (h["touch_id"], ids)
         # The caption is on the frame itself, or -- once `add_aes_batt_heat_status` has run -- in
         # every arm of the state switch that replaced the button body, which is where it has to be
-        # for an arm repaint to redraw it (v31 lost it on enable by leaving it a sibling).
+        # for an arm repaint to redraw it (a 2026-09-22 build lost it on enable by leaving it a
+        # sibling).
         labels = [r.label for r in frame if r.wtype == 11 and r.label]
         arm_labels = []
         for sw in [r for r in frame if r.wtype == 6]:
@@ -7398,7 +7410,7 @@ class AddAltReboot(Op):
         gt = guidata.group_table(data)
         binding_start = len(guidata.binding_table(data))
         # a hold-only control: `newbutton.hold_safe_groups` (never 68/69, never GuiCode-driven --
-        # v45's 137 never fired on a hold -- and only a press-cycled slot)
+        # 137 never fired on a hold on the coach, 2026-09-30 -- and only a press-cycled slot)
         free = newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
         if not free:
             raise RecipeError("NO_FREE_GROUP",
@@ -7472,7 +7484,7 @@ class AddAesBattHeatStatus(Op):
         Heater use;
       - **battery heater contactor closed** = status byte 1 bit 2 -> a **red wavy-lines glyph**
         (font slot 23 char `'2'`) in the button's **top-right** corner. The contactor is a relay
-        inside the battery pack; v31 called it a heat pump, which the owner corrected.
+        inside the battery pack; an earlier build called it a heat pump, which the owner corrected.
 
     The receive side **appends two new variable-table entries** for `0xFF70` (`append_filter`,
     coach-verified 2026-09-22), so no existing subscription is taken over -- an earlier revision
@@ -7484,8 +7496,10 @@ class AddAesBattHeatStatus(Op):
     `bitcombine` routine (bit 0 = heater, bit 1 = contactor), and ONE wtype-6 switch over four
     whole-button arms watches that cell.
 
-    **One switch, not two** -- this is what v31 got wrong. The panel repaints only the arm a switch
-    selects, so v31's separate body and glyph switches each left something stale: enabling the
+    **One switch, not two** -- this is what the first status build (2026-09-22) got wrong. The panel
+    repaints only the arm a switch
+    selects, so that build's separate body and glyph switches each left something stale: enabling
+    the
     heater painted the body arm over the sibling 'Batt Heat' caption with nothing to redraw it, and
     disabling the contactor selected an empty arm that drew nothing, leaving the red glyph lit
     until the page was navigated away and back (both reported by the owner on 2026-09-22). Here
@@ -7548,7 +7562,8 @@ class AddAesBattHeatStatus(Op):
         try:
             # Neither entry filters on instance (compare_byte is a don't-care byte once instance
             # stays FILTER_DISABLED); compare_byte=0x00 is pinned explicitly here, matching the
-            # +5 byte this op has shipped with since v27/v32, so the flashed image and the
+            # +5 byte this op has shipped with since its first flash (2026-09-21), so the flashed
+            # image and the
             # historical coach-verified builds keep compiling byte-identically now that
             # `NewFilter`'s own default changed (Task 2, `append_filter` instance/compare_byte).
             out, edits, (var_heat, var_con) = appendfilter.append_filters(data, [
@@ -7567,7 +7582,8 @@ class AddAesBattHeatStatus(Op):
         # (2) DISPLAY: a widget's value_slot indexes the CELL table, never the variable table, and
         # a switch reads exactly ONE slot -- so both vars are folded per tick into ONE cell
         # (bit 0 = heater, bit 1 = contactor) by a single `bitcombine` routine, and one switch
-        # owns the whole button. The cell mechanism is v25's live House battery and the
+        # owns the whole button. The cell mechanism is the live House battery's (verified
+        # 2026-09-12) and the
         # 2026-09-22 append probe; the fold is what lets one arm draw every pixel.
         try:
             out, cells, cell_edits = readout.allocate_fresh_cells(
@@ -7617,7 +7633,8 @@ class AddAesBattHeatStatus(Op):
         # The body pair comes from the firmware's own palette rather than from pinned indices, so
         # the button rests at exactly the blue every other button rests at and lights to exactly
         # their cyan. A static index is preferred (`resolve_fill_index`), which is what keeps the
-        # fill from coupling to some other widget's live state -- v15's defect 1 (`aescompact.py`).
+        # fill from coupling to some other widget's live state -- the first Auto Off flash's defect
+        # 1, 2026-09-04 (`aescompact.py`).
         try:
             off_index = theme.resolve_fill_index(out, color=aescompact.BATT_HEAT_OFF_RGB)
             on_index = theme.resolve_fill_index(out, color=aescompact.BATT_HEAT_ON_RGB)
@@ -7671,7 +7688,8 @@ class AddAesBattHeatStatus(Op):
         assert len(statusbind.registered_dgns(data)) <= statusbind.REGISTRY_CAP, \
             "status DGN pushed the variable table over REGISTRY_CAP"
 
-        # THE GUARD the v28/v29 defect needed: the switch's value_slot must resolve, through the
+        # THE GUARD the variable-index defect (2026-09-21/22) needed: the switch's value_slot must
+        # resolve, through the
         # cell table, to an address a GuiCode routine writes from BOTH vars' receive slots. A
         # switch pointed straight at a var index reads an unrelated cell and never moves, and a
         # render cannot tell the difference (the renderer injects values by value_slot).
@@ -7701,13 +7719,13 @@ class AddAesBattHeatStatus(Op):
         # is gone, and no second switch shares its arm band. (Object 829 carries the compact AES
         # frame's own switches too, so this is scoped to the button rather than to the object.)
         # scoped to THIS button (its capsule is followed by its own caption): a second BMS
-        # button (Ignore Alarms, v49) carries the same static fill until its own status op runs
+        # button (Ignore Alarms) carries the same static fill until its own status op runs
         assert not [i for i, r in enumerate(frame[:-1]) if r.wtype == 33 and r.colors
                     and r.colors[0] == ("fillA", 7, aescompact.BATT_HEAT_FILL_INDEX)
                     and frame[i + 1].wtype == 11 and frame[i + 1].label == h["text"]], \
             "the static batt-heat capsule survived; the body would not follow the heater"
         # The caption MOVED into the arms. A copy left in the stream is drawn a second time at the
-        # pen the arm's caption advanced to -- the first v32 render showed 'Batt Heat' twice,
+        # pen the arm's caption advanced to -- the first one-switch render showed 'Batt Heat' twice,
         # stacked -- so its absence here is the check, not an accident of ordering.
         assert not [r for r in frame
                     if r.wtype == 11 and r.label == h["text"]], \
@@ -7721,7 +7739,8 @@ class AddAesBattHeatStatus(Op):
             "its own arm, which is how an earlier build lost the caption and kept a stale glyph" % (
                 [r.value_slot for r in others],)
 
-        # THE GUARD for the v31 repaint defects: EVERY arm must draw the full-size opaque capsule
+        # THE GUARD for the 2026-09-22 repaint defects: EVERY arm must draw the full-size opaque
+        # capsule
         # AND the caption, so selecting it erases whatever the outgoing arm left. An arm missing
         # either is the exact shape of both bugs the owner reported.
         want_w = h["w"] - 2 * aescompact.PUMP_OUTLINE_INSET
@@ -7772,12 +7791,13 @@ class AesCardLayout(Op):
     sizes.
 
     Runs AFTER swap_aes_electrical, add_aes_batt_heat and add_aes_batt_heat_status (built with
-    the full-width heater: `x 84, y 156, w 328, h 54`). Asserts the exact v47 record shapes of
+    the full-width heater: `x 84, y 156, w 328, h 54`). Asserts the exact pre-card record shapes of
     829 and the private AES cluster and refuses otherwise. Edits only those two objects: shared
     objects move through the records that place them (`cardlayout.py`).
 
     Error codes:
-      WRONG_SHAPE     -- 829 or the cluster is not the v47 shape (cardlayout.CardLayoutError).
+      WRONG_SHAPE     -- 829 or the cluster is not the pre-card compact shape
+      (cardlayout.CardLayoutError).
       REPLACE_REFUSED -- a record stream could not be relocated.
     """
 
@@ -7827,7 +7847,7 @@ class AesCardLayout(Op):
 
 @op("add_card_readouts")
 class AddCardReadouts(Op):
-    """Captioned live readouts inside an aes_card_layout card (v49: the Inverter card's right
+    """Captioned live readouts inside an aes_card_layout card (e.g. the Inverter card's right
     column).
 
     Each row is a white caption over a right-justified value and its unit. A value names either
@@ -7992,7 +8012,7 @@ class AddCardReadouts(Op):
 
 @op("add_aes_bms_button_status")
 class AddAesBmsButtonStatus(Op):
-    """Light a BMS command button (an `add_aes_batt_heat` instance, e.g. v49's Ignore Alarms) from
+    """Light a BMS command button (an `add_aes_batt_heat` instance, e.g. Ignore Alarms) from
     ONE bit of the BMS status the heater status already receives: button blue while the bit is
     clear (or nothing has arrived), cyan while it is set.
 
@@ -8000,7 +8020,7 @@ class AddAesBmsButtonStatus(Op):
     byte 2 bits 0-1 (mode 4); `mask` picks the bit inside that field (2 = byte 2 bit 1, "alarm
     mask active"). No new subscription: a one-source `bitcombine` fold writes a fresh cell, and
     ONE two-arm switch over whole-button arms (`aescompact.BMS_BIT_STATE_ARMS`) replaces the
-    button's static capsule -- the same repaint-safe shape as the heater (v32).
+    button's static capsule -- the same repaint-safe shape as the heater's status.
 
     Error codes:
       BAD_REF           -- `button` / `status` name no matching handle.
@@ -8930,7 +8950,7 @@ class AddRvcButton(Op):
     group-17 clone with the hold nibble at `seconds` and one binding on 0x04; `tap` + `hold` is
     Batt Heat's group-17 clone with the hold nibble at `seconds`, the hold binding (0x04) first
     and the tap (0x02) after. The group is the pool's first slot, never 68/69; a hold on a
-    GuiCode-driven group is dead (v45), so a hold takes the `hold_safe` pool.
+    GuiCode-driven group is dead (coach, 2026-09-30), so a hold takes the `hold_safe` pool.
 
     The records are Batt Heat's body (`rvcbutton.button_records`): a filled box at `x, y` `w` x
     `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
@@ -9101,7 +9121,7 @@ class AddRvcButton(Op):
                             % (list(rvcbutton.POOLS), self.group_pool))
         if self.hold is not None and self.group_pool == "free":
             raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
-                            "is dead (v45)")
+                            "is dead (coach, 2026-09-30)")
         if toggle is not None and self.group_pool == "free":
             raise self._bad("a toggle needs the hold_safe pool: GuiCode drives its own groups' "
                             "variants, and would fight the status op's setVariant")
@@ -9454,7 +9474,8 @@ class AddBattHeatBatteryGlyph(Op):
                                         style=self.style, outline_rgb=self.outline_rgb), \
                     "battery %d arm %d (match %#x) is not the whole battery with the %s mark %s" \
                     % (oi, ai, match, self.style, "on" if contactor else "off")
-            # The enrolled voltage containers still point at the battery: the v25 repaint path.
+            # The enrolled voltage containers still point at the battery: the live House battery's
+            # repaint path.
             assert any(r.wtype == 5 and r.child_index == oi and (r.header[4] & _ENROLL_BIT)
                        for oj in range(len(tab))
                        for r in records.object_records(data, gs + tab[oj])), \
@@ -9559,9 +9580,10 @@ class AddPumpAutoOff(Op):
                   (`optionrow.REUSE_GROUP_SLOT`) on the CREATE path, or the group
                   `optionrow.find_config_toggle` locates on the ADOPT path. Either path refuses
                   (`TOGGLE_REFUSED`) if the group it would act on is not this one.
-      allow_disable: bool (default `False`) -- v20. Lower the minute floor from 5 to 0, making 0
+      allow_disable: bool (default `False`) -- verified 2026-09-06. Lower the minute floor from 5 to
+      0, making 0
                   a legal setting that DISABLES Auto Off, and emit the borrow recovery that
-                  floor needs. Left `False` the routine is the v14-v19 one byte for byte, which
+                  floor needs. Left `False` the routine is the earlier one byte for byte, which
                   is what keeps every flashed image reproducible from this recipe; the whole
                   behaviour change is in that one flag. The disabling itself costs no code --
                   `armit` stores `minutes * 60`, so 0 arms to `DISARMED` -- but the floor does:
@@ -9830,11 +9852,11 @@ class AddPumpAutoOff(Op):
                                                   # even when a LATER op grows the table too
             "config_slot": plan.config_slot,
             "pump_slot": plan.pump_slot,
-            "minutes_min": plan.minutes_min,      # 5 = the shipped floor, 0 = disablable (v20)
+            "minutes_min": plan.minutes_min,      # 5 = the shipped floor, 0 = disablable
             "display_addr": plan.display_addr,
             "countdown_addr": plan.countdown_addr,
             "countdown_slot": plan.countdown_slot,   # what a wtype-6 switch reads to see the
-                                                     # timer running (0 = disarmed) -- v20's
+                                                     # timer running (0 = disarmed) -- the
                                                      # `add_corner_mark` gate
             "hook_at": hook_at,
             "code_load_addr": code_load_addr,
@@ -10269,7 +10291,8 @@ class AddCornerMark(Op):
     appears in the HOME Water Pump button's lower-right corner while the countdown runs and goes
     when it stops, with `Water Pump` and `Tank Heater` unmoved in both states.
 
-    It took two rounds. v20 shipped a mark that drew **one column of pixels**, because its record
+    It took two rounds. The first flash (2026-09-06) shipped a mark that drew **one column of
+    pixels**, because its record
     was copied from `aescompact._flow_anchor` -- which declares coordinates 0 and 1 only, since an
     invisible record needs no box -- and the panel clipped the glyph to the degenerate box that
     gave it. `verify` checked WHERE the mark landed and not that it had a width to land in, and
@@ -10362,7 +10385,8 @@ class AddCornerMark(Op):
                 % (self.font, self.char), op_id=self.spec.id) from None
 
         # The box comes from the GLYPH, not from a parameter: a label with no box draws a single
-        # column (the v20 defect), and a box smaller than its glyph clips it just as silently.
+        # column (the first flash's defect), and a box smaller than its glyph clips it just as
+        # silently.
         # `metrics.font_metrics(...).height` is the cell the panel lays the line out in, so the
         # box is the glyph's own width by that cell -- never narrower than what will be drawn.
         g = glyphs.decode_glyph(data, font.glyph_index(ord(self.char)))
@@ -10444,7 +10468,8 @@ class AddCornerMark(Op):
         assert got == h["expect"], \
             "the mark lands at %s on screen root %d, the project expected %s" % (
                 got, h["page_root"], h["expect"])
-        # THE BOX IT LANDS IN, not just the corner it starts at. v20 shipped a mark whose placed
+        # THE BOX IT LANDS IN, not just the corner it starts at. the first flash shipped a mark
+        # whose placed
         # box was (571,218)-(571,218) -- zero-wide -- and the panel drew one column of the glyph.
         # Checking only the origin is what let that through.
         drawn_w, drawn_h = marks[0].x1 - marks[0].x0, marks[0].y1 - marks[0].y0
@@ -10588,7 +10613,7 @@ class AddLevelPage(Op):
          appended as one band group).
 
     Preview (`preview` true) draws the mockup's example state as static text: no receive side,
-    no cells and no GuiCode (v34a, a drawing check before the live build).
+    no cells and no GuiCode (flashed 2026-09-26 as a drawing check before the live build).
 
     Controls (`controls` true): the
     Blocks-carried stepper (- / +) and the Zero Level button. Three free group slots
@@ -10602,8 +10627,10 @@ class AddLevelPage(Op):
     place of the Carried row -- the carried readout moves into its centre panel -- the Zero
     Level button, and three wt-12 touch regions (`levelpage.CONTROLS`) last in the static body,
     each touch id the group index. `stepper_dgn` picks the - / + DGN: 0x0EFFF (J1939
-    proprietary-A, what v35/v36 send) or 0x1EFBF (RV-C's custom DGN 1EF00h addressed to the
-    sensor's pinned BFh, v37). The controls are allowed with `preview` too: the stepper shows the example carried value as static text and the touches still transmit, so a preview
+    proprietary-A, what the first live builds sent) or 0x1EFBF (RV-C's custom DGN 1EF00h addressed
+    to the
+    sensor's pinned BFh, since 2026-09-28). The controls are allowed with `preview` too: the stepper
+    shows the example carried value as static text and the touches still transmit, so a preview
     build can test the transmit side alone. They only transmit: the carried value is the
     sensor's own report, never written by the panel.
 
@@ -10833,9 +10860,10 @@ class AddLevelPage(Op):
 
     def _grow_controls(self, data, ctx, handles):
         """Three fresh groups and their four bindings in one grow; the touch id is the group."""
-        # never a group GuiCode drives (`newbutton.guicode_selected_groups`): v45's Track + took
-        # 136 and its hold never repeated on the coach. The repeating geometry steppers take
-        # `newbutton.hold_safe_groups` only; the rest keep their v42-v44 allocation.
+        # never a group GuiCode drives (`newbutton.guicode_selected_groups`): a Track + on
+        # 136 never repeated its hold on the coach (2026-09-30). The repeating geometry steppers
+        # take
+        # `newbutton.hold_safe_groups` only; the rest keep their earlier allocation.
         selected = newbutton.guicode_selected_groups(data)
         free = [g for g in newbutton.free_group_slots(data)
                 if g not in levelcontrols.RESERVED_GROUPS and g not in selected]
@@ -11132,7 +11160,7 @@ class AddLevelPage(Op):
             "the level DGN pushed the variable table over REGISTRY_CAP"
 
         # CELLS <-> ROUTINE: every widget cell names the address the routine writes, and the
-        # routine's pool carries every slot and cell address (the v28/v29 class of defect).
+        # routine's pool carries every slot and cell address (the variable-index class of defect).
         table = status_map.cell_table(data)
         gc = theme.guicode_section(data)
         # From the routine's entry to the section's end: its own code and pool (plus any routine
@@ -11213,10 +11241,10 @@ class SetTheme(Op):
       WRONG_BUILD — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or
                     a theme already applied)
 
-    Hardware status: verified on the coach 2026-11-02 (owner): v54 Saffron, a recipe with the
-    six roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.
-    First run in the emulator the same day (Harvest Maple on a reference build LV-mc: no stock theme pixel on
-    any nav-rail page).
+    Hardware status: verified on the coach 2026-11-02 (owner): a reference build with the six
+    roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.
+    First run in the emulator the same day (a re-themed reference build: no stock theme pixel
+    on any nav-rail page).
     """
     hardware_verified = True
     PARAMS = {
@@ -11311,6 +11339,6 @@ class SetTheme(Op):
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
         return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
                 "entries, %d GuiCode colour literals, %d tank fills, %d tank wells "
-                "-- HARDWARE-VERIFIED (v54 Saffron, 2026-11-02)"
+                "-- HARDWARE-VERIFIED (2026-11-02)"
                 % (applied, len(h.get("extra", {})), h["inline"], h["palette"],
                    h.get("literals", 0), h.get("tank_fills", 0), h["wells"]))

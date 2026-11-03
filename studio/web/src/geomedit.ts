@@ -85,7 +85,7 @@ export function moveElementDraft(
  * moving one leaves the others behind" (MCF-FORMAT.md §6) -- so making a button
  * 120x60 means three edits, and doing two of the three leaves a button whose touch
  * area no longer matches its paint. That is a firmware fact the owner should not have
- * to carry: the drafts below are exactly the ops reference build v1 writes by
+ * to carry: the drafts below are exactly the ops the first reference build writes by
  * hand as l-geom / l-cap / l-touch, produced from one width and one height.
  *
  * Records are visited in placement order, and only those that actually carry the field

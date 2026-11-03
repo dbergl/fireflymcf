@@ -48,7 +48,8 @@ prefers the proven arrow shape.
 
 **Zero Level: prefix `30 00 00 00`, mask `0x04`, repeat clear, both frames in table order.**
 Group 17 (`10 00 0c 00`) with the hold nibble set to 3 and the held rate cleared -- exactly the
-hardware-verified `gestures.make_hold_to_toggle` edit, and byte-identical to v34b's group 229.
+hardware-verified `gestures.make_hold_to_toggle` edit, and byte-identical to the first live page's
+group 229.
 Built from group 17 rather than read from group 229 so it does not depend on the base image
 (stock 229 is `10 00 00 00`). Hold seconds = byte 0 high nibble (`mla r0,fp,r3,r0`, fp = 1000,
 @0x21BD86; section 2 "The hold threshold" lines 197-207). Both bindings match phase 3 in one
@@ -64,7 +65,8 @@ class LevelControlsError(ValueError):
     """A press the model does not settle, or an unknown control."""
 
 
-# DGN 0x0EFFF: J1939 proprietary-A, destination FF -- what v35/v36 send, and the default, so
+# DGN 0x0EFFF: J1939 proprietary-A, destination FF -- what the first live builds sent, and the
+# default, so
 # their projects rebuild byte-identically. RV-C puts custom messages on 1EF00h with DGN-low the
 # destination: `STEPPER_DGN_RVC` = 0x1EFBF addresses the sensor at BFh, its default and first
 # claimed address. A binding's frame is fixed, so the sensor accepts BFh-addressed commands
@@ -95,7 +97,8 @@ FORBIDDEN_DONORS = (64, 85)        # byte 3 bit 7: the second loop over the glob
 # 68 and 69 hold the stock `1FFD3` / `1FFC5` inverter/charger enable/disable templates (two-variant
 # toggles: variant 1 enable, variant 0 disable, tap-release); `docs/HARDWARE-VERIFIED.md`'s
 # PD-inverter bridge brief ("Commands need no edit at all", the paragraph ending "Groups 68/69 are
-# two-variant toggles") names them as the route that bridge will drive. Of v34b's 43 free slots
+# two-variant toggles") names them as the route that bridge will drive. Of the first live page's 43
+# free slots
 # only group 61 is an empty stub, so every other claim overwrites an unreferenced stock template;
 # these two are the ones with a documented purpose (controller ruling, 2026-09-26).
 RESERVED_GROUPS = frozenset({68, 69})    # `recipe.RESERVED_GROUPS` gates them at compile
@@ -114,7 +117,8 @@ SETUP_CONTROLS = tuple(SETUP_OPCODES)
 for _name, _op in SETUP_OPCODES.items():
     _BINDINGS[_name] = [(_DGN_PROP_A, bytes([0x4C, 0x56, _op]) + b"\xff" * 5, STEPPER_MASK)]
 
-# The popup's wheelbase and track steppers (v45; level-sensor ops 0Bh-0Eh, +/-0.5 in). Unlike the
+# The popup's wheelbase and track steppers (`geometry`; level-sensor ops 0Bh-0Eh, +/-0.5 in). Unlike
+# the
 # rest they REPEAT while held, because 0.5 in steps across an 80-300 in range are too many taps:
 # the stock arrows' own shape (group 103 `10 00 04 80`: 1-s hold, held-phase repeat index 1 =
 # 250 ms; the delta binding's repeat bit set), coach-proven on the Water Pump Auto Off stepper,

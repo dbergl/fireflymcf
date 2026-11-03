@@ -85,11 +85,11 @@ _VAR_READ = {0: (1, False), 1: (1, False), 2: (1, True), 3: (2, False), 4: (2, T
              5: (4, False), 6: (4, True)}
 
 # Pages are identified by SCREEN ID, never by header text: a header rename (`rename_label` on a
-# page's title, e.g. HOME -> MYCOACHNAME) is the commonest user edit and must not move a page.
+# page's title, e.g. HOME -> MY COACH) is the commonest user edit and must not move a page.
 # The rail screens are 0-4 by the screen switch's own contract (`layout._screen_switch_record`
 # is defined as the switch covering {0..4}); OPTIONS is the screen `navmap.routes` resolves for
 # the "Main Options" tab's touch id. Names below (and the stock headers) are aliases only; any
-# header the image actually draws also resolves, so "MYCOACHNAME" finds screen 0 too.
+# header the image actually draws also resolves, so "MY COACH" finds screen 0 too.
 RAIL_SCREENS = {"home": 0, "electrical": 1, "lights": 2, "climate": 3, "climate control": 3,
                 "settings": 4}
 OPTIONS_NAMES = {"options"}

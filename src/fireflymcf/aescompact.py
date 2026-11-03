@@ -96,7 +96,7 @@ SETTINGS_LEAF_STOCK = bytes.fromhex("0e23")     # movs r3,#0xe  (screen 14)
 # carries touch id 0x7F7, an ACTION id (>= the 233 group count), whose dispatcher leaf sets screen
 # 39: object 38, the READ-ONLY 'PD Inverter' readout. The owner wants it to reach screen 14,
 # object 17, 'INVERTER / CHARGER SETTINGS' -- the page the HOME inverter's 3-second hold reaches
-# (`holdregion`, reference build v8), which carries five live controls (Low Batt. Cutout, VAC Dropout, Max
+# (`holdregion`, PC.29), which carries five live controls (Low Batt. Cutout, VAC Dropout, Max
 # Chrge Rate, Shore Brkr Size, Battery Type).
 #
 # 1421 is the ONLY carrier of 0x7F7 and it renders on the AGS compact frame as well as the AES one,
@@ -294,7 +294,8 @@ PUMP_BUTTON_LABEL_REC = 1
 PUMP_BUTTON_TEXT = "Pump Link"              # 9 chars over 'Low\nVolts' (9) -- same size
 PUMP_BUTTON_TOUCH_REC = 9                   # 315[9]: the Low Volts wtype-12 touch region
 
-# The Pump Link state arms (v16; fixes v15's defect 1, below). Stock shows an on/off state on a
+# The Pump Link state arms (the switch shape; fixes the first Pump Link flash's defect 1, below).
+# Stock shows an on/off state on a
 # button with a wtype-6 switch over pre-coloured capsule arms that carry their own caption --
 # 45 stock switches do it, the AES enable pill among them: object 173 'Enable' (fill index 10,
 # dark) and 174 'Enabled' (fill index 35, cyan), keyed by a byte cell. Those two are the donors;
@@ -353,7 +354,8 @@ def _object_records(data: bytes, index: int) -> list[records.WRecord]:
 
 def frame_roles(data: bytes, recs: list) -> dict:
     """Indices of the compact frame's records by ROLE, so records a later op prepends or appends
-    (v48's cards and titles) do not break the verifies that used to pin 0..6 and 7.. by index.
+    (the card layout's cards and titles) do not break the verifies that used to pin 0..6 and 7.. by
+    index.
 
     `frame` is the battery strip (wtype 33 followed by a label and a voltage container),
     `cluster` the wtype-5 whose child carries the AES gear's nav touch, `inverter` the slot-113
@@ -701,7 +703,7 @@ def _author_n_arm_switch(data: bytes, display_slot: int, arms_base: int, count: 
 
 
 def _author_two_arm_switch(data: bytes, display_slot: int, arms_base: int) -> bytes:
-    """A two-arm state switch (the Pump Link button and the v20 Auto Off readout) -- thin wrapper
+    """A two-arm state switch (the Pump Link button and the Auto Off readout) -- thin wrapper
     over `_author_n_arm_switch` with `count = 2`."""
     return _author_n_arm_switch(data, display_slot, arms_base, 2)
 
@@ -713,8 +715,9 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
                        readout_arms_base: int | None = None) -> list[bytes]:
     """The Water Pump section's record fragments, in flow order.
 
-    Fifteen fragments (`link_display_slot`/`link_arms_base` both `None`, the v14/v15 shape) or
-    fourteen (both given, v16), wtypes `[32, 32, 11, 11, 33, 11, 12, 11, 5, 11, 12, 12, 9, 8, 0]`
+    Fifteen fragments (`link_display_slot`/`link_arms_base` both `None`, the static-box shape) or
+    fourteen (both given, the switch shape), wtypes `[32, 32, 11, 11, 33, 11, 12, 11, 5, 11, 12, 12,
+    9, 8, 0]`
     or `[32, 32, 11, 11, 6, 12, 11, 5, 11, 12, 12, 9, 8, 0]`:
 
       [0]  wtype-32  section box       -- 829[7], absolute at (X, Y), W x H, alignment forced
@@ -723,10 +726,12 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
       [2]  wtype-11  'Water Pump'      -- 829[9] relabelled; a 10-char string into a 16-char
                                          field, so the record is REBUILT at its own length
       [3]  wtype-11  flow anchor       -- invisible; puts the button row on its origin
-      [4]  wtype-33  button box        -- v14/v15 only: 285[0] widened to the content column
-      [5]  wtype-11  'Pump Link'       -- v14/v15 only: 285[1] relabelled (9 over 9: same size)
+      [4]  wtype-33  button box        -- static-box shape only: 285[0] widened to the content
+      column
+      [5]  wtype-11  'Pump Link'       -- static-box shape only: 285[1] relabelled (9 over 9: same
+      size)
                                          and widened
-      [4]  wtype-6   link switch       -- v16 only: `_author_two_arm_switch`, reading
+      [4]  wtype-6   link switch       -- switch shape only: `_author_two_arm_switch`, reading
                                          `link_display_slot` and selecting the two-object band at
                                          `link_arms_base`; the arms carry their own caption, so
                                          the separate box/label pair above is not emitted
@@ -741,7 +746,7 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
       [13] wtype-8   numeric readout   -- 793[5], stock value_slot 278 -> `readout_slot`
       [14] wtype-0   'Min'             -- 793[6], verbatim
 
-    With `readout_arms_base` (v20) those last TWO fragments are replaced by ONE wtype-6 switch
+    With `readout_arms_base` those last TWO fragments are replaced by ONE wtype-6 switch
     on `readout_slot`, selecting the band at `readout_arms_base`: 'Off' at match 0, the number +
     'Min' on the default arm. So the section is thirteen fragments, ending
     `[..., 12, 9, 6]`. The switch is authored by the same `_author_two_arm_switch` the Pump Link
@@ -774,13 +779,13 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
                                {0: content_dx, 2: PUMP_CONTENT_W, 3: PUMP_HEADING_H})
     heading = _relabel(data, PUMP_FRAME_DONOR, PUMP_HEADING_REC, PUMP_HEADING_TEXT, heading)
 
-    # [3..6] the full-width 'Pump Link' button: state (box+label, or v16's switch) and touch
+    # [3..6] the full-width 'Pump Link' button: state (box+label, or the switch) and touch
     # region, widened to the content column and stacked on one flow origin.
     if (link_display_slot is None) != (link_arms_base is None):
         raise ValueError("link_display_slot and link_arms_base must be given together")
     if link_display_slot is None:
-        # v14/v15 shape: a static box + caption (the box's fill index is the Low Volts cell --
-        # v15's defect 1 -- kept only so the pre-v16 image stays reproducible).
+        # the static-box shape: a box + caption (the box's fill index is the Low Volts cell --
+        # the first Pump Link flash's defect 1 -- kept only so that image stays reproducible).
         btn_box = _clone_with_geom(data, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_BOX_REC,
                                    {2: PUMP_CONTENT_W, 3: PUMP_BUTTON_H})
         btn_label = _clone_with_geom(data, PUMP_BUTTON_BODY_DONOR, PUMP_BUTTON_LABEL_REC,
@@ -789,7 +794,8 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
                              PUMP_BUTTON_TEXT, btn_label)
         button = [bytes(btn_box), bytes(btn_label)]
     else:
-        # v16: the stock state-button pattern -- one wtype-6 switch on the bridge's 0/1 cell
+        # the switch shape: the stock state-button pattern -- one wtype-6 switch on the bridge's 0/1
+        # cell
         # selecting the dark/lit arm objects, which carry the caption themselves.
         button = [_author_two_arm_switch(data, link_display_slot, link_arms_base)]
     btn_touch = _clone_with_geom(data, CLUSTER_DONOR_OBJECT, PUMP_BUTTON_TOUCH_REC,
@@ -821,7 +827,7 @@ def build_pump_section(data: bytes, *, link_touch_id: int, plus_touch_id: int,
                      readout_slot & 0xFFFF)
     unit = bytearray(_record_bytes(data, PUMP_STEPPER_DONOR, 6))
 
-    # v20: one switch in place of the (number, unit) pair. The spacer stays OUTSIDE it, so the
+    # One switch in place of the (number, unit) pair. The spacer stays OUTSIDE it, so the
     # flow state entering the switch is byte-for-byte the state that entered the numeric readout.
     readout = ([_author_two_arm_switch(data, readout_slot, readout_arms_base)]
                if readout_arms_base is not None else [bytes(value), bytes(unit)])
@@ -870,7 +876,8 @@ BATT_HEAT_OFF_ID = 0x18EF709F
 
 # A solid, static button fill (a colour-table index that resolves to a fixed colour, not a live
 # cell): the Low Volts box donor (285[0]) uses mode-7 index 45, which is the Low Volts RECOLOR
-# cell -- copying it verbatim makes the button track the Low Volts state (v15's defect 1).
+# cell -- copying it verbatim makes the button track the Low Volts state (the first Pump Link
+# flash's defect 1, 2026-09-04).
 # Repointing that index to 35 (the enable pill's lit "Enabled" colour, cyan) gives a solid button
 # that stands out against the navy page and is not wired to any live cell.
 BATT_HEAT_FILL_INDEX = 35
@@ -880,7 +887,8 @@ BATT_HEAT_FILL_INDEX = 35
 # The status frame broadcasts ~every 2 s and immediately after a command. Two live bits drive the
 # button: byte 2 bit 0 = the battery HEATER (the button body's colour) and byte 1 bit 2 = the
 # battery's internal HEATER CONTACTOR (the red glyph). The contactor is a relay inside the battery
-# pack; it is NOT a heat pump, which is what v31's constants and docs called it until the owner
+# pack; it is NOT a heat pump, which is what an earlier build's constants and docs called it until
+# the owner
 # corrected the naming on 2026-09-22. The receive filter extracts a 2-bit field, not a single bit,
 # so the finest extraction covering each bit is used and the "on" bit is masked out of the field.
 BATT_HEAT_STATUS_DGN = 0x0FF70              # low-16 0xFF70; CAN id 0x18FF7070 (PDU2, DP=0)
@@ -920,8 +928,9 @@ BATT_HEAT_ON_RGB = (0, 174, 239)           # cyan         -- heater on
 
 # ONE switch owns the whole button, over four arms that each draw EVERY element: capsule, caption
 # and (when the contactor is closed) the glyph. That is not redundancy, it is the fix for both
-# repaint defects the owner reported on v31 (2026-09-22). A switch repaints only the arm it
-# selects, so v31's two independent switches each left something stale: the body switch's capsule
+# repaint defects the owner reported on 2026-09-22. A switch repaints only the arm it
+# selects, so that build's two independent switches each left something stale: the body switch's
+# capsule
 # painted over the sibling 'Batt Heat' caption, which nothing then redrew, and the glyph switch's
 # off arm drew nothing at all, so the red glyph stayed lit. Because every arm here repaints the
 # opaque full-size capsule first, whatever the previous arm drew is covered by construction.
@@ -938,7 +947,7 @@ BATT_HEAT_STATE_ARMS = ((0xFFFF, False, False),      # default + "nothing on yet
                         (2,      False, True),
                         (3,      True,  True))
 BATT_HEAT_STATE_MATCH_VALUES = tuple(m for m, _h, _c in BATT_HEAT_STATE_ARMS)
-# A one-bit BMS status button (v49's Ignore Alarms): default/stale and 0 read off, 1 reads on.
+# A one-bit BMS status button (e.g. Ignore Alarms): default/stale and 0 read off, 1 reads on.
 BMS_BIT_STATE_ARMS = ((0xFFFF, False, False),
                       (1,      True,  False))
 
@@ -1016,7 +1025,8 @@ def build_state_arm(donors: bytes, *, fill_index: int, label_record: bytes, glyp
 
     **The capsule and the caption are in EVERY arm on purpose.** The panel repaints only the
     selected arm, so anything an arm omits keeps the previous arm's pixels -- which is exactly how
-    v31 lost its caption on enable and kept a lit glyph on disable. The capsule is opaque and
+    a 2026-09-22 build lost its caption on enable and kept a lit glyph on disable. The capsule is
+    opaque and
     covers the full button, so drawing it first erases whatever the outgoing arm left, including
     the glyph. `<count>` + records, padded to 4.
 
@@ -1033,7 +1043,7 @@ def _batt_heat_body_records(recs, object_index: int,
     record stream -- the static capsule the state switch replaces and the caption it absorbs.
     Both must be unique; object 829 also carries the compact AES frame, so a second match would
     mean the wrong record was about to be rewritten. The capsule is the static fill-35 one
-    directly before the caption: v49 carries a second BMS button (Ignore Alarms) with the same
+    directly before the caption: a build may carry a second BMS button (Ignore Alarms) with the same
     static fill, so "the only fill-35 capsule" no longer names one button."""
     cap = [i for i, r in enumerate(recs[:-1])
            if r.wtype == 33 and r.colors and r.colors[0] == ("fillA", 7, BATT_HEAT_FILL_INDEX)
@@ -1065,7 +1075,8 @@ def add_batt_heat_state_switch(data: bytes, *, object_index: int, value_slot: in
 
     The caption MOVES into the arms rather than being copied into them: a wtype-11 label is in the
     layout flow gate, so leaving the original in the record stream draws 'Batt Heat' twice, once at
-    the pen the arm's own caption left (the first v32 render showed exactly that). Because the arm
+    the pen the arm's own caption left (the first one-switch render showed exactly that). Because
+    the arm
     carries the caption record byte for byte, the flow it commits is the flow the stream record
     used to commit, so the touch region after the switch does not move. The capsule is wtype-33,
     which is not in the flow gate, and the glyph cancels its own offset, so nothing else shifts
@@ -1312,7 +1323,7 @@ def swap_electrical_to_compact(data: bytes,
     outlined Water Pump section (`build_pump_section`). Left `None` this function emits the
     identical image it did before Task 7, byte for byte.
 
-    `off_at_zero` (default `False`, v20) needs `pump_section_ids` too. It appends the two Auto
+    `off_at_zero` (default `False`) needs `pump_section_ids` too. It appends the two Auto
     Off readout arms (`append_readout_arms`) and has `build_pump_section` emit a wtype-6 switch
     on the readout slot in place of the (number, 'Min') pair, so a minute count of 0 -- the
     disabled setting since `pumpauto.MINUTES_MIN` became 0 -- reads 'Off' instead of '0 Min'.
@@ -1321,8 +1332,8 @@ def swap_electrical_to_compact(data: bytes,
     `link_display_slot` (default `None`) needs `pump_section_ids` -- there is no Pump Link button
     without the section. When given, the two Pump Link state arms are appended FIRST
     (`append_link_arms`, before the frame is built, since the section's wtype-6 switch names their
-    indices) and `build_pump_section` emits that switch (v16) instead of the static box+label pair
-    (pre-v16). Left `None`, the section keeps the pre-v16 shape unchanged.
+    indices) and `build_pump_section` emits that switch instead of the static box+label pair. Left
+    `None`, the section keeps the static-box shape unchanged.
     """
     out, aes_body_index = clone_all_in_one(data)
     out, _edits, engine_index = insert._append_object(out, build_engine(data))

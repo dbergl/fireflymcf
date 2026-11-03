@@ -307,7 +307,7 @@ def worst_fill_width(data: bytes, slot: int, field: int) -> int:
     render-state byte (`+0x0A`) that varies at runtime, so this bounds every class
     `FUN_002517AC` implements, per character: class 1's fixed `font[0x06]`, class 3's fixed
     `font[0x11] + font[0x12]`, and the kerned advance of the widest number glyph
-    (`x + width + font[0x12] + 1`). v37 on the coach showed a class-1 fill (`LAYERS_FIELD`)
+    (`x + width + font[0x12] + 1`). The coach showed (2026-09-28) a class-1 fill (`LAYERS_FIELD`)
     that `text_width`'s kerned model placed 29 px further right."""
     font = glyphs.font_for_slot(data, slot)
     d = data[font.offset:font.offset + 20]

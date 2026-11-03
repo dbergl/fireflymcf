@@ -142,7 +142,7 @@ def font_specimen(stock: bytes, slot: int) -> bytes:
         for yy, row in enumerate(g.rows):
             for xx, v in enumerate(row):
                 # 4bpp coverage 0..15 -> 0..255; 1bpp rows carry 0/1 (so a 1bpp
-                # specimen renders near-black -- acceptable for v1, not fixed here).
+                # specimen renders near-black -- acceptable for now, not fixed here).
                 im.putpixel((x + xx, yy), min(255, v * 17))
         x += g.width + 2
     buf = io.BytesIO()

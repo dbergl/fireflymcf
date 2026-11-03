@@ -26,8 +26,9 @@ Inside the dialog, top to bottom:
     Carried        [-]    10     [+]
     [Zero Level, hold 3 s]              [Close]
 
-Every value is a live readout (`levelfeed` cells), drawn BEFORE any label beside it: v37-v40
-showed a readout repainting about 50 px of background left of its pen, whatever its field width,
+Every value is a live readout (`levelfeed` cells), drawn BEFORE any label beside it: the
+coach showed (2026-09-28/29) a readout repainting about 50 px of background left of its pen,
+whatever its field width,
 which wipes whatever was drawn there first (`readoutfill`). The AUTO button is a type-6 switch on
 the auto cell (lit green while the tolerance is automatic). Every touch region is appended last in
 the root, never inside a switch arm (the LEVEL controls' rule).
@@ -42,7 +43,8 @@ SETUP_ACTION = 0x7ED                 # LEVEL page Setup button -> screen 12 (ret
 CLOSE_ACTION = 0x7DC                 # the rail icon's leaf -> screen 29, the LEVEL page
 KEPT_ROOT_RECORDS = (3, 4)           # root 15's wt-5 references to 892 (header widgets), 974 (rail)
 ROOT_REFS = (892, 974)
-# v43 (`popup_background`): v42 on the coach showed a screen change DOES clear the display (to
+# `popup_background`: the first popup on the coach (2026-09-29) showed a screen change DOES clear
+# the display (to
 # white), refuting the no-clear inference above. So root 15 keeps its own background, header bar
 # and title (records 0-2, retitled), then paints the LEVEL page's navy page area, then the dialog.
 BACKGROUND_RECORDS = (0, 1, 2)
@@ -73,11 +75,11 @@ ROW_CONTROLS = {"height": ("h_down", "h_up"), "tol": ("t_down", "t_up"),
                 "carried": ("minus", "plus")}
 TOUCH_NAMES = ("h_down", "h_up", "t_down", "t_up", "t_auto", "minus", "plus", "zero", "close")
 
-# v45 `geometry`: Wheelbase and Track rows under Carried (set once, so last), -/+ 0.5 in on
+# `geometry`: Wheelbase and Track rows under Carried (set once, so last), -/+ 0.5 in on
 # level-sensor ops 0Bh-0Eh, each value in 0.1 in shown with one place. Five rows need a taller
 # dialog (y 46..464, still inside the page area below the 36-px header) and a 54-px row pitch
 # (46-px buttons, 8-px gaps). Without `geometry` every constant above is used unchanged, so
-# v42-v44 rebuild byte-identically.
+# the earlier popup builds rebuild byte-identically.
 GEOMETRY_DIALOG = (150, 46, 580, 418, 10)
 GEOMETRY_TITLE_Y = 56
 GEOMETRY_ROW_Y = {"height": 94, "tol": 148, "carried": 202, "wb": 256, "track": 310}

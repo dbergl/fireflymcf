@@ -236,8 +236,8 @@ def render(data: bytes) -> str:
       "like a light if some other sender commanded it to.")
     a("")
     a("**Scope.** Generated from **13.6**. Firmware versions add/remove floorplans, options "
-      "and outputs over time (e.g. AES did not exist in v11), and some output *names* change "
-      "between v13 and v14 -- run the decoder per build rather than assuming this table is "
+      "and outputs over time (e.g. AES did not exist in 11.23), and some output *names* change "
+      "between 13.6 and 14.7 -- run the decoder per build rather than assuming this table is "
       "identical everywhere. The base-config tables in table 0x82 that were checked (regions "
       "A/B/D) are in fact byte-identical across 13.6/11.23/14.7, and region C isolates output "
       "44 as the sole 12 A output in every build; the panel-side columns and the *automation* "

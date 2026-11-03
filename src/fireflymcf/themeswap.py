@@ -22,8 +22,8 @@ stock colours show through:
    has only 4 bytes; it becomes `add.w`/`sub.w r1, r3, #modimm` from the button value (r3 holds
    it there, loaded at `0x24832e` and unchanged until `0x248340`), so it lands on the nearest
    colour a Thumb-2 modified immediate reaches from the new button colour.
-2. **GuiData inline (mode-3) fields** carrying a stock theme colour as a BGR u24: 155 on a reference build
-   LV-mc (the stock body boxes, the CLIMATE header, every page fireflymcf authored).
+2. **GuiData inline (mode-3) fields** carrying a stock theme colour as a BGR u24: 155 on a reference
+   build (the stock body boxes, the CLIMATE header, every page fireflymcf authored).
 3. **The GuiData mode-6 palette** (`0x90010010`, MCF-FORMAT §5.5): entries 4/14-18 are the
    theme colours (the CLIMATE empty mode cells read entry 16).
 

@@ -15,10 +15,11 @@ enrolled wt6 switch on the Batt Heat state cell (`add_aes_batt_heat_status`'s fo
 bit 1 contactor), and each of its four arms draws the whole battery, the contactor arms adding the
 glyph. A voltage repaint walks the switch and picks the current arm; a contactor change repaints
 the switch, and the selected arm's opaque body covers whatever the previous arm drew. That is the
-v32 one-switch rule applied to the battery, and stock uses the same object shape (the container on
+one-switch rule of the heater status (verified 2026-09-22) applied to the battery, and stock uses
+the same object shape (the container on
 slot 419 whose child 465 is a single enrolled switch on slot 225).
 
-The containers are not touched, so the v25 live-repaint path is byte-identical.
+The containers are not touched, so the live House battery's repaint path is byte-identical.
 
 **Record order inside an arm** (the battery is seven flow records: two terminals, body, level fill,
 the slot-208 switch, the number, 'V'): the glyph goes straight after the level fill, so it draws
