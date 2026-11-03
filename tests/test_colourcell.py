@@ -17,6 +17,8 @@ NEEDS_RESEARCH_DATA = "gives the 13.6 corpus image's tank gauges colour cells, b
 
 TANK_STATUS = 0x1FFB7
 RED = 0xFF0000
+GARBAGE = 0x00FF00FF                    # magenta: what an uninitialised cell might hold
+GARBAGE_RGB = (255, 0, 255)
 
 
 @pytest.fixture(scope="module")
@@ -179,6 +181,7 @@ def test_two_calls_give_two_independent_cells(gauges, mcf_136):
     ((194, "fill"), {}, "STATEFUL_RECORD"),                     # a button box on its value slot
     ((31, "fill"), {"record": 19}, "UNSUPPORTED_MODE"),         # an inheriting fillA
     ((16, "fill"), {"record": 5}, "INHERITED_COLOUR"),          # a later record inherits it
+    ((246, "fill"), {}, "INHERITED_COLOUR"),                    # the object ends unreset
     ((99999, "border"), {}, "BAD_OBJECT"),
     ((721, "border"), {"expect": b"\x00" * 16}, "FIRMWARE_MISMATCH"),
 ])
@@ -201,13 +204,16 @@ def test_expect_matches_the_stock_record(gauges, mcf_136):
 # --- emulator ---------------------------------------------------------------------------------
 
 def _alarm_build(slot: int, cell: colourcell.ColourCell):
-    """A tick routine: red while the tank's level is at or below 10 % of its resolution
-    (TANK_STATUS byte 1 / byte 2, the receive slot's low and high byte), the field's old colour
-    otherwise. It writes the cell every tick, in both branches."""
+    """A tick routine in the documented shape: store the field's old colour into the cell at
+    entry, every tick, then overwrite it with red while the tank's level is at or below 10 % of
+    its resolution (TANK_STATUS byte 1 / byte 2, the receive slot's low and high byte)."""
     def build(code_load_addr, tail_target):
         r = thumb.Routine({"slot": slot, "cell": cell.addr, "red": RED,
                            "restore": cell.before_word}, error=routinekit.RoutineKitError)
         routinekit.emit_prologue(r)
+        r.ldr_lit(0, "cell")
+        r.ldr_lit(1, "restore")
+        r.emit(2, lambda h, s: (thumb.str_imm(1, 0, 0), "str r1, [r0]"))      # unconditional
         r.ldr_lit(0, "slot")
         r.emit(2, lambda h, s: (thumb.ldrh_imm(1, 0, 0), "ldrh r1, [r0]"))
         r.emit(2, lambda h, s: (thumb.lsls_imm(2, 1, 24), "lsls r2, r1, #0x18"))
@@ -216,14 +222,11 @@ def _alarm_build(slot: int, cell: colourcell.ColourCell):
         r.emit(2, lambda h, s: (thumb.movs_imm(0, 10), "movs r0, #0xa"))
         r.emit(2, lambda h, s: (thumb.muls(2, 0), "muls r2, r0, r2"))
         r.emit(2, lambda h, s: (thumb.cmp_reg(2, 3), "cmp r2, r3"))
-        r.bcc("hi", "normal")                                   # 10 * level > resolution
-        r.ldr_lit(1, "red")
-        r.b("store")
-        r.label("normal")
-        r.ldr_lit(1, "restore")
-        r.label("store")
+        r.bcc("hi", "done")                                     # 10 * level > resolution
         r.ldr_lit(0, "cell")
+        r.ldr_lit(1, "red")
         r.emit(2, lambda h, s: (thumb.str_imm(1, 0, 0), "str r1, [r0]"))
+        r.label("done")
         routinekit.emit_tail(r, tail_target)
         return routinekit.assemble_tick(r, code_load_addr)
     return build
@@ -253,7 +256,9 @@ def test_emulated_outline_is_red_only_when_low(gauges, mcf_136, tmp_path):
     assert userop.replay(mcf_136, ed.ledger) == ed.data
 
     s = Scenario(ed.data, timeout_s=400)
-    s.set_tank_raw(1, 63000)                                    # fresh empty at power-on
+    # power-on garbage in the cell, before the first tick (nothing initialises it)
+    s._m.mem(cell.addr, 4)[:] = GARBAGE.to_bytes(4, "little")
+    s.set_tank_raw(1, 50)                                       # fresh full at power-on
     s.boot()
 
     def wells():
@@ -274,14 +279,14 @@ def test_emulated_outline_is_red_only_when_low(gauges, mcf_136, tmp_path):
     boxes = wells()
     others = [gauges[i] for i in (1, 2, 18)]
     shots = []
-    for raw, low in ((None, True), (50, False), (63000, True)):
+    for raw, low in ((None, False), (63000, True), (50, False)):
         if raw is not None:
             s.set_tank_raw(1, raw)
-            until(lambda: (level() == 0) == low, 40)
-        assert (level() == 0) == low
+        until(lambda: (level() == 0) == low, 45)
         img = s.screenshot(tmp_path / f"home-{len(shots)}.png")
         shots.append(img)
         mine = _band(img, boxes[gauges[0]])
+        assert _count(mine, GARBAGE_RGB) == 0
         word = int.from_bytes(s.read_mem(cell.addr, 4), "little")
         if low:
             assert word == RED
@@ -295,3 +300,176 @@ def test_emulated_outline_is_red_only_when_low(gauges, mcf_136, tmp_path):
     for oi in others:                                           # the neighbours never changed
         assert all(np.array_equal(_band(x, boxes[oi]), _band(shots[0], boxes[oi]))
                    for x in shots[1:])
+
+
+# --- the batched form ---------------------------------------------------------------------------
+
+def test_batched_cells_take_one_grow(gauges, mcf_136):
+    from fireflymcf import coverage
+    _cb, _tb, rows = readout.resolve_cell_tables(mcf_136)
+    ed = userop.Editor(mcf_136)
+    objs = [gauges[i] for i in (0, 1, 2, 18)]
+    cells = ed.call("own_colour_cells", [[oi, "border"] for oi in objs])
+    out = ed.data
+    assert [c.cell_index for c in cells] == list(range(rows, rows + 4))
+    assert [c.object_index for c in cells] == objs
+    addrs = [a for c in cells for a in range(c.addr, c.addr + 4)]
+    assert len(set(addrs)) == 16
+    for oi, c in zip(objs, cells):
+        assert ("fillA", 7, c.cell_index) in _recs(out, oi)[0].colors
+        assert _row(out, c.cell_index) == (c.addr, 10)
+        assert c.before == (255, 255, 255)
+    report = coverage.analyse(out, deep=True)
+    labels = [label.split(":")[0] for _s, _n, label in report.spans]
+    assert labels.count("variable-cell-table") == 1
+    assert labels.count("variable-cell-table-dead") == 0          # one grow, no dead copy
+    assert userop.replay(mcf_136, ed.ledger) == out
+    assert userop.touched_sections(mcf_136, out) == {"guicode", "guidata"}
+
+
+def test_batched_two_fields_of_one_record_compose(gauges, mcf_136):
+    ed = userop.Editor(mcf_136)
+    border, fill = ed.call("own_colour_cells", [[gauges[0], "border"],
+                                                 {"object": gauges[0], "field": "fill",
+                                                  "record": 0}])
+    well = _recs(ed.data, gauges[0])[0]
+    assert ("fillA", 7, border.cell_index) in well.colors
+    assert ("fillB", 7, fill.cell_index) in well.colors
+    assert fill.before_mode == 7 and fill.before_cell_addr == _row(mcf_136, 161)[0]
+
+
+@pytest.mark.parametrize("reqs,code", [
+    ([[721, "border"], [721, "border"]], "BAD_EDIT"),                  # the same field twice
+    ([], "BAD_EDIT"),
+    ([[721]], "BAD_EDIT"),
+    ([[721, "border"], [246, "fill"]], "INHERITED_COLOUR"),            # one bad refuses all
+])
+def test_batched_refusals(mcf_136, reqs, code):
+    ed = userop.Editor(mcf_136)
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        ed.call("own_colour_cells", reqs)
+    assert e.value.code == code, str(e.value)
+    assert ed.data == mcf_136 and ed.ledger == ()
+
+
+# --- a relocation failure is a coded refusal that names the headroom ----------------------------
+
+@pytest.mark.parametrize("where,code", [("readout.allocate_fresh_cells", "NO_DISPLAY_CELL"),
+                                        ("relocate.replace_object_records", "BAD_EDIT")])
+def test_relocation_failure_is_coded(mcf_136, monkeypatch, where, code):
+    mod, fn = where.split(".")
+
+    def boom(*a, **k):
+        raise relocate.RelocationError("the trailing object ... is absorbing something else")
+    monkeypatch.setattr({"readout": readout, "relocate": relocate}[mod], fn, boom)
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        userop.Editor(mcf_136).call("own_colour_cell", 721, "border")
+    assert e.value.code == code
+    assert "tail headroom is" in str(e.value)
+
+
+# --- a build whose GuiData tail is nearly spent -------------------------------------------------
+
+# Five AC readouts, each growing the cell table: the last object table's tail headroom falls
+# below one grow of the table, as on the reference coach's running builds (2026-11-03).
+def _crowded_ops():
+    ops = []
+    for i, (inst, byte) in enumerate([(1, 1), (1, 3), (65, 3), (2, 1), (2, 3)]):
+        ops.append({"id": f"f{i}", "type": "append_filter",
+                    "params": {"dgn": 0x1FFD7, "mode": 2, "payload_byte": byte,
+                               "instance": inst, "compare_byte": 0}})
+        ops.append({"id": f"r{i}", "type": "add_register_readout",
+                    "params": {"register": {"ref": f"f{i}"}, "draw": False, "shift": 1}})
+    return ops
+
+
+_CELLS_OP = '''from fireflymcf import recipe
+from fireflymcf.userop import UserOp
+
+
+@recipe.op("user:cells")
+class Cells(UserOp):
+    PARAMS = {{"properties": {{}}, "required": []}}
+
+    def build(self, ed, ctx):
+        objs = {objs!r}
+        if {batched!r}:
+            cells = ed.call("own_colour_cells", [[oi, "border"] for oi in objs])
+        else:
+            cells = [ed.call("own_colour_cell", oi, "border") for oi in objs]
+        ctx.handles[self.spec.id] = [c.cell_index for c in cells]
+
+    def check(self, data, ctx):
+        return "cells"
+'''
+
+
+def _cells_project(tmp_path, stock, objs, batched, touches=("guicode", "guidata"), ops=()):
+    import hashlib
+    import json
+    from fireflymcf import recipe
+    folder = tmp_path / "ops" / "cells"
+    folder.mkdir(parents=True)
+    (folder / "op.py").write_text(_CELLS_OP.format(objs=list(objs), batched=batched))
+    (folder / "manifest.json").write_text(json.dumps({
+        "name": "cells", "type": "user:cells", "version": "1.0.0", "author": "tests",
+        "description": "colour cells (a test fixture, never flash it)",
+        "touches": list(touches), "written_against": [], "provenance": []}))
+    pf = tmp_path / "p.ffproj.json"
+    p = {"schema": 1, "base_sha256": hashlib.sha256(stock).hexdigest(),
+         "build_name": "Jayco B-Van V13 colour cell test",
+         "ops": list(ops) + [{"id": "cells", "type": "user:cells", "params": {}}]}
+    pf.write_text(json.dumps(p))
+    proj = recipe.Project.from_json(pf.read_text())
+    return pf, proj
+
+
+def _compile(pf, proj, stock):
+    from fireflymcf import recipe
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        return recipe.compile_project(proj, stock)
+
+
+@pytest.fixture(scope="module")
+def crowded(mcf_136):
+    import hashlib
+    import json
+    from fireflymcf import recipe
+    p = {"schema": 1, "base_sha256": hashlib.sha256(mcf_136).hexdigest(),
+         "build_name": "Jayco B-Van V13 colour cell test", "ops": _crowded_ops()}
+    res = recipe.compile_project(recipe.Project.from_json(json.dumps(p)), mcf_136)
+    assert res.ok, res.errors
+    return res.data
+
+
+@pytest.mark.parametrize("batched", [True, False])
+def test_four_cells_on_a_crowded_build(gauges, mcf_136, crowded, tmp_path, batched):
+    """Four gauge outlines on a build whose tail headroom is below one table grow compile and
+    pass every structural gate, in one batched call and in four single calls."""
+    from fireflymcf import coverage
+    # Counted the old way, as one trailing object running to GuiData's checksum, the bytes
+    # after the last object leave less headroom than one grow of the table needs.
+    gs, ge = guidata.guidata_extent(crowded)
+    _a, _b, ptrs = coverage._pointer_tables(crowded, gs, ge - 4)[-1]
+    distinct = sorted(set(ptrs))
+    largest = max(b - a for a, b in zip(distinct, distinct[1:]))
+    _cb, _tb, rows = readout.resolve_cell_tables(crowded)
+    assert largest - (ge - 4 - distinct[-1]) < 5 * rows
+    room = coverage.analyse(crowded, deep=True).tail_headroom
+    objs = [gauges[i] for i in (0, 1, 2, 18)]
+    pf, proj = _cells_project(tmp_path, mcf_136, objs, batched, ops=_crowded_ops())
+    res = _compile(pf, proj, mcf_136)
+    assert res.ok, res.errors
+    for oi in objs:
+        assert any(r == "fillA" and m == 7 for r, m, _v in _recs(res.data, oi)[0].colors)
+    after = coverage.analyse(res.data, deep=True)
+    assert after.unclaimed == [] and after.tail_headroom == room
+
+
+def test_own_colour_cell_needs_guicode_declared(gauges, mcf_136, tmp_path):
+    """The grow repoints GuiCode literals: an op that declares only guidata is refused."""
+    pf, proj = _cells_project(tmp_path, mcf_136, [gauges[0]], True, touches=("guidata",))
+    res = _compile(pf, proj, mcf_136)
+    assert not res.ok
+    [err] = res.errors
+    assert err["code"] == "USER_OP_UNDECLARED_TOUCH" and "guicode" in err["message"]

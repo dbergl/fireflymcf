@@ -47,7 +47,8 @@ __all__ = ["PRIMITIVES", "RoutineKitError", "TickPlan", "TickInstall", "tick_ins
            "install_tick_routine", "install_tick", "slot_addr", "resolve_register",
            "fresh_sram", "find_config_toggle", "config_frame", "emit_prologue", "emit_tail",
            "emit_send_frame", "assemble_tick", "thumb", "PROLOGUE_TEXT", "EPILOGUE_TEXT",
-           "GuiCodeView", "guicode", "find_tag", "tick_chain", "own_colour_cell", "ColourCell"]
+           "GuiCodeView", "guicode", "find_tag", "tick_chain", "own_colour_cell",
+           "own_colour_cells", "ColourCell"]
 
 
 class RoutineKitError(RecipeError):
@@ -357,8 +358,9 @@ def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int |
     row's SRAM word, which a routine can copy to follow it at run time).
 
     **The cell is not initialised at boot** (SRAM above `0x2000AD98` is garbage at power-on):
-    the op must install a tick routine that stores a colour into `addr` on every tick, in every
-    branch. The chain runs before `FUN_00247BF8` draws anything, so the control never shows the
+    the op must install a tick routine that, every tick, first stores `before_word` into `addr`
+    unconditionally and then, when its condition holds, the new colour over it. The chain runs
+    before `FUN_00247BF8` draws anything, so the control never shows the
     garbage (`colourcell`'s docstring has the argument). A new colour shows at the control's
     next repaint, not at the store.
 
@@ -366,11 +368,26 @@ def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int |
     in `touches`. Refuses (codes of `colourcell.ColourCellError`): BAD_OBJECT, NO_COLOUR_FIELD,
     AMBIGUOUS_RECORD, UNSUPPORTED_FIELD, UNSUPPORTED_MODE (the field inherits, mode 0/4/5, or is
     the theme default, mode 1), STATEFUL_RECORD (a record on a value slot draws its on/off
-    pair), INHERITED_COLOUR (a later record of the object inherits the field's colour),
-    FIRMWARE_MISMATCH, NO_DISPLAY_CELL, BAD_EDIT."""
+    pair), INHERITED_COLOUR (a later record of the object inherits the field's colour, or the
+    object ends before any record sets it again),
+    FIRMWARE_MISMATCH, NO_DISPLAY_CELL, BAD_EDIT (a relocation failure names GuiData's tail
+    headroom). For more than one field use `own_colour_cells`: one grow for all of them."""
     try:
         return colourcell.own_colour_cell(data, object_index, field, record=record,
                                           expect=expect)
+    except colourcell.ColourCellError as e:
+        raise RoutineKitError(e.code, str(e)) from e
+
+
+def own_colour_cells(data: bytes, requests: list) -> tuple[bytes, list[ColourCell]]:
+    """`own_colour_cell` for several fields with ONE grow of the cell table: each request is
+    `[object_index, field]`, `[object_index, field, record]` or a dict with keys `object`,
+    `field` and optionally `record` and `expect`. Returns a `ColourCell` per request, in order,
+    on consecutive rows. Every request is checked before anything changes; one refusal
+    refuses them all, and the same field twice is BAD_EDIT. Prefer it to one call per field:
+    each grow copies the whole table to the end of GuiData."""
+    try:
+        return colourcell.own_colour_cells(data, requests)
     except colourcell.ColourCellError as e:
         raise RoutineKitError(e.code, str(e)) from e
 
@@ -383,6 +400,7 @@ PRIMITIVES: dict = {
     "fresh_sram": fresh_sram,
     "find_config_toggle": find_config_toggle,
     "own_colour_cell": own_colour_cell,
+    "own_colour_cells": own_colour_cells,
 }
 
 
