@@ -236,3 +236,12 @@ def test_set_g12_selector_before_and_after_boot(mcf_136):
     assert int.from_bytes(s.read_mem(slot, 2), "little") & 0xFF == 0
     with pytest.raises(ScenarioError, match="u16"):
         s.set_g12_selector(HEAT_PUMP_SELECTOR, 0x10000)
+
+
+def test_set_tank_raw_before_boot(mcf_136):
+    """A tank reading set before boot is what the G12 reports from its first frame on."""
+    s = Scenario(mcf_136, timeout_s=240)
+    s.set_tank_raw(1, 63000)
+    s.boot()
+    fresh = [f for f in s.frames(sa=None, dgn=G12_TANK_LEVEL_SENSOR) if f.data[0] == 1]
+    assert fresh and all(f.data[1:3] == (63000).to_bytes(2, "little") for f in fresh)

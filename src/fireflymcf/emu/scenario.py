@@ -186,6 +186,7 @@ class Scenario:
             os.unlink(tmp)
         self._booted = False
         self._g12_preset: dict[int, int] = {}
+        self._tank_preset: dict[int, int] = {}
         self._recorder: _Recorder | None = None
         self._screen = layout.Screen(self.image)
         self._screen_map = layout.screen_object_map(self.image)
@@ -318,6 +319,8 @@ class Scenario:
         self._booted = True
         for sel, value in self._g12_preset.items():
             self._store_g12_selector(sel, value)
+        for sensor, raw in self._tank_preset.items():
+            self.set_tank_raw(sensor, raw)
         self.run(BOOT_S)
         if not accept_terms:
             return
@@ -584,9 +587,13 @@ class Scenario:
 
     def set_tank_raw(self, sensor: int, raw: int) -> None:
         """Set the G12's raw tank sensor `sensor` (1 fresh, 2 grey, 3 black, 4 grey 2; high =
-        empty). The G12 reads it into its cells once a second."""
+        empty). The G12 reads it into its cells once a second. Before `boot()`, the coach comes
+        up with that reading (a tank already past a threshold at power-on)."""
         if not 0 <= raw <= 0xFFFF:
             raise ScenarioError(f"tank raw value {raw} is not a u16")
+        if not self._booted:
+            self._tank_preset[sensor] = raw
+            return
         g12 = self._g12()
         if g12 is None:
             raise ScenarioError("no emulated G12 on the bus (boot() first)")
