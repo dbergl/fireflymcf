@@ -288,8 +288,9 @@ class PumpAutoPlan:
     minutes_min: int = MINUTES_MIN   # the floor this build ships; 0 makes 0 the disabled setting
 
 
-def _config_frame(selector: int, value: int, function: int, trailer: int) -> bytes:
-    """A 12-byte `0x1FED9` config frame in the pool's wire order."""
+def config_frame(selector: int, value: int, function: int, trailer: int) -> bytes:
+    """A 12-byte `0x1FED9` config frame in the pool's wire order. Public since the user-op
+    primitives (`routinekit.config_frame`) build on it; `_config_frame` is the old name."""
     if not 0 <= selector <= 0xFF:
         raise PumpAutoError(f"selector {selector!r} is not a byte")
     if not 0 <= value <= 0xFFFF:
@@ -298,6 +299,9 @@ def _config_frame(selector: int, value: int, function: int, trailer: int) -> byt
             + bytes([0xFF, CONFIG_GROUP, selector, CONFIG_PAD])
             + struct.pack("<H", value)
             + bytes([function, trailer]))
+
+
+_config_frame = config_frame      # the pre-routinekit name, kept for existing callers
 
 
 def resolve(data: bytes, *, config: "_register.Register",
@@ -363,8 +367,8 @@ def resolve(data: bytes, *, config: "_register.Register",
         sender_ptr=followchannel.SENDER_PTR_ADDR,
         off_template=followchannel._template(pump.value, 0, 3),
         default_word=pack(MINUTES_DEFAULT, False),
-        write_template=_config_frame(config.value, 0, FUNCTION_WRITE, WRITE_TRAILER),
-        readback_template=_config_frame(config.value, READBACK_VALUE, FUNCTION_READBACK,
+        write_template=config_frame(config.value, 0, FUNCTION_WRITE, WRITE_TRAILER),
+        readback_template=config_frame(config.value, READBACK_VALUE, FUNCTION_READBACK,
                                         READBACK_TRAILER),
         config_selector=config.value,
         display_slot=display_slot,

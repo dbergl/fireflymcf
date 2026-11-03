@@ -391,6 +391,11 @@ def pop_w_reglist(regs) -> bytes:
     return struct.pack("<HH", 0xE8BD, mask)
 
 
+def _imm(v: int) -> str:
+    """An immediate as capstone prints it: decimal below 10, hex from 10."""
+    return f"{v:#x}" if v >= 10 else str(v)
+
+
 class Routine:
     """An authored routine as a stream of sized instructions, labels and a literal pool.
 
@@ -418,14 +423,14 @@ class Routine:
         if self.wide_literals:
             def fn(h, s):
                 off = s(name) - ((h + 4) & ~3)
-                text = f"ldr.w r{rt}, [pc, #{off:#x}]" if off >= 0 else \
-                    f"ldr.w r{rt}, [pc, #-{-off:#x}]"
+                text = f"ldr.w r{rt}, [pc, #{_imm(off)}]" if off >= 0 else \
+                    f"ldr.w r{rt}, [pc, #-{_imm(-off)}]"
                 return ldr_literal_w(rt, h, s(name)), text
             self.emit(4, fn)
         else:
             def fn(h, s):
                 off = s(name) - ((h + 4) & ~3)
-                text = f"ldr r{rt}, [pc, #{off:#x}]" if off else f"ldr r{rt}, [pc]"
+                text = f"ldr r{rt}, [pc, #{_imm(off)}]" if off else f"ldr r{rt}, [pc]"
                 return ldr_literal(rt, h, s(name)), text
             self.emit(2, fn)
 
