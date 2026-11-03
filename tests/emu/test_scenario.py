@@ -108,3 +108,28 @@ def test_cpu_fault_raises(mcf_136):
     s._m.run = lambda cycles: "unmapped read 0x00000000 (size 4) at pc=0x00000000"
     with pytest.raises(ScenarioError, match="fault: unmapped read"):
         s.run(0.1)
+
+
+def test_renamed_home_header_still_home(mcf_136):
+    """Pages are screen ids: a build whose HOME header is renamed (a-reference-build's `hdr` op, one
+    `rename_label` on object 4) still boots to HOME, and goto finds HOME and the rail by it."""
+    import hashlib
+
+    from fireflymcf import recipe
+
+    project = recipe.Project(
+        base_sha256=hashlib.sha256(mcf_136).hexdigest(), build_name=None,
+        ops=[recipe.OpSpec(id="hdr", type="rename_label",
+                           params={"object": 4, "old": "   HOME", "new": "   MYCOACHNAME",
+                                   "allow_grow": True})])
+    built = recipe.compile_project(project, mcf_136)
+    assert built.ok, built.errors
+    s = Scenario(built.data, timeout_s=240)
+    s.boot()
+    assert s.screen == 0 and s.page == "MYCOACHNAME"
+    s.goto("LIGHTS")
+    assert s.screen == 2
+    s.goto("HOME")
+    assert s.screen == 0
+    s.goto("MYCOACHNAME")                       # the drawn header is an alias of screen 0
+    assert s.screen == 0

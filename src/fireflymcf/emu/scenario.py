@@ -31,13 +31,21 @@ structurally), so the slot it carries (`value_slot`, 2 on 13.6 -> SRAM `0x2003A1
 maps that id to its page. (`GuiCodeState+0x20A`, the navigation byte, is not it: it stays 0 while
 the terms page, screen 96, is up.) The emulator gate is 13.6-only.
 
-**Navigation** (`goto`) knows: the nav rail's five pages (HOME, ELECTRICAL, LIGHTS, CLIMATE
-CONTROL, SETTINGS: rail touch ids `0x7D0`-`0x7D3`, `0x838`; `navmap.routes` resolves
-`0x7D1`-`0x7D3` -> screens 1-3, `CONTROL-BEHAVIOR.md` §7 the `0x838` tap -> SETTINGS), and OPTIONS:
-SETTINGS, hold "Floorplan:" (the hidden technician page, `EMULATOR-NOTES.md`: ~3.2 s) ->
-ADDITIONAL OPTIONS, "Proceed" -> FLOORPLAN SELECTION, "Main Options" (`0x7FF` -> screen 47,
-`navmap`) -> OPTIONS. Every step is checked against the screen variable; anything else raises
-`ScenarioError("no known path to page X")`.
+**Pages are screen ids, not header text.** A header rename is the commonest user edit, so HOME
+is screen 0 whatever its title says. The rail pages are screens 0-4 (the screen switch is by
+definition the one covering {0..4}); OPTIONS is the screen `navmap.routes` resolves for the "Main
+Options" tab's touch id `MAIN_OPTIONS_ID`. The names HOME, ELECTRICAL, LIGHTS, CLIMATE (CONTROL),
+SETTINGS, OPTIONS and any header the image draws are aliases resolving to those screens.
+
+**Navigation** (`goto`) knows the rail and OPTIONS, all without reading a caption:
+* the rail: the object on HOME whose touch regions `navmap` routes to screens 1-3; its five
+  regions top to bottom are screens 0-4 (13.6: ids `0x7D0`-`0x7D3`, `0x838`);
+* OPTIONS: SETTINGS, hold (`FLOORPLAN_HOLD_S`; ~3.2 s on the panel, `EMULATOR-NOTES.md`) the touch
+  region around the floorplan-name switch (`options._find_floorplan_switch`) -> ADDITIONAL OPTIONS,
+  touch id `PROCEED_ID` -> FLOORPLAN SELECTION, touch id `MAIN_OPTIONS_ID` -> OPTIONS. Each step
+  waits for the page carrying the next step's touch id, the last for the OPTIONS screen.
+Anything else raises `ScenarioError("no known path to page X")`. The terms page at boot is
+accepted by its only touch region, again not by its caption.
 
 **Time.** `run` advances simulated time in `CHUNK_S` slices; between slices the wall-clock budget
 (`timeout_s`, counted from construction) is checked. A CPU fault (the machine's stop reason, or an
@@ -74,17 +82,19 @@ FLOORPLAN_HOLD_S = 4.0           # the Floorplan button's protected hold (~3.2 s
 _VAR_READ = {0: (1, False), 1: (1, False), 2: (1, True), 3: (2, False), 4: (2, True),
              5: (4, False), 6: (4, True)}
 
-# Nav-rail touch ids (13.6 object 385, on every rail page): page header -> touch id.
-_RAIL = {"HOME": 0x7D0, "ELECTRICAL": 0x7D1, "LIGHTS": 0x7D2, "CLIMATE CONTROL": 0x7D3,
-         "SETTINGS": 0x838}
-# OPTIONS, from SETTINGS: (label, hold seconds, header the step lands on).
-_OPTIONS_PATH = (("Floorplan:", FLOORPLAN_HOLD_S, "ADDITIONAL OPTIONS"),
-                 ("Proceed", 0.0, "FLOORPLAN SELECTION"),
-                 ("Main Options", 0.0, "OPTIONS"))
-# `fireflymcf pages`' --page shortcut names -> header (cli._PAGE_HEADERS).
-_PAGE_ALIASES = {"home": "HOME", "electrical": "ELECTRICAL", "lights": "LIGHTS",
-                 "climate": "CLIMATE CONTROL", "settings": "SETTINGS", "options": "OPTIONS",
-                 "floorplan": "FLOORPLAN SELECTION"}
+# Pages are identified by SCREEN ID, never by header text: a header rename (`rename_label` on a
+# page's title, e.g. HOME -> MYCOACHNAME) is the commonest user edit and must not move a page.
+# The rail screens are 0-4 by the screen switch's own contract (`layout._screen_switch_record`
+# is defined as the switch covering {0..4}); OPTIONS is the screen `navmap.routes` resolves for
+# the "Main Options" tab's touch id. Names below (and the stock headers) are aliases only; any
+# header the image actually draws also resolves, so "MYCOACHNAME" finds screen 0 too.
+RAIL_SCREENS = {"home": 0, "electrical": 1, "lights": 2, "climate": 3, "climate control": 3,
+                "settings": 4}
+OPTIONS_NAMES = {"options"}
+# Touch ids the GuiCode ACTION dispatcher acts on (13.6), label-independent:
+MAIN_OPTIONS_ID = 0x7FF      # FLOORPLAN SELECTION's "Main Options" tab; navmap: -> screen 47
+PROCEED_ID = 0x7E0           # ADDITIONAL OPTIONS' "Proceed" (-> screen 16, seen in emulation;
+                             # its store is not one `navmap` resolves)
 
 
 class ScenarioError(Exception):
@@ -144,6 +154,36 @@ class Scenario:
         self._screen_cell = self._screen_variable()
         self._headers = self._page_headers()
         self._vars = self._variable_cells()
+        self._rail = self._rail_ids()
+        self._options_screen = self._route_target(MAIN_OPTIONS_ID)
+
+    def _route_target(self, touch_id: int) -> int | None:
+        from .. import navmap
+
+        hits = {r.screen for r in navmap.routes(self.image) if r.touch_id == touch_id}
+        return hits.pop() if len(hits) == 1 else None
+
+    def _rail_ids(self) -> dict[int, int]:
+        """{screen 0-4: rail touch id}, found structurally on HOME's static layout: the object
+        whose touch regions `navmap` routes to screens 1, 2 and 3 is the rail; its five regions,
+        top to bottom, are screens 0-4 (the HOME and SETTINGS taps are stores `navmap` does not
+        resolve, so their ids come from their place on the rail). Empty if not found."""
+        from .. import navmap
+
+        home = self._screen_map.get(0)
+        if home is None:
+            return {}
+        routes = {}
+        for r in navmap.routes(self.image):
+            routes.setdefault(r.touch_id, set()).add(r.screen)
+        regions = self._regions(self._screen.walk(home))
+        objs = {o for _, t, o in regions if routes.get(t, set()) & {1, 2, 3}}
+        for obj in objs:
+            mine = sorted((b[1], t) for b, t, o in regions if o == obj)
+            if len(mine) == 5 and all(i in routes.get(t, ()) for i, (_, t) in
+                                      enumerate(mine) if i in (1, 2, 3)):
+                return {i: t for i, (_, t) in enumerate(mine)}
+        return {}
 
     # -- static reads of the image -------------------------------------------------------
     def _page_headers(self) -> dict[int, str]:
@@ -227,9 +267,17 @@ class Scenario:
         self.run(BOOT_S)
         if not accept_terms:
             return
-        if self._labels("I ACCEPT", self._root()):
-            self.tap("I ACCEPT")
-        self._await(("HOME",), "boot: accepting the terms")
+        if self._screen_id() != 0:
+            # The terms page (a fresh EEPROM) has exactly one touch region, I ACCEPT; found
+            # structurally rather than by its caption.
+            root = self._root()
+            regions = self._regions(self._placed(root)) if root is not None else []
+            if len(regions) != 1:
+                raise ScenarioError(f"boot: the panel shows {self.page!r}, not HOME or a "
+                                    "one-button terms page")
+            box, tid, _ = regions[0]
+            self._press(*self._tap_point(box, tid, regions), 0.0)
+        self._await({0}, "boot: accepting the terms")
 
     # -- pages -------------------------------------------------------------------------------
     def _screen_id(self) -> int:
@@ -240,50 +288,111 @@ class Scenario:
         return self._screen_map.get(self._screen_id())
 
     @property
+    def screen(self) -> int:
+        """The id of the screen showing now (`fireflymcf pages`' screen column)."""
+        return self._screen_id()
+
+    @property
     def page(self) -> str:
         """The header of the page showing now, whitespace-normalised (`fireflymcf pages`)."""
         root = self._root()
         return self._headers.get(root, "") if root is not None else f"<screen {self._screen_id()}>"
 
-    def _roots_for(self, page: str) -> set[int]:
-        want = _norm(_PAGE_ALIASES.get(page.strip().lower(), page)).casefold()
-        return {r for r, h in self._headers.items() if h.casefold() == want}
+    def _screens_for(self, page: str) -> set[int]:
+        """Screen ids `page` names: a structural name (HOME, ELECTRICAL, LIGHTS, CLIMATE
+        CONTROL, SETTINGS, OPTIONS), or any header this image draws."""
+        key = _norm(page).casefold()
+        if key in RAIL_SCREENS:
+            return {RAIL_SCREENS[key]}
+        if key in OPTIONS_NAMES and self._options_screen is not None:
+            return {self._options_screen}
+        by_root = {}
+        for sid, root in self._screen_map.items():
+            by_root.setdefault(root, set()).add(sid)
+        return {sid for r, h in self._headers.items() if h.casefold() == key
+                for sid in by_root.get(r, ())}
 
-    def _await(self, headers, what: str) -> None:
-        want = {_norm(h).casefold() for h in headers}
+    def _roots_for(self, page: str) -> set[int]:
+        return {self._screen_map[s] for s in self._screens_for(page) if s in self._screen_map}
+
+    def _await(self, screens, what: str) -> None:
         deadline = self.now + ARRIVE_S
-        while self.page.casefold() not in want:
+        while self._screen_id() not in screens:
             if self.now >= deadline:
-                raise ScenarioError(f"{what}: the panel shows {self.page!r}, expected "
-                                    f"{' or '.join(map(repr, headers))}")
+                raise ScenarioError(f"{what}: the panel shows screen {self._screen_id()} "
+                                    f"({self.page!r}), expected screen "
+                                    f"{' or '.join(map(str, sorted(screens)))}")
             self.run(0.1)
 
+    def _await_touch_id(self, tid: int, what: str) -> None:
+        """Wait until the page showing carries a touch region with id `tid` (the next step)."""
+        deadline = self.now + ARRIVE_S
+        while True:
+            root = self._root()
+            if root is not None and any(t == tid for _, t, _ in self._regions(self._placed(root))):
+                return
+            if self.now >= deadline:
+                raise ScenarioError(f"{what}: the panel shows {self.page!r}, which has no "
+                                    f"touch region {tid:#x}")
+            self.run(0.1)
+
+    def _floorplan_region(self) -> tuple[tuple, int, list]:
+        """SETTINGS' Floorplan button: the touch region around the floorplan-name switch
+        (`options._find_floorplan_switch`'s slot), found in the live walk's trace."""
+        slot, _ = options._find_floorplan_switch(self.image)
+        root = self._page_root(None)
+        trace: list = []
+        values = self._slot_values()
+        placed = self._screen.walk(root, slot_values=values, trace=trace)
+        regions = self._regions(placed)
+        hits = set()
+        for _key, _obj, _ri, rec, box, *_ in trace:
+            if rec.wtype == 6 and rec.value_slot == slot:
+                x, y = box[0], box[1]
+                for r in regions:
+                    if r[0][0] <= x < r[0][2] and r[0][1] <= y < r[0][3]:
+                        hits.add(r)
+        if len(hits) != 1:
+            raise ScenarioError(f"goto OPTIONS: {len(hits)} touch regions hold the floorplan "
+                                "name on SETTINGS, expected 1")
+        box, tid, _ = hits.pop()
+        return box, tid, regions
+
     def goto(self, page: str) -> None:
-        """Navigate to `page` (a `fireflymcf pages` header or --page name) by tapping its path."""
-        targets = self._roots_for(page)
-        if self._root() in targets:
+        """Navigate to `page` (HOME, ELECTRICAL, LIGHTS, CLIMATE CONTROL, SETTINGS, OPTIONS, or
+        a header this image draws for one of them) by tapping its path."""
+        targets = self._screens_for(page)
+        if self._screen_id() in targets:
             return
-        header = self._headers[next(iter(targets))] if targets else None
-        if header in _RAIL:
-            self._tap_touch_id(_RAIL[header], page)
-            self._await((header,), f"goto {page!r}")
-        elif header == "OPTIONS":
+        rail = targets & set(self._rail)
+        if rail:
+            sid = rail.pop()
+            self._tap_touch_id(self._rail[sid], page)
+            self._await({sid}, f"goto {page!r}")
+        elif self._options_screen is not None and targets == {self._options_screen}:
             self.goto("SETTINGS")
-            for label, hold, lands in _OPTIONS_PATH:
-                self.tap(label, hold_s=hold)
-                self._await((lands,), f"goto {page!r}: {label!r}")
+            box, tid, regions = self._floorplan_region()
+            self._press(*self._tap_point(box, tid, regions), FLOORPLAN_HOLD_S)
+            self._await_touch_id(PROCEED_ID, f"goto {page!r}: holding Floorplan")
+            self._tap_touch_id(PROCEED_ID, page)
+            self._await_touch_id(MAIN_OPTIONS_ID, f"goto {page!r}: Proceed")
+            self._tap_touch_id(MAIN_OPTIONS_ID, page)
+            self._await(targets, f"goto {page!r}: Main Options")
         else:
             raise ScenarioError(f"no known path to page {page!r}")
 
     # -- controls ----------------------------------------------------------------------------
-    def _placed(self, root: int) -> list:
-        """The live layout of `root`: every type-6 switch driven by its variable's value now."""
+    def _slot_values(self) -> dict[int, int]:
         values = {}
         for slot, addr, size, signed in self._vars:
             raw = self._m.mem(addr, size)
             if raw is not None:
                 values[slot] = int.from_bytes(bytes(raw), "little", signed=signed) & 0xFFFF
-        return self._screen.walk(root, slot_values=values)
+        return values
+
+    def _placed(self, root: int) -> list:
+        """The live layout of `root`: every type-6 switch driven by its variable's value now."""
+        return self._screen.walk(root, slot_values=self._slot_values())
 
     def _labels(self, text: str, root: int | None, placed: list | None = None) -> list:
         if root is None:
