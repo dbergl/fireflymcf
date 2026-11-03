@@ -78,3 +78,23 @@ def test_call_dispatch_and_replay(mcf_136, monkeypatch):
     assert replay(mcf_136, ed.ledger) == ed.data
     with pytest.raises(EditorError):
         ed.call("flip", object())
+
+
+def test_call_arguments_are_copied(mcf_136, monkeypatch):
+    from fireflymcf import routinekit
+
+    def eat(d, lst, opt=None):
+        n = len(lst)
+        lst.append(99)                      # a primitive mutating its argument in place
+        opt["k"].append(1)
+        return d[:5] + bytes([n + len(opt["k"])]) + d[6:]
+
+    monkeypatch.setitem(routinekit.PRIMITIVES, "eat", eat)
+    lst, opt = [1, 2], {"k": []}
+    ed = Editor(mcf_136)
+    ed.call("eat", lst, opt=opt)
+    lst.append(7)                           # the caller editing after the call
+    opt["k"].append(5)
+    ed.ledger[0].args[1][0].append(3)       # reaching through the ledger
+    assert ed.ledger[0].args == ("eat", ([1, 2],), {"opt": {"k": []}})
+    assert replay(mcf_136, ed.ledger) == ed.data

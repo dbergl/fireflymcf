@@ -12,6 +12,7 @@ the offset within the section.
 """
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Literal
 
@@ -57,7 +58,7 @@ class Editor:
 
     @property
     def ledger(self) -> tuple[Step, ...]:
-        return tuple(self._ledger)
+        return copy.deepcopy(tuple(self._ledger))
 
     def section(self, marker: str) -> container.Section:
         found = [s for s in container.parse_container(self._buf).sections if marker in s.name]
@@ -119,10 +120,13 @@ class Editor:
             raise EditorError("NOT_A_PRIMITIVE", f"{name!r} is not a routinekit primitive")
         _check_arg(args)
         _check_arg(kwargs)
-        out = fn(self._buf, *args, **kwargs)
+        # The primitive gets its own copy and the ledger keeps another, so neither an in-place
+        # mutation by the primitive nor a later edit by the caller changes what replay re-invokes.
+        rec = copy.deepcopy((name, args, kwargs))
+        out = fn(self._buf, *copy.deepcopy(args), **copy.deepcopy(kwargs))
         new, result = out if isinstance(out, tuple) else (out, None)
         self._buf = bytes(new)
-        self._ledger.append(Step("call", (name, args, kwargs), f"call {name}"))
+        self._ledger.append(Step("call", rec, f"call {name}"))
         return result
 
 
