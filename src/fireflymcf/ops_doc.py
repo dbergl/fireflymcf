@@ -56,6 +56,17 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "half the shorter side. An object shared by several pages changes on all of them.",
         "UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME "
         "(2026-11-02, the LCARS HOME build).", "`docs/HARDWARE-VERIFIED.md`"),
+    "set_record_color": ("structural",
+        "Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), "
+        "a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. "
+        "Same-size between valueless modes; adding a value grows the object.",
+        "UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments "
+        "draw (2026-11-02).", "`docs/HARDWARE-VERIFIED.md`"),
+    "fill_to_capsule": ("structural",
+        "Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding "
+        "the radius slot.",
+        "UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02).",
+        "`docs/HARDWARE-VERIFIED.md`"),
     "move_attach": ("same-size",
         "Move where a page attaches a child object (its wtype-5 attach record).",
         "Flashed.", "`docs/HARDWARE-VERIFIED.md`"),

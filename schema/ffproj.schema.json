@@ -91,9 +91,11 @@
             "add_text_label",
             "aes_card_layout",
             "append_filter",
+            "fill_to_capsule",
             "install_glyph",
             "move_control",
             "remove_records",
+            "set_record_color",
             "split_hold_region",
             "swap_aes_electrical",
             "wire_button",
@@ -2068,6 +2070,45 @@
           "if": {
             "properties": {
               "type": {
+                "const": "fill_to_capsule"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "object index or {\"ref\": op_id}"
+                  },
+                  "selector": {
+                    "type": "object",
+                    "description": "record selector: wtype (int|None), label (str|None), nth (int)"
+                  },
+                  "radius": {
+                    "type": "integer",
+                    "description": "corner radius in px (0..255)"
+                  }
+                },
+                "required": [
+                  "target",
+                  "selector",
+                  "radius"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "install_glyph"
               }
             }
@@ -2227,6 +2268,69 @@
                 "required": [
                   "target",
                   "records"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "set_record_color"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "target": {
+                    "type": [
+                      "integer",
+                      "object"
+                    ],
+                    "description": "object index or {\"ref\": op_id}"
+                  },
+                  "selector": {
+                    "type": "object",
+                    "description": "record selector: wtype (int|None), label (str|None), nth (int)"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "fillA",
+                      "fillB",
+                      "fillA2",
+                      "fillB2"
+                    ],
+                    "default": "fillA",
+                    "description": "the colour field (fillA = a label's ink)"
+                  },
+                  "color": {
+                    "type": [
+                      "array",
+                      "object",
+                      "string"
+                    ],
+                    "description": "[r,g,b], {\"index\": n}, {\"palette\": n}, or dark/white/transparent/inherit"
+                  },
+                  "every": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "every record the selector matches"
+                  },
+                  "from_mode": {
+                    "type": "integer",
+                    "description": "only records whose field holds this mode now"
+                  }
+                },
+                "required": [
+                  "target",
+                  "selector",
+                  "color"
                 ]
               }
             }

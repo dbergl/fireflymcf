@@ -35,6 +35,7 @@ from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
+from fireflymcf import recordedit
 from fireflymcf import rvcbutton
 from fireflymcf import statelights
 from fireflymcf import statusfold
@@ -409,6 +410,228 @@ class SetCornerRadius(Op):
             "set_corner_radius: obj %d radius %r != %d" % (h["object"], rec.corner_radius,
                                                            h["radius"])
         return "corner radius: object %d %d -> %d" % (h["object"], h["was"], h["radius"])
+
+
+# colour spelling -> (mode, value) for set_record_color (GUICODE Findings 28/38)
+_NAMED_COLOR_MODES = {"inherit": 0, "dark": 1, "white": 2, "transparent": 5}
+
+
+def _color_mode(color, op_id):
+    """A `set_record_color` colour -> (decoder mode, inline value)."""
+    if isinstance(color, str) and color in _NAMED_COLOR_MODES:
+        return _NAMED_COLOR_MODES[color], None
+    if (isinstance(color, list) and len(color) == 3
+            and all(isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 255
+                    for v in color)):
+        return 3, tuple(color)
+    if isinstance(color, dict) and len(color) == 1:
+        (k, v), = color.items()
+        if isinstance(v, int) and not isinstance(v, bool):
+            if k == "index" and 0 <= v <= 0xFFFF:
+                return 7, v
+            if k == "palette" and 0 <= v <= 0xFF:
+                return 6, v
+    raise RecipeError("BAD_PARAMS", "color %r is not [r,g,b], {\"index\": n}, {\"palette\": n} "
+                      "or one of %s" % (color, sorted(_NAMED_COLOR_MODES)), op_id=op_id)
+
+
+@op("set_record_color")
+class SetRecordColor(Op):
+    """Set one colour field of a record to any colour mode, adding the inline value if the
+    field has none.
+
+    A colour field is 3 mode bits in the header plus, for modes 3/6/7, an inline value
+    (`recordedit`). On a text label `fillA` is the INK and `fillB` the box background (the
+    CLIMATE title bar is a wtype-11 fillB); on a fill or capsule `fillA` is the body. So this op
+    darkens a caption (`"dark"`: mode 1, the colour at GuiCode `0x2535AC`, `0x322B42`, with no
+    inline bytes), or paints a label's box (`fillB` `[r,g,b]`). A change between valueless modes
+    is same-size; a change that adds or resizes a value grows the object through
+    `relocate.replace_object_records`.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element` (wtype, label, nth)
+      role: "fillA"|"fillB"|"fillA2"|"fillB2" (default "fillA")
+      color: [r,g,b] (mode 3) | {"index": n} (mode 7) | {"palette": n} (mode 6) |
+             "dark" (1) | "white" (2) | "transparent" (5) | "inherit" (0)
+      every: bool (default false) -- every record the selector matches, not only `nth`
+      from_mode: int (optional) -- only records whose field currently has this mode
+
+    Error codes:
+      BAD_PARAMS -- an unknown role or colour spelling, or `from_mode` without `every`
+      NO_SUCH_RECORD -- nothing matches
+      NO_FIELD -- the record's type (or its colour-mode bytes) gives it no such field
+      POINTER_INSIDE -- a GuiCode/LCD literal points into the object after the edited record
+      RELOCATE_REFUSED -- the relocation gates refused the grown object
+
+    `set_theme` runs after it and remaps an inline colour equal to a theme colour, as it does
+    every inline field.
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "role": {"type": "string", "enum": ["fillA", "fillB", "fillA2", "fillB2"],
+                     "default": "fillA", "description": "the colour field (fillA = a label's ink)"},
+            "color": {"type": ["array", "object", "string"],
+                      "description": "[r,g,b], {\"index\": n}, {\"palette\": n}, or dark/white/transparent/inherit"},
+            "every": {"type": "boolean", "default": False,
+                      "description": "every record the selector matches"},
+            "from_mode": {"type": "integer",
+                          "description": "only records whose field holds this mode now"},
+        },
+        "required": ["target", "selector", "color"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.role = self._param("role", "fillA")
+        self.every = self._param("every", False)
+        self.from_mode = self._param("from_mode", None)
+        if self.role not in recordedit.ROLES:
+            raise RecipeError("BAD_PARAMS", "role %r is not one of %s"
+                              % (self.role, recordedit.ROLES), op_id=self.spec.id)
+        if self.from_mode is not None and not self.every:
+            raise RecipeError("BAD_PARAMS", "from_mode filters an `every` selection",
+                              op_id=self.spec.id)
+        self.mode, self.value = _color_mode(self._param("color"), self.spec.id)
+
+    def _targets(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        if not self.every:
+            rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+            recs = records.object_records(data, gs + tab[obj])
+            return obj, [next(i for i, r in enumerate(recs) if r.offset == rec.offset)]
+        wtype, label = self.selector.get("wtype"), self.selector.get("label")
+        out = []
+        for i, r in enumerate(records.object_records(data, gs + tab[obj])):
+            if wtype is not None and r.wtype != wtype:
+                continue
+            if label is not None and (r.label or "").strip() != label.strip():
+                continue
+            have = dict((c[0], c[1]) for c in r.colors)
+            if self.role not in have:
+                continue
+            if self.from_mode is not None and have[self.role] != self.from_mode:
+                continue
+            out.append(i)
+        if not out:
+            raise RecipeError("NO_SUCH_RECORD", "object %d has no record matching %r with a %s "
+                              "field%s" % (obj, self.selector, self.role,
+                                           "" if self.from_mode is None
+                                           else " in mode %d" % self.from_mode),
+                              op_id=self.spec.id)
+        return obj, out
+
+    def apply(self, data, ctx):
+        obj, idxs = self._targets(data, ctx)
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[obj])
+        new = {}
+        try:
+            for i in idxs:
+                new[i] = recordedit.with_color(data, recs[i], self.role, self.mode, self.value)
+            out, edits = recordedit.replace_records(data, obj, new)
+        except recordedit.PointerInside as err:
+            raise RecipeError("POINTER_INSIDE", str(err), op_id=self.spec.id)
+        except relocate.RelocationError as err:
+            raise RecipeError("RELOCATE_REFUSED", str(err), op_id=self.spec.id)
+        except recordedit.RecordEditError as err:
+            raise RecipeError("NO_FIELD", str(err), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.handles[self.spec.id] = {"object": obj, "records": idxs}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        recs = records.object_records(data, gs + tab[h["object"]])
+        want = recordedit._decoded_value(self.mode, self.value)
+        for i in h["records"]:
+            got = dict((c[0], (c[1], c[2])) for c in recs[i].colors)[self.role]
+            assert got == (self.mode, want), \
+                "set_record_color: object %d record %d %s is %r" % (h["object"], i,
+                                                                    self.role, got)
+        return "record color: object %d record(s) %s %s -> mode %d%s" % (
+            h["object"], h["records"], self.role, self.mode,
+            "" if self.value is None else " %r" % (self.value,))
+
+
+@op("fill_to_capsule")
+class FillToCapsule(Op):
+    """Turn a plain fill (wtype 4) into a capsule (wtype 0x21) with a corner radius.
+
+    The two types decode the same fields (`recordedit.with_wtype_radius`), and the capsule case
+    of `FUN_00256C54` draws a solid rounded rectangle in fillA where the fill case draws a square
+    one, so the colour and box are unchanged and only the corners round. The radius slot
+    (geometry slot 4) is added when the fill has none, which grows the object by 2 bytes.
+
+    Params:
+      target: int|{"ref"} -- object index
+      selector: dict -- record selector, as `move_element`; it must name a wtype-4 record
+      radius: int 0..255
+
+    Error codes:
+      BAD_PARAMS -- radius out of range
+      NO_SUCH_RECORD -- nothing matches
+      NOT_A_FILL -- the record is not wtype 4
+      POINTER_INSIDE / RELOCATE_REFUSED -- as `set_record_color`
+    """
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "target": {"type": ["integer", "object"],
+                       "description": "object index or {\"ref\": op_id}"},
+            "selector": {"type": "object",
+                         "description": "record selector: wtype (int|None), label (str|None), nth (int)"},
+            "radius": {"type": "integer", "description": "corner radius in px (0..255)"},
+        },
+        "required": ["target", "selector", "radius"],
+    }
+
+    def validate(self):
+        self.target = self._param("target")
+        self.selector = self._param("selector", kind=dict)
+        self.radius = self._param("radius")
+        if (not isinstance(self.radius, int) or isinstance(self.radius, bool)
+                or not 0 <= self.radius <= 255):
+            raise RecipeError("BAD_PARAMS", "radius %r is not an int in 0..255" % (self.radius,),
+                              op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        obj = resolve_target(ctx, self.target)
+        gs, tab = _gs_tab(data)
+        rec = _select_record(data, gs, tab, obj, self.selector, self.spec.id)
+        if rec.wtype != 0x04:
+            raise RecipeError("NOT_A_FILL", "object %d record %r is wtype %#x, not a fill"
+                              % (obj, self.selector, rec.wtype), op_id=self.spec.id)
+        recs = records.object_records(data, gs + tab[obj])
+        idx = next(i for i, r in enumerate(recs) if r.offset == rec.offset)
+        try:
+            new = recordedit.with_wtype_radius(data, rec, 0x21, self.radius)
+            out, edits = recordedit.replace_records(data, obj, {idx: new})
+        except recordedit.PointerInside as err:
+            raise RecipeError("POINTER_INSIDE", str(err), op_id=self.spec.id)
+        except relocate.RelocationError as err:
+            raise RecipeError("RELOCATE_REFUSED", str(err), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.handles[self.spec.id] = {"object": obj, "index": idx}
+        return out
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        rec = records.object_records(data, gs + tab[h["object"]])[h["index"]]
+        assert rec.wtype == 0x21 and rec.corner_radius == self.radius, \
+            "fill_to_capsule: object %d record %d is wtype %#x radius %r" % (
+                h["object"], h["index"], rec.wtype, rec.corner_radius)
+        return "fill to capsule: object %d record %d, radius %d" % (h["object"], h["index"],
+                                                                     self.radius)
 
 
 @op("move_attach")

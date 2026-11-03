@@ -2334,3 +2334,78 @@ def test_set_corner_radius_bad_params(stock, stock_hash, radius):
 def test_set_corner_radius_is_unverified(stock, stock_hash):
     from fireflymcf import recipe_ops
     assert recipe_ops.SetCornerRadius.hardware_verified is False
+
+
+# --- set_record_color / fill_to_capsule (recordedit). On stock 13.6: object 380 is Light Master
+# (record 3 'ON' text, fillA mode 2 white ink, fillB mode 0); object 389 the 5-icon nav rail
+# (record 2 'P', fillB mode 5); object 4 record 1 HOME's header fill (wtype 4, no radius slot).
+
+def _colors(data, obj, idx):
+    gs, tab = _gs_tab_t(data)
+    return dict((c[0], (c[1], c[2])) for c in
+                records.object_records(data, gs + tab[obj])[idx].colors)
+
+
+def _paint(stock, stock_hash, **params):
+    return compile_ops(stock, stock_hash, recipe.OpSpec(id="c", type="set_record_color",
+                                                        params=params))
+
+
+def test_set_record_color_dark_ink_is_a_header_edit(stock, stock_hash):
+    assert _colors(stock, 380, 3)["fillA"] == (2, None)
+    r = _paint(stock, stock_hash, target=380, selector={"label": "ON"}, color="dark")
+    assert r.ok, r.errors
+    assert len(r.data) == len(stock)
+    assert _colors(r.data, 380, 3)["fillA"] == (1, None)
+    gs, ge = guidata.guidata_extent(stock)
+    assert sum(stock[i] != r.data[i] for i in range(gs, ge - 4)) == 1
+
+
+def test_set_record_color_inline_rgb_grows_the_object_and_relocates(stock, stock_hash):
+    r = _paint(stock, stock_hash, target=389, selector={"label": "P"}, role="fillB",
+               color=[255, 153, 0])
+    assert r.ok, r.errors
+    assert _colors(r.data, 389, 2)["fillB"] == (3, 0xFF9900)
+    gs, tab = _gs_tab_t(r.data)
+    before = [(x.wtype, x.label, x.geom) for x in
+              records.object_records(stock, gs + _gs_tab_t(stock)[1][389])]
+    after = [(x.wtype, x.label, x.geom) for x in records.object_records(r.data, gs + tab[389])]
+    assert before == after                       # every record still decodes, nothing else moved
+    raw = r.data[records.object_records(r.data, gs + tab[389])[2].offset:]
+    assert b"\x00\x99\xff" in raw[:16]           # B, G, R
+
+
+def test_set_record_color_every_with_from_mode(stock, stock_hash):
+    r = _paint(stock, stock_hash, target=380, selector={"wtype": 11}, every=True, from_mode=0,
+               role="fillB", color="transparent")
+    assert r.ok, r.errors
+    assert r.manifest[0].startswith("record color: object 380 record(s) [3, 6] fillB -> mode 5")
+
+
+def test_set_record_color_refuses_a_field_the_type_lacks(stock, stock_hash):
+    r = _paint(stock, stock_hash, target=4, selector={"wtype": 4, "nth": 1}, role="fillB",
+               color="dark")
+    assert not r.ok and r.errors[0]["code"] == "NO_FIELD", r.errors
+
+
+@pytest.mark.parametrize("color", ["black", [1, 2], [0, 0, 256], {"index": -1}, {"rgb": 3}])
+def test_set_record_color_bad_color(stock, stock_hash, color):
+    r = _paint(stock, stock_hash, target=380, selector={"label": "ON"}, color=color)
+    assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS", r.errors
+
+
+def test_fill_to_capsule_rounds_the_header(stock, stock_hash):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="h", type="fill_to_capsule", params={
+        "target": 4, "selector": {"wtype": 4, "nth": 1}, "radius": 30}))
+    assert r.ok, r.errors
+    gs, tab = _gs_tab_t(r.data)
+    old = records.object_records(stock, gs + _gs_tab_t(stock)[1][4])[1]
+    new = records.object_records(r.data, gs + tab[4])[1]
+    assert (new.wtype, new.corner_radius, new.colors) == (0x21, 30, old.colors)
+    assert new.geom[:4] == old.geom[:4] and new.size == old.size + 2
+
+
+def test_fill_to_capsule_refuses_a_non_fill(stock, stock_hash):
+    r = compile_ops(stock, stock_hash, recipe.OpSpec(id="h", type="fill_to_capsule", params={
+        "target": 380, "selector": {"wtype": 0x21}, "radius": 10}))
+    assert not r.ok and r.errors[0]["code"] == "NOT_A_FILL", r.errors
