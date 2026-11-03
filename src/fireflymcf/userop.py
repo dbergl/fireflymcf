@@ -7,8 +7,9 @@ recorded, checked step (a section growth shifts offsets, so a run-by-run diff ca
 bytes, but replay can).
 
 Addresses: GuiCode, GuiData and the LCD firmware are mapped at their descriptor's flash
-destination (`theme.guicode_base`). G12 has no CPU address the panel uses, so its "address" is
-the offset within the section.
+destination (`theme.flash_destination`; GuiCode falls back to its default base,
+`theme.guicode_base`, and another section without one is refused). G12 has no CPU address the
+panel uses, so its "address" is the offset within the section.
 """
 from __future__ import annotations
 
@@ -80,11 +81,24 @@ class Editor:
 
     def offset_of(self, marker: str, addr: int) -> int:
         s = self.section(marker)
-        rel = addr if marker == "G12" else addr - theme.guicode_base(s)
+        rel = addr if marker == "G12" else addr - self._base(s)
         if not 0 <= rel < s.length:
             raise EditorError("BAD_EDIT", f"{marker}+{addr:#x} is outside the section "
                               f"({s.length:#x} bytes)")
         return s.offset + rel
+
+    @staticmethod
+    def _base(s: container.Section) -> int:
+        """A section's runtime base: GuiCode's as `theme.guicode_base` gives it (the base every
+        primitive uses), any other's from its own descriptor's flash destination, refused when
+        the descriptor names none (GuiCode's fallback base is not GuiData's)."""
+        if "GuiCode" in s.name:
+            return theme.guicode_base(s)
+        base = theme.flash_destination(s)
+        if base is None:
+            raise EditorError("BAD_EDIT", f"{s.name}'s descriptor names no flash destination, "
+                              "so it has no panel address")
+        return base
 
     def expect(self, off: int, expected: bytes) -> None:
         self._expect(off, expected, f"@{off:#x}")
@@ -132,13 +146,17 @@ class Editor:
         length and the later sections' file offsets grow, the checksums are resealed, and the
         relocator's self-check gates run on the result. The address is GuiData's mapped base (its
         descriptor's flash destination, `0x90000000` on 11.23, 13.6 and 14.7) plus the offset, the
-        coordinates `patch_addr("GuiData", ...)` takes. Recorded padded, so replay appends exactly
-        the same bytes. Refuses (BAD_EDIT) an empty payload."""
+        coordinates `patch_addr("GuiData", ...)` takes; a GuiData descriptor without a flash
+        destination refuses (BAD_EDIT) rather than borrow GuiCode's base. Recorded padded, so
+        replay appends exactly the same bytes. Refuses (BAD_EDIT) an empty payload. The bytes
+        spend GuiData's tail headroom (`coverage.CoverageReport.tail_headroom`): the coverage
+        gate refuses an append that nothing names past it."""
         payload = bytes(payload)
         if not payload:
             raise EditorError("BAD_EDIT", "grow_guidata needs at least one byte")
         payload += bytes(-len(payload) % 4)
         gd = self.section("GuiData")
+        base = self._base(gd)
         at = gd.length - 4
         try:
             out, _ = relocate.relocate(self._buf, at, payload)
@@ -146,7 +164,7 @@ class Editor:
             raise EditorError("BAD_EDIT", str(e)) from e
         self._buf = out
         self._ledger.append(Step("grow_guidata", (payload,), note))
-        return theme.guicode_base(gd) + at
+        return base + at
 
     def call(self, name: str, *args, **kwargs):
         fn = routinekit.PRIMITIVES.get(name)

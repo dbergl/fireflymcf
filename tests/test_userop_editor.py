@@ -151,3 +151,17 @@ def test_grow_guidata_refuses_empty(mcf_136):
     with pytest.raises(EditorError) as e:
         Editor(mcf_136).grow_guidata(b"", "nothing")
     assert e.value.code == "BAD_EDIT"
+
+
+def test_guidata_address_is_its_flash_destination(mcf_136, monkeypatch):
+    """GuiData's addresses come from its own descriptor's flash destination (0x90000000), never
+    from GuiCode's fallback base: a descriptor without one refuses rather than guess."""
+    gd = _guidata(mcf_136)
+    assert theme.flash_destination(gd) == 0x90000000
+    assert Editor(mcf_136).grow_guidata(b"\x01" * 4, "x") == 0x90000000 + gd.length - 4
+    monkeypatch.setattr(theme, "flash_destination", lambda s: None)
+    for call in (lambda ed: ed.grow_guidata(b"\x01" * 4, "x"),
+                 lambda ed: ed.offset_of("GuiData", 0x90000000)):
+        with pytest.raises(EditorError) as e:
+            call(Editor(mcf_136))
+        assert e.value.code == "BAD_EDIT" and "flash destination" in str(e.value)

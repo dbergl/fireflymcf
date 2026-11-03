@@ -572,14 +572,12 @@ def guicode_guidata_pointers(data: bytes) -> list:
 _guicode_section = guicode_section
 
 
-def guicode_base(section: container.Section) -> int:
-    """Mapped base of the GuiCode section, from its descriptor's tag-0x40 flash destination.
-
-    Falls back to `GUICODE_BASE_DEFAULT` if the descriptor does not carry a tag-0x40 entry.
-    """
+def flash_destination(section: container.Section) -> int | None:
+    """Any section's mapped base: its descriptor's tag-0x40 flash destination (GuiCode
+    `0x00240000`, GuiData `0x90000000` on 11.23, 13.6 and 14.7), or None if it carries none."""
     entry = section.raw_entry
     if len(entry) < _DESC_ENTRY_COUNT + 2:
-        return GUICODE_BASE_DEFAULT
+        return None
     count = struct.unpack_from("<H", entry, _DESC_ENTRY_COUNT)[0]
     for k in range(count):
         at = _DESC_ENTRIES + k * 8
@@ -588,7 +586,17 @@ def guicode_base(section: container.Section) -> int:
         tag = struct.unpack_from("<H", entry, at)[0]
         if tag == _DESC_TAG_FLASH:
             return struct.unpack_from("<I", entry, at + 4)[0]
-    return GUICODE_BASE_DEFAULT
+    return None
+
+
+def guicode_base(section: container.Section) -> int:
+    """Mapped base of the GuiCode section, from its descriptor's tag-0x40 flash destination.
+
+    Falls back to `GUICODE_BASE_DEFAULT` if the descriptor does not carry a tag-0x40 entry. A
+    GuiCode default: for another section use `flash_destination`, which has no fallback.
+    """
+    base = flash_destination(section)
+    return GUICODE_BASE_DEFAULT if base is None else base
 
 
 # Back-compat alias: this was private until `config.py` became a second caller (2026-08-15).
