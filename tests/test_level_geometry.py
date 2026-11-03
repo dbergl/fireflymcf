@@ -1,11 +1,12 @@
-"""v45: Wheelbase and Track rows on the LEVEL SETUP popup (`add_level_page` `geometry`).
+"""Wheelbase and Track rows on the LEVEL SETUP popup (`add_level_page` `geometry`).
 
 - the four steppers send level-sensor ops 0Bh-0Eh on 0x1EFBF: one frame per tap, and after a
   1-s hold one every 250 ms (the stock arrows' shape), nothing on release;
 - two more receive entries read record 04h bytes 1-2 and 3-4 as u16;
 - the popup grows to five rows inside the page area, its touches last, its readouts on the new
   cells with one decimal place;
-- v45 is v44's recipe with `geometry` on, and rebuilds to the image handed over.
+- the reference build is its predecessor's recipe with `geometry` on, and rebuilds to the image
+handed over.
 """
 
 import pytest

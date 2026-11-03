@@ -39,6 +39,32 @@ def test_ssh_placeholder_is_fine_but_a_real_target_on_its_line_is_not(tmp_path):
     assert [f.text for f in scrub_check.scan([p], [])] == ["pi@box:"]
 
 
+def test_build_names_and_numbers_are_flagged(tmp_path):
+    # Adjacent literals keep the names themselves out of the tracked tree.
+    bad = ["the Ha" "nk build", "HA" "NK SE", "header JUL" "IEMOBILE", "Jul" "ie's van",
+           "the LV" "-mc probe", "lv" "-move", "lv" "-hold", "v54 Saf" "fron", "Har" "vest Maple",
+           "the LC" "ARS2 home", "dan-v66",
+           "Special Edition", "flashed in v17", "the v47 shape", "v34a", "(v16+v17)",
+           "mcf-tankheat-v10.bin", "V22", "def _v20_shaped_mark", "V47_FRAME_WTYPES",
+           "FIELDS_V37"]
+    for n, text in enumerate(bad):
+        p = tmp_path / f"bad{n}.md"
+        p.write_text(text + "\n")
+        assert [f.rule for f in scrub_check.scan([p], [])] == ["build-name"], text
+
+
+def test_versions_and_names_that_are_not_builds_pass(tmp_path):
+    ok = ["Thank you", "thanks", "shank", "v0.4.0", "git tag -a v0.3.0", "actions/checkout@v4",
+          "ExtFwVer 0x0106 = v1.06", "PD-INV v1.23", "Jayco B-Van V13", "B-Van V14",
+          "Jayco Ethos/Swift V11", "jayco/b_van/v13/config.json", "CMSIS-RTOS v1",
+          "STM32F7 I2C (v2 IP)", "firmware 13.6", "PC.62", "01-Lyra_13v6_GuiCode.bin",
+          "JBv13-042525", "lv-gear-centre", "level", "dev1", "env13"]
+    for n, text in enumerate(ok):
+        p = tmp_path / f"ok{n}.md"
+        p.write_text(text + "\n")
+        assert scrub_check.scan([p], []) == [], text
+
+
 def test_allow_list_exempts(tmp_path):
     p = tmp_path / "b.md"
     p.write_text("coach2mqtt\n")

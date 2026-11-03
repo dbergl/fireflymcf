@@ -47,7 +47,7 @@ def test_the_records_self_decode(stock):
     assert mark.base_modes[:4] == [1, 1, 1, 1], "the mark must ride the host's flow origin"
     assert [layout._s16(mark.geom[0]), layout._s16(mark.geom[1])] == [80, 26]
     assert [mark.geom[2], mark.geom[3]] == [20, 21], \
-        "a VISIBLE label needs a box; without one the panel draws a single column (v20)"
+        "a VISIBLE label needs a box; without one the panel draws a single column (2026-09-06)"
 
     empty = records.decode_record(cornermark.build_empty_record(-80, -26), 0)
     assert empty.wtype == 11 and (empty.label or "") == ""
@@ -58,7 +58,8 @@ def test_the_records_self_decode(stock):
 
 
 def test_a_box_of_zero_is_refused():
-    """The v20 defect at its source. The mark record was copied from `_flow_anchor`, which
+    """The first corner mark's defect (2026-09-06) at its source. The mark record was copied from
+    `_flow_anchor`, which
     declares no width or height because it never draws; the panel clipped the glyph to that
     degenerate box and drew one column of it."""
     for w, h in ((0, 21), (20, 0), (-1, 21)):
@@ -68,7 +69,8 @@ def test_a_box_of_zero_is_refused():
 
 def test_the_placed_box_is_big_enough_for_the_glyph(stock):
     """What `AddCornerMark.verify` now asserts, at the layout level: the box the mark is PLACED
-    in must be at least as big as the glyph going into it. v20 placed it in (571,218)-(571,218)
+    in must be at least as big as the glyph going into it. That build placed it in
+    (571,218)-(571,218)
     and the re-walk, which only checked the origin, passed anyway."""
     out, info = cornermark.add_mark(stock, object_index=PUMP_BUTTON, value_slot=217,
                                     dx=80, dy=26, w=20, h=21, font_slot=13, char=MARK_CHAR)

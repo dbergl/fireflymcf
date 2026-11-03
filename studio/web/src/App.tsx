@@ -256,7 +256,7 @@ export default function App() {
               // applyOpDrafts keeps that atomic, where three separate onOp calls would
               // each rebuild from the same pre-save op list and lose two of the three.
               onOps={(drafts) => guardedMutate(opsLib.applyOpDrafts(proj.ops, drafts))}
-              // v1 limitation, deliberate not overlooked: this always emits
+              // A limitation of this version, deliberate not overlooked: this always emits
               // remove_control, even for a control THIS session just added with
               // AddButton. The nicer move -- deleting the add_button op outright --
               // needs a map from an op id to the object index it created, and the

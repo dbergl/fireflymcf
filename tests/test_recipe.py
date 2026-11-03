@@ -104,7 +104,7 @@ def test_build_name_applied(stock, stock_hash):
 
 def test_capabilities_of_stock(stock):
     caps = recipe.capabilities(stock)
-    assert (3, 1) in caps            # AWNING EXT on — the pair v11 famously lost
+    assert (3, 1) in caps            # AWNING EXT on — the pair a reference build famously lost
     assert all(isinstance(c, int) and isinstance(cmd, int) for c, cmd in caps)
 
 def test_cache_hit_is_byte_identical_and_resumes(stock, stock_hash, monkeypatch):

@@ -1,7 +1,8 @@
-"""The v48 four-card ELECTRICAL page: object 829 (the compact AES frame) re-laid out as HOME's
+"""The four-card ELECTRICAL page: object 829 (the compact AES frame) re-laid out as HOME's
 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump.
 
-Pinned to the v47 shape: the frame's and the private AES cluster's wtype sequences, and every
+Pinned to the compact-frame shape (the frame as it was before the cards): the frame's and the
+private AES cluster's wtype sequences, and every
 edited geometry slot's prior value, are asserted before anything is written. Shared objects
 (443, 440, 1409, 1421, 285, 393, 249, 251, 154, 526) are never edited; they move only through the
 829 and cluster records that place them.
@@ -10,12 +11,14 @@ How a coordinate composes (`layout.Screen.walk`, FUN_00257BFC): `geom + reg[in_r
 with separate x and y register files. 829[0] (the battery strip) writes regx/regy[1], which
 829[3] ('Chassis' y) and 829[5] (the cluster container) read -- so the strip is kept as an
 invisible, card-coloured anchor rather than deleted. The values below were solved against the
-walk on the v47 bytes.
+walk on the compact-frame bytes.
 
 Draw order is stream order: the three new cards and then the four titles are PREPENDED (the
-Water Pump card is the pump section's own box, recoloured in place). Every v47 record after them
-sets the font, align and colour it draws with, so the shared controls draw exactly as in v47 and
-the frame ends in v47's persistent state (tests/test_card_layout.py pins both).
+Water Pump card is the pump section's own box, recoloured in place). Every compact-frame record
+after them
+sets the font, align and colour it draws with, so the shared controls draw exactly as in the compact
+frame
+and the frame ends in the compact frame's persistent state (tests/test_card_layout.py pins both).
 """
 from __future__ import annotations
 
@@ -34,20 +37,21 @@ TITLE_DX, TITLE_DY, TITLE_W, TITLE_H = 16, 2, 300, 28
 TITLE_FONT = 14              # the 'House' / 'Water Pump' caption font
 WHITE_BGR = (0xFF, 0xFF, 0xFF)
 
-V47_FRAME_WTYPES = [33, 11, 5, 11, 5, 5, 6, 32, 32, 11, 11, 6, 12, 11, 5, 11, 12, 12, 9, 8, 0,
+COMPACT_FRAME_WTYPES = [33, 11, 5, 11, 5, 5, 6, 32, 32, 11, 11, 6, 12, 11, 5, 11, 12, 12, 9, 8, 0,
                     32, 11, 6, 12]
-V47_CLUSTER_WTYPES = [5, 33, 12, 4, 11, 13, 6, 11, 5, 12, 33, 11, 12, 11]
+COMPACT_CLUSTER_WTYPES = [5, 33, 12, 4, 11, 13, 6, 11, 5, 12, 33, 11, 12, 11]
 
-# {record: {geom slot: (v47 value, v48 value)}}, signed as `layout._s16` reads them.
+# {record: {geom slot: (compact-frame value, card value)}}, signed as `layout._s16` reads them.
 FRAME_EDITS = {
     0: {0: (200, 138), 1: (60, 80), 2: (460, 0), 3: (80, 0)},  # strip -> anchor: reg[1] = 138/80
     1: {0: (15, -60), 2: (90, 60)},                            # 'House' 78..138, y 108
     3: {0: (70, 21)},                                          # 'Chassis' 238..308
     5: {1: (94, 186)},                                         # cluster origin (138, 80+186)
-    6: {0: (439, 452), 1: (154, 82)},                          # inverter pill; x 682..778 kept for v49 readouts
+    6: {0: (439, 452), 1: (154, 82)},                          # inverter pill; x 682..778 kept for readouts
     8: {0: (2, 320), 1: (292, 252), 2: (228, 0), 3: (169, 0), 4: (5, 0)},
                                      # pump inset -> a 0x0, radius-0 anchor at x 760, clear of the
-                                     # 'Water Pump' title: v50 drew its radius-5 blob over the e/r
+                                     # 'Water Pump' title: a flashed build drew its radius-5 blob
+                                     # over the e/r
     9: {0: (6, -257)},               # heading back to the content column at x 503
 }                                                              # after the restore record's +20
 CLUSTER_EDITS = {
@@ -62,9 +66,9 @@ FRAME_PUMP_BOX, FRAME_PUMP_INSET, FRAME_PUMP_HEADING, FRAME_HEATER_BOX = 7, 8, 9
 # The heater must already be the full-width Batteries-card bar (add_aes_batt_heat x/y/w/h); at the
 # stock 122x173 at 672,290 it would sit on the Water Pump card.
 HEATER_BOX = (84, 156, 328, 54)
-# BMS command buttons (add_aes_batt_heat instances) after the v47 frame: each is the group
-# (backing box, flow anchor, state switch, touch). One button (v48) is the full-width heater; two
-# (v49) are the heater and Ignore Alarms side by side.
+# BMS command buttons (add_aes_batt_heat instances) after the compact frame: each is the group
+# (backing box, flow anchor, state switch, touch). One button is the full-width heater; two
+# are the heater and Ignore Alarms side by side.
 BUTTON_GROUP = [32, 11, 6, 12]
 BUTTON_BOXES = {1: [HEATER_BOX],
                 2: [(84, 156, 163, 54), (249, 156, 163, 54)]}
@@ -73,7 +77,7 @@ SWITCH_EDIT = {0: (0, -20), 1: (0, -20)}
 
 
 def _button_bases(frame) -> list[int]:
-    """Start index of every button group after the v47 frame's own records (21..)."""
+    """Start index of every button group after the compact frame's own records (21..)."""
     n = (len(frame) - FRAME_HEATER_BOX) // len(BUTTON_GROUP)
     return [FRAME_HEATER_BOX + k * len(BUTTON_GROUP) for k in range(n)]
 
@@ -86,13 +90,14 @@ def _frame_edits(frame) -> dict:
 CLUSTER_TRIGGERS = 7
 CLUSTER_PILL_SWITCH = 6
 # The pump section's box (829[7]) stays as a 0x0 card-coloured anchor INSIDE its card: the card
-# itself is prepended with the other three so every title is drawn after every card (v48 on the
-# coach lost 'Water Pump' under the section box, which was drawn after the titles).
+# itself is prepended with the other three so every title is drawn after every card (a build
+# flashed 2026-10-15 lost 'Water Pump' under the section box, which was drawn after the titles).
 PUMP_ANCHOR = (440, 232)
 # The restore record sits after the heater's flow anchor (829[22]), offset under the capsule the
 # switch draws next, so its 0x0 white background pixel is covered. Before the anchor it would make
-# the anchor itself inherit white and paint the button's corner pixel -- v48 on the coach showed
-# exactly that dot; after it, the anchor inherits the card fill and its pixel is invisible.
+# the anchor itself inherit white and paint the button's corner pixel -- the coach
+# showed exactly that dot (2026-10-15); after it, the anchor inherits the card fill and its pixel is
+# invisible.
 RESTORE_DXY = (20, 20)
 # The AES enable pill's state band (stock 154-161, shared with 16, 315, 795 and 1425): its two
 # DISABLED arms fill index 8, the card colour, so the half vanished into the card. The cluster
@@ -130,7 +135,8 @@ def card_record(x: int, y: int, w: int, h: int, wtype: int = 33,
 
     wtype 33 (HOME's card, 905[0] made absolute) carries one mode-7 fill; wtype 32 (the
     pump/heater box shape, 829[7]) carries fillA and fillB, both mode 7 here -- header byte 3
-    `0x7F` is align 1 with both modes 7, as the v47 inset outline's `0x3F` is align 0."""
+    `0x7F` is align 1 with both modes 7, as the compact frame's inset outline's `0x3F` is align
+    0."""
     if wtype == 33:
         rec = (bytes([0x21, 0x50, 0x0F, 0x47, 0, 0, 0x10, 0])
                + struct.pack("<H", CARD_FILL_INDEX)
@@ -170,7 +176,8 @@ def title_record(x: int, y: int, text: str, *, font: int = TITLE_FONT, w: int = 
     TITLE_FONT, left-aligned, centred vertically in TITLE_H. The colour is the mode-3 inline BGR
     form of the coach-verified white contactor glyph (`aescompact._red_glyph_record`)."""
     # header byte 3: align 1 | fillB mode 5 (transparent, as stock captions) | fillA mode 3 --
-    # an inherited, opaque fillB let each glyph cell paint over its neighbour (v50: the 'm' of
+    # an inherited, opaque fillB let each glyph cell paint over its neighbour (seen on the coach
+    # 2026-10-15: the 'm' of
     # 'Amps' lost its right edge on the coach)
     rec = (bytes([0x0B, 0x50, 0x0F, 0x6B, 0, 0, 0, 0]) + bytes(WHITE_BGR)
            + struct.pack("<hhhh", x, y, w, h)
@@ -188,7 +195,8 @@ def title_record(x: int, y: int, text: str, *, font: int = TITLE_FONT, w: int = 
 
 def restore_record(dx: int = 0, dy: int = 0) -> bytes:
     """An empty, zero-offset wtype-11 label whose only effect is to set fillA and fillB back to
-    mode 2 -- what v47's white heater backing box (829[21]) left them at, before that box was
+    mode 2 -- what the compact frame's white heater backing box (829[21]) left them at, before that
+    box was
     recoloured to the card. Draws nothing (no text), moves no flow (base mode 1, offset 0),
     inherits the font (0xFF). It DOES paint its 0x0 background as one white pixel, so the caller
     offsets it by `(dx, dy)` under a capsule drawn after it, and compensates the next record."""
@@ -262,7 +270,7 @@ def _gs(data: bytes) -> int:
 def _check_shape(data: bytes, cluster_index: int) -> None:
     body = aescompact.ELECTRICAL_AES_BODY
     frame = _records(data, body)
-    shapes = [V47_FRAME_WTYPES + BUTTON_GROUP * (n - 1) for n in sorted(BUTTON_BOXES)]
+    shapes = [COMPACT_FRAME_WTYPES + BUTTON_GROUP * (n - 1) for n in sorted(BUTTON_BOXES)]
     if [r.wtype for r in frame] not in shapes:
         raise CardLayoutError("object %d is not the expected compact AES frame (wtypes %s)"
                               % (body, [r.wtype for r in frame]))
@@ -270,7 +278,7 @@ def _check_shape(data: bytes, cluster_index: int) -> None:
         raise CardLayoutError("frame[5] points at %s, not the cluster %d"
                               % (frame[5].child_index, cluster_index))
     cluster = _records(data, cluster_index)
-    if [r.wtype for r in cluster] != V47_CLUSTER_WTYPES:
+    if [r.wtype for r in cluster] != COMPACT_CLUSTER_WTYPES:
         raise CardLayoutError("object %d is not the expected AES cluster (wtypes %s)"
                               % (cluster_index, [r.wtype for r in cluster]))
     if cluster[CLUSTER_TRIGGERS].label != "Triggers:":
@@ -337,10 +345,14 @@ def apply_card_layout(data: bytes, cluster_index: int) -> tuple[bytes, dict]:
     for b, box in zip(bases, BUTTON_BOXES[len(bases)]):
         fstream[b] = card_record(*box, wtype=32)
 
-    # Order: all four cards, all four titles, then v47's records with the restore record right
-    # after the heater's flow anchor. Every title follows every card; every v47 record after them sets the
-    # state it draws with exactly as in v47, the heater arms are entered with v47's mode-2 fills,
-    # and the frame ends in v47's persistent state -- what a live repaint might inherit (GUICODE
+    # Order: all four cards, all four titles, then the compact frame's records with the restore
+    # record right
+    # after the heater's flow anchor. Every title follows every card; every compact-frame record
+    # after them sets the
+    # state it draws with exactly as in the compact frame, the heater arms are entered with its
+    # mode-2 fills,
+    # and the frame ends in the compact frame's persistent state -- what a live repaint might
+    # inherit (GUICODE
     # Finding 78 has not located that path).
     cards = [card_record(*box) for _t, box in CARDS]
     titles = [title_record(x + TITLE_DX, y + TITLE_DY, t) for t, (x, y, _w, _h) in CARDS]

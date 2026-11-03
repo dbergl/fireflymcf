@@ -173,8 +173,8 @@ def test_index_cell_refuses_a_cell_outside_sram(data):
 # joint 3: the state colours
 # --------------------------------------------------------------------------------------
 
-def test_set_state_colour_reproduces_the_hardware_verified_v9_edit(data):
-    """v9 (flashed 2026-08-17) fixed pin 15's off colour by hand: the 16-bit LDR at 0x002488EA
+def test_set_state_colour_reproduces_the_hardware_verified_pin15_edit(data):
+    """A probe (flashed 2026-08-17) fixed pin 15's off colour by hand: the 16-bit LDR at 0x002488EA
     went `1c 49` -> `22 49`. The tool must derive the same two bytes structurally."""
     out, edits = sb.set_state_colour(data, 32, "off", (65, 81, 163))
     payload = [e for e in edits if e.structure == "guicode-state-colour"]

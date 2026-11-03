@@ -389,7 +389,7 @@ Verbatim, as part of the documentation cleanup. Dated statements below describe 
 
    **The fix is two 1-byte same-size edits** (`0x002494d8` `04 2d`→`08 2d`, `0x0024951e`
    `09 2d`→`08 2d`), shipped by `tankgates.widen` as 9 GuiCode edits / 26 bytes with GuiData
-   byte-identical to stock. Flashed as `mcf-tankheat-v10.bin`: **all four rows populate on WD**
+   byte-identical to stock. Flashed 2026-08-18: **all four rows populate on WD**
    (PC.18b Result 7), and row 07 tracks the Black Tank option live (Result 8) — which also
    confirmed `0x2003A4B4` as that option's register and that the firmware's *second* gate at
    `0x249528`, deliberately left intact, is re-read per render rather than latched at boot.
@@ -423,7 +423,7 @@ Verbatim, as part of the documentation cleanup. Dated statements below describe 
    which DGNs the two inverter pages feed from (they are *different*, do not assume one feed serves
    both), the panel's own `FUN_0024F1FC` device table that binds by source address, the DC-current
    negation trap, the `0x42` address to claim, and why the commands need no MCF edit at all — is
-   **`docs/HARDWARE-VERIFIED.md`**. reference build v5 already pins the three alternator
+   **`docs/HARDWARE-VERIFIED.md`**. a reference build already pins the three alternator
    filters; that discrimination is **unexercised** until the bridge is live.
 
    **Three bridge-side results from 2026-09-03** (`BUS-BASELINE.md` PC.52, PC.53, PC.55; synced to
@@ -624,7 +624,7 @@ still needs `move_display_list` because they are two distinct fields — but the
 now *computable* (from `instance_status_var(new_channel)`), so that move could be automated. Full
 write-up: `MCF-FORMAT.md` §10 item 11a.
 *Automated 2026-09-10:* `set_channel`'s default retargets the control's own indicator records at
-the new pin's cells and moves no variable; `move_display_list` keeps the coach-proven v9. See
+the new pin's cells and moves no variable; `move_display_list` keeps PC.14's coach-proven path. See
 `MCF-FORMAT.md` §10 item 11a.
 ### Foundations complete — do not re-derive
 

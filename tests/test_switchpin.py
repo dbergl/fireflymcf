@@ -71,7 +71,7 @@ def test_the_recipe_op_pins_and_reports_verified(data: bytes) -> None:
                       params={"object": OBJ, "record": REC, "arm": ROWS})])
     r = recipe.compile_project(p, data)
     assert r.ok, r.errors
-    assert r.unverified == []          # v18 FLASHED AND VERIFIED 2026-09-05
+    assert r.unverified == []          # FLASHED AND VERIFIED 2026-09-05
     assert switchpin.pinned_to(r.data, OBJ, REC) == ROWS
     bad = recipe.Project(base_sha256=hashlib.sha256(data).hexdigest(), build_name=None, ops=[
         recipe.OpSpec(id="rows", type="pin_switch_arm",

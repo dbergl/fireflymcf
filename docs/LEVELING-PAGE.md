@@ -3,11 +3,11 @@
 **Status:** page decode `proven-from-data`; the `0x1FFEE` payload layout `inferred-from-data`
 (the RV-C spec names the DGN but carries no parameter list); the display-cell negative
 `proven-from-code` with the caveat in §4. Reached on the coach for the first time by
-`mcf-experiment-v14.bin`, 2026-09-03.
+a probe build, 2026-09-03.
 
 Screen 29 is the second page titled `SLIDES/AWNINGS` — the auto-levelling page. It is orphaned in
 stock: its only ACTION leaf is `0x7ED` and **no `wt-12` region in the image carries that id**
-(`navmap`), so nothing can navigate to it. v14 reveals the nav rail's authored sixth icon and
+(`navmap`), so nothing can navigate to it. `show_nav_slides_icon` reveals the nav rail's authored sixth icon and
 points its `0x7DC` leaf here (`navicon`).
 
 The owner's interest is **indication, not actuation**: publishing levelling/attitude data onto
@@ -215,7 +215,7 @@ Everything needed is proven and already shipping in the owner's image:
    is the known-unverified part of `register.resolve_register`.
 2. **The write path is hardware-verified** — `add_aes_low_volts_trigger` appends a per-tick routine
    onto the GuiCode hook at `+0xEE3C`, reads a receive slot, and drives a recolour cell through
-   `setVariant`. It has run on this coach since v10, and the ops **chain**, so another routine can
+   `setVariant`. It has run on this coach since 2026-09-01, and the ops **chain**, so another routine can
    be added beside it (`followchannel.chain_from_hook`).
 3. **So the feature is**: a routine that reads `0x20008198`/`0x2000819C`, derives the five status
    booleans and the eight arrow states, and writes cells 176-180 / 424-430 the way the AES bridge

@@ -53,7 +53,7 @@ re-impose the coupling on receipt either** — it lives in the tap handler alone
 `can_rvc`) — `can_bms` is `can0`, the 11-bit BMS bus, so `candump can_bms` shows none of this.
 `0x42` is now **claimed** by the owner's PD-inverter bridge; `0xC0` was free and is the probe SA.
 
-**REMOVED in reference build v6, shipped in v7 — CONFIRMED ON HARDWARE 2026-08-23.** Owner wants PI and
+**REMOVED in a reference build — CONFIRMED ON HARDWARE 2026-08-23.** Owner wants PI and
 AES selectable together (the inverter is being replaced by a Renogy 48 V). `interlocks.uncouple`
 NOPs the 36-byte emit pair behind each of the four cross-writes — **same-size**, so the image
 stays 1,069,668 B — locating each block by walking the run and matching the selector, asserting
@@ -113,13 +113,13 @@ touch id (`cmp`/`beq` @`0x24ACBA`), so a tap fires on touch-down, 3 s before any
 *navigating* tap cancels its own hold by changing what is under the finger. Both shipped tap+hold
 pairs are navigate+navigate or nothing+navigate. So: **two non-overlapping regions**
 (`src/fireflymcf/holdregion.py`, `CONTROL-BEHAVIOR.md` §9, recipe op `split_hold_region`),
-shipped in reference build v7 — tap `(197,382)-(340,439)`, hold `(345,382)-(417,439)`.
+flashed in a reference build 2026-08-23 (PC.22) — tap `(197,382)-(340,439)`, hold `(345,382)-(417,439)`.
 
-**v8 retargets that hold to `INVERTER / CHARGER SETTINGS` (object 17, screen 14) — CONFIRMED ON
+**The next build retargets that hold to `INVERTER / CHARGER SETTINGS` (object 17, screen 14) — CONFIRMED ON
 HARDWARE 2026-08-24** (`BUS-BASELINE.md` **PC.29**). One recipe parameter, `screen_object 38 → 17`.
 That page is **ORPHANED in stock** (`GUICODE.md` **Finding 53**): its only navigation site is
 guarded by action id `0x7DE`, carried solely by objects 1052/1053, neither in the display graph.
-v8 gives it its **first** route by writing the screen id straight to `state+0x20A`, and the page
+That build gives it its **first** route by writing the screen id straight to `state+0x20A`, and the page
 renders correctly.
 
 **Finding 53's predictions held 6 for 6** — made from the file and the 30 s PC.23 baseline about a
@@ -185,8 +185,8 @@ trustworthy check is a layout re-walk of the finished image.
 regions exactly as asked and moved the block's label and boxes 148 px right, off the panel.
 Boundary oracle, deep coverage, pointer repair, capability gate and the build's own assertion all
 passed, because they checked the two regions and nothing else. Caught by looking at the render.
-`split_touch_region` now asserts every **non-touch** element lands where it did before, and v7's
-HOME render is pixel-identical to v6's. *Verifying only what you set is not verification.*
+`split_touch_region` now asserts every **non-touch** element lands where it did before, and the
+build's HOME render is pixel-identical to its predecessor's. *Verifying only what you set is not verification.*
 
 Id `0x1795` needed **no arm edit**: §7's "third arm" is a reachable dispatch leaf (any id >
 `0xFA1`) whose deadline nothing consumed — spare capacity, and that answers "what it protects"
@@ -209,7 +209,7 @@ owner photographed SERVICE MODE from the gear hold that `−4` says is AUTO ENGI
 Screens are candidates of object 1's type-6 switch (`value_slot 2`, base 3, count 47);
 `layout.screen_object_map` reads the real map from the match table. The old rule holds only over
 screens 0-4, where it was derived — screen 6 does not exist, so everything after drifts, and the
-anchor was ambiguous anyway (objects 3 AND 4 both render HOME). It had already aimed v7 at GO
+anchor was ambiguous anyway (objects 3 AND 4 both render HOME). It had already aimed a reference build at GO
 POWER! CONFIGURATION (screen 34) when the PD Inverter page is screen **39**, through every gate,
 the tests and a commit. **Pass object indices, never screen ids** (`layout.screen_for_object`).
 
@@ -550,7 +550,7 @@ landed and neither the G12 nor the panel re-imposed it). Two things bind:
 - **The G12 has never originated a change to an option-*selection* selector** — 84 such changes
   across eleven captures, all echoes. Pinned by `tests/test_option_interlocks.py`.
 
-`interlocks.uncouple` removes the coupling in same-size NOPs and ships in reference build v7+ (the owner wants PI and AES together). **PC.21 is what licenses that edit**: had the G12
+`interlocks.uncouple` removes the coupling in same-size NOPs and has shipped in every reference build since 2026-08-23 (the owner wants PI and AES together). **PC.21 is what licenses that edit**: had the G12
 enforced the interlock too, deleting the panel's copy would have made the screen disagree with the
 device it commands. Full narrative in `docs/SETTLED-FINDINGS.md`.
 

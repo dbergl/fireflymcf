@@ -367,7 +367,7 @@ def test_text_widgets_are_renameable_and_clickable(client):
     # The G12 OUTPUTS rows are wtype-0 text widgets, not wtype-11 labels. They were
     # classified as bare "widget" (move_element only) and reported a DEGENERATE box --
     # [325, 286, 325, 286] -- so they could be neither selected nor renamed, though
-    # renaming two of them is exactly what reference build v1 does.
+    # renaming two of them is exactly what the first reference build does.
     _make(client, "txt")
     body = client.get("/api/projects/txt/placements/outputs").json()
     rows = [p for p in body["placements"] if (p["label"] or "").strip() == "28 -"]
@@ -1107,7 +1107,7 @@ def test_page_stays_findable_after_its_header_is_renamed(client):
     """Renaming a page header must not make the page unreachable in the editor.
 
     Pages resolve by header LABEL (`cli._resolve_page_root`), so renaming HOME's header
-    to '   MY COACH' -- which is one of reference build v1's own ops -- used to
+    to '   MY COACH' -- which is one of the first reference build's own ops -- used to
     404 every render and placements request for `home`. The editor broke the page the
     user was editing, mid-edit, and the canvas went blank. Object indices never move, so
     the name is resolved against stock as a fallback.
@@ -1141,7 +1141,7 @@ def test_battery_block_follows_the_generator_setting(client):
     (AES, AES Single Output) gives 1, AGS == 1 gives 2, anything else 0
     (see reference.derived_slots for the traced branches).
 
-    Before this, reaching object 902 -- the block reference build v1's own
+    Before this, reaching object 902 -- the block the first reference build's own
     `battery` op edits -- meant typing `6:1` into the raw-slots escape hatch, which no
     owner would guess. Picking their coach's floorplan does it now.
     """

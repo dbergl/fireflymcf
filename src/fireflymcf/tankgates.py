@@ -124,7 +124,8 @@ def widen(data: bytes) -> tuple:
     Every edit asserts its expected old bytes first, so this refuses on a build whose GuiCode
     already differs at these sites rather than corrupting it. The addresses are GuiCode virtual
     addresses and GuiCode is never shifted by a GuiData insertion, so the same patch applies to a
-    stock image and to a relocated one (e.g. the Pin-15 build) alike -- which is how v11 = v9 +
+    stock image and to a relocated one (e.g. the Pin-15 build) alike -- which is how the pin-15
+    build +
     this patch is produced. The caller must still `patch.reseal`.
     """
     section = theme.guicode_section(data)

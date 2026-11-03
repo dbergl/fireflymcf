@@ -1,7 +1,7 @@
 """The customised build must be reproducible from the corpus alone.
 
-Builds up to v18 were chained off the previous *binary*, and one link in that chain
-(`mcf-pin15-v9.bin`) had no build script at all. Since `build/` is gitignored, the whole thing
+Builds up to 2026-09-05 were chained off the previous *binary*, and one link in that
+chain (a pin-15 build) had no build script at all. Since `build/` is gitignored, the whole thing
 was unreproducible from a clean checkout -- the failure this test exists to prevent.
 
 It does NOT re-run `build/build-from-stock.py` (that needs Inkscape and takes minutes). It pins

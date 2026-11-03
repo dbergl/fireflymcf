@@ -178,7 +178,7 @@ def create_app(stock_path: str = "firefly-13.6/mcf.bin",
             pass
         # A page is found by its header LABEL, so renaming that header makes the page
         # unfindable by name -- '   HOME' -> '   MY COACH' is a change this editor
-        # exists to make (it is in reference build v1), and after it the canvas
+        # exists to make (it is in the first reference build), and after it the canvas
         # could no longer show the very page being edited. Object indices do not move
         # under any op the engine has (relocation repairs the tables), so resolving the
         # name against STOCK and using that root is both stable and honest: same page,

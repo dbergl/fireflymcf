@@ -4,7 +4,7 @@ Date: 2026-10-19. Status: approved in conversation; to be planned.
 
 ## Why
 
-Moving Low Volts from the compact AES ELECTRICAL card to the AES settings page (the LV-move build,
+Moving Low Volts from the compact AES ELECTRICAL card to the AES settings page (a reference build,
 flashed and verified 2026-10-19) took four recipe ops: `remove_records` on object 1427,
 `move_element` to restore the "AES ⚙" gear, and `add_low_volts_control`, a Low-Volts-only copy op
 on body 1425. The gear fix was needed because the removed wtype-5 attach had carried a +29 y flow
@@ -20,7 +20,7 @@ Two ops close that:
   page, or that nothing on a page moved since an earlier point in the recipe.
 
 There is no specific next move in mind (owner, 2026-10-19). Build them general, and prove them by
-reproducing LV-move.
+reproducing that move.
 
 ## Goals
 
@@ -49,7 +49,7 @@ reproducing LV-move.
   this exists to prevent.
 - Fitting a fix: compensation must restore each moved record's position exactly, from its geometry
   fields, or refuse. It must never nudge a record until it looks right.
-- A moved control that draws but does not repaint on a status change (the pin-15 v7 defect).
+- A moved control that draws but does not repaint on a status change (the pin-15 probe's defect, 2026-08-17).
 
 ## Constraints
 
@@ -169,7 +169,7 @@ Steps, all in `apply`:
      geometry and register reads (in the proof, 1425 record 6: y base mode 3, x read from
      register 1). It is a zero-size container, so it draws nothing; in the proof it sits off
      canvas at (81, 537), and the pasted records are absolute, so its pen does not matter. The proof's walks
-     and renders match LV-move. A template carrying a `value_slot` is refused
+     and renders match the flashed three-op move. A template carrying a `value_slot` is refused
      `UNSUPPORTED_RECORD`, since the pasted control would inherit it. A moved record with no
      `value_slot` of its own that inherits one from an attach above `from` is refused the same
      way (Ruling 14), rather than having the slot written into it.
@@ -236,26 +236,26 @@ through unchanged.
 
 ## Proof
 
-1. **Reproduce LV-move.** Replace LV-move's `lv-off-elec`, `lv-gear` and `lv-aes-settings` with
+1. **Reproduce the three-op move.** Replace its `lv-off-elec`, `lv-gear` and `lv-aes-settings` with
    one `move_control`, from 1427 to 1425, with `at` set to where the flashed build draws the
    button.
    - **Builder call:** keep the owner's gear centring as a separate step. The proof recipe is
      `move_control` (1427 → 1425), then `move_element` on the gear with `set {x: 55}`,
-     `expect {x: 110}`. LV-move's `lv-gear` restored the 29 px of y and also centred x (−55);
+     `expect {x: 110}`. The three-op move's `lv-gear` restored the 29 px of y and also centred x (−55);
      `move_control` now restores the y itself, so only the centring remains.
-   - Compare the walk of every page against the flashed LV-move image (`94fe0f0a…`), using
+   - Compare the walk of every page against the flashed three-op move image, using
      `assert_layout`-style keys:
      - the source card (roots 5 and 39) must be identical;
-     - the settings page must match, except for the "Triggers:" title, which LV-move's op
+     - the settings page must match, except for the "Triggers:" title, which the three-op move's op
        authored and `move_control` does not carry over.
    - Byte equality is not required; layout equality is.
    - If the walks are identical, the build is a candidate for one coach flash. That flash, and only
      that flash, sets `hardware_verified`.
-   - **Note:** LV-move's source records are the Low Volts attach and touch on 1427. Its title came
+   - **Note:** the three-op move's source records are the Low Volts attach and touch on 1427. Its title came
      from the AGS donor, so the move is not a byte-for-byte reproduction. The planner should decide
      whether the proof build also adds a title.
 2. **Tests that can fail.**
-   - Stub the compensation pass to do nothing, and confirm the LV-move test fails with
+   - Stub the compensation pass to do nothing, and confirm the three-op move test fails with
      `LAYOUT_MOVED` naming the gear (−29 y; the design review measured its box going from
      (110,134) to (110,105) after the removal alone).
    - Stub `assert_layout` to compare nothing, and confirm its tests break.
@@ -277,6 +277,6 @@ through unchanged.
   graph: `insert.object_child_graph`).
 - Re-encoding records as absolute, per wtype, factored out of `add_low_volts_control`'s
   `_title_record`, `_box_record`, `_label_record` and `_attach_record`. Refactoring those to share
-  it is fine if the private LV-move pin test and every committed build stay byte-identical.
+  it is fine if the private three-op move pin test and every committed build stay byte-identical.
 - Whether compensation edits use `move_element`'s field-writing helper or its own.
 - The exact text of manifest lines.

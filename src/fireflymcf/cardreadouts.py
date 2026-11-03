@@ -1,4 +1,4 @@
-"""Captioned live readouts drawn inside a cardlayout card (v49: the ELECTRICAL Inverter card).
+"""Captioned live readouts drawn inside a cardlayout card (e.g. the ELECTRICAL Inverter card).
 
 One private object holds, per row: a white caption (`cardlayout.title_record`, font 5), a number
 directive and a wtype-8 readout (`readout.author_readout_object`'s two records, the readout's font
@@ -7,9 +7,10 @@ authored whatever the flow origin.
 
 The object is attached to 829 by a plain wtype-5 container inserted DIRECTLY AFTER cardlayout's
 four titles: after every card fill (the panel paints in stream order, so nothing covers the rows)
-and before every v47 record. Its persistent state (font, align, colour, the directive) is
-therefore followed by v47's own records; tests/test_card_readouts.py pins that no stock control or
-readout draws differently and that the frame still ends in v47's state.
+and before every compact-frame record. Its persistent state (font, align, colour, the directive) is
+therefore followed by the compact frame's own records; tests/test_card_readouts.py pins that no
+stock control or
+readout draws differently and that the frame still ends in the compact frame's state.
 """
 from __future__ import annotations
 

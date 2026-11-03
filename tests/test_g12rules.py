@@ -240,15 +240,16 @@ def test_screen_14_is_orphaned_in_stock(data):
 
     GuiCode has exactly ONE store of screen 14 to `state+0x20A` (`0x0024B96C`) and it is guarded
     by action id 0x7DE. Only objects 1052 and 1053 carry that id, and neither is in the display
-    graph -- so in stock 13.6 the page cannot be opened by touch. That is what makes v8's hold
-    its first route, and why nothing about its runtime behaviour is confirmed.
+    graph -- so in stock 13.6 the page cannot be opened by touch. That is what makes the PC.29
+    build's
+    hold its first route, and why nothing about its runtime behaviour is confirmed.
     """
     registrars = _registrars(data, NAV_TO_SCREEN_14)
     assert registrars == [1052, 1053], registrars
     reachable = _reachable_objects(data)
     assert not (set(registrars) & reachable), (
         "an object registering %#05x became reachable; screen 14 is no longer orphaned "
-        "and the v8 write-up needs revisiting" % NAV_TO_SCREEN_14)
+        "and the PC.29 write-up needs revisiting" % NAV_TO_SCREEN_14)
 
 
 def test_three_page_controls_write_selectors_the_g12_never_relays(data):

@@ -348,7 +348,7 @@ def test_build_pump_section_emits_the_expected_record_shape():
 # Asserted BY INDEX rather than as a set: a set comparison passes just as happily with the
 # plus and minus arrows swapped, which is precisely the mistake worth catching -- the arrows
 # are visually interchangeable but drive opposite-signed config writes on the bus.
-# This set describes the v14/v15 shape: 15 fragments, box+label at [4]/[5] (PUMP_IDS, no arm
+# This set describes the static-box shape: 15 fragments, box+label at [4]/[5] (PUMP_IDS, no arm
 # keys -- link_display_slot/link_arms_base left None).
 PUMP_FRAG_LINK_TOUCH = 6
 PUMP_FRAG_PLUS_TOUCH = 10
@@ -359,7 +359,7 @@ PUMP_FRAG_READOUT = 13
 # this offset.
 PUMP_FRAME_PREFIX = 7
 
-# The v16 shape (LINK_IDS, both arm keys given): 14 fragments, the box+label pair collapsed into
+# The switch shape (LINK_IDS, both arm keys given): 14 fragments, the box+label pair collapsed into
 # one wtype-6 switch at [4], so every index from there on shifts down by one from the set above.
 LINK_FRAG_LINK_TOUCH = 5
 LINK_FRAG_PLUS_TOUCH = 9
@@ -492,9 +492,9 @@ def test_pump_section_lands_inside_its_own_outlined_box():
 
 
 def test_frame_with_the_pump_section_keeps_every_other_element_in_place():
-    """The v7 discipline: verifying only what you set is not verification.
+    """The 2026-08-23 discipline: verifying only what you set is not verification.
 
-    The v7 defect moved an unrelated label and its boxes 148 px off the panel while placing
+    That build's defect moved an unrelated label and its boxes 148 px off the panel while placing
     exactly the two regions it was asked to place, and every gate passed because each gate only
     looked at the two regions. So this looks at EVERYTHING: every pixel of the frame, in both
     inverter states, with the ONLY exemption being the section's own declared box. The House/
@@ -597,7 +597,8 @@ def test_pump_section_with_arms_replaces_the_box_and_label_by_one_switch():
     assert sw.base_modes[:4] == [1, 1, 1, 1] and sw.geom[0] == 0 and sw.geom[1] == 0
     assert "Pump Link" not in [r.label for r in recs], "the arms carry the caption now"
 
-    # every touch id / value slot lands on its own record, at the v16 (14-fragment) indices.
+    # every touch id / value slot lands on its own record, at the switch shape's (14-fragment)
+    # indices.
     link_rec = recs[LINK_FRAG_LINK_TOUCH]
     assert link_rec.wtype == 12 and _touch_id(_out, link_rec) == PUMP_IDS["link_touch_id"]
     plus_rec = recs[LINK_FRAG_PLUS_TOUCH]
@@ -608,17 +609,18 @@ def test_pump_section_with_arms_replaces_the_box_and_label_by_one_switch():
     assert readout_rec.wtype == 8 and readout_rec.value_slot == PUMP_IDS["readout_slot"]
 
 
-def test_pump_section_without_arms_is_byte_identical_to_v15():
+def test_pump_section_without_arms_is_byte_identical_to_the_static_box_shape():
     """Pinned digest of `build_pump_section(**PUMP_IDS)`'s 15 fragments as they stood at 3e144fe
     (the commit immediately before this task), computed with this file's own PUMP_IDS -- so a
-    changed byte anywhere in the pre-v16 shape breaks this, rather than comparing f(x) == f(x)."""
+    changed byte anywhere in the static-box shape breaks this, rather than comparing f(x) ==
+    f(x)."""
     import hashlib
     from fireflymcf import aescompact
     data = open("firefly-13.6/mcf.bin", "rb").read()
     frags = aescompact.build_pump_section(data, **PUMP_IDS)
     assert len(frags) == 15
     assert hashlib.sha256(b"".join(frags)).hexdigest() == \
-        "6db5739a8889ab949e2d39f9a77fd147d1b5b72a439708d60967ca6797210d15"   # 15 fragments, pre-v16 shape, at 3e144fe
+        "6db5739a8889ab949e2d39f9a77fd147d1b5b72a439708d60967ca6797210d15"   # 15 fragments, static-box shape, at 3e144fe
 
 
 def test_the_switch_draws_the_dark_arm_at_0_and_the_lit_arm_at_1_where_the_box_was():

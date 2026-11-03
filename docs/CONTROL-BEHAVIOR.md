@@ -72,8 +72,8 @@ so the rail could not distinguish `+3` from `+4`.
 | 7-16 | 10-19 | | 34 | 37 GO POWER! CONFIGURATION |
 | 18-34 | 21-37 | | **39** | **38 PD Inverter** |
 
-**The cost of the wrong rule, recorded because it nearly shipped.** reference build v7
-aimed its new hold at "screen 34, the PD Inverter page". Screen 34 is GO POWER! CONFIGURATION;
+**The cost of the wrong rule, recorded because it nearly shipped.** A reference build
+(2026-08-23) aimed its new hold at "screen 34, the PD Inverter page". Screen 34 is GO POWER! CONFIGURATION;
 the PD Inverter page is screen 39. The build was gated, tested and committed with the wrong
 target, and only the owner's photograph of a *different* screen exposed the rule behind it.
 **Pass object indices, not screen ids** — `layout.screen_for_object` does the lookup, and an
@@ -618,10 +618,10 @@ fix.
 unless the record draws with v-align 1, in which case it is a direct offset from the box top.
 `install_glyph` asserts this against the font's own cell rather than hardcoding 37.
 
-**Confirmed on the coach, 2026-08-19** (owner, `Custom v22`): with `y = 37` the logo sits centred
-in its button. Three flashes were needed and each ruled something out — v20 (`y = 0`) showed the
-error, v21 (`y = 3`) showed that a nudge sized by eye is invisible against it, and v22 (`y = 37`,
-derived) fixed it. The lesson is the project's own: the formula was recoverable from the code the
+**Confirmed on the coach, 2026-08-19** (owner): with `y = 37` the logo sits centred
+in its button. Three flashes were needed and each ruled something out — the first (`y = 0`) showed
+the error, the second (`y = 3`) showed that a nudge sized by eye is invisible against it, and the
+third (`y = 37`, derived) fixed it. The lesson is the project's own: the formula was recoverable from the code the
 whole time, and two rounds were spent calibrating instead of deriving.
 
 **A wtype-0 single character is drawn by a different function** (`FUN_002557C0`, `GUICODE.md`
@@ -655,10 +655,10 @@ above its button. `metrics.wt0_ink_offset` gives the offset.
   the firmware lie to the user.
 * A control that should *never* act on a stray touch wants byte 3 = `4` or `8` (hold-only), not
   `2`. The firmware already uses exactly that for its own destructive actions.
-* **A new control's group must not be one GuiCode drives by number** (observed on hardware, v45,
+* **A new control's group must not be one GuiCode drives by number** (observed on hardware,
   2026-09-30). 13.6 calls `setVariant` on groups 130-139 as a block (`0x24AC66`-`0x24ACB0`); no
   stock touch region uses 136-139, so `newbutton.free_group_slots` offers them. Minted there, a
-  tap still sends, but a hold never registers: v45's Track + (136) did not repeat and its
+  tap still sends, but a hold never registers: a Track + on 136 did not repeat and its
   hold-only reboot (137) sent nothing, while identical controls on 96/126/127 worked. The mechanism
   is not traced (the setter refuses a byte-1 `0x00` group, so it is not its write). Allocate holds
   from `newbutton.hold_safe_groups` and taps from `newbutton.assignable_groups` (which drops
@@ -701,7 +701,7 @@ of 0/1 plus its read-back); group 129 is Low Volts, whose variant GuiCode sets f
 hold, pressed from the compact AES ELECTRICAL page, works. AGS mode and groups 82/88 have not
 run.
 
-**Confirmed on the coach, 2026-08-19** (owner, build `Custom v20`): a 3-second hold turns pin 29
+**Confirmed on the coach, 2026-08-19** (owner): a 3-second hold turns pin 29
 on, another turns it off, a tap does nothing, and holding past the threshold does not re-toggle.
 Pin 15, deliberately left a plain latch in the same build, still switches on a tap — so the change
 was surgical rather than a global shift in how buttons behave.
@@ -715,7 +715,7 @@ the held phase, and no hold-only group drives a load at all — every shipped ho
 control emits `0x1FED9` config frames. This composition followed from the decoded mechanism with
 no shipped precedent, which is exactly why it needed the round-trip.
 
-**A second pin, and that is what makes it general — 2026-08-21** (owner, reference build v4). The same three bytes applied to the **Overflow Valve** on **pin 28** behave identically: 3 s
+**A second pin, and that is what makes it general — 2026-08-21** (owner). The same three bytes applied to the **Overflow Valve** on **pin 28** behave identically: 3 s
 on, 3 s off, a tap does nothing. One confirmed instance of a precedent-free composition leaves
 open whether it worked for a reason particular to that button — a different group, a different
 pin, a button built by a different route (`build_home_button` rather than `wire_button` on a
@@ -740,11 +740,11 @@ because a navigating tap changes what is under the finger and **cancels its own 
 non-overlapping regions are the way, and overlapping ones are useless: the hit test returns the
 **lowest** matching id, and every class-1 id is below every class-2 id.
 
-`src/fireflymcf/holdregion.py`, shipped in reference build v7. The block's single
+`src/fireflymcf/holdregion.py`, flashed in a reference build 2026-08-23 (PC.22). The block's single
 221 px region becomes a 144 px tap `(197,382)-(340,439)` and a 73 px hold `(345,382)-(417,439)`,
 4 px apart.
 
-**v8 changes only where the hold goes**: `INVERTER / CHARGER SETTINGS` (object **17**, screen 14)
+**The next build (2026-08-24, PC.29) changes only where the hold goes**: `INVERTER / CHARGER SETTINGS` (object **17**, screen 14)
 instead of the read-only `PD Inverter` readout (object 38, screen 39). The regions, the id
 `0x1795`, the 3000 ms delay and the dispatch stub are untouched — it is one constant inside the
 stub, and `holdregion.hold_dispatch_map` reads all three holds back from the finished image. The
@@ -768,12 +768,12 @@ boxes 148 px right, off the panel and over the battery quadrant. Every gate pass
 oracle, deep coverage, pointer repair, capability gate — and so did the build's own assertion,
 because it checked the two regions and nothing else. It was caught by *looking at the render*.
 `split_touch_region` now asserts that every **non-touch** element of the object lands where it did
-before (`_drawn_placements`), and v7's HOME render is pixel-identical to v6's. **Verifying only
+before (`_drawn_placements`), and the build's HOME render is pixel-identical to its predecessor's. **Verifying only
 what you set is not verification; check what you did not intend to change.**
 
 **The GuiCode half**, three same-size edits:
 
-| site | stock | v7 |
+| site | stock | edited |
 |---|---|---|
 | `0x0024B7E6` | `add.w r3,r3,#0x3e8` (1000 ms) | `addw r3,r3,#0xbb8` (3000 ms) |
 | `0x0024E90E` | `movw r2,#0x838` | `movw r2,#0x1795` |
@@ -875,11 +875,11 @@ On the reference coach's compact AES card (object 1427), moving Low Volts (the a
 compensation edit: the "AES ⚙" gear's y field gets back the +29 px the removed attach carried.
 The pasted attach needed font 14 and align 1 made explicit (the settings page leaves font 9 and
 align 3 in effect where the paste lands); its colours inherited correctly. The result draws Low
-Volts at the boxes the flashed LV-move build draws it at (`tests/test_move_control.py`).
+Volts at the boxes the flashed three-op move build draws it at (`tests/test_move_control.py`).
 
-Flashed 2026-10-20 in the LV-mc proof build (LV-hold plus `move_control`, the gear centred by a
-`move_element`, and an `assert_layout` on the gear's box) and verified by the owner: the compact
-AES card draws as LV-move's, nothing else moved, and Low Volts on the AES settings page arms and
+Flashed 2026-10-20 in a proof build (the Low Volts hold-to-toggle build plus `move_control`, the
+gear centred by a `move_element`, and an `assert_layout` on the gear's box) and verified by the
+owner: the compact AES card draws as the three-op move build's, nothing else moved, and Low Volts on the AES settings page arms and
 disarms on its 3 s hold and repaints with its status. The generic re-encoding and the automatic
 compensation have now run on a coach, so `hardware_verified` is True.
 

@@ -7,7 +7,8 @@ the whole picture it draws.
 
 That asymmetry is not a style preference, it is what makes the drawing correct. A switch repaints
 only the arm it selects, so an arm that leaves something out leaves the previous arm's pixels on
-the glass -- the v31 "Batt Heat" button shipped two independent switches and both failure modes
+the glass -- a "Batt Heat" button flashed 2026-09-22 shipped two independent switches and both
+failure modes
 the owner reported (2026-09-22) are that: the body switch's arm painted its capsule over the
 sibling 'Batt Heat' caption and nothing redrew it, and the glyph switch's off arm drew nothing at
 all, so the red glyph stayed lit until the page was navigated away and back. Combining the bits

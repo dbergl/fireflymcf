@@ -160,7 +160,7 @@ from `add_rvc_button`, `add_button_status` and `add_enum_label` rather than a on
 ```json
 {"schema": 1,
  "base_sha256": "<sha256 of the owner's mcf.bin>",
- "build_name": "Jayco B-Van V13 pump-rename v1",
+ "build_name": "Jayco B-Van V13 pump-rename",
  "ops": [{"id": "pump", "type": "rename_label",
           "params": {"object": 295, "old": "Water\nPump", "new": "Pump", "align": "center"},
           "note": "owner asked for the short name"}],
@@ -178,7 +178,7 @@ from stock alone, which would drop every earlier change.
 
 ```bash
 $F validate pump.ffproj.json $M --require-verified    # every gate; writes nothing
-$F compile  pump.ffproj.json $M -o build/mcf-pump-rename-v1.bin
+$F compile  pump.ffproj.json $M -o build/mcf-pump-rename.bin
 ```
 
 A failure names the op id and an error code (`$F ops NAME` explains it), sometimes with an `offer`.
@@ -204,7 +204,7 @@ result in the sidecar. The `write-new-op` skill has the details.
 ## Verify the whole build, not only your change
 
 ```bash
-$F verify build/mcf-pump-rename-v1.bin $M --config coach.json   # every page, ~1 min
+$F verify build/mcf-pump-rename.bin $M --config coach.json   # every page, ~1 min
 ```
 
 For a change to an earlier build, also run `$F verify NEW.bin PREVIOUS.bin --config coach.json`:

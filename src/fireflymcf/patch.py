@@ -643,7 +643,7 @@ class McfPatcher:
           cells and move no variable (`_retarget_indicator`). Every G12 OUTPUTS row keeps
           reporting its own channel. Hardware-unverified.
         * `move_display_list=True` -- repoint the status variables watching the old channel
-          (`_move_status_variables`). PC.14's v9, proven on the coach, at the cost of the old
+          (`_move_status_variables`). PC.14's edit, proven on the coach, at the cost of the old
           channel's G12 OUTPUTS row, which then reports the new one.
 
         `allow_capability_change` suppresses I8 only. It exists because the file cannot
@@ -741,12 +741,13 @@ class McfPatcher:
 
     def _move_status_variables(self, control: guidata.ControlGroup, was: int,
                                channel: int) -> None:
-        """Repoint every `DC_DIMMER_STATUS_3` variable watching `was` at `channel` -- PC.14's v9.
+        """Repoint every `DC_DIMMER_STATUS_3` variable watching `was` at `channel` -- PC.14's edit.
 
         Coach-proven, and it costs a diagnostics row: a control's indicator and the G12 OUTPUTS
         row for its channel read the same variable (82 for channel 40), so once it moves the
         row for `was` reports `channel`. Moving only the watcher outside the display list (184)
-        was tried too, as v10, and did nothing -- 184 has no GuiCode bridge block -- so that
+        was tried too, in the next probe, and did nothing -- 184 has no GuiCode bridge block -- so
+        that
         shape is no longer offered.
         """
         gd_start, _ = guidata.guidata_extent(self._original)

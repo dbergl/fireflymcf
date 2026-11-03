@@ -93,7 +93,7 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 {
   "schema": 1,
   "base_sha256": "<sha256 of the owner's stock mcf.bin>",
-  "build_name": "Jayco B-Van V13 pump-rename v1",
+  "build_name": "Jayco B-Van V13 pump-rename",
   "ops": [
     {"id": "pump-caption", "type": "rename_label",
      "params": {"object": 295, "old": "Water\nPump", "new": "Pump"},
@@ -113,7 +113,7 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 ## Step 4 — compile
 
 ```bash
-fireflymcf compile pump.ffproj.json mcf.bin -o build/mcf-pump-rename-v1.bin
+fireflymcf compile pump.ffproj.json mcf.bin -o build/mcf-pump-rename.bin
 ```
 
 The command refuses a stock whose hash is not `base_sha256`, refuses any name not matching
@@ -121,7 +121,7 @@ The command refuses a stock whose hash is not `base_sha256`, refuses any name no
 a code from `docs/RECIPE-OPS.md` and, where the engine knows one, an `offer` (for example `grow` or
 `shorten` on `LABEL_TOO_LONG`). Success prints the manifest, one line per op. A project with an op
 whose mechanism has never run on a coach is refused unless `--allow-unverified` is given: that is
-the owner's decision, so ask first, and the build then prints an `UNVERIFIED` line. A sidecar `build/mcf-pump-rename-v1.bin.json`
+the owner's decision, so ask first, and the build then prints an `UNVERIFIED` line. A sidecar `build/mcf-pump-rename.bin.json`
 records the SHA-256, manifest and unverified list.
 
 Every compile reseals all nine checksums and runs the structural gates: the object-table boundary

@@ -55,7 +55,7 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Set a rounded widget's corner radius (its fifth geometry slot); `\"pill\"` sizes it to "
         "half the shorter side. An object shared by several pages changes on all of them.",
         "UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME "
-        "(2026-11-02, the LCARS HOME build).", "`docs/HARDWARE-VERIFIED.md`"),
+        "(2026-11-02, a restyled HOME).", "`docs/HARDWARE-VERIFIED.md`"),
     "set_record_color": ("structural",
         "Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), "
         "a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. "
@@ -81,7 +81,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "(bg, panel, button, header, rail, active), every GuiData inline field and mode-6 "
         "palette entry that holds them, and optionally the tank wells' colour. Runs after every "
         "op that names a colour by RGB, before a header rename. 13.6 only.",
-        "Flashed: v54 Saffron, palette change verified on the coach 2026-11-02 (owner).",
+        "Flashed and verified on the reference coach 2026-11-02 (owner): palette change "
+        "confirmed.",
         "`docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`"),
     "recolor": ("same-size",
         "Repoint a button box's fill index to another colour in the firmware palette. A "

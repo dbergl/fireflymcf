@@ -36,7 +36,24 @@ LINE_RULES = [
     ("pii-ip", re.compile(
         r"\b(?:10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}"
         r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})\b")),
+    # No build names or build numbers (the names are spelt with a character class so this file
+    # does not itself carry them): evidence is cited by date and by what the reference coach
+    # showed; which private build carried it lives in the research repository's BUILD-LOG.
+    # A build number is `v` plus one or two digits, in prose or in an identifier (`_v20_mark`,
+    # `V47_SHAPE`); `@v4` (an action or pip tag), `v1.06` (a dotted version) and `13v6` are not.
+    ("build-name", re.compile(
+        r"(?i)\bh[a]nk\b|jul[i]e|\blv-(?:mc|move|hold)\b|s[a]ffron|h[a]rvest[\s_-]*m[a]ple|lc[a]rs"
+        r"|\bdan-v\d|special[\s_-]+edition"
+        r"|(?<![A-Za-z0-9@])v\d{1,2}[a-z]?(?![A-Za-z0-9]|\.\d)")),
 ]
+# Text a rule must not see: legitimate names that look like what it forbids.  The stock config
+# names (`Jayco B-Van V13`), the Mira app's model path, third-party IP and API versions, and one
+# file in the research repository's `build/` that a skip-if-absent test reads by its real name.
+LINE_OK = {
+    "build-name": re.compile(
+        r"B-Van V1[34]\b|Ethos/Swift V11\b|b_van/v13\b|CMSIS-RTOS v1\b|I2C \(v2 IP"
+        r"|build/mcf-experiment-v22-notankbcast\.bin"),
+}
 # Documentation placeholders that look like what a rule forbids (an SSH target in a usage line).
 PLACEHOLDERS = {"USER@HOST:"}
 
@@ -99,7 +116,8 @@ def scan(paths: list[pathlib.Path], allow: list[str]) -> list[Finding]:
             if p.suffix.lower() in BLOB_EXTS and BLOB_RE.search(line):
                 hits.append(Finding(rel, n, "blob", "base64/hex literal >= 512 chars"))
             for rule, rx in LINE_RULES:
-                m = next((m for m in rx.finditer(line) if m.group(0) not in PLACEHOLDERS), None)
+                subject = LINE_OK[rule].sub(" ", line) if rule in LINE_OK else line
+                m = next((m for m in rx.finditer(subject) if m.group(0) not in PLACEHOLDERS), None)
                 if m:
                     hits.append(Finding(rel, n, rule, m.group(0)))
             for m in EMAIL_RE.finditer(line):

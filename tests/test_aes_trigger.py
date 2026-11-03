@@ -3,7 +3,8 @@
 Stock freezes the Low Volts recolor cell (cell 45) in AES -- a native GuiCode gate at
 0x0024A172 skips the cell-45 decode whenever the mode is AES, the only mode object 829 is
 ever on screen for. Rev 2 reuses the un-frozen 0x2F receive slot (var 42, slot 0x2000801C)
-with the hardware-proven v9 follower toolchain to drive an AGS-STYLE Low Volts control that
+with the hardware-proven Pump Link follower toolchain (PC.45) to drive an AGS-STYLE Low Volts
+control that
 works in AES -- with NO gate surgery. The appended bridge MIRRORS the stock cell-45 block
 un-gated: each tick it updates the group-129 variant counter through the firmware's OWN
 setVariant (a `blx` through the fn-ptr at 0x20039908, r0=0x81, r1=!armed -- rev 3, replacing

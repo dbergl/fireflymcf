@@ -1,4 +1,4 @@
-"""v49: captioned readouts in the ELECTRICAL Inverter card (spec 2026-10-15-inverter-card-readouts).
+"""Captioned readouts in the ELECTRICAL Inverter card (spec 2026-10-15-inverter-card-readouts).
 
 `add_register_readout`'s `sub` / `draw: false` (a cell and routine with no widget of its own) and
 `add_card_readouts` (captions, values and units drawn together inside cardlayout's frame)."""
@@ -30,10 +30,10 @@ def test_draw_false_allocates_a_cell_and_routine_but_no_object():
     assert "r" in res.unverified
 
 
-# --- add_card_readouts on the v48 card layout ------------------------------------------------
+# --- add_card_readouts on the card layout -----------------------------------------------------
 
 
-# --- v50: inverter DC current replaces Batt Amps ----------------------------------------------
+# --- inverter DC current replaces Batt Amps ---------------------------------------------------
 
 
 # --- add_card_readouts `parent` ----------------------------------------------------------------

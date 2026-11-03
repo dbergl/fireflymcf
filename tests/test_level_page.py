@@ -197,10 +197,10 @@ def test_recipe_ops_carries_controls():
 # ---- RV-C custom DGNs (owner 2026-09-28) -------------------------------------------------------
 
 
-# ---- readout fills and the nav icon (v38, owner 2026-09-28) ------------------------------------
+# ---- readout fills and the nav icon (owner 2026-09-28) -----------------------------------------
 
 
-# ---- the LEVEL SETUP popup (v42, owner 2026-09-29) -----------------------------------------------
+# ---- the LEVEL SETUP popup (owner 2026-09-29) ----------------------------------------------------
 
 
 def test_setup_touches_do_not_overlap_and_sit_in_the_dialog():
@@ -215,4 +215,4 @@ def test_setup_touches_do_not_overlap_and_sit_in_the_dialog():
                for r in rr.values())
 
 
-# ---- repaint-on-change and the popup background (v43) --------------------------------------------
+# ---- repaint-on-change and the popup background -------------------------------------------------

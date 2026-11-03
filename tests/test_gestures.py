@@ -506,16 +506,16 @@ def test_multi_binding_refuses_a_gesture_that_is_not_a_release_toggle(mcf_136):
 
 
 def test_multi_binding_refuses_variants_that_do_not_write_zero_and_one(mcf_136):
-    set_v1 = _low_volts_bindings(mcf_136)[1]
-    assert mcf_136[_binding_off(mcf_136, set_v1, 11)] == 1
-    mutated = _poke(mcf_136, _binding_off(mcf_136, set_v1, 11), 0)   # both copies write 0
+    set_var1 = _low_volts_bindings(mcf_136)[1]
+    assert mcf_136[_binding_off(mcf_136, set_var1, 11)] == 1
+    mutated = _poke(mcf_136, _binding_off(mcf_136, set_var1, 11), 0)   # both copies write 0
     with pytest.raises(gestures.GestureEditError, match="two-state"):
         gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)
 
 
 def test_multi_binding_refuses_paired_copies_that_differ_elsewhere(mcf_136):
-    read_v1 = _low_volts_bindings(mcf_136)[3]
-    off = _binding_off(mcf_136, read_v1, 9)
+    read_var1 = _low_volts_bindings(mcf_136)[3]
+    off = _binding_off(mcf_136, read_var1, 9)
     mutated = _poke(mcf_136, off, 0xD1)                              # read-back -> set
     with pytest.raises(gestures.GestureEditError, match="differ"):
         gestures.make_hold_to_toggle(mutated, _LOW_VOLTS_GROUP)

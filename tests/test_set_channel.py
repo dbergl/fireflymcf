@@ -111,7 +111,8 @@ def _pin_cells(data: bytes, pin: int) -> set[int]:
 
 def test_default_leaves_the_variable_table_alone(
         image: bytes, bath_fan: guidata.ControlGroup) -> None:
-    """Neither watcher moves: PC.14 showed moving 184 alone does nothing (v10), and moving 82
+    """Neither watcher moves: PC.14 showed moving 184 alone does nothing (the next probe), and
+    moving 82
     makes the old channel's G12 OUTPUTS row lie. The indicator is retargeted instead."""
     patcher = patch.McfPatcher(image)
     patcher.set_channel(bath_fan, FREE_CHANNEL)
@@ -167,9 +168,9 @@ def test_default_edits_only_bindings_the_control_and_one_cell_entry(
         assert image[span] == out[span]
 
 
-def test_move_display_list_is_the_v9_shape(
+def test_move_display_list_is_the_pc14_shape(
         image: bytes, bath_fan: guidata.ControlGroup) -> None:
-    """With the flag, both watchers move -- PC.14's v9, the coach-proven build -- and the
+    """With the flag, both watchers move -- PC.14's edit, the coach-proven build -- and the
     control's own records are left as they are."""
     patcher = patch.McfPatcher(image)
     patcher.set_channel(bath_fan, FREE_CHANNEL, move_display_list=True)

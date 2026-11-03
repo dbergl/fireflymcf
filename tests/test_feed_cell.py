@@ -80,7 +80,7 @@ def test_feeding_the_absorb_cell_compiles_and_reports_verified(data) -> None:
     r = _compile(data, recipe.OpSpec(id="absorb", type="add_register_readout",
                                      params=absorb_params()))
     assert r.ok, r.errors
-    assert r.unverified == []          # v18 FLASHED AND VERIFIED 2026-09-05 (PC.60)
+    assert r.unverified == []          # FLASHED AND VERIFIED 2026-09-05 (PC.60)
     img = r.data
     # the stock config-byte writer is gone, the fenced decode's is kept, ours is added
     writes = slotsource.slot_source(img, ABSORB_CELL).writes

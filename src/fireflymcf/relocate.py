@@ -421,7 +421,8 @@ def _verify_guicode_pointers(before: bytes, after: bytes, at: int,
     # A position at or above `at` that only one scan saw is exactly the dangerous case (a real
     # pointer the forward pass never bumped, left aiming at shifted content), and still refuses.
     #
-    # Found 2026-09-06 building v21: dropping one op moved GuiData enough that the sweep exposed
+    # Found 2026-09-06 building the boxed corner mark: dropping one op moved GuiData enough that the
+    # sweep exposed
     # a bogus `ldr` naming code offset 0x12508, whose word `0x9003b200` is stock, unchanged, and
     # sits mid-instruction-stream (`sxth r0,r0` / `str r0,[sp,#0xc]`). Target 0x3b200, insertion
     # at 0x6d804: below it, so untouched and correct either way.
@@ -816,7 +817,7 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
 
     That trailer means the table CAN be wider than the object count: an earlier grow that
     needed it leaves `w == n + 1` until the next object is appended, so `gap < 0` is a legal
-    state (found 2026-09-24: v32's Batt Heat switch grew four entries after an odd gap, and the
+    state (found 2026-09-24: the Batt Heat status switch grew four entries after an odd gap, and the
     next grow in the same build was refused). The extra entries `n .. w-1` are exactly those
     pre-covering `0xFFFF` sentinels, so they are OVERWRITTEN in place with the first `values`
     and only the rest is inserted.

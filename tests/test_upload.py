@@ -1,6 +1,6 @@
 """The network upload decode, held to the one oracle that cannot be fitted.
 
-The capture is of the owner flashing `mcf-experiment-v22-notankbcast.bin`'s G12 section
+The capture is of the owner flashing a probe build's G12 section
 (`BUS-BASELINE.md` PC.63). That image is reproducible from stock without any build artifact:
 stock 13.6 + `tankbroadcast.suppress` + `reseal`. So the test rebuilds the section it expects and
 compares it against bytes recovered from the wire, and neither side ever looks at the other.
@@ -36,7 +36,7 @@ def g12_section(data: bytes) -> bytes:
 
 @pytest.fixture(scope="module")
 def flashed_section():
-    """The G12 section of v22, rebuilt from stock rather than read from `build/`."""
+    """The flashed G12 section, rebuilt from stock rather than read from `build/`."""
     out, _ = tankbroadcast.suppress(STOCK.read_bytes())
     out, _ = patch.reseal(out)
     return g12_section(out)
@@ -58,7 +58,7 @@ def test_the_transfer_reproduces_the_flashed_section_byte_for_byte(
 
 
 def test_it_is_NOT_the_stock_section_it_is_the_patched_one(transfer):
-    """Ten bytes separate v22's G12 from stock's; the wire carries v22's."""
+    """Ten bytes separate the flashed G12 from stock's; the wire carries the flashed one."""
     stock = g12_section(STOCK.read_bytes())
     assert not transfer.matches(stock)
     differing = [

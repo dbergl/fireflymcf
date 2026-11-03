@@ -1,12 +1,13 @@
-"""v25 (2026-09-11/12): the coach-48V battery live-repaint + ELECTRICAL 48V rescale.
+"""2026-09-11/12: the coach-48V battery live-repaint + ELECTRICAL 48V rescale.
 
-Covers the two coach-observed defects the v25 design fixes:
+Covers the two coach-observed defects this design fixes:
 
 1. `live_repaint` retargets the clone's enrolled wt5 CONTAINER record (on the parent object) to
    watch the live coach cell 209 instead of the chassis cell 205 it inherited from the template.
    The panel's per-widget dispatch then repaints the WHOLE House child -- number AND fill -- on
    every coach-voltage change, exactly as the stock chassis rides object 902 rec2 (vslot 205,
-   child 440). This is why v24 stayed frozen when only cell 209 was injected: the House container
+   child 440). This is why the previous build stayed frozen when only cell 209 was injected: the
+   House container
    watched 205, which the injection never touched.
 2. `rescale_donor` repoints the ELECTRICAL coach battery (donor object 443) fill colour (206) and
    level (207) onto the clone's fresh 48V-scaled cells, so it stops showing always-100%-green (its
@@ -70,7 +71,8 @@ def test_live_repaint_retargets_container_to_coach_cell():
 
 def test_live_repaint_false_leaves_inherited_chassis_cell():
     # Backward-compat: with the flag off, the container keeps the chassis cell 205 it inherited
-    # from the template (so it only repaints on chassis-voltage change -- the v24 behaviour).
+    # from the template (so it only repaints on chassis-voltage change -- the previous build's
+    # behaviour).
     data = _build(live_repaint=False, rescale_donor=False)
     crec = _container(data)
     assert crec.value_slot == 205, \

@@ -24,8 +24,9 @@ coach's builds) stays private and depends on this one.
 - [x] Reference-coach defaults: checked 2026-10-16, there are none in this repo's general path.
       `tank_heater_names` applies only when a recipe names it (its purpose states the SY/WT
       trade); renders use no floorplan unless `--config` gives one (`coach-config`).
-- [x] `RECIPE-OPS.md` no longer reads the reference coach's recipe: its "in v26" column is now
-      each op's `hardware_verified` default, and statuses are current through v50.
+- [x] `RECIPE-OPS.md` no longer reads the reference coach's recipe: its column of the
+      reference coach's build is now each op's `hardware_verified` default, and statuses are current
+      through 2026-10-15.
 
 ## 2. Make the tool agent-friendly
 

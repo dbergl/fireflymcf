@@ -279,7 +279,7 @@ class Prim:
                                       # (`FUN_00253E38` at 0x255d..), draws every line, then
                                       # restores. Inclusive is why a box with x0 == x1 leaves
                                       # exactly ONE pixel column -- which is what the coach drew
-                                      # for v20's boxless mark.
+                                      # for the first, boxless corner mark (2026-09-06).
     outline: bool = False             # for kind 'rect'/'rrect': stroke only, no interior fill
                                        # (the tank gauge well -- render-fidelity Task 1)
     line_w: int = 2                   # for kind 'rect'/'rrect' with `outline`/`stroke`: the border
@@ -1182,7 +1182,7 @@ def screen_placements(data: bytes, root: int,
     geometry is the 100% extent, which would otherwise read as a falsely-full tank). Levels are
     ~~quantised 0/33/67/100% on hardware (owner-confirmed)~~ -- **CORRECTED 2026-09-07
     (`BUS-BASELINE.md` PC.62): the PANEL does not quantise; the G12 did.** With the G12's own
-    `1FFB7` broadcast suppressed (v22) an injected `19FFB7AF#002238FFFFFFFFFF` -- relative level
+    `1FFB7` broadcast suppressed (PC.62) an injected `19FFB7AF#002238FFFFFFFFFF` -- relative level
     34, resolution 56 -- read **61%** on HOME's FRESH gauge, and `000D64...` (13/100) read
     **13%**. The panel computes `level / resolution` and shows the percent. The quarters were an
     artefact of the only source that had ever fed it: the G12's `CC`/`CD`/`CE` bucketing ladder
@@ -2140,8 +2140,8 @@ def _text_clip(p) -> tuple | None:
         FUN_00253e38(iVar10, iVar9, iVar22, iVar11)       # restore
 
     The box is inclusive on both ends (the same `x1 - x0 + 1` width the wrap uses), which is why
-    a record whose box collapsed to `x0 == x1` still draws exactly ONE pixel column -- v20's
-    corner mark, and the observation that started this.
+    a record whose box collapsed to `x0 == x1` still draws exactly ONE pixel column -- the
+    first corner mark (2026-09-06), and the observation that started this.
 
     Only wtype 11/13 get it. A **wtype-0** single character goes through a different drawer and
     is NOT bounded this way: HOME's `V` and CLIMATE's `°` have 0x0 placed boxes and draw in full
@@ -2155,7 +2155,8 @@ def _text_clip(p) -> tuple | None:
       `'Go Power!\nSettings'` second line at 443 where the firmware pens it at 441. That was
       `_effective_line_height` shipped dead (a swallowed `NameError`, see there). Fixed; the two
       now agree and a vertical clip cuts zero pixels on every stock page.
-    * *Held back again because v20's mark "showed one column of pixels"*, which a 1x1 clip
+    * *Held back again because the first corner mark "showed one column of pixels"*, which a 1x1
+    clip
       seemed unable to produce. Measuring the photo settled it: the surviving ink is at panel
       **y 204-212**, inside `'Water'`'s own row band (201-214), and there is **no ink at all** at
       x 573-594. The column is the caption's `r` bleeding at photo scale, not the mark. Nothing

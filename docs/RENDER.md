@@ -241,7 +241,7 @@ cuts it.
 
 **Clip — `render._text_clip`, horizontal only.** The drawer installs `box ∩ enclosing clip` before
 drawing and restores it after, and the rectangle is **inclusive** — which is why a record whose box
-collapsed to `x0 == x1` draws exactly one pixel column (v20's corner mark).
+collapsed to `x0 == x1` draws exactly one pixel column (the first corner mark flashed, 2026-09-06).
 This is specific to wtype 11/13: a **wtype-0** single character is drawn by
 `FUN_002557C0` and is not bounded, which is why HOME's `V` and CLIMATE's `°` render in full from
 0×0 boxes.
@@ -261,7 +261,7 @@ This is specific to wtype 11/13: a **wtype-0** single character is drawn by
    module-local import and a narrow `except glyphs.GlyphError`; the render moved 537 pixels
    closer to the photo on that button.
 
-   *A misread of the coach photo.* v20's boxless mark would clip to 1×1, which seemed unable to
+   *A misread of the coach photo.* That first, boxless mark would clip to 1×1, which seemed unable to
    produce the "one column of pixels" the owner reported. Measuring the photo settled it: the
    surviving ink is at panel **y 204–212**, inside `'Water'`'s own row band (201–214), and there
    is **none at all** at x 573–594. The column is the caption's `r` bleeding at 6.5 photo pixels
@@ -281,7 +281,7 @@ This is specific to wtype 11/13: a **wtype-0** single character is drawn by
 
    **No wtype-7 or wtype-14 record exists in any build.** All 1201/1422/1077 objects decode with
    zero derailments, giving 6109/8272/5311 records, and the wtype set is identical in all three —
-   `{0,2,3,4,5,6,8,9,10,11,12,13,16,19,32,33}`. Our own v21 adds none. So `box ∩ enclosing` is
+   `{0,2,3,4,5,6,8,9,10,11,12,13,16,19,32,33}`. Our own corner mark adds none. So `box ∩ enclosing` is
    `box`, and `_text_clip` is **exact rather than approximate**. The absence is what the model
    rests on, so it is pinned: `test_no_record_in_the_corpus_can_narrow_the_enclosing_clip`.
 

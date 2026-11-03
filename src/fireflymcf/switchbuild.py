@@ -11,14 +11,14 @@ that is meant to be the switch's default must be placed FIRST in the band -- at 
 `arm_objects[0]` / `match_values[0]` in `append_arms` -- or an unmatched value renders nothing
 instead of the intended default.
 
-`author_switch` builds the switch record itself, either flow-relative (the original v14-v32 shape:
+`author_switch` builds the switch record itself, either flow-relative (the original shape:
 header byte 1 `0x55`, base modes `[1,1,1,1]`, geometry `(0, 0)`) or absolute (header byte 1 `0x50`,
 base modes `[0,0,1,1]`, geometry `(x, y)`). `append_arms` grows the match table and appends the arm
 objects that make up the band, in one call, returning the base index `author_switch`'s `arms_base`
 argument expects.
 
 The donor (object 9, record 9 -- the AES enable-pill switch, first repurposed for the Pump Link
-button in v14) and its stock bytes are pinned here; `aescompact` re-exports the names so existing
+button) and its stock bytes are pinned here; `aescompact` re-exports the names so existing
 imports keep working.
 """
 
@@ -29,7 +29,7 @@ import struct
 from . import guidata, insert, records, relocate
 
 # Object indices (object-table 1). The AES enable-pill switch -- stock donor for every authored
-# n-arm switch in this project (v14 Pump Link onward).
+# n-arm switch in this project (the Pump Link button onward).
 LINK_SWITCH_DONOR = 9
 LINK_SWITCH_REC = 9                         # 9[9]: wtype-6, slot 11, band 173+6
 LINK_SWITCH_STOCK = bytes.fromhex("0650030020000000f4015e01ff0b000600ad00")
@@ -58,8 +58,9 @@ def author_switch(data: bytes, *, value_slot: int, arms_base: int, count: int,
 
     `at=None` (the default): flow-relative at the flow origin -- header byte 1 `0x55` (base modes
     `[1,1,1,1]`), x = y = 0, i.e. the box the donor replaces drew at the flow origin. This is
-    byte-identical to every switch this project authored before this module existed (v14 Pump Link
-    through v32 Batt Heat state) -- `aescompact._author_n_arm_switch` is now a thin wrapper over
+    byte-identical to every switch this project authored before this module existed (the Pump Link
+    button through the Batt Heat state) -- `aescompact._author_n_arm_switch` is now a thin wrapper
+    over
     this branch.
 
     `at=(x, y)`: absolute placement -- header byte 1 `0x50` (base modes `[0,0,1,1]`: x/y absolute,

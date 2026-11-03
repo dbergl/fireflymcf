@@ -51,14 +51,16 @@ SETUP_VARS = (("height", 4, 5, 1), ("tol", 4, 7, 1), ("auto", 2, 5, 4))
 SETUP_CELLS = (("height", 2), ("tol", 2), ("auto", 2))
 HEIGHT_SCALE = 5
 
-# The popup's wheelbase and track (v45): record 04h bytes 1-2 and 3-4, u16 in 0.1 in, copied
+# The popup's wheelbase and track (`geometry`): record 04h bytes 1-2 and 3-4, u16 in 0.1 in, copied
 # straight (the sensor keeps them in 80-300 / 40-110 in; the boot/expiry 0xFFFF stays n/a and the
-# formatter dashes it). Present only with `geometry`, so v42-v44 keep their exact routine.
+# formatter dashes it). Present only with `geometry`, so the earlier popup builds keep their exact
+# routine.
 GEOMETRY_VARS = (("wb", 4, 1, 2), ("track", 4, 3, 2))
 GEOMETRY_CELLS = (("wb", 2), ("track", 2))
 AUTO_NA = 3                                           # the 2-bit field's n/a, 11b
 
-# Repaint-on-change (v43): a readout repaints only its new text's extent, so a narrower value
+# Repaint-on-change (verified 2026-09-29): a readout repaints only its new text's extent, so a
+# narrower value
 # leaves the edge of the wider old one (the stray dash before pitch; '2.75' after '12.50' on the
 # popup, owner photo 2026-09-29). For each of these values the routine keeps the last value
 # (`<name>_p`) and flips a toggle (`<name>_t`, always 0 or 1) when it changes; a two-arm switch on

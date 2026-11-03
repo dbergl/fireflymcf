@@ -19,8 +19,8 @@ a character** — `'Star\nLink'` (9) will not fit an 8-byte field; `'Bath Fan'` 
 **A *longer* label is now possible via the relocator** — hardware-confirmed 2026-08-18,
 `BUS-BASELINE.md` PC.18 — so that limit binds `patch.set_label`, not the tooling.
 
-**Colour scheme** (`set_theme`, `themeswap.py`; verified on the coach 2026-11-02, owner): v54
-Saffron was flashed and the palette change confirmed. The six chrome colours are GuiCode
+**Colour scheme** (`set_theme`, `themeswap.py`; verified on the coach 2026-11-02, owner): a
+reference build was flashed and the palette change confirmed. The six chrome colours are GuiCode
 constants written at boot by `FUN_00247bf8` (`0x248316`-`0x248388`). Three are literal words;
 header and rail are add-chains, rewritten as `movw`+`movt`. The lit colour is a 4-byte `movw`,
 rewritten as one `add.w` from the button value, so it lands on the nearest reachable colour. The
@@ -49,20 +49,20 @@ green. On the coach it toggles pin 15, tracks its status colour, and **repaints 
 things had to be right, each found by a hardware round-trip:
 - **Command**: a **single** command-5 binding. A two-binding group `[toggle, off]` is a
   *smart toggle* — the panel picks off-vs-toggle from the commanded instance's tracked state, and
-  an instance with no status defaults to "believed on" and only ever sends OFF (v5). Binding order
+  an instance with no status defaults to "believed on" and only ever sends OFF (a probe flash, 2026-08-17). Binding order
   does **not** decide this (Water Pump is `[5,3]`, Tank Heater `[3,5]`; both work). The wire
   command is binding **byte[4]**; byte[3]=`0x0a` is metadata.
 - **Donor**: must carry a `value_slot` field on **both** box and caption. Field *presence* is
   header-gated, so a same-size edit cannot add one. Water Pump (295) has none — it inherits one
   from its **parent wtype-5 container** (obj 989/990, `value_slot 160` == its `fillA` index 160),
   which a generated attach record does not supply, so a 295 clone only repaints on page re-entry
-  (v6). Donor 279 carries both.
+  (a probe flash, 2026-08-17). Donor 279 carries both.
 - **The live-redraw invariant**: `fillA` mode-7 index == box `value_slot` == caption `value_slot`,
   all one cell. The colour table *is* the value-slot table (Finding 18), so index N and slot N are
   the same cell. All 9 live buttons obey it; the 6 that don't are unattached **template** objects
-  (247, 278-281, 1038) whose `value_slot` is a **type-1 config gate**, not a status cell. v7 set
-  the slots to 32 while `fillA` stayed 145 — the box repainted in place, the caption vanished
-  until a full render. v8 made all three equal and works.
+  (247, 278-281, 1038) whose `value_slot` is a **type-1 config gate**, not a status cell. One probe
+  set the slots to 32 while `fillA` stayed 145 — the box repainted in place, the caption vanished
+  until a full render. The next made all three equal and works.
 - **Correction**: `FUN_0021a664` (LCD firmware) is the **CAN-event/switch matcher** (24-byte
   records, timers), *not* the GUI redraw dispatch. An earlier note here claimed otherwise. The
   widget redraw lives in GuiCode; it has still not been located, so the invariant above is
@@ -305,12 +305,12 @@ centred it. On the coach the settings-page button arms, disarms and recolours th
 `add_aes_low_volts_trigger`'s bridge, with the 3 s hold.
 
 **Moving a control between pages in one op: `move_control` — CONFIRMED ON HARDWARE 2026-10-20**
-(owner). The LV-mc proof build made the same move with one op instead of three: `move_control`
+(owner). A proof build made the same move with one op instead of three: `move_control`
 removed Low Volts' attach and touch region (id 129) from object 1427, found the compensation
 itself (one edit: the gear's y gets back the 29 px the removed attach carried), re-encoded the
 records at absolute positions and pasted them into a new object attached to 1425, the AES
 settings page's body. It asserted every page that shows either object, in every switch state,
-unchanged apart from the move. The compact card draws as LV-move's (byte-identical, pixel-identical
+unchanged apart from the move. The compact card draws as the earlier three-op move's build did (byte-identical, pixel-identical
 render), nothing else moved, and the moved button arms, disarms and recolours with the 3 s hold.
 
 **Where a glyph lands vertically — `proven-from-code`** (`CONTROL-BEHAVIOR.md` §7a). A `wtype 11`

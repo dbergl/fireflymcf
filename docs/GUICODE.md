@@ -2392,12 +2392,12 @@ parent-scoped model this finding used to state:
 
 - ELECTRICAL 'Engine' (353:5, fillA mode 0) draws **white**, inherited from the 'Stop' caption
   (251:2) inside the container 353:3 recursed into just before it. The parent-scoped model gave
-  it the Stop button's idx 168 (brown in v54 Saffron, whose 'Engine' the emulator draws white).
+  it the Stop button's idx 168 (brown in a re-themed reference build, whose 'Engine' the emulator draws white).
   The coach agrees: `render.py` records "Engine Not Running" as plain white text on the coach.
 - SLIDES/AWNINGS' levelling diamond (367:6-9, wtype 2, fillA mode 0) draws **white**, after the
   FRONT/LEFT/RIGHT/REAR labels' white ink, beside a (128,130,133) frame; the parent-scoped model
   gave it the frame's grey.
-- A build that gave the nav rail's icon boxes explicit fillB colours (v54 LCARS2/3) painted the
+- A build that gave the nav rail's icon boxes explicit fillB colours (two restyled emulator builds, 2026-11-02) painted the
   last icon's colour behind every later mode-0 fillB label on the page -- the inverter status
   'DC Voltage' among them -- where the stock state was transparent.
 
@@ -2731,7 +2731,7 @@ u32 absolute addresses — 13.6 has **no `movw`/`movt`**, so every 32-bit consta
 from that pool). The routine edge-detects a watched G12 output's status, transmits one gated CAN
 frame on a transition, then **tail-calls** the displaced `FUN_00247BF8` (`push {r0-r3,lr}` … `pop.w
 {r0-r3,lr}` + `b.w 0x00247BF8`, never `pop {pc}`), so the per-tick paint path is preserved. **Flashed
-and confirmed on the coach (v7):** each bath-light edge is matched at the same timestamp by a
+and confirmed on the coach (2026-08-31):** each bath-light edge is matched at the same timestamp by a
 panel-sourced `19FEDB9F#2C…` frame, the pump follows, and a light-off cold boot is silent — so the
 detour, the appended routine, and the grown-GuiCode flash all work on hardware. The routine reads the
 watched channel's state the firmware's own way: the receive-filter slot (`0x20007FC8+var*2`, §5.4c),
@@ -3003,7 +3003,7 @@ a different lineup (9 plans, no WD), so it is **not** evidence upstream fixed th
 
 *The two 1-byte edits below were the minimal 3/4 fix. The owner asked instead for all four rows on
 the six Ethos/Swift floorplans — **WA, RA, WD, RD, WT, RT** (`MCF-FORMAT.md` §7.1) — accepting
-collateral damage to floorplans this coach never runs. That is `build/build-tankheat-v10.py`:
+collateral damage to floorplans this coach never runs. That is the tank-heater build:
 **9 same-size GuiCode edits, 26 bytes**, GuiData byte-identical.*
 
 **How the target set is reachable at all.** `{1,2,3,7,8,9}` is the union of two contiguous runs, so
@@ -3032,17 +3032,17 @@ both arms execute. The emulator is only trusted because it reproduces **two inde
 the stock image: the coach's WD = rows 05+08 only, and this finding's own "best 3/4, none 4/4".
 `tests/test_tankgates.py` pins both.
 
-**Status: CONFIRMED ON HARDWARE 2026-08-18** (`build/mcf-tankheat-v10.bin`, "Jayco B-Van V13
-(Custom v10)"; `BUS-BASELINE.md` PC.18b). All four rows populate on WD, and row 07 tracks the
+**Status: CONFIRMED ON HARDWARE 2026-08-18** (a probe build;
+`BUS-BASELINE.md` PC.18b). All four rows populate on WD, and row 07 tracks the
 **Black Tank option** live — visible when selected, gone when deselected — confirming the
 `[0x2003A4B4] == 1` gate at `0x249528` that the patch left intact, and that the option register is
 re-read per render rather than latched at boot.
 
 **The panel flashes GuiData and GuiCode together — the pair cannot be split** (owner, 2026-08-18;
-`MCF-FORMAT.md` §4.1). So "a GuiCode-only build" describes the *edits*, not what gets written: v10
-is built from **stock**, its GuiData carries no Pin-15 button, and flashing it replaced the
-customised GuiData and removed the button. `build/mcf-pin15-tankheat-v11.bin` applies the same 9
-edits on top of v9 instead, keeping both features. The enforced pairing is also what makes a
+`MCF-FORMAT.md` §4.1). So "a GuiCode-only build" describes the *edits*, not what gets written: the
+tank-heater build is built from **stock**, its GuiData carries no Pin-15 button, and flashing it replaced the
+customised GuiData and removed the button. A later build applies the same 9
+edits on top of the pin-15 build instead, keeping both features. The enforced pairing is also what makes a
 self-consistent build safe to flash: the PC.18 Result 4 boot loop came from a build whose *own*
 GuiCode literals were stale for its *own* grown GuiData, not from mismatched sections.
 
@@ -3716,7 +3716,7 @@ nine that differ do so **only in bit 0**, which is not RLE at all (below). So id
 unusual encoding. Compressing costs nothing and matches the shipped convention: the authored
 96×54 Starlink logo stores 50 rows instead of 54, 2616 → 2424 bytes.
 
-**Hardware-confirmed 2026-08-21** (owner, reference build v2): the panel draws that
+**Hardware-confirmed 2026-08-21** (owner, a reference build): the panel draws that
 greedy-encoded logo correctly. The corpus match above says our encoder agrees with Firefly's;
 this says the **blitter** accepts what we write, which is the claim that matters for a build.
 The failure mode it rules out is specific — a wrong run encoding repeats or drops rows, so it
@@ -4022,7 +4022,7 @@ input/output nibble — the opposite of how object 1418 does it (Finding 48).
 
 ### Correction and confirmation on the coach — `observed-on-hardware`, 2026-08-24 (PC.29)
 
-v8 gave screen 14 its first route and the page was photographed, which exercised this block for
+A reference build (2026-08-24, PC.29) gave screen 14 its first route and the page was photographed, which exercised this block for
 the first time.
 
 **`DC Current` is bytes 4-7, not 4-5.** RV-C carries that field as a 32-bit at 1 mA with a
@@ -4257,7 +4257,7 @@ and no claim is made that 14.7 lacks the coupling.
 
 Owner request: allow **Progressive Inverter and AES together**, which stock cannot express, and
 rename that row to **`Renogy 48v Inverter`** (the coach's inverter is being replaced). Shipped in
-reference build v6.
+a reference build.
 
 Because there is no interlock *logic* to excise, there is nothing to rewrite — only emissions to
 delete. Each of the four cross-writes is the same 36-byte, twelve-instruction pair (write frame,
@@ -4293,8 +4293,8 @@ new name is 19, so it fits with one trailing space. These OPTIONS rows are **`h_
 start position does not move. (Do *not* copy `align="center"` from the reference build's caption work; that
 record is `h_align = 2` and centres by the padded width.)
 
-**Status: CONFIRMED ON HARDWARE 2026-08-23**, shipped in v7 (1,069,684 B, sha `e10a5aca…`; v6's
-own 1,069,668 B / `744cbeb7…` was superseded before it was ever flashed). The flash had to settle
+**Status: CONFIRMED ON HARDWARE 2026-08-23**, in a reference build (an earlier build carrying it was
+superseded before it was ever flashed). The flash had to settle
 one thing the file cannot: that each row still *writes its own selector* after the NOP runs, i.e.
 the removal took exactly the intended block and not one instruction more. It did — the owner
 reports the build working as expected (`BUS-BASELINE.md` PC.22).
@@ -4363,7 +4363,7 @@ matches `0x15FCE` — the G12's configuration *status* broadcast — with the in
 which is byte-for-byte the `0x1FED9` selector its own arrows write. Read and write name the same
 number. The other four read genuine RV-C charger/inverter status DGNs straight from the device
 through an **open** filter (`0xFF` at `+4`), so on a coach with two chargers the last transmitter
-wins — the same hazard v5 pinned for `1FFC7`/`1FEA3`/`1FF99`.
+wins — the same hazard a reference build pinned for `1FFC7`/`1FEA3`/`1FF99`.
 
 > **THAT PREDICTION CAME TRUE — `observed-on-hardware` 2026-09-02, `BUS-BASELINE.md` PC.46.** A
 > second device joined the bus (the owner's rvc2mqtt virtual inverter on SA `0x42`) beside the
@@ -4372,10 +4372,10 @@ wins — the same hazard v5 pinned for `1FFC7`/`1FEA3`/`1FF99`.
 > request-driven rather than periodic, so the wrong value latched once and stayed. The signature
 > worth carrying: a field that is right almost always and wrong just after something on the bus
 > restarts is an open filter, not a bad value. Fixed by `statusbind.pin_filter_instance(var=125,
-> instance=1)` — one byte at `+4`, `ff` → `01`, shipped as recipe op `pin125` (built as
-> `mcf-experiment-v13.bin`, not yet flashed). `1FFCA` (vars 116/117) is open on the same page and
+> instance=1)` — one byte at `+4`, `ff` → `01`, shipped as recipe op `pin125` (built
+> 2026-09-02, not yet flashed). `1FFCA` (vars 116/117) is open on the same page and
 > stays unpinned: uncontended today, and a pin with no observation behind it is a guess.
-> *Update: `pin125` shipped in v17, flashed 2026-09-04, and every image since.*
+> *Update: `pin125` shipped in a build flashed 2026-09-04, and every image since.*
 
 ### Two more controls behind a switch: `Absorb` and `Float`
 
@@ -4719,9 +4719,9 @@ future build attaches either object — giving the page a route should be a deli
 
 ### Three things this changes about Finding 51
 
-**reference build v8 gives the page its first route.** The hold dispatch writes the screen
+**A reference build (2026-08-24) gives the page its first route.** The hold dispatch writes the screen
 id straight to `state+0x20A` and never consults the action-id chain, so it bypasses the missing
-registration entirely. That is a point in v8's favour — but it also means **no one has ever seen
+registration entirely. That is a point in its favour — but it also means **no one has ever seen
 this page on this coach**, and nothing about its runtime behaviour is confirmed.
 
 **Three of its seven controls are wired to selectors the G12 does not relay.** Finding 52's rule
@@ -4746,13 +4746,13 @@ It did **not** press a button, and it could not have — the page cannot be open
 | the G12 relays `0x82`/`0x86`/`0x88`/`0x92` to `1FFD0`/`1FF87`/`1FFC4`/`1FF95` | `observed-on-hardware` |
 | the rule table encodes that mapping | `proven-from-file`, reproduces the captured frames |
 | screen 14 is unreachable in stock | `proven-from-code` |
-| the page renders correctly at runtime | **`observed-on-hardware`** — v8, PC.29 |
+| the page renders correctly at runtime | **`observed-on-hardware`** — PC.29 |
 | its buttons emit the frames their bindings describe | **`observed-on-hardware`** for 4 of 7 — PC.30 |
 | `0x99` is stored by the G12 and relayed to nobody | **`observed-on-hardware`** — PC.30 |
 
 ### Seen on the coach — PC.29, 2026-08-24, and the predictions held 6 for 6
 
-reference build v8 gave the page its first route and the owner photographed it. Every row
+A reference build gave the page its first route and the owner photographed it. Every row
 of "its readouts have no source on this coach" is confirmed, including the one positive:
 
 | control | displayed | this finding predicted |
@@ -4784,10 +4784,10 @@ already exist could not have been wrong here.
 is shut. `0x88` (`Battery Type`) was deliberately not pressed: `+1` per release with no decrement,
 a blank readout, and it relays to `1FFC4`, a charger config command.
 
-*A precision fix to a claim made for v7.* `CLAUDE.md` says id `0x7E1` (SERVICE MODE) "is
+*A precision fix to a claim made for the 2026-08-23 reference build.* `CLAUDE.md` says id `0x7E1` (SERVICE MODE) "is
 registered only by unattached objects 92/690/826". Object **690** is in fact a type-6 candidate
 under the page header container (892), so it is in the graph — it is simply only drawn when that
-switch selects it. The v7 conclusion is unaffected (the gear hold was confirmed on the coach), but
+switch selects it. That build's conclusion is unaffected (the gear hold was confirmed on the coach), but
 "unattached" was the wrong word for one of the three. Note the general caution the scan forces:
 membership in the graph means *can be displayed*, never *is displayed*.
 
@@ -5801,8 +5801,8 @@ under the same divider. The photo and the byte-derived render agree.
 **What this rules out.** The rows are not gated on `Battery Type`, and not on the panel adopting an
 inverter: `BUS-BASELINE.md` **PC.53** shows adoption firing on `1FFD4` alone with the rows staying
 away. Nor is `1FFC6` filter pinning involved — that is `Battery Type`'s feed (PC.46), a different
-readout, and in any case the pinning ships in **v13**, which was built and
-not flashed.
+readout, and in any case the pinning ships in a build that was built and
+not flashed (2026-09-02).
 
 ### Two residuals, both bounded
 
@@ -5907,7 +5907,7 @@ names them and no `0x1FED9` selector for them can be recovered by that route.
 
 ### RESOLVED 2026-09-03 — nothing writes it, and that IS the answer (`BUS-BASELINE.md` PC.56)
 
-The owner cold-booted the screen **~10 times and the rows appeared every time**, flashed v12 and
+The owner cold-booted the screen **~10 times and the rows appeared every time**, flashed the 2026-09-02 build and
 **they were missing**, then cycled power and **they returned**. A boot-path writer is refuted by
 the flash case (the same boot path runs). Uninitialised SRAM fits all three: power-on state is
 per-cell fabrication bias, hence deterministic per device, and a flash is the one event that
@@ -6161,7 +6161,7 @@ call, not a test step.
 ### Corroborated on the coach, 2026-09-03 — 18 cells photographed in two states
 
 The strongest evidence for this finding arrived from the levelling page (screen 29), reached for
-the first time by `mcf-experiment-v14.bin`. All 18 of its state-driven elements read
+the first time by a probe build (2026-09-03). All 18 of its state-driven elements read
 never-established cells (`docs/LEVELING-PAGE.md` §3), and the owner photographed it twice: once
 after flashing **without** a power cycle, and once after one, with nothing on the bus changing
 between.
@@ -6269,7 +6269,7 @@ register needs no scaling code and no float cell: a directive with `places = 1`.
 
 ## Finding 66 — base+offset reachability of the working area: the scratch-cell scan's premise was false, the cells survive anyway, and nine holes of 20+ bytes are free — `proven-from-code` with a stated residual, 2026-09-04
 
-Asked because the `follow_register` readout needs a u16 display cell and v15 has no 2-aligned
+Asked because the `follow_register` readout needs a u16 display cell and the reference build of the day has no 2-aligned
 spare cell left (Finding 65's session). Before looking for fresh SRAM, the existing safety scan
 had to be trusted, and its docstring rested on a false premise.
 
@@ -6288,9 +6288,9 @@ render-state span is derived from the `movw` offsets actually indexed off that b
 `0x200301B0`-`0x20039868`.
 
 **Result for the shipping scratch cells.** Cells 211/213/215/217 (`0x20039F68`/`60`/`5E`/`58`),
-which the follower, the Low Volts bridge and the pump routine allocate on v10-v15, are reached
-by **no** base+offset form on stock; on v15 the only reaches are the appended routines' own
-instructions. The unflashed v15's allocation therefore stands under a stronger scan than it was
+which the follower, the Low Volts bridge and the pump routine allocate in the builds of 2026-09-01 to
+2026-09-04, are reached by **no** base+offset form on stock; on the newest of them the only reaches
+are the appended routines' own instructions. That unflashed build's allocation therefore stands under a stronger scan than it was
 made with. Two near misses show the width matters: a `strh` to `0x20039F66` and a pointer to
 `0x20039F56` both stop two bytes short.
 
@@ -6304,7 +6304,7 @@ parameter, and pointer walks — the same limit `slotsource` carries.
 
 **Free SRAM.** After every form above, plus the cell table at variable-type width and the LCD
 firmware's 29 unrelated words, nine holes of 20 bytes or more remain below `0x2003A8B8`, identical
-on stock and v15: `0x2003A858` (44), `0x2003A000` (34, between cells 167 and 485), `0x2003A476`
+on stock and that build: `0x2003A858` (44), `0x2003A000` (34, between cells 167 and 485), `0x2003A476`
 (34), `0x2003A024`, `0x2003A2B0` (24), `0x2003A819` (23), `0x20039958`, `0x20039B28`, `0x20039D18`
 (20). `sramreach.free_runs` lists them; `statusbind.index_cell` can point a spare index at one.
 They sit above `_ebss`, so they hold garbage at power-on like every cell and a routine must
@@ -7197,12 +7197,12 @@ check the caption geometry. They also show the answer does not depend on RV-C's 
 on any instance constant: renumbering var 0's filter to instance 7 moves FRESH to 7. A broken
 `mov r4,r0` names nothing. Stubbing the trace or the caption scan makes the pinned table fail.
 
-## Finding 79 — the header's ⚠ triangle is always drawn and always tappable; slot 234 only picks its colour — `proven-from-code` plus `observed-on-hardware` (v47), 2026-10-06
+## Finding 79 — the header's ⚠ triangle is always drawn and always tappable; slot 234 only picks its colour — `proven-from-code` plus `observed-on-hardware`, 2026-10-06
 
 **The question (owner, 2026-10-06).** On the coach, tapping about ½ in left of the clock opens
 NETWORK DIAGNOSTICS even though no triangle is showing there. Is that something a build added?
 
-**No: it is stock, byte-identical in 13.6 and v47.** The HOME header object **892** (stock)
+**No: it is stock, byte-identical in 13.6 and the reference coach's running build.** The HOME header object **892** (stock)
 holds, in order:
 
 | record | what | touch id → screen |
@@ -7231,9 +7231,9 @@ network-health timeout, which fits where the tap leads).
 **Renderer residual.** `cli render` draws this triangle white with no slot override, which
 matches neither arm; read the header triangle in a render as "present", not as its colour.
 
-## Finding 78 — a number readout fills its background across its MEASURED text, and the measuring class it uses varies at runtime — `proven-from-code` (the fill, the class byte, its writer and reset) plus `observed-on-hardware` (v37), 2026-09-28
+## Finding 78 — a number readout fills its background across its MEASURED text, and the measuring class it uses varies at runtime — `proven-from-code` (the fill, the class byte, its writer and reset) plus `observed-on-hardware`, 2026-09-28
 
-The v37 LEVEL page drew each amber tile's up arrow as a 6 px fragment ("◢", its leftmost six
+The LEVEL page flashed 2026-09-28 drew each amber tile's up arrow as a 6 px fragment ("◢", its leftmost six
 columns, cut sharply at x0+14). The arrow is drawn correctly; the layers readout drawn after it
 in the same arm paints over it.
 
@@ -7266,29 +7266,29 @@ against 76), which is what the photo shows. So the readouts draw under more than
 runtime, and **which path changes the class between a paint's reset and a
 live redraw is not found**. Stated as open, not fitted.
 
-**Correction, 2026-09-28 (v38 on the coach): the fill is NOT what cuts the arrow.** v38 bounds the
+**Correction, 2026-09-28 (the next build on the coach): the fill is NOT what cuts the arrow.** It bounds the
 layers fill at x0+39 in every class, and the arrow is still its leftmost six columns, cut at
-x0+13, exactly as in v37. The fill rule and its guard stand on the code, but they do not explain
+x0+13, exactly as before. The fill rule and its guard stand on the code, but they do not explain
 the arrow. What does is open. The blitter clips only horizontally, to `+0x864A..0x864E`, which
 only `FUN_00250ED0` writes, reached only through `FUN_00253E38`/`E18`/`EA4`. The text drawer sets
 that clip to the record box intersected with the enclosing clip `+0x58..0x5E`. Every writer of
 `+0x58..0x5E` is Finding 70's list, and no LEVEL record is wt-7 or wt-14. By the code, then, the
-arrow's clip is its own 19×20 box, which holds all 20 columns. v39 (`arrow_probe`) tests it on
-the coach. **v39's result:** only an arrow outside the tile arm is whole. Box width and
+arrow's clip is its own 19×20 box, which holds all 20 columns. A diagnostic build (`arrow_probe`) tests it on
+the coach. **Its result:** only an arrow outside the tile arm is whole. Box width and
 alignment do not matter, and text right after a capsule is not the trigger (the banners draw).
 The suspect is the layers readout's fill after all, at about 50 px whatever the field width.
-v40 paints it green to measure it. **v40's result** (`observed-on-hardware`): the fill is the
+A second diagnostic paints it green to measure it. **Its result** (`observed-on-hardware`, 2026-09-29): the fill is the
 cause. Both tile readouts filled about 50 px left of their pens, at fields 1 and 3, which is not
 what any class here computes. Drawing the arrow after the readouts showed it whole.
 `readoutfill` now treats a tile readout's fill as reaching the tile's left edge. What sets the
-50 px is open. The stray dash did not appear in the v38 photo either, though v38 changed nothing it
+50 px is open. The stray dash did not appear in the `fill_safe` build's photo either, though that build changed nothing it
 touches: also open.
 
 **The rule this leaves, and its guard.** Lay a readout out for its widest fill in any class:
 `field * max(font[0x06], font[0x11] + font[0x12], widest kerned number glyph)`
 (`metrics.worst_fill_width`). `readoutfill.conflicts` walks an object in record order and fails
 any readout whose widest fill covers an earlier label or glyph, or leaves the capsule it sits in.
-It flags v37's four arrows and four lift fields and passes v38 (`fill_safe`: layers field 1,
+It flags the first live page's four arrows and four lift fields and passes the `fill_safe` build (layers field 1,
 lift 3). The stray dash is not guarded: equal character counts do not give equal extents outside
 class 1, and no layout choice removes that.
 
@@ -7321,7 +7321,7 @@ There are five ways a read could happen, and each is closed:
    124 bytes, for `ldr`), so the read would have to be one of the wide loads (`ldr.w`, `ldrh.w`,
    `ldrsh.w`, `ldrb.w`, `ldrsb.w`, or `ldrd`). A byte scan of the whole section at every
    halfword, which does not depend on disassembly staying in sync, finds **no non-PC wide load at
-   any of those offsets**, in stock 13.6 or in v32. The scan's positive control is var 138:
+   any of those offsets**, in stock 13.6 or in the heater-status build (2026-09-22). The scan's positive control is var 138:
    `FUN_00247BF8` reads its slot with `ldrsh.w r6,[r4,#0x114]` at `0x2484D2`, and the scan finds
    that load.
 3. **The functions the base is passed to.** `FUN_00247BF8` hands `r4` on to `FUN_00242B70`,
@@ -7329,8 +7329,8 @@ There are five ways a read could happen, and each is closed:
    `FUN_00250CF0` and `FUN_00259100`. Decompiled, they touch only the struct fields past the
    low slot array (`+0x208`, `+0x20A`, `+0x20B`, `+0x214`, `+0x220`, `+0x222`), never a slot.
    Item 2's scan covers them as well.
-4. **An absolute address.** Neither stock nor v32 holds a literal for any of the five slot
-   addresses. v32's appended routines read nine other slots.
+4. **An absolute address.** Neither stock nor the heater-status build holds a literal for any of the five
+   slot addresses. Its appended routines read nine other slots.
 5. **A widget cell or an indexed read.** None of the 665 cell-table entries points into
    `[0x20007EBC, 0x20008400)`. None of the 26 register-indexed halfword loads indexes the array
    (Finding 32).
@@ -7391,7 +7391,7 @@ filter variables it does overwrite are read by nothing.
 `FUN_00247BF8` found no such derivation of `r4`, and the decompiled callees have none. A read
 through the slot array's address stored somewhere and then reloaded is excluded by item 4 and by
 Finding 32's search for the struct base. Pinned by `tests/test_dmrv_subscriptions.py`: the
-entries, the negative with its positive control on stock and v32, the dispatch literals, the
+entries, the negative with its positive control on stock and the heater-status build, the dispatch literals, the
 address-table reset, and the frame-layout anchor.
 
 ## Finding 74 — widget type 0x13 is a fill GATED on the transparent-interior bit, and every one in the corpus is gated OFF — `proven-from-code`, a defensible negative, 2026-09-06
@@ -7738,7 +7738,7 @@ records), and the wtype set is *identical* in all three:
 {0, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 16, 19, 32, 33}
 ```
 
-Our own `mcf-experiment-v21.bin` adds none either. So for every text record this project can
+Our own corner-mark build adds none either. So for every text record this project can
 render, `box ∩ enclosing` is `box ∩ (0,0,799,479)`, which is `box`. **`render._text_clip`
 returning the record's own box is exact, not an approximation** — pinned by
 `tests/test_render_bytes.py::test_no_record_in_the_corpus_can_narrow_the_enclosing_clip`, which
@@ -7808,7 +7808,7 @@ FUN_00253e38(iVar21, iVar12, iVar17, local_8c8);      // set
 FUN_00253e38(iVar10, iVar9, iVar22, iVar11);          // restore
 ```
 
-**The rectangle is inclusive**, which is the whole explanation of the v20 corner-mark defect: a
+**The rectangle is inclusive**, which is the whole explanation of the first corner mark's defect (2026-09-06): a
 record whose box collapsed to `x0 == x1` still draws **exactly one pixel column** of its glyph.
 That is what the coach showed and what the renderer now reproduces.
 
@@ -7818,7 +7818,7 @@ coach. "The panel clips text to its record box" is true for wtype 11/13 and fals
 readings were held here at different times before this decompilation settled it.
 
 `render._text_clip` applies **both** bounds. A record whose box collapses therefore draws its
-glyph's top-left pixel and nothing else — for v20's timer mark that pixel has coverage 0, so the
+glyph's top-left pixel and nothing else — for that first timer mark the pixel has coverage 0, so the
 panel drew nothing, which is what the coach showed once the photo was measured rather than read
 (`docs/RENDER.md`). *The enclosing clip is settled by **Finding 70**: only a wtype-7 or wtype-14
 record can narrow it, and the corpus contains neither — so the record's own box IS the whole
@@ -7900,7 +7900,7 @@ one `−` press goes out and the G12 clamps it (PC.32's injected −45 read back
    `0x95 = 0` in its sweep, so the injection has to outrun it) and press `−` at any non-zero size:
    a `19FED99F#FF96990F FBFF D2FF` frame appears, the first this button has ever sent. Stop the
    injection and it goes silent again within one sweep.
-2. **v19** (`fix_variant_gate`): `−` transmits at any non-zero size with nothing injected;
+2. **With `fix_variant_gate`**: `−` transmits at any non-zero size with nothing injected;
    after a `−` that lands on 0, the next `−` is silent; `+` re-enables it.
 
 `variantgates.gated_variants` is the scan (`tests/test_variantgates.py` pins all three builds);

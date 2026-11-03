@@ -118,7 +118,7 @@ def unused_command_groups(data: bytes) -> list[int]:
     carrying perfectly live bindings sails through both. On stock 13.6 that made **23 of 33**
     candidates unsafe, including group 3, the sole producer of `(3, 1)` = AWNING EXT, and
     group 4, the sole producer of `(4, 1)` = AWNING RET. `build_home_button` took group 3, so
-    every Pin-15 build (v8/v9/v11 and their descendants -- all flashed) silently lost the
+    every Pin-15 build (and their descendants -- all flashed) silently lost the
     awning-extend command. Criterion (3) is not a reachability guess: it is a direct statement
     about what the file can still transmit, computed from the two tables alone, and it demotes
     exactly those groups.
@@ -158,9 +158,9 @@ def guicode_selected_groups(data: bytes) -> frozenset:
     `ldr r3,[rN]` ... `movs r0,#group` / `blx r3` (up to three halfwords apart), or by
     `ldr r3,[r3]` when N is 3 itself. These groups are driven from outside the screen.
 
-    Why an allocator must avoid them (v45, coach 2026-09-30): 13.6 sets the variant of groups
+    Why an allocator must avoid them (coach, 2026-09-30): 13.6 sets the variant of groups
     130-139 (`0x82`-`0x8B`) as a block (`0x24AC66`-`0x24ACB0`, `0x24AF1A`-`0x24AF64`); no stock
-    touch region uses 136-139, and `free_group_slots` listed them. v45's Track + (group 136)
+    touch region uses 136-139, and `free_group_slots` listed them. A Track + on group 136
     sent a tap but never repeated on a hold, and the APS-500 reboot (137, hold-only) sent
     nothing, while the identically built 96/126/127 worked. How the block's other input
     cancels a screen hold is NOT established (inference); that GuiCode drives these groups is.
@@ -196,8 +196,8 @@ def guicode_selected_groups(data: bytes) -> frozenset:
 def hold_safe_groups(data: bytes, reserved=frozenset()) -> list[int]:
     """Free group slots fit for a control whose HOLD must work: not in `reserved`, not driven by
     GuiCode (`guicode_selected_groups`), and still carrying a press-cycled header (byte 1 bits
-    6-7 == 0). Every hold proven on the coach sits on such a slot (Batt Heat 46; v45's
-    wheelbase and track - on 96/126/127); v45's failures (136/137) were externally selected
+    6-7 == 0). Every hold proven on the coach sits on such a slot (Batt Heat 46; the
+    wheelbase and track - on 96/126/127); the 2026-09-30 failures (136/137) were externally selected
     (`11 80`) and GuiCode-driven. The byte-1 rule is the conservative half: 61/77-82 were `0x80`
     slots whose TAPS work, and no hold on one has been seen."""
     selected = guicode_selected_groups(data)
@@ -315,8 +315,8 @@ def _grow_command_group(data: bytes):
 # the HOME Water Pump (obj 295), has no value_slot on any of its records: it inherits one from
 # its PARENT wtype-5 container record (obj 989/990, value_slot 160 == its fillA index 160), and
 # a clone attached by our own generated container does not inherit that. Cloning 295 therefore
-# gives a button whose colour is right but which only repaints on re-entering the page (v6,
-# on the coach, 2026-08-17).
+# gives a button whose colour is right but which only repaints on re-entering the page (a
+# probe on the coach, 2026-08-17).
 #
 # The donor's own value_slots (53 box, 59 caption) are type-1 CONFIG GATES ("is this tank heater
 # fitted?"), not status cells, so `retarget_indicator` rewrites both to the pin's cell.
@@ -365,7 +365,7 @@ TARGET_CHANNEL = 15
 # Why not the Water Pump's own TWO-binding group [toggle(5), off(3)]: that group is a *smart
 # toggle* -- the panel picks off-vs-toggle from the commanded instance's tracked on/off state.
 # On the coach the clone commanded instance 15, which nothing drives, so the panel had no status
-# for it, defaulted to "believed on", and sent OFF (command 3) on every tap (CAN capture, v5,
+# for it, defaulted to "believed on", and sent OFF (command 3) on every tap (CAN capture,
 # 2026-08-17: only ever `0FFF0003FF00FFFF`). A SINGLE-binding group removes the choice: there is
 # no off binding to select, so command 5 fires unconditionally -- exactly how the 15 single-
 # command-5 light groups on this build toggle their (latching) outputs on/off from the panel.
@@ -467,8 +467,8 @@ def set_binding_dgn(data: bytes, binding_index: int, dgn: int, *,
 
     Moving a binding off `DC_DIMMER_COMMAND_2` **removes a channel capability** -- the panel can
     no longer command that pin through this entry -- so it needs `allow_capability_change`, the
-    same gate `patch.set_channel` puts on the equivalent move. That is not ceremony: v11 and v18
-    both shipped having silently lost a real control this way.
+    same gate `patch.set_channel` puts on the equivalent move. That is not ceremony: two reference
+    builds shipped having silently lost a real control this way.
     """
     if not 0 <= dgn <= 0x3FFFF:
         raise ValueError(f"DGN {dgn:#x} is not an 18-bit value")
@@ -795,10 +795,12 @@ INDICATOR_COLOUR_INDEX = 145
 # value_slot is a type-1/0 config gate ("is this tank heater fitted?"), not a status cell. The
 # donor is one of those, so both of its value_slot fields must be retargeted here.
 #
-# Hardware history (all on the coach): v6 left the box with no value_slot at all -> colour was
-# right but only repainted on re-entering the page. v7 set the value_slots to 32 while fillA
+# Hardware history (all on the coach, three probes): the first left the box with no value_slot at
+# all -> colour was
+# right but only repainted on re-entering the page. The second set the value_slots to 32 while fillA
 # stayed 145 -- two DIFFERENT live cells -- so the box repainted in place but the caption
-# vanished until a full page render. v8, with all three equal, redraws box AND caption in place
+# vanished until a full page render. The third, with all three equal, redraws box AND caption in
+# place
 # (verified 2026-08-17).
 # Kept as a name for the default: the status slot and the colour index are one cell
 # (Finding 18 -- the colour table IS the value-slot table), which is the invariant itself.
@@ -874,7 +876,8 @@ def retarget_indicator(data: bytes, obj_index: int, *,
     if w33 is None:
         raise ValueError(f"object {obj_index} has no wtype-33 (indicator) record")
     # EVERY wtype-11, not just the first: a button with both an icon record and a caption record
-    # has two, and a record left on the donor's config gate does not repaint in place (v7).
+    # has two, and a record left on the donor's config gate does not repaint in place (a probe,
+    # 2026-08-17).
     w11s = [r for r in recs if r.wtype == 11]
 
     off = _fillA_mode7_offset(data, w33)
@@ -891,7 +894,8 @@ def retarget_indicator(data: bytes, obj_index: int, *,
     # donor's type-1 config gates (53 box, 59 caption); rewriting them all to `colour_index`
     # (== INDICATOR_COLOUR_INDEX) satisfies the live-redraw invariant every working button on
     # this build obeys -- fillA index == box value_slot == caption value_slot (MCF-FORMAT.md
-    # Sec.6.0a). Retargeting only the box is what v7 did, and on the coach the box repainted in
+    # Sec.6.0a). Retargeting only the box is what a probe did (2026-08-17), and on the coach the box
+    # repainted in
     # place while the caption vanished until a full page render. Same-size u16 edits; a record
     # carrying no value_slot is skipped (the caller then keeps colour-cell-only behaviour).
     targets = [(w33, "wtype-33 box")] + [(r, f"wtype-11 text #{i}") for i, r in enumerate(w11s)]
@@ -1036,7 +1040,8 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     # right-padding preserves the indent (`patch.repad`'s hardware-settled default). A CENTRED
     # one is different: the panel centres each line by the width of the string it was given, pad
     # included, so slack parked at the end of the last line drags the visible text left by half
-    # of it. That is what shipped in reference build v1/v2 -- 'Overflow\nValve   ' drew its second line 9 px
+    # of it. That is what shipped in the first reference builds -- 'Overflow\nValve   ' drew its
+    # second line 9 px
     # left of centre, next to a 'Water\nPump' that needed no padding and looked right (owner,
     # 2026-08-21). `align="center"` splits the slack around that line instead.
     if label is None:

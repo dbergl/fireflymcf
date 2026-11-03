@@ -920,8 +920,8 @@ Remapping only the binding produced a button that **switched the new channel whi
 indicator stayed dark**. The indicator reads a `DC_DIMMER_STATUS_3` entry in the variable
 table (`+0x2A70`, instance at byte 4), which still named the old channel.
 
-Two variables watched instance 40 — index 82 and index 184. Moving both (v9) lit the
-button. Moving only 184 (v10) did nothing, so **184 is not the control's watcher** and an
+Two variables watched instance 40 — index 82 and index 184. Moving both (PC.14) lit the
+button. Moving only 184 (the next probe) did nothing, so **184 is not the control's watcher** and an
 edit to it should not ship. Index 82 is a member of the per-channel display list (indices
 66..86 → instances 24..44, one per row), which the `G12 OUTPUTS` diagnostics screen draws.
 
@@ -938,7 +938,7 @@ button cannot be repointed at a different variable. `set_channel` exposes this a
 > variable's GuiCode bridge block writes (`MCF-FORMAT.md` §5.4c, proven 2026-08-17), and those
 > names can be swapped. `set_channel`'s default now does that and moves no variable, so the
 > button follows the remap and every diagnostics row stays honest (hardware-unverified).
-> `move_display_list` keeps v9. The v10 shape, moving 184 alone, had been the default and is
+> `move_display_list` keeps PC.14's edit. The other shape, moving 184 alone, had been the default and is
 > no longer offered.
 
 ### Result 4 — press-and-hold is command 21, and the G12 interpolates
@@ -1098,13 +1098,13 @@ at G12 **pin 15** (uncommanded on this coach, floorplan WD).
 
 | build | one variable changed | result on the coach |
 |---|---|---|
-| v6 | clone of obj **295** (Water Pump) | button appears; repaints **only on page re-entry** |
-| v7 | clone of obj **279**, `value_slot` = 32 | box repaints live; **caption disappears** until a full page render |
-| v8 | `fillA` index = box `value_slot` = caption `value_slot` = **145** | **works** — toggles pin 15, tracks its state, repaints in place |
+| 1st | clone of obj **295** (Water Pump) | button appears; repaints **only on page re-entry** |
+| 2nd | clone of obj **279**, `value_slot` = 32 | box repaints live; **caption disappears** until a full page render |
+| 3rd | `fillA` index = box `value_slot` = caption `value_slot` = **145** | **works** — toggles pin 15, tracks its state, repaints in place |
 | — | first *inserted* (relocating) build, before the GuiCode-pointer repair | **boot loop**; recovered by reflashing the stock GuiData+GuiCode pair |
 
-**Result 1 — the live-redraw invariant is real, and it is three fields, not one.** v7 differs
-from v8 in nothing but the two `value_slot` u16s. Splitting them (box painting from cell 145
+**Result 1 — the live-redraw invariant is real, and it is three fields, not one.** The second build
+differs from the third in nothing but the two `value_slot` u16s. Splitting them (box painting from cell 145
 while the slots named 32) gave a button that repainted its *box* live and lost its *caption* —
 the panel repaints a box in place on a status change but re-renders text only on a full page
 pass. This is the evidence behind `MCF-FORMAT.md` §6.0a; it is `inferred-from-data` rather than
@@ -1113,7 +1113,7 @@ pass. This is the evidence behind `MCF-FORMAT.md` §6.0a; it is `inferred-from-d
 **Result 2 — a donor must already carry `value_slot` on both its box and its caption.** Field
 presence is header-gated, so a same-size edit cannot add one. Water Pump (295) carries neither
 and inherits from its wt-5 parent — which a generated attach record does not supply. That is
-the v6 result, and it is why donor selection is a documented step rather than an arbitrary one.
+the first build's result, and it is why donor selection is a documented step rather than an arbitrary one.
 
 **Result 3 — a single command-5 binding is a plain toggle.** A two-binding `[toggle, off]`
 group is a *smart toggle*: the panel picks off-vs-toggle from the commanded instance's tracked
@@ -1133,7 +1133,7 @@ together. `relocate.py` now repairs the literals and has a gate that refuses a s
 Two builds that had been outstanding at PC.18 were flashed and both work. Reported by the
 owner; on-screen observation, as PC.18.
 
-**Result 5 — the off-state colour is editable, and it lives in GuiCode.** Build **v9** = v8
+**Result 5 — the off-state colour is editable, and it lives in GuiCode.** A fourth build = the third
 plus a **two-byte** edit at GuiCode `0x002488EA`: the `ldr` that loads pin-15's *default (off)*
 colour master had its `imm8` displacement repointed from the pool word holding `0x20039974`
 `(39,40,98)` — the quadrant panel colour, which made the button invisible when off — to the one
@@ -1172,7 +1172,7 @@ heaters blank on this coach).
 
 ## PC.18b — the widened tank-heater whitelists, confirmed (2026-08-18)
 
-**Build:** `mcf-tankheat-v10.bin` — 9 same-size GuiCode edits (26 bytes), GuiData byte-identical
+**Build:** a probe build — 9 same-size GuiCode edits (26 bytes), GuiData byte-identical
 to stock. Flashed by the owner; on-screen observation of the `G12 OUTPUTS` diagnostics page.
 
 **Result 7 — all four tank-heater rows populate on WD.** Rows 05/06/07/08 all carry their names,
@@ -1194,13 +1194,13 @@ emulator was trusted only after it reproduced two independent oracles on the *st
 coach's WD = rows 05+08 only, and Finding 35's "best 3/4, none 4/4"). The coach then matched its
 prediction for the patched image on the first flash.
 
-**Result 9 — a build carries whatever its BASE carried; sections are a matched pair.** v10 was
-built from **stock**, so its GuiData (888,344 B) has no Pin-15 button, and flashing it removed the
-button added by v8/v9 (GuiData 888,440 B — the +96-byte inserted object). Nothing failed: the panel
+**Result 9 — a build carries whatever its BASE carried; sections are a matched pair.** The tank-heater build
+was built from **stock**, so its GuiData (888,344 B) has no Pin-15 button, and flashing it removed the
+button added by the pin-15 builds (GuiData 888,440 B — the +96-byte inserted object). Nothing failed: the panel
 booted normally, because a consistent stock-derived **pair** was loaded.
 
-**Corrected 2026-08-18, same day:** this paragraph originally warned that loading v10's GuiCode
-onto v9's GuiData would be the PC.18 Result 4 stale-pointer condition, and advised flashing both
+**Corrected 2026-08-18, same day:** this paragraph originally warned that loading the tank-heater build's
+GuiCode onto the pin-15 build's GuiData would be the PC.18 Result 4 stale-pointer condition, and advised flashing both
 sections together. The owner reports the menu's four entries are really **three loadable units** —
 `LCD Firmware` alone, `G12` alone, and **`GuiCode`+`GuiData` as an inseparable pair**, which the
 panel will not split. So that mix cannot be produced by hand, the warning is
@@ -1210,9 +1210,9 @@ grown GuiData — an internally inconsistent file, not a mismatched flash.)
 
 What survives is the *costly* half, and it is the one that bit here: since every build writes both
 sections, **a build derived from stock silently replaces a customised GuiData**. "GuiCode-only"
-described v10's edits, never what got written. So: **derive every new build from the image you are
+described the tank-heater build's edits, never what got written. So: **derive every new build from the image you are
 actually running**, and state what a build drops when handing it over.
-`mcf-pin15-tankheat-v11.bin` is v9 + the same 9 edits, which is how to have both.
+A build of the pin-15 recipe plus the same 9 edits is how to have both.
 
 ---
 
@@ -1228,10 +1228,10 @@ The mechanism was derived from code first and predicted before the file existed
 (`MCF-FORMAT.md` §4.2); this is its hardware confirmation. The file carries a FAT date of
 `1979-12-31`, i.e. the panel has no RTC.
 
-**The session, per the owner:** `mcf-13.6-Special_Edition.bin` was selected (byte-identical to
-`build/mcf-from-stock.bin` — reference build v1), then the GuiCode/GuiData pair was
+**The session, per the owner:** the first reference build was selected (byte-identical to
+`build/mcf-from-stock.bin`), then the GuiCode/GuiData pair was
 loaded, then G12. The stick's `cli.bin` and `mcf (original).bin` are byte-identical to
-`firefly-13.6/`. **So reference build v1 is flashed as of this date** — the owner's
+`firefly-13.6/`. **So the first reference build is flashed as of this date** — the owner's
 on-screen confirmation of what that build actually does (`MY COACH`, `Overflow Valve` on pin
 28, pin 15 inert) is recorded in `CLAUDE.md`'s build entry; this section is the *loader's* account
 of the same flash.
@@ -1309,7 +1309,7 @@ operator `0 → 3`) plus a descriptor reseal. **Not built, not flashed** — and
 
 ## What the log does not say
 
-It never records **which** MCF was selected, and stock 13.6 and reference build v1 carry
+It never records **which** MCF was selected, and stock 13.6 and the first reference build carry
 byte-identical descriptors (their `LCD Firmware` and `G12` payloads are byte-identical too;
 only GuiData differs, `0xD8E18` → `0xD9944`). The identification above is the owner's, not the
 log's. Touch events are logged only on the MANUAL LOAD screen, so the file-selection tap does
@@ -1560,7 +1560,7 @@ probe was safe to run.
 
 ---
 
-# PC.22 — reference build v7 on the coach (2026-08-23)
+# PC.22 — a reference build on the coach (2026-08-23)
 
 **Method:** USB flash, owner-operated; observations by eye on the panel.
 
@@ -1600,13 +1600,13 @@ ids are the match values of object 1's type-6 switch, read from GuiData `+0x4562
 from; screen 6 does not exist, so everything after drifts.
 
 **This is the third time the file has been read as contradicting the coach and been wrong**, and
-the first time the contradiction was a *rule* rather than a value. It had already aimed v7's new
+the first time the contradiction was a *rule* rather than a value. It had already aimed this build's new
 hold at GO POWER! CONFIGURATION (screen 34) instead of PD Inverter (screen 39), through every
 structural gate, the full test suite and a commit — because each check verified the constant that
 was written, not what it denoted. The fix is to name pages by **object index**, which can be
 rendered and looked at.
 
-*Not separately itemised:* selecting **Progressive Inverter and AES together** (the v6 interlock
+*Not separately itemised:* selecting **Progressive Inverter and AES together** (the interlock
 removal) ships in this image and is expected to work, but the owner's report covered the split and
 the holds. Confirmed-by-inclusion, not observed.
 
@@ -2187,14 +2187,14 @@ investigation.
 
 ---
 
-# PC.29 — reference build v8: screen 14 seen for the first time (2026-08-24)
+# PC.29 — the next reference build: screen 14 seen for the first time (2026-08-24)
 
 **Method:** USB flash, owner-operated. Two photographs of the panel plus one `candump -L can1`
 excerpt. No frames were transmitted — this is an observation entry, not an injection.
 
 Screen 14 `INVERTER / CHARGER SETTINGS` is **orphaned in stock 13.6** (`GUICODE.md` Finding 53):
 its only navigation site is guarded by an action id carried solely by two objects that are not in
-the display graph. v8's hold on the HOME inverter strip writes the screen id straight to
+the display graph. This build's hold on the HOME inverter strip writes the screen id straight to
 `state+0x20A`, bypassing the action-id chain, and so gives the page its first route. Nobody had
 ever seen it on this coach, and Findings 51/53 recorded its runtime behaviour as **untested**.
 
@@ -2204,9 +2204,9 @@ The hold opens object **17**, and the page draws correctly: header, five control
 `Inverter/Charger Status` readout block, `Faults:`, and the three identity rows. Nothing is
 clipped or misplaced.
 
-This confirms the v8 change itself (one recipe parameter, `screen_object 38 → 17`) and, with it,
+This confirms the build's change itself (one recipe parameter, `screen_object 38 → 17`) and, with it,
 that `layout.screen_for_object` picks the right object after the `state+0x20A` retraction of
-PC.22 Result 3 — the bug that had aimed v7 at GO POWER! CONFIGURATION through every gate.
+PC.22 Result 3 — the bug that had aimed the PC.22 build at GO POWER! CONFIGURATION through every gate.
 
 ## Result 2 — Finding 53's predictions hold 6 for 6
 
@@ -2653,7 +2653,7 @@ either kind (container child, or type-6 switch candidate range):
 They are the Finding 15 class: authored template objects nothing can display. So **object 929's
 `−` is the only control in 13.6 that is simultaneously (a) externally variant-selected, (b)
 carrying bindings for variant 0 only, and (c) reachable on a screen** — and it only became
-reachable at all because v8 gave the page its first route.
+reachable at all because the PC.29 build gave the page its first route.
 
 **And the pattern done correctly exists, one group away.** Group **34** — the awning control's
 other half — is also externally selected (`12 80 0c 80`), but declares `variant_count = 2` and
@@ -3266,13 +3266,13 @@ panel pushes that profile on boot, and G12 config that had been adjusted did **n
 panel flash. *Corrects an assumption stated during PC.36 that the G12's NVM would be untouched by a
 panel-side flash.*
 
-## AES + Progressive Inverter coexisted after the flash — v6/v7's interlock removal outliving its firmware
+## AES + Progressive Inverter coexisted after the flash — a reference build's interlock removal outliving its firmware
 
 Owner-reported immediately after: the coach came up with **both AES and Progressive Inverter
 selected**, a combination stock firmware's interlocks are designed to prevent
 (`GUICODE.md` Finding 50 — selecting PI emits `EF := 1`, which deselects AES).
 
-reference build v6/v7 removed those cross-writes (`interlocks.uncouple`). The resulting
+The reference builds of 2026-08-23 on removed those cross-writes (`interlocks.uncouple`). The resulting
 *state* lives in G12 NVM, so it **outlived the firmware that permitted it**: flashing stock restored
 the interlock logic, and stock then found the coach in a configuration it cannot itself produce.
 
@@ -3634,7 +3634,7 @@ the selector write but kept the storage.
 reselecting WD set `EF := 3` (AES Single, the WD default) and cleared `E6` (Progressive
 Inverter), and the mode change re-derived the whole AES parameter profile (`0x31 → 1020` etc. —
 PC.39's mode-reset behaviour, reconfirmed). The owner re-set `E6 := 1` at 11:21:17 — **with no
-coupled `EF` write, the uncoupled reference build v8 interlock edit confirmed on hardware again** — and
+coupled `EF` write, the uncoupled reference build's interlock edit confirmed on hardware again** — and
 deliberately kept AES Single with the 51.0 V profile. Residuals worth carrying: `0xD8`
 (batteries count) went 0 → 1 during option toggling, and `0x15` dropped one LSB
 (23041 → 23040), meaning unknown. Selectors 11.23 wrote that 13.6 never uses (`A0/ED/F0/A1-A3`)
@@ -3655,8 +3655,8 @@ and the config-unpack derivation (`config.floorplan_slot`).
 
 # PC.41 — the coach ran 14.7: the map, both interlock arms, and the Lithionics-era selector family (2026-08-30)
 
-`captures/pc-147-session-2026-08-30.log` — 182,184 frames, one capture spanning v14 → stock 13.6 →
-reference build v8. Baseline: `captures/pc-147-preflash-baseline-2026-08-30.log`. Same
+`captures/pc-147-session-2026-08-30.log` — 182,184 frames, one capture spanning 14.7 → stock 13.6 →
+a reference build. Baseline: `captures/pc-147-preflash-baseline-2026-08-30.log`. Same
 method as PC.40: GuiCode+GuiData pair only, G12/LCD Firmware untouched (`GUI Version: 14.7 /
 Logic Controller Version: 13.6` on SETTINGS, both healthy). Every claim below is
 `observed-on-hardware`.
@@ -3745,7 +3745,7 @@ reference (offset-`0x1DC`/`movs #0xEE` scan — the usual Thumb-1 weak-negative 
 The one thing the file cannot show is the G12 **app**'s behaviour, hence this test.
 
 **The test, all from the bus host (`cansend`/`candump` on can1, SA `0xC0`), coach on the
-`Experimental` v7 image:**
+probe image of 2026-08-31:**
 
 1. *Baseline:* `195FCE9C#EE00FFFF00000000` every ~5.0 s — value `0xFFFF`, unset, matching the
    file's unseeded-cell prediction.
@@ -3801,9 +3801,9 @@ read-back pattern (group-129 clone) plus an authored per-tick bridge block (our 
 extended to `setVariant` + write a display cell for `0xEE`) is lag-free and is the firmware's own
 existing mechanism, not a new one.
 
-# PC.44 — Pump Link (new OPTIONS row, v8) flashed: row renders, but the follower is dead because the panel never surfaces `0xEE` where the routine reads it (2026-08-31)
+# PC.44 — Pump Link (new OPTIONS row) flashed: row renders, but the follower is dead because the panel never surfaces `0xEE` where the routine reads it (2026-08-31)
 
-**The build.** `build/mcf-experiment-v8.bin` — the `add_option_follower` recipe op: a genuinely
+**The build.** A probe build — the `add_option_follower` recipe op: a genuinely
 new "Pump Link" OPTIONS row (a cloned `wtype-6` checkbox on object 46, sharing the check-glyph
 child 394) that toggles config selector **`0xEE`**, plus the per-tick follower routine re-gated
 to read `0xEE`'s var-table status slot (`0x2000820A`) and act as a bridge block (setVariant on
@@ -3815,7 +3815,7 @@ main (`c73d112`).
 - **The row RENDERS correctly** — the OPTIONS page draws "Pump Link" at the bottom of the left
   column, exactly as the in-repo compositor previewed, with Heat Pump restored to stock beside it.
   (So the append-as-child-object-via-wt5-attach path *does* draw on hardware; the earlier "did not
-  appear" was a user-error flash of reference build v8, not this image.)
+  appear" was a user-error flash of an earlier reference build, not this image.)
 - **The tap DOES write `0xEE`** — each tap emits `19FED99F#FF96EE0F0100D1EA` + the `D3` read-back,
   and the G12 stores it and sweeps `195FCE9C#EE0001`. The row's tap→G12 path works.
 - **The checkbox never fills, and the follower never fires** — with `0xEE` armed on the bus
@@ -3838,9 +3838,9 @@ class 3 → deadline 0 (**never stale**, so not a staleness effect), detour appl
 `0x15FCE` status slot would be written; the coach says it is not, at least for these mode-1/class-3
 config-option selectors.
 
-**Why v7 worked and v8 does not.** The v7 light→pump follower gated on the Heat Pump config
+**Why the previous probe worked and this one does not.** The previous probe's light→pump follower gated on the Heat Pump config
 **register** (`0x2003A296`), which the panel *does* populate (the config-buffer→register path,
-`FUN_00247BF8`). v8 moved the gate to a `0x15FCE` status **slot**, which the panel does not populate
+`FUN_00247BF8`). This build moved the gate to a `0x15FCE` status **slot**, which the panel does not populate
 for config selectors. The working readback path for config selectors is the config buffer/register,
 not the status slot.
 
@@ -3870,15 +3870,15 @@ and worked, which is why the *watch* half was fine and only the *gate* half was 
 reach only the config buffer / must gate on a register" conclusion is withdrawn; (b) a **var-table
 entry is a general "create a new register" mechanism** for any DGN the filter processes, read at the
 correct index-split address, and our own routine reading the slot sidesteps the 46-bridge-block
-paint limit; (c) **persistent Pump Link is a ~2-byte fix** — re-gate the v8 follower on `0x20008242`
-(the whole v8 design then works, persistent via the G12's stored/swept `0xEE`, no boot-reset, no
+paint limit; (c) **persistent Pump Link is a ~2-byte fix** — re-gate this build's follower on `0x20008242`
+(the whole design then works, persistent via the G12's stored/swept `0xEE`, no boot-reset, no
 config patch, no Approach B). The tooling (`followchannel`) must compute the slot with the
 index-split base. Decisive confirmation is one diagnostic flash (gate on `0x20008242`, arm `0xEE`,
 toggle the light → pump follows + checkbox fills).
 
-# PC.45 — Pump Link (new OPTIONS row, v9) WORKS on the coach: the index-split slot fix closes PC.44 (2026-08-31)
+# PC.45 — Pump Link (new OPTIONS row) WORKS on the coach: the index-split slot fix closes PC.44 (2026-08-31)
 
-**`build/mcf-experiment-v9.bin`** — v8 with one correction: the follower's gate/bridge reads the
+**A probe build** — the PC.44 build with one correction: the follower's gate/bridge reads the
 `0xEE` status slot at its true **index-split** address **`0x20008242`** (var 289 > 255 → high slot
 array), not the flat `0x2000820A` the PC.44 build used. Owner flashed it and confirmed on the panel:
 
@@ -3962,8 +3962,8 @@ right after something on the bus restarts is an open filter, not a bad value.
 
 `GUICODE.md` Finding 51 said of this page's four device-sourced readouts: *"the other four read
 genuine RV-C charger/inverter status DGNs straight from the device through an **open** filter
-(`0xFF` at `+4`), so on a coach with two chargers the last transmitter wins — the same hazard v5
-pinned for `1FFC7`/`1FEA3`/`1FF99`."* This is that, on a fourth DGN, observed. Reference build v5
+(`0xFF` at `+4`), so on a coach with two chargers the last transmitter wins — the same hazard a reference build
+pinned for `1FFC7`/`1FEA3`/`1FF99`."* This is that, on a fourth DGN, observed. That reference build
 pinned three DGNs against a hazard that had not yet materialised; this is the first
 time one actually did.
 
@@ -4004,8 +4004,8 @@ byte-fields do not interfere. The stock ± arrows are delta emitters (group 103/
 `0x0E`), so a delta-capable `0xEE` is what lets the new stepper be **stock bindings with a
 different selector byte** instead of authored code.
 
-**Method.** From the bus host (`cansend`/`candump` on can1, SA `0xC0`), coach on the `Experimental` v12
-image, Pump Link ON. Every step read back with the stock `D3` frame; the sequence ends with an
+**Method.** From the bus host (`cansend`/`candump` on can1, SA `0xC0`), coach on the probe image
+of 2026-09-02, Pump Link ON. Every step read back with the stock `D3` frame; the sequence ends with an
 absolute restore.
 
 ```
@@ -4070,7 +4070,7 @@ owner's first tap plus the clamp, not by a seed.
 # PC.48 — the awning ignition interlock is BUS-FED, and the panel's lock label reads a DIFFERENT instance than the G12's lock (2026-09-03)
 
 `captures/pc48-awning-lock-injection-2026-09-03.log`. Ignition off, engine off, coach on
-`Experimental` v12. From the bus host (SA `0xC0`, `can1`) we replayed the G12's own engine-running
+the probe image of 2026-09-02. From the bus host (SA `0xC0`, `can1`) we replayed the G12's own engine-running
 indicator byte-for-byte — `19FBDAC0#FB01FFFFFFFFFFFF` — at 1 Hz, and cleared it with `FB00`.
 
 **Result 1 — a table-`0x61` receive record really does write its cell** (`MCF-FORMAT.md` §9a.3,
@@ -4456,7 +4456,7 @@ mechanism, they were describing one.
 | event | rows |
 |---|---|
 | cold boot of the screen (disconnect/reconnect), **~10 times** | **present, every time** |
-| flash to v12 | **missing** |
+| flash to the 2026-09-02 build | **missing** |
 | cycle panel power after that flash | **present** |
 
 **Why this settles it.** Two theories survived PC.54's six bus negatives, and this separates them
@@ -4547,7 +4547,7 @@ static negative. The panel's filters do store the values (vars 232/234/236 land 
 `0x20008198`/`0x2000819C`/`0x200081A0`); nothing carries them to the display cells.
 
 **And it closes the §4 caveat by a different route.** That caveat was that a cell can be written
-*by index* through `setVariant`, which no literal scan sees. The two v14 photos already rule that
+*by index* through `setVariant`, which no literal scan sees. The two 2026-09-03 photos already rule that
 out: the eight arrow cells came up in eight **different, arbitrary colours** after a power cycle and
 stayed that way. Any writer on the paint path — indexed or not — would have overwritten that garbage
 within one tick. Uninitialised values that persist while the page is displayed are proof that
@@ -4561,7 +4561,7 @@ is not merely the cheapest route — it is the only one.
 
 ## PC.58 — a `wtype-8` readout repaints from a cell an appended routine writes; the Pump Link button was reading the wrong cell — `observed-on-hardware`, 2026-09-04
 
-`mcf-experiment-v15.bin` on the coach, flashed and verified. Three
+A probe build on the coach, flashed and verified. Three
 observations that settle things the file could not:
 
 1. **Live repaint.** The `Auto Off` minutes readout (a `wtype-8` on spare cell 215, written by the
@@ -4581,8 +4581,8 @@ observations that settle things the file could not:
 
 ## PC.59 — the first on-screen register readout, and a byte cell's sentinel draws dashes — observed-on-hardware, 2026-09-04
 
-`mcf-experiment-v17.bin` on the coach, flashed and verified
-2026-09-04. Setup: v17's `minutes-home` op (`add_register_readout`) put
+A probe build on the coach, flashed and verified
+2026-09-04. Setup: its `minutes-home` op (`add_register_readout`) put
 the Auto Off minute byte of `DGN_CONFIG` selector `0xEE` on HOME (object 4) at `(300, 357)`, on
 display cell **219** (SRAM `0x20039f51`, tier 2 — an odd spare byte, `fresh=False`), driven by a
 44-byte per-tick copy routine chained onto the hook ahead of the AES Low Volts bridge, the pump
@@ -4600,7 +4600,7 @@ Five observations, mapped to that entry's checklist:
 3. **Right after a power cycle, HOME reads dashes, then `15`** (the stored Auto Off minutes).
 4. **Nothing else on HOME visibly moved** — the new object does not disturb the page's existing
    layout.
-5. **Everything the v16 checklist covers still holds** on the combined v16+v17 run (Pump Link,
+5. **Everything the previous build's checklist covers still holds** on this combined run (Pump Link,
    Low Volts, the minute clamp, the bath light follower, the timer, power-cycle persistence).
 
 **The sentinel-to-dashes mechanism, observed on hardware for the first time, on a BYTE cell.**
@@ -4682,14 +4682,14 @@ actually flashed:
 
 | candidate | differing bytes |
 |---|---|
-| `mcf-experiment-v22-notankbcast.bin` G12 | **0** |
+| the flashed tank-broadcast build's G12 | **0** |
 | stock `firefly-13.6/mcf.bin` G12 | 10 |
-| `mcf-experiment-v21.bin` G12 | 10 |
+| the previous reference build's G12 | 10 |
 
 **Byte-for-byte, across every one of the 9,632 bytes the capture saw.** And the ten that separate
 it from stock are exactly PC.62's edit: the four `blx r3` → `nop` tank-broadcast sites plus the
 section checksum word. **The bus carries enough to reconstruct the flashed section in full** — the
-test rebuilds v22's G12 from stock with `tankbroadcast.suppress` and compares, so neither side of
+test rebuilds that build's G12 from stock with `tankbroadcast.suppress` and compares, so neither side of
 that comparison ever reads the other.
 
 ### Result 3 — the loader's log and the bus agree, and the G12 reboots afterwards
@@ -5204,7 +5204,7 @@ actually performed. The owner pressed one row of a four-row menu.*
 
 ## PC.62 — the breaker `−` transmits, the tank broadcast is gone, and a foreign sender drives the stock gauges — observed-on-hardware, 2026-09-07
 
-**`build/mcf-experiment-v22-notankbcast.bin`** (sha256 `008a9f7d…`), flashed by the owner.
+A probe build, flashed by the owner.
 Three results, two of which close long-standing items, plus three corrections to things this
 project believed.
 
@@ -5233,7 +5233,7 @@ the owner pressed `−`, `−`, `+`. The value came back **5**, which only one p
 
 So the control is disabled at exactly 0 A and re-enabled by `+` — 11.23's design, restored.
 
-### Result 2 — v22 silences `1FFB7` and nothing else
+### Result 2 — the build silences `1FFB7` and nothing else
 
 A 12-second capture carries **zero** `19FFB7` frames. Every earlier capture carries ~48 (four
 instances × 1 Hz). The controls hold exactly as the edit predicted: `18BFC19C` still sends all
@@ -5283,8 +5283,7 @@ confirmed.
 
 ## PC.61 — an Auto Off timer indicator, and a byte borrow recovered on the wire — observed-on-hardware, 2026-09-06
 
-Two images across three rounds: **`build/mcf-experiment-v20.bin`** (sha256 `b90c3e14…`) and
-**`build/mcf-experiment-v21.bin`** (sha256 `4b639367…`). v21 is **FLASHED AND VERIFIED**.
+Two probe images across three rounds; the second is **FLASHED AND VERIFIED**.
 
 ### The headline: PC.47's borrow model holds in the other direction
 
@@ -5323,7 +5322,7 @@ Round 2's is the one that mattered functionally: the pump would have been switch
 timer was disabled. Round 1's first is the one worth carrying as a rule — **a visible label MUST
 declare a box**; the two-coordinate shape is for records that never draw.
 
-### v21, verified 2026-09-06
+### The second image, verified 2026-09-06
 
 | item | result |
 |---|---|
@@ -5331,7 +5330,7 @@ declare a box**; the two-coordinate shape is for records that never draw.
 | 2. pump off while on HOME: the mark goes | **as expected** |
 | 3. Auto Off to 0 while the pump runs: the mark goes immediately, pump never switched off after | **as expected** |
 | 4. AES page reads `0 Min` at zero, no `Off` ghost | **as expected** |
-| 5. HOME no longer shows v17's bare minute count | **as expected** |
+| 5. HOME no longer shows PC.59's bare minute count | **as expected** |
 
 White on the button's lit cyan is legible — the owner's call, after round 1's first read of
 "barely visible" turned out to be clipping rather than contrast.
@@ -5340,7 +5339,7 @@ White on the button's lit cyan is legible — the owner's call, after round 1's 
 
 ## PC.60 — a stock readout fed past its decode fence, and a switch pinned through a flash — observed-on-hardware, 2026-09-05
 
-**`build/mcf-experiment-v18.bin`** (sha256 `5340767d…`).
+A probe build.
 The owner flashed it and reported against the checklist:
 
 | item | result |
@@ -5350,7 +5349,7 @@ The owner flashed it and reported against the checklist:
 | 3. `cansend can1 19FECCC0#01FFFF80043804FF` (absorb raw 1152, float raw 1080) | **rows show the values** (57.6 / 54.0) |
 | 4. PC.55's in-band frame `19FECCC0#01FFFF20011001FF` (14.4 / 13.6) | **confirmed** (run after the rest, 2026-09-05) |
 | 5. after a power cycle | rows present, **dashes until the next frame** |
-| 6. v17's features (HOME minute readout, Pump Link, Auto Off, six-icon rail) | unchanged |
+| 6. PC.59's features (HOME minute readout, Pump Link, Auto Off, six-icon rail) | unchanged |
 
 **What it settles, each for the first time on this coach.**
 

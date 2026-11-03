@@ -85,7 +85,7 @@ red*. A shared-path hazard, inert today but worth knowing before trusting a gree
 Measured with `-n auto` on 16 cores, 2,548 tests. Compiles were 3,729 s of the suite's 4,926 s of
 test time; one run asked for 292 compiles of 198 distinct (recipe, stock) pairs.
 
-- **The engine** (every user's compile, not only the tests): a v50 compile went from 119 s to 37 s,
+- **The engine** (every user's compile, not only the tests): a reference build's compile went from 119 s to 37 s,
   and all 28 reference recipes compile byte-identical to before (sha256 compared). GuiCode's
   literal scan and `tablegrow`'s `cmp.w` scan are memoised on the GuiCode section's bytes rather
   than the file's, since a GuiData edit never changes GuiCode; the two object-table scans share a

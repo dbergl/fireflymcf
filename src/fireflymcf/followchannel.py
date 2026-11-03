@@ -72,7 +72,7 @@ VARIANT_SETTER = 0x20039908
 # separate slot arrays.  `status_slot_addr()` must be used for every var; the old flat
 # `STATUS_SLOT_BASE + var*2` was correct only for index <= 255 and put every high-index var
 # (e.g. the 0xEE config selector, var 289) 56 bytes into unwritten space -- the PC.44 bug that
-# made the v8 Pump Link follower read a slot the firmware never wrote (the value was live at
+# made the PC.44 Pump Link follower read a slot the firmware never wrote (the value was live at
 # 0x20008242 all along). `MCF-FORMAT.md` §5.4c.
 # The mechanism now lives in `register.py`; re-exported here so existing references
 # (`followchannel.status_slot_addr`, `followchannel.STATUS_SLOT_BASE`, ...) still resolve.
@@ -707,7 +707,8 @@ def build(plan: FollowPlan, code_load_addr: int) -> tuple[bytes, list]:
     # there is no real state to act on. We do NOT special-case the *previous* slot being 0xFFFF: the
     # firmware decodes 0xFFFF as OFF (its operating-status field is 7, not 1), so the on-state test
     # below treats a 0xFFFF baseline as a genuine "off". That makes the first real ON after boot a
-    # true off->on transition that fires -- fixing the "took a second toggle" the coach showed on v6,
+    # true off->on transition that fires -- fixing the "took a second toggle" the coach showed on an
+    # earlier follower,
     # while the current-sentinel guard keeps boot itself silent.
     emit(4, lambda h, s: (thumb.movw(0, STALE_SENTINEL), f"movw r0, #{STALE_SENTINEL:#x}"))
     emit(2, lambda h, s: (thumb.cmp_reg(1, 0), "cmp r1, r0"))
@@ -954,7 +955,7 @@ def detour_edit(plan: FollowPlan, code_load_addr: int) -> tuple[int, bytes, byte
 # AGS) -- so AGS runtime is unchanged. In AES the stock block's decode is gated off, so the
 # bridge's writes stand. It is the Mechanism-B alternative to nop-ing the freeze gate
 # (Mechanism C): no GuiCode CODE patch, just an appended routine on the same hook/append-point
-# the coach-proven v9 follower uses.
+# the coach-proven Pump Link follower (PC.45) uses.
 #
 # Blob layout (entry at offset 0 -- there are no CAN templates to sit in front of it):
 #     +0x00  routine entry (code)

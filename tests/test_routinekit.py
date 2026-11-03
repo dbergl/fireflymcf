@@ -43,7 +43,7 @@ def _install_counter(data: bytes):
     return ed, cell, inst
 
 
-def _saffron_ops():
+def _routine_build_ops():
     return [
         {"id": "link", "type": "add_option_follower", "enabled": True,
          "params": {"watch_channel": 25, "target_channel": 44, "gate_mask": 0xFF00,
@@ -58,9 +58,10 @@ def _saffron_ops():
     ]
 
 
-def _saffron_substitute(stock):
-    """Ruling R2a's v54-Saffron stand-in: option follower, pump auto off, one register readout."""
-    ops = _saffron_ops()
+def _routine_build(stock):
+    """Ruling R2a's stand-in for a reference build: option follower, pump auto off, one
+    register readout."""
+    ops = _routine_build_ops()
     p = {"schema": 1, "base_sha256": hashlib.sha256(stock).hexdigest(),
          "build_name": "routinekit-test", "ops": ops}
     res = recipe.compile_project(recipe.Project.from_json(json.dumps(p)), stock)
@@ -197,7 +198,7 @@ def test_install_tick_routine_refuses_a_broken_link(mcf_136):
 def test_every_library_link_passes_the_link_check(mcf_136):
     """The prologue/tail check `install_tick_routine` applies holds for every routine the
     library's own ops chain, so it describes the existing contract rather than a new one."""
-    data = _saffron_substitute(mcf_136)
+    data = _routine_build(mcf_136)
     chain = followchannel.chain_from_hook(data)
     assert len(chain) >= 4
     for entry, nxt in zip(chain, chain[1:]):
@@ -218,12 +219,12 @@ def test_fresh_sram_and_registers(mcf_136):
     assert routinekit.find_config_toggle(mcf_136, 0xEE) == (mcf_136, None)
     link = recipe.compile_project(recipe.Project.from_json(json.dumps({
         "schema": 1, "base_sha256": hashlib.sha256(mcf_136).hexdigest(), "build_name": "t",
-        "ops": [_saffron_ops()[0]]})), mcf_136)
+        "ops": [_routine_build_ops()[0]]})), mcf_136)
     assert link.ok, link.errors
     assert routinekit.find_config_toggle(link.data, 0xEE) == (link.data, 164)
     # pumpauto's +/-5 stepper groups qualify too: three candidates, so it refuses rather than pick
     with pytest.raises(routinekit.RoutineKitError, match="ambiguous") as e:
-        routinekit.find_config_toggle(_saffron_substitute(mcf_136), 0xEE)
+        routinekit.find_config_toggle(_routine_build(mcf_136), 0xEE)
     assert e.value.code == "AMBIGUOUS_TOGGLE"
 
 
@@ -260,7 +261,7 @@ def test_tick_routine_runs_each_tick(mcf_136):
 def test_tick_routine_chains_after_existing(mcf_136):
     from fireflymcf.emu.canbus import Peer
 
-    base = _saffron_substitute(mcf_136)
+    base = _routine_build(mcf_136)
     before = followchannel.chain_from_hook(base)
     display = _pumpauto_display_addr(base)
     ed, cell, inst = _install_counter(base)

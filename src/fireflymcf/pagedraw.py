@@ -64,7 +64,8 @@ class PageDrawError(ValueError):
     """A donor drifted, a request is out of range, or an authored record failed its self-check."""
 
 
-# ---- pinned donors (identical in stock 13.6 and v33) ------------------------------------------
+# ---- pinned donors (identical in stock 13.6 and the heater-glyph build)
+# ------------------------------------------
 
 FILL_DONOR = (32, 2)
 FILL_STOCK = bytes.fromhex("04500c070000000004001f032400")

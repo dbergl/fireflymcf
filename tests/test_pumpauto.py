@@ -30,9 +30,10 @@ def test_pack_refuses_out_of_range_minutes():
 
 
 def test_pack_accepts_zero_only_at_the_lowered_floor():
-    """v20's `allow_disable`. 0 is the disabled setting, and it is legal only for a build that
+    """`allow_disable` (verified 2026-09-06). 0 is the disabled setting, and it is legal only for a
+    build that
     asked for the lowered floor -- the default stays the shipped 5, which is what keeps every
-    flashed image (v14-v19) compiling byte-identically."""
+    earlier flashed image compiling byte-identically."""
     with pytest.raises(pumpauto.PumpAutoError):
         pumpauto.pack(0, False)
     assert pumpauto.pack(0, False, minutes_min=0) == 0x0000
@@ -94,7 +95,8 @@ def test_clamp_rounds_onto_the_lowered_floor_when_it_is_zero():
 
 
 def test_clamp_pins_a_zero_minute_byte_to_the_floor_and_KEEPS_the_flag():
-    """v15 defect 2. `-` at 5 sends -5, the G12 stores 0, and the clamp used to
+    """The first Auto Off flash's defect 2 (2026-09-04). `-` at 5 sends -5, the G12 stores 0, and
+    the clamp used to
     treat 0 as "never configured" and rewrite the DEFAULT with the link flag cleared. Zero IS a
     value the arrows produce; it pins to the floor like any other underflow, flag intact."""
     from fireflymcf import pumpauto
@@ -105,9 +107,10 @@ def test_clamp_pins_a_zero_minute_byte_to_the_floor_and_KEEPS_the_flag():
 
 
 def test_clamp_leaves_a_zero_minute_byte_ALONE_at_the_lowered_floor():
-    """The v15 word, read by a v20 build: 0 is the disabled setting, so it needs no correction
+    """That word, read by a build with the 0 floor: 0 is the disabled setting, so it needs no
+    correction
     at all -- and the Pump Link flag still rides through untouched, which is the part both the
-    v15 fix and this one are about."""
+    first fix and this one are about."""
     from fireflymcf import pumpauto
     assert pumpauto.clamp(0x0000, minutes_min=0) is None
     assert pumpauto.clamp(0x0100, minutes_min=0) is None
@@ -115,7 +118,7 @@ def test_clamp_leaves_a_zero_minute_byte_ALONE_at_the_lowered_floor():
 
 
 def test_clamp_undoes_the_borrow_a_minus_press_at_zero_leaves():
-    """v20. With the floor at 0, `-` subtracts 5 from a word whose low byte is already 0 and
+    """With the floor at 0, `-` subtracts 5 from a word whose low byte is already 0 and
     borrows out of it -- into the Pump Link flag. Both fields must come back exactly, because
     the alternative is a press that jumps the setting to an hour and silently clears the link.
 
@@ -128,7 +131,8 @@ def test_clamp_undoes_the_borrow_a_minus_press_at_zero_leaves():
     assert pumpauto.clamp(0x00FB, **z) == pumpauto.pack(0, True, 0)    # link on, flag borrowed
     # and it is a real correction, not a no-op: the stored word is not the recovered one
     assert pumpauto.clamp(0xFFFB, **z) != 0xFFFB and pumpauto.clamp(0x00FB, **z) != 0x00FB
-    # at the SHIPPED floor the rule is off entirely -- that is what keeps v14-v19 reproducible
+    # at the SHIPPED floor the rule is off entirely -- that is what keeps the earlier builds
+    # reproducible
     assert pumpauto.clamp(0x00FB) == pumpauto.pack(60, False)
 
 
@@ -145,7 +149,7 @@ def test_clamp_normalises_a_nonzero_flag_byte_to_one():
 # ---------------------------------------------------------------------------
 # Task 8a: the scratch-space allocation for the per-tick Auto Off routine.
 #
-# Measured on v12, and it is tighter than the design assumed: 15 spare +0x44BC8
+# Measured on the 2026-09-02 build, and it is tighter than the design assumed: 15 spare +0x44BC8
 # cells, of which exactly TWO pass the GuiCode-reference safety scan as a whole
 # 2-aligned halfword (215 -> 0x20039F5E, 217 -> 0x20039F58), and NO cell offers a
 # safe 4-aligned word. So the routine cannot hold a u32 millisecond deadline.
@@ -226,7 +230,7 @@ def test_the_display_cell_and_the_tick_anchor_are_the_two_halves_of_one_cell():
     assert SCRATCH_SPANS["tick_anchor"][0] == disp + 1
 
 
-# --- the type dispatch of FUN_00251E38 (13.6, byte-identical on v12) ---------
+# --- the type dispatch of FUN_00251E38 (13.6, byte-identical on the 2026-09-02 build) ---------
 
 def test_value_formatter_dispatch_table_is_the_ten_way_switch(mcf_136):
     """`tbh [pc, r1, lsl #1]` at 0x00251E58 over an 11-entry halfword table based at
@@ -386,7 +390,7 @@ def test_the_renderer_clamps_by_type_and_treats_type_1_exactly_like_type_0(mcf_1
 # ---------------------------------------------------------------------------
 # Task 8b: the per-tick routine -- clamp, seed, display, timer.
 #
-# Everything below derives its allocation from the PRE-APPEND image (V12). That is
+# Everything below derives its allocation from the PRE-APPEND image (the 2026-09-02 build). That is
 # not a convenience: `_guicode_references` is a literal scan, so the moment this
 # routine reaches those cells through its own pool words they become "referenced"
 # by the routine itself. The allocation is computed once, on the input.

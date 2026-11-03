@@ -52,7 +52,8 @@ def test_naming_no_tanks_is_not_an_error_but_says_what_to_do(capsys):
 
 # --- the patch path --------------------------------------------------------------------
 def test_all_water_reproduces_the_image_on_the_coach(tmp_path, capsys):
-    """The oracle: the recipe op's bytes, which are the bytes of v22 (`BUS-BASELINE.md` PC.62)."""
+    """The oracle: the recipe op's bytes, which are the bytes of the flashed image
+    (`BUS-BASELINE.md` PC.62)."""
     out = tmp_path / "mcf-tanks.bin"
     assert run(STOCK, "--all-water", "--no-rename", "-o", out) == 0
 
@@ -63,8 +64,8 @@ def test_all_water_reproduces_the_image_on_the_coach(tmp_path, capsys):
 
 
 @pytest.mark.skipif(not (REPO / "build/mcf-experiment-v22-notankbcast.bin").exists(),
-                    reason="build/ is gitignored; build the v22 experiment image first")
-def test_the_g12_section_matches_the_flashed_v22_image(tmp_path):
+                    reason="build/ is gitignored; build the tank-broadcast probe image first")
+def test_the_g12_section_matches_the_flashed_image(tmp_path):
     out = tmp_path / "mcf-tanks.bin"
     assert run(STOCK, "--all-water", "--no-rename", "-o", out) == 0
     flashed = (REPO / "build/mcf-experiment-v22-notankbcast.bin").read_bytes()
@@ -257,7 +258,7 @@ def test_the_extracted_section_is_what_pc63_actually_transferred(tmp_path):
     from fireflymcf import upload
 
     capture = REPO / "captures/pc63-g12-network-upload-2026-09-08.log"
-    out = tmp_path / "v22.g12"
+    out = tmp_path / "flashed.g12"
     assert run(STOCK, "--all-water", "--no-rename", "--extract-g12", out) == 0
 
     transfer = upload.decode(capture.read_text())

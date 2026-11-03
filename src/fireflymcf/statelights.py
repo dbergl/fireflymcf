@@ -9,7 +9,8 @@ the button's cell, in its place:
   after:   box, anchor, SWITCH,                                      touch, [restore]
   arm k:   capsule in arm k's fill, [strip], [caption], [glyph, cancel], [contactor, cancel]
 
-**Each arm draws the whole button** (the v31 lesson, `aescompact`'s state-arm comment): the panel
+**Each arm draws the whole button** (the 2026-09-22 lesson, `aescompact`'s state-arm comment): the
+panel
 repaints only the arm it selects, so an arm that left out the caption would leave the previous
 arm's capsule over it. The opaque capsule goes first and covers whatever the outgoing arm drew.
 
@@ -25,8 +26,8 @@ the ones the stream records used to commit, and the touch region after the switc
 record in between must belong to a button body (empty labels, the caption, the glyph), so a
 capsule another button's switch already replaced cannot be mistaken for this one. Without it,
 the Batt Heat rule (`aescompact._batt_heat_body_records`: the fill-35 capsule directly before
-the `text` caption) names the span, which is the path the coach-verified v32 heater status and
-v49's Ignore Alarms status take, byte-identically.
+the `text` caption) names the span, which is the path the coach-verified heater status and
+the Ignore Alarms status take, byte-identically.
 
 **Arms** are `(match, lit, contactor)` triples: `match` the match-table value (the `0xFFFF`
 default arm FIRST, `switchbuild.append_arms`), `lit` picks `on_index` over `off_index`, and
