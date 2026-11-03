@@ -6,6 +6,7 @@ own. `compile_project` is pure and deterministic: same project, byte-identical b
 """
 from __future__ import annotations
 
+import contextvars
 import copy
 import dataclasses
 import hashlib
@@ -32,6 +33,17 @@ class RecipeError(ValueError):
                 "message": str(self), "offers": self.offers}
 
 
+class GateError(RecipeError, AssertionError):
+    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`).
+    Raised explicitly, never by `assert`, so `python -O` cannot remove a gate. It is also an
+    AssertionError, the type these gates raised before they were explicit."""
+
+
+def _gate(ok, code: str, message) -> None:
+    if not ok:
+        raise GateError(code, str(message))
+
+
 @dataclasses.dataclass
 class OpSpec:
     id: str
@@ -53,6 +65,13 @@ class Project:
     # file. `_prefix_key` does not read it, so a preview change can never invalidate
     # a compile or alter an output byte; `tests/test_recipe.py` pins that.
     preview: dict = dataclasses.field(default_factory=dict)
+    # User-op folders outside `<project dir>/ops/` (paths relative to the project file), and the
+    # owner's acceptance records for user ops (`userop`; `fireflymcf op accept` fills it), and where
+    # each installed user op came from (`fireflymcf op install`: {type: {source, folder_sha256}}).
+    # Each is written only when non-empty, so a project without user ops serialises as before.
+    ext_ops: list = dataclasses.field(default_factory=list)
+    user_op_acceptance: dict = dataclasses.field(default_factory=dict)
+    user_op_sources: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
     def from_json(cls, text: str) -> "Project":
@@ -89,18 +108,38 @@ class Project:
         if not isinstance(preview, dict):
             raise RecipeError("BAD_PROJECT", "field 'preview' must be an object, got %r"
                               % (preview,))
+        ext_ops = doc.get("ext_ops") or []
+        if not (isinstance(ext_ops, list) and all(isinstance(x, str) for x in ext_ops)):
+            raise RecipeError("BAD_PROJECT", "field 'ext_ops' must be a list of paths, got %r"
+                              % (ext_ops,))
+        acceptance = doc.get("user_op_acceptance") or {}
+        if not isinstance(acceptance, dict):
+            raise RecipeError("BAD_PROJECT", "field 'user_op_acceptance' must be an object, "
+                              "got %r" % (acceptance,))
+        sources = doc.get("user_op_sources") or {}
+        if not isinstance(sources, dict):
+            raise RecipeError("BAD_PROJECT", "field 'user_op_sources' must be an object, "
+                              "got %r" % (sources,))
         return cls(base_sha256=doc["base_sha256"], build_name=doc["build_name"], ops=ops,
-                   preview=preview)
+                   preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance,
+                   user_op_sources=sources)
 
     def to_json(self) -> str:
-        return json.dumps({
+        doc = {
             "schema": self.schema,
             "base_sha256": self.base_sha256,
             "build_name": self.build_name,
             "ops": [{"id": o.id, "type": o.type, "params": o.params,
                      "enabled": o.enabled, "note": o.note} for o in self.ops],
             "preview": self.preview,
-        }, indent=2)
+        }
+        if self.ext_ops:
+            doc["ext_ops"] = self.ext_ops
+        if self.user_op_acceptance:
+            doc["user_op_acceptance"] = self.user_op_acceptance
+        if self.user_op_sources:
+            doc["user_op_sources"] = self.user_op_sources
+        return json.dumps(doc, indent=2)
 
 
 @dataclasses.dataclass
@@ -116,14 +155,36 @@ class Ctx:
 
 REGISTRY: dict[str, type] = {}
 
+# User ops (`userop`) never enter REGISTRY. `userop.registered(...)` sets this overlay for the
+# duration of a compile, so a loaded op cannot outlive the block or leak into another thread's (or
+# test's) compile; `_lookup` consults REGISTRY first, and the loader refuses a built-in's name.
+# Values are `userop.LoadedOp`.
+_USER_OPS: contextvars.ContextVar = contextvars.ContextVar("fireflymcf_user_ops", default=None)
+# While the loader imports an `op.py`, `@op` registers into this dict instead of REGISTRY, so a
+# user op naming a built-in can never replace it, not even between import and refusal.
+_CAPTURE: contextvars.ContextVar = contextvars.ContextVar("fireflymcf_op_capture", default=None)
+
 
 def op(name: str):
     """Class decorator: register an Op subclass under its project-file type name."""
     def register(cls):
         cls.type = name
-        REGISTRY[name] = cls
+        target = _CAPTURE.get()
+        (REGISTRY if target is None else target)[name] = cls
         return cls
     return register
+
+
+def _user_ops() -> dict:
+    return _USER_OPS.get() or {}
+
+
+def _lookup(type_name: str):
+    cls = REGISTRY.get(type_name)
+    if cls is None:
+        loaded = _user_ops().get(type_name)
+        cls = loaded.cls if loaded is not None else None
+    return cls
 
 
 class Op:
@@ -193,6 +254,15 @@ class CompileResult:
     # {op_id: [entry, ...]}: what each `remove_records`/`move_element` moved besides its own
     # records (`recipe_ops.shift_report`); report only, additive
     shifts: dict = dataclasses.field(default_factory=dict)
+    # {op_id: {"type", "lost", "gained", "frames"}}: each user op that changes what the panel
+    # sends, by the capability_delta it declares, by the (channel, command) pairs its own apply
+    # changed, or by the frames its tick routines send (`userop.routine_frames`). The CLI asks the
+    # owner's G12 acceptance for these (`G12_ACK_REQUIRED`); additive
+    sends: dict = dataclasses.field(default_factory=dict)
+
+
+# ctx.handles key under which a user op's apply records the capabilities it changed
+USER_OP_CAPS = "__user_op_caps__"
 
 
 def capabilities(img: bytes) -> set:
@@ -209,18 +279,20 @@ def capabilities(img: bytes) -> set:
 
 def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
     ok, reason = relocate._boundary_oracle(data)
-    assert ok, reason
+    _gate(ok, "STRUCTURAL_GATE", reason)
     ok, reason = relocate._verify_record_geometry(data)
-    assert ok, reason
-    assert coverage.analyse(data, deep=True).unclaimed == []
+    _gate(ok, "STRUCTURAL_GATE", reason)
+    unclaimed = coverage.analyse(data, deep=True).unclaimed
+    _gate(unclaimed == [], "STRUCTURAL_GATE",
+          "deep coverage found %d unclaimed byte run(s): %r" % (len(unclaimed), unclaimed[:4]))
     for lit_off, tgt in theme.guicode_guidata_pointers(data):
-        assert struct.unpack_from("<I", data, lit_off)[0] == 0x90000000 + tgt, \
-            "stale GuiCode->GuiData pointer at %#x" % lit_off
+        _gate(struct.unpack_from("<I", data, lit_off)[0] == 0x90000000 + tgt, "STRUCTURAL_GATE",
+              "stale GuiCode->GuiData pointer at %#x" % lit_off)
     if ctx.insertions:
         # Check the LOWEST insertion — the most conservative `at`, since the gate
         # refuses if the separately-flashed LCD Firmware points anywhere ABOVE it.
         lcd_ok, lcd_why = relocate._verify_no_stranded_lcd_pointers(data, min(ctx.insertions))
-        assert lcd_ok, lcd_why
+        _gate(lcd_ok, "STRUCTURAL_GATE", lcd_why)
 
     _assert_authored_cells_fresh(ctx)
     _assert_reserved_groups_intact(ctx.stock, data)
@@ -244,9 +316,10 @@ def _assert_reserved_groups_intact(stock: bytes, data: bytes) -> None:
         slice_ = range(sg[g].start, sg[g].start + sg[g].count)
         if not all(sb[i].dgn_low == dgn_low for i in slice_):
             continue
-        assert dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_), \
-            "reserved group %d (the stock %#x inverter/charger template) was changed" % (
-                g, 0x10000 | dgn_low)
+        _gate(dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_),
+              "STRUCTURAL_GATE",
+              "reserved group %d (the stock %#x inverter/charger template) was changed" % (
+                  g, 0x10000 | dgn_low))
 
 
 def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
@@ -259,8 +332,9 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     selected = newbutton.guicode_selected_groups(stock)
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
     bad = [g for g in selected if g < len(sg) and g < len(dg) and dg[g].start != sg[g].start]
-    assert not bad, ("group(s) %s were reused, but GuiCode drives them by number "
-                     "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
+    _gate(not bad, "STRUCTURAL_GATE",
+          "group(s) %s were reused, but GuiCode drives them by number "
+          "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
 
 
 def _assert_authored_cells_fresh(ctx: Ctx) -> None:
@@ -283,11 +357,11 @@ def _assert_authored_cells_fresh(ctx: Ctx) -> None:
     except Exception:
         return
     reused = sorted(i for i in ctx.authored_cells if i < stock_len)
-    assert not reused, (
+    _gate(not reused, "STRUCTURAL_GATE", (
         "op authored display cell index(es) %r below the stock cell-table row count (%d) -- a "
         "private cell must be a freshly grown index, never a reused +0x44BC8 index (on 13.6 every "
         "reusable index is read by an object in another GuiData object table: the coach-48V "
-        "background-bar aliasing). Use readout.allocate_fresh_cells." % (reused, stock_len))
+        "background-bar aliasing). Use readout.allocate_fresh_cells." % (reused, stock_len)))
 
 
 def _build_ops(specs: list) -> tuple:
@@ -296,7 +370,7 @@ def _build_ops(specs: list) -> tuple:
     raising, so the caller can collect every problem in one pass."""
     ops, errors = [], []
     for spec in specs:
-        cls = REGISTRY.get(spec.type)
+        cls = _lookup(spec.type)
         if cls is None:
             errors.append(RecipeError("UNKNOWN_OP", "no op type %r" % spec.type,
                                       op_id=spec.id))
@@ -372,27 +446,57 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     # Capability gate: the finished image must still send every (channel, command)
     # pair stock could, minus/plus exactly what the ops declare.
     lost_want, gained_want = set(), set()
+    sends = {}
     for o in ops:
         lo, ga = o.capability_delta(ctx)
         lost_want |= lo
         gained_want |= ga
+        if getattr(o, "user_op", False):
+            m = ctx.handles.get((USER_OP_CAPS, o.spec.id)) or {}
+            lo_all = set(lo) | {tuple(x) for x in m.get("lost", ())}
+            ga_all = set(ga) | {tuple(x) for x in m.get("gained", ())}
+            frames = list(m.get("frames", ()))
+            if lo_all or ga_all or frames:
+                sends[o.spec.id] = {"type": o.spec.type, "lost": sorted(lo_all),
+                                    "gained": sorted(ga_all), "frames": frames}
     stock_caps, out_caps = capabilities(stock), capabilities(data)
-    assert stock_caps - out_caps == lost_want, \
-        "capability gate: lost %s, ops declared %s" % (
-            sorted(stock_caps - out_caps), sorted(lost_want))
-    assert out_caps - stock_caps == gained_want, \
-        "capability gate: gained %s, ops declared %s" % (
-            sorted(out_caps - stock_caps), sorted(gained_want))
+    _gate(stock_caps - out_caps == lost_want, "CAPABILITY_GATE",
+          "capability gate: lost %s, ops declared %s" % (
+              sorted(stock_caps - out_caps), sorted(lost_want)))
+    _gate(out_caps - stock_caps == gained_want, "CAPABILITY_GATE",
+          "capability gate: gained %s, ops declared %s" % (
+              sorted(out_caps - stock_caps), sorted(gained_want)))
 
     manifest = [o.verify(data, ctx) for o in ops]
     res, ch = patch.reseal(data)
-    assert res == data, "image not sealed after verify: %s" % ch
+    _gate(res == data, "NOT_SEALED", "image not sealed after verify: %s" % ch)
     unverified = [o.spec.id for o in ops if not o.hardware_verified]
     # An op's shift report joins its own line: the manifest stays one entry per op
     shifts, texts = recipe_ops.shift_report(ops, ctx)
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
-    return CompileResult(True, data, [], manifest, unverified, shifts)
+    return CompileResult(True, data, [], manifest, unverified, shifts, sends)
+
+
+def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
+                      ops: list) -> CompileResult:
+    """`_finish`, except that a user op's refusal (`userop` tags it `user_op`) surfacing in its
+    verify or capability_delta comes back as a failed CompileResult, the shape every other
+    user-op failure has, and so does a whole-image gate's refusal (`GateError`) in a build that
+    holds a user op. A built-in op's or the project's RecipeError, and a gate's in a build of
+    built-in ops alone, still raises as before."""
+    try:
+        return _finish(project, stock, data, ctx, ops)
+    except GateError as e:
+        # A whole-image gate names no op; with a user op in the build it is most likely the
+        # user op's doing, and it comes back in the same shape as the user op's own refusals.
+        if not any(getattr(o, "user_op", False) for o in ops):
+            raise
+        return CompileResult(False, None, [e.to_json()], [], [])
+    except RecipeError as e:
+        if not getattr(e, "user_op", False):
+            raise
+        return CompileResult(False, None, [e.to_json()], [], [])
 
 
 def compile_project(project: Project, stock: bytes) -> CompileResult:
@@ -416,7 +520,7 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
             e.op_id = e.op_id or o.spec.id
             return CompileResult(False, None, [e.to_json()], [], [])
 
-    return _finish(project, stock, data, ctx, ops)
+    return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
 def _prefix_key(base_hash: str, specs: list) -> str:
@@ -424,7 +528,11 @@ def _prefix_key(base_hash: str, specs: list) -> str:
     `base_hash`'s stock. Keyed on (id, type, params) only — `enabled`/`note` never
     reach here since callers always filter to the enabled list first, and `note` has
     no effect on the compiled bytes."""
-    doc = [(s.id, s.type, s.params) for s in specs]
+    user = _user_ops()
+    # A user op's bytes come from its folder, not the package: its folder hash joins the key, so
+    # an edited op misses. Built-in entries keep their 3-tuple, so their keys are unchanged.
+    doc = [(s.id, s.type, s.params) + ((user[s.type].folder_sha256,) if s.type in user else ())
+           for s in specs]
     return hashlib.sha256((base_hash + json.dumps(doc, sort_keys=True))
                           .encode()).hexdigest()
 
@@ -484,7 +592,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
         cache[_prefix_key(project.base_sha256, enabled[:i + 1])] = (
             data, _snapshot(ctx))
 
-    return _finish(project, stock, data, ctx, ops)
+    return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
 from fireflymcf import recipe_ops  # noqa: E402,F401  (populates REGISTRY)

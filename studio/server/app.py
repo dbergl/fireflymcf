@@ -103,6 +103,14 @@ def create_app(stock_path: str = "firefly-13.6/mcf.bin",
             body = {"code": exc.code, "errors": exc.payload}
         return JSONResponse(status_code=exc.status, content={"detail": body})
 
+    # A whole-image gate's refusal (`recipe.GateError`) is a RecipeError too; it keeps the
+    # GATE_FAILED shape it had as an assert, naming the gate.
+    @app.exception_handler(recipe.GateError)
+    def _gate_refusal(_, exc: recipe.GateError):
+        return JSONResponse(status_code=500,
+                            content={"detail": {"code": "GATE_FAILED", "gate": exc.code,
+                                                "message": str(exc)}})
+
     @app.exception_handler(AssertionError)
     def _gate_error(_, exc: AssertionError):
         return JSONResponse(status_code=500,

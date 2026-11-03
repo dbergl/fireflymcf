@@ -531,6 +531,14 @@ def project_schema(registry: dict | None = None) -> dict:
             "ops": {"type": "array", "items": {"$ref": "#/$defs/op"}},
             "preview": {"type": "object",
                         "description": "render-only state; never build input"},
+            "ext_ops": {"type": "array", "items": {"type": "string", "minLength": 1},
+                        "description": "user-op folders outside <project dir>/ops/, relative "
+                                       "to the project file"},
+            "user_op_acceptance": {"type": "object",
+                                   "description": "the owner's acceptance of each user op"},
+            "user_op_sources": {"type": "object",
+                                "description": "where each installed user op came from: "
+                                               "{type: {source, folder_sha256}}"},
         },
         "$defs": {"op": {
             "type": "object",
@@ -539,7 +547,11 @@ def project_schema(registry: dict | None = None) -> dict:
             "properties": {
                 "id": {"type": "string", "minLength": 1,
                        "description": "unique; later ops reference it as {\"ref\": id}"},
-                "type": {"enum": [e["name"] for e in entries(registry)]},
+                "type": {"anyOf": [
+                    {"enum": [e["name"] for e in entries(registry)]},
+                    {"type": "string", "pattern": "^user:.+",
+                     "description": "a user op loaded from an op folder; its params are "
+                                    "its own"}]},
                 "params": {"type": "object"},
                 "enabled": {"type": "boolean", "default": True},
                 "note": {"type": "string", "description": "free text; never affects bytes"},

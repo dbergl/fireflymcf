@@ -4,6 +4,12 @@ Tools and a Claude Code plugin for reading, rendering and safely modifying **Fir
 MCF** firmware: the configuration bundle (`mcf.bin`) for the Firefly G12 / Spyder panel RV
 multiplex system found in Jayco and other coaches.
 
+> **Unofficial, no warranty.** Not affiliated with or endorsed by Firefly Integrations, Jayco or
+> any coach or component maker. Modifying and flashing panel firmware can switch the wrong load,
+> stop a control working or misreport a tank or battery, and an op you or someone else wrote has
+> been checked by nobody but its author. You use this entirely at your own risk, and you decide
+> which risks are acceptable. See [Disclaimer](#disclaimer).
+
 > **Status: early.** One coach (a Jayco on firmware 13.6) has run every build the tools have made;
 > other coaches and firmware versions are where the work is least proven. See
 > [`ROADMAP.md`](ROADMAP.md).
@@ -30,19 +36,38 @@ At the prompt of a Claude Code session:
 The plugin drives the `fireflymcf` command-line tool and installs it itself. At each session start
 its hook (`plugin/hooks/hooks.json`, `plugin/scripts/session-start.sh`) checks that the release
 matching the plugin's version is installed in a venv in the plugin's data folder, installs it from
-that release's wheel when it is not (the first session, and the first after a plugin update), and
-tells the agent where it is. It needs Python 3.10+ (`python3`, `python` or `py -3`) and, on
+that release's wheel, with the panel emulator (`[full,emu]`), when it is not (the first session,
+and the first after a plugin update), and tells the agent where it is. It needs Python 3.10+ (`python3`, `python` or `py -3`) and, on
 Windows, Git Bash, which Claude Code runs hooks in. It does not touch any other Python install.
 When it cannot install, the agent says so and gives the command to run by hand:
 
 ```
-pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"
+pip install "fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git"
 ```
 
 Describe the change you want ("rename the Water Pump button to Pump"), or use
 `/fireflymcf:inspect`, `/fireflymcf:coach-profile`, `/fireflymcf:build` and
 `/fireflymcf:flash-report`. The agent builds from your own stock `mcf.bin`, checks the whole image
 against it, and tells you what has and has not been tested on a coach.
+
+### Writing your own op
+
+When no existing op does what you want, the plugin's `write-new-op` skill writes a **user op**: a
+folder of Python beside your project that the engine gates like its own ops (every write checked
+against the bytes it expects, replayed, and limited to the sections it declares) and that is
+tested in the panel emulator before you flash anything. A user op runs with the same trust as any
+Python you run; the gates check correctness, they are not a sandbox, so read an op someone else
+wrote before you build with it. See [`plugin/skills/write-new-op/USER-OPS.md`](plugin/skills/write-new-op/USER-OPS.md).
+
+## Panel emulator
+
+`fireflymcf.emu` boots an `mcf.bin` on an emulated Spyder 7" LCD panel (STM32F7 on Unicorn, with
+its display, touch, EEPROM and CAN bus) next to an emulated G12 that runs the image's own G12
+logic and a simulated RV-C network, so a build can be looked at and tapped before it is flashed.
+Install the `emu` extra (`pip install "fireflymcf[emu] @ git+https://github.com/dbergl/fireflymcf.git"`),
+then run `python -m fireflymcf.emu MCF --seconds 5 --screenshot shot.png` (`--gui` with the
+`emu-gui` extra). It is developed against firmware 13.6. See [`docs/EMULATOR.md`](docs/EMULATOR.md)
+and its findings in [`docs/EMULATOR-NOTES.md`](docs/EMULATOR-NOTES.md).
 
 ## Development
 

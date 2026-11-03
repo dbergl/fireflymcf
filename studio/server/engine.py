@@ -191,6 +191,15 @@ class Engine:
 
     def compile(self, name: str, project: recipe.Project):
         tag = self.etag(project)
+        # Studio never imports a user-written op (R6): it has no way to ask the owner, and an op's
+        # op.py runs with full Python trust. Such a project builds from the CLI only.
+        user = [s for s in project.ops if s.enabled and s.type.startswith("user:")]
+        if user:
+            return recipe.CompileResult(False, None, [{
+                "op_id": s.id, "code": "USER_OPS", "offers": [],
+                "message": "Studio does not run user-written ops (%s); build this project with "
+                           "`fireflymcf compile --allow-user-ops` once the owner has been told "
+                           "what it changes" % s.type} for s in user], [], []), tag
         result = self._results.get(tag)
         if result is None:
             cache = self._caches.setdefault(name, {})

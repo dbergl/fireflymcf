@@ -72,7 +72,7 @@ def _spec(wheel):
 
 def test_the_wheel_spec_is_the_releases_asset():
     assert hook.wheel_spec("0.3.3") == (
-        "fireflymcf[full] @ https://github.com/dbergl/fireflymcf/releases/download/v0.3.3/"
+        "fireflymcf[full,emu] @ https://github.com/dbergl/fireflymcf/releases/download/v0.3.3/"
         "fireflymcf-0.3.3-py3-none-any.whl")
 
 

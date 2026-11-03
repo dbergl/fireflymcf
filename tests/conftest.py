@@ -67,7 +67,7 @@ def pytest_report_header(config):
 def pytest_terminal_summary(terminalreporter):
     # Counted here: under xdist, collection happens in the workers.
     if _RESEARCH_MISSING:
-        left_out = [p for p in (REPO_ROOT / "tests").glob("test_*.py")
+        left_out = [p for p in (REPO_ROOT / "tests").rglob("test_*.py")
                     if any(token in p.read_text() for token in _RESEARCH_TOKENS)]
         terminalreporter.write_line(
             f"{len(left_out)} test modules not collected: they need research data "
@@ -293,7 +293,8 @@ _CACHE_ACTIVE = [False]
 
 
 def _compile_through_cache(project, stock, *args, **kwargs):
-    if args or kwargs or not _CACHE_ACTIVE[0] or \
+    # A compile with user ops loaded (`userop.registered`) reads op folders the key cannot see.
+    if args or kwargs or not _CACHE_ACTIVE[0] or _recipe._user_ops() or \
             hashlib.sha256(stock).hexdigest() != project.base_sha256:
         return _UNCACHED_COMPILE(project, stock, *args, **kwargs)
     entry, failed = _cached_entry(project, stock)

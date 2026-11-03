@@ -264,3 +264,138 @@ def test_auto_off_encoders_refuse_bad_operands():
         thumb.ldr_imm12(0, 15, 4)      # rN=pc is a literal load, a different instruction
     with pytest.raises(ValueError, match="bad register"):
         thumb.ldr_imm12(15, 4, 4)      # and rT=pc is a branch
+
+
+# --- the helpers a user op's routine uses (acceptance runs 1-2 wrote their own) -----------------
+# Checked against capstone, the independent decoder `Routine.assemble` itself trusts.
+
+def _dis(raw, at=0x259C00):
+    return [t for _a, t in thumb.disassemble(raw, at)]
+
+
+@pytest.mark.parametrize("rt,rn,imm", [(1, 0, 0), (2, 0, 5), (7, 3, 31)])
+def test_strb_imm_t1(rt, rn, imm):
+    raw = thumb.strb_imm(rt, rn, imm)
+    assert len(raw) == 2
+    want = f"strb r{rt}, [r{rn}, #{thumb._imm(imm)}]" if imm else f"strb r{rt}, [r{rn}]"
+    assert _dis(raw) == [want]
+    assert _dis(thumb.ldrb_imm(rt, rn, imm)) == [want.replace("strb", "ldrb")]
+
+
+@pytest.mark.parametrize("rd,rm,n", [(2, 2, 8), (0, 1, 1), (7, 7, 31)])
+def test_lsls_imm_t1(rd, rm, n):
+    assert _dis(thumb.lsls_imm(rd, rm, n)) == [f"lsls r{rd}, r{rm}, #{thumb._imm(n)}"]
+
+
+def test_strb_lsls_refuse_what_t1_cannot_say():
+    for bad in (lambda: thumb.strb_imm(8, 0, 0), lambda: thumb.strb_imm(0, 0, 32),
+                lambda: thumb.lsls_imm(0, 0, 0), lambda: thumb.lsls_imm(0, 9, 1)):
+        with pytest.raises(ValueError):
+            bad()
+
+
+@pytest.mark.parametrize("cond", ["eq", "ne", "cs", "hs", "cc", "lo", "hi", "ls", "ge", "lt"])
+def test_routine_branches_carry_capstones_spelling(cond):
+    """`Routine.bcc` writes the text capstone prints (`cc` is `blo`, `cs` is `bhs`), so an
+    author never has to know it; `b` likewise."""
+    r = thumb.Routine({})
+    r.bcc(cond, "out")
+    r.b("out")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("out")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    blob, dis = r.assemble(0x259C00)
+    assert dis[0][1] == f"b{thumb.COND_TEXT[cond]} #0x259c06"
+    assert dis[1][1] == "b #0x259c06"
+    assert thumb.bcc_n(0, 6, cond) == thumb.bcc_n(0, 6, {"hs": "cs", "lo": "cc"}.get(cond, cond))
+
+
+def test_routine_bcc_out_of_range_is_the_routines_error():
+    class Refused(Exception):
+        pass
+    r = thumb.Routine({}, error=Refused)
+    r.bcc("eq", "far")
+    for _ in range(200):
+        r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("far")
+    with pytest.raises(Refused, match="out of range"):
+        r.assemble(0x259C00)
+    with pytest.raises(Refused, match="unknown condition"):
+        r.bcc("xx", "far")
+
+
+def test_routine_refuses_a_name_that_is_both_label_and_pool_word():
+    """Acceptance run 3: a pool constant and a label both named `giveup`; `ldr_lit` silently
+    loaded from the label's address. The routine now refuses the clash, a label defined twice,
+    and a name that is neither."""
+    class Refused(Exception):
+        pass
+
+    def routine(pool, labels, ref):
+        r = thumb.Routine(pool, error=Refused)
+        r.ldr_lit(0, ref)
+        for name in labels:
+            r.label(name)
+            r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+        return r
+
+    with pytest.raises(Refused, match="both a label and a pool word"):
+        routine({"giveup": 5}, ["giveup"], "giveup").assemble(0x259C00)
+    with pytest.raises(Refused, match="defined twice"):
+        routine({"k": 5}, ["a", "a"], "k").assemble(0x259C00)
+    with pytest.raises(Refused, match="no label or pool word"):
+        routine({"k": 5}, ["a"], "missing").assemble(0x259C00)
+    blob, _ = routine({"k": 5}, ["a"], "k").assemble(0x259C00)
+    assert blob[-4:] == (5).to_bytes(4, "little")
+
+
+def test_ldr_lit_text_at_offset_zero():
+    """A pool word right after the load: capstone prints `[pc, #0]`, which `ldr_lit` used to
+    claim as `[pc]`, so that routine could never assemble."""
+    r = thumb.Routine({"k": 7})
+    r.ldr_lit(0, "k")
+    r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    blob, dis = r.assemble(0x259C00)
+    assert dis[0][1] == "ldr r0, [pc, #0]" and blob[-4:] == (7).to_bytes(4, "little")
+
+
+def test_routine_b_out_of_range_is_the_routines_error():
+    """`Routine.b` routes its range error through `error`, as `bcc` does (final review)."""
+    class Refused(Exception):
+        pass
+    r = thumb.Routine({}, error=Refused)
+    r.b("far")
+    for _ in range(1100):
+        r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("far")
+    with pytest.raises(Refused, match="out of range"):
+        r.assemble(0x259C00)
+
+
+@pytest.mark.parametrize("v", [0, 1, 9, 10, 0x40, 255, 0xFFF])
+def test_imm_text_is_capstones_spelling(v):
+    assert _dis(thumb.movw(0, v)) == [f"movw r0, {thumb.imm_text(v)}"]
+
+
+@pytest.mark.parametrize("enc,rn,imm", [
+    (lambda: thumb.ldr_imm(1, 0, 0), 0, 0), (lambda: thumb.ldr_imm(1, 0, 4), 0, 4),
+    (lambda: thumb.ldr_imm(1, 0, 0x40), 0, 0x40), (lambda: thumb.ldrb_imm(1, 2, 10), 2, 10),
+    (lambda: thumb.str_sp_imm(1, 8), 13, 8), (lambda: thumb.strb_imm12(1, 3, 0x123), 3, 0x123)])
+def test_mem_text_is_capstones_spelling(enc, rn, imm):
+    text = _dis(enc())[0]
+    assert text.endswith(", " + thumb.mem_text(rn, imm)), text
+
+
+def test_mem_text_pc_and_negative():
+    """A pc-relative operand keeps `#0`; a negative offset is `#-` and the magnitude."""
+    assert thumb.mem_text(15, 0) == "[pc, #0]"
+    assert thumb.mem_text(15, -0x10) == "[pc, #-0x10]"
+    assert thumb.imm_text(-5) == "#-5"
+    blob, dis = _ldr_w_back()
+    assert dis.endswith(thumb.mem_text(15, -0x10)), dis
+
+
+def _ldr_w_back():
+    at = 0x259C20
+    raw = thumb.ldr_literal_w(0, at, ((at + 4) & ~3) - 0x10)
+    return raw, _dis(raw, at)[0]

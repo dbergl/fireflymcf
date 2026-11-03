@@ -1,0 +1,11 @@
+# path:rule exemptions for scripts/scrub_check.py; every line needs a why.
+studio/web/src/panes/Canvas.test.tsx:pii-home  # JS regex /home/i matching the "home" alt text, not a path
+tests/test_g12code.py:pii-host  # assembly comment "time@stop: movs ..." is a label, not an SSH target
+scripts/scrub_check.py:pii-host  # the gate's own patterns name the hostname it forbids
+scripts/scrub_check.py:pii-home  # the gate's own patterns
+tests/test_scrub.py:pii-host  # fixtures that must trip the gate
+tests/test_scrub.py:pii-home  # fixtures that must trip the gate
+tests/test_scrub.py:pii-email  # fixtures that must trip the gate
+tests/test_scrub.py:pii-ip  # fixtures that must trip the gate
+scrub-allow.txt:pii-home  # the Canvas.test.tsx entry above quotes its regex
+scrub-allow.txt:pii-host  # the test_g12code.py entry above quotes its label

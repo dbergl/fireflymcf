@@ -721,6 +721,137 @@ def _cmd_swap_image(args: argparse.Namespace) -> int:
     return 0
 
 
+USER_OPS_MSG = ("USER_OPS: %s are user-written and have never been checked by anyone but their "
+                "author. Nothing written. Rebuild with --allow-user-ops once the owner has been "
+                "told what they change.")
+
+
+def _user_op_rows(discovered) -> list[dict]:
+    return [{"type": d.type, "folder": str(d.folder), "folder_sha256": d.folder_sha256}
+            for d in discovered]
+
+
+def _user_ops_refusal(project, discovered, allowed: bool):
+    """(code, message) when the project's user ops may not run, else None. Read from discovery
+    alone (manifests and folder hashes): nothing has been imported (R6)."""
+    from . import userop
+    if not discovered:
+        return None
+    if not allowed:
+        return "USER_OPS", USER_OPS_MSG % ", ".join(d.type for d in discovered)
+    g12 = userop.needs_g12_ack(project, discovered)
+    if g12:
+        types = ", ".join(d.type for d in g12)
+        return "G12_ACK_REQUIRED", (
+            f"G12_ACK_REQUIRED: {types} change the G12's configuration (what drives the pumps, "
+            "slides, heaters and other loads), and the owner has not accepted this version of "
+            "it. Nothing written. Once the owner says yes, run `fireflymcf op accept PROJECT "
+            "TYPE --g12` and rebuild.")
+    return None
+
+
+def _frames_text(f: dict) -> str:
+    """One `userop.routine_frames` entry in words."""
+    kinds = {0xD1: "D1", 0xD2: "D2", 0xD3: "D3"}
+    if f["templates"]:
+        what = "OPTIONS config frames: " + ", ".join(
+            "selector 0x%02X %s (%s)" % (t["selector"], t["kind"],
+                                         kinds.get(t["function"], hex(t["function"])))
+            for t in f["templates"])
+    else:
+        what = "frames through the host CAN sender (not decoded)"
+    return f"sends frames from its tick routine {f['routine']!r}: {what}"
+
+
+def _user_ops_sends_refusal(project, discovered, sends: dict):
+    """(code, message) when a compiled user op changes what the panel sends (its declared
+    `capability_delta`, the (channel, command) pairs its apply changed, or the frames its tick
+    routines send: `recipe.CompileResult.sends`) and the owner has not accepted that folder with `--g12`: the
+    G12 acts on what the panel sends, whatever the manifest's `touches` declares. Else None."""
+    from . import userop
+    by = {d.type: d for d in discovered}
+    need = {}
+    for e in sends.values():
+        d = by.get(e["type"])
+        if d is not None and (userop.acceptance(project, d) or {}).get("g12") is not True:
+            pairs = need.setdefault(d.type, [])
+            pairs += ["gains (%d, %d)" % tuple(x) for x in e["gained"]]
+            pairs += ["loses (%d, %d)" % tuple(x) for x in e["lost"]]
+            pairs += [_frames_text(f) for f in e.get("frames", ())]
+    if not need:
+        return None
+    what = "; ".join(f"{t} {', '.join(p)}" for t, p in need.items())
+    return "G12_ACK_REQUIRED", (
+        f"G12_ACK_REQUIRED: {what}: what the panel sends to the G12, which "
+        "the G12 acts on, and the owner has not accepted this version of it with --g12. Nothing "
+        "written. Once the owner says yes, run `fireflymcf op accept PROJECT TYPE --g12` and "
+        "rebuild.")
+
+
+def _print_user_ops_refusal(code: str, msg: str, discovered, as_json: bool, shape: dict) -> int:
+    if as_json:
+        print(json.dumps(dict(shape, errors=[{"op_id": None, "code": code, "message": msg,
+                                              "offers": []}],
+                              user_ops=_user_op_rows(discovered)), indent=2))
+    else:
+        print(f"error: {msg}", file=sys.stderr)
+        for d in discovered:
+            print(f"  {d.type}  {d.folder}", file=sys.stderr)
+    return 1
+
+
+def _op_folder_of(path: Path) -> Path | None:
+    """The op folder (`manifest.json` and `op.py`) that holds `path`, if any."""
+    for d in Path(path).resolve().parents:
+        if (d / "manifest.json").is_file() and (d / "op.py").is_file():
+            return d
+    return None
+
+
+def _scenario_refusal(files, allowed: bool, as_json: bool, shape: dict) -> int | None:
+    """Refuse (USER_OPS, exit 1) to run a scenario file from an op folder without
+    `--allow-user-ops`: it is that op's author's code, as its `op.py` is. None when it may run.
+    A scenario of your own outside any op folder runs like any script you start."""
+    if allowed:
+        return None
+    held = [(Path(f), _op_folder_of(Path(f))) for f in files]
+    held = [(f, d) for f, d in held if d is not None]
+    if not held:
+        return None
+    msg = ("USER_OPS: %s %s in an op folder, the op author's code, never checked by anyone but "
+           "them. Nothing run. Run it again with --allow-user-ops once you have read it."
+           % (", ".join(str(f) for f, _ in held), "is" if len(held) == 1 else "are"))
+    if as_json:
+        print(json.dumps(dict(shape, errors=[{"op_id": None, "code": "USER_OPS",
+                                              "message": msg, "offers": []}],
+                              folders=[str(d) for _, d in held]), indent=2))
+    else:
+        print(f"error: {msg}", file=sys.stderr)
+        for _, d in held:
+            print(f"  {d}", file=sys.stderr)
+    return 1
+
+
+def _announce_user_ops(discovered, as_json: bool) -> None:
+    """Say what runs before anything is imported: type, folder, folder hash."""
+    if as_json or not discovered:
+        return
+    for d in discovered:
+        print(f"user op {d.type} v{d.manifest.get('version', '?')} from {d.folder} "
+              f"(sha256 {d.folder_sha256}): runs with full Python trust")
+
+
+def _sidecar_user_ops(project, discovered) -> list[dict]:
+    """The sidecar's record of the user ops this build ran (enabled in the project)."""
+    from . import userop
+    used = {s.type for s in project.ops if s.enabled}
+    return [{"type": d.type, "version": d.manifest.get("version"),
+             "folder_sha256": d.folder_sha256,
+             "source": (project.user_op_sources.get(d.type) or {}).get("source"),
+             "touches": d.touches, "accepted": userop.acceptance(project, d)}
+            for d in discovered if d.type in used]
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     """Pre-flash gate: compile a *.ffproj.json through every universal gate and report PASS/FAIL.
 
@@ -728,26 +859,41 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     pass it explicitly, or omit it and let the repo's known stock images be searched by hash.
     Exit 0 on PASS, 1 on FAIL.
     """
-    from . import recipe, validate
+    from . import recipe, userop, validate
+    discovered = []
     try:
         project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
+        discovered = userop.discover_used_ops(Path(args.project), project)
+        refusal = _user_ops_refusal(project, discovered, args.allow_user_ops)
+        if refusal:
+            return _print_user_ops_refusal(*refusal, discovered, args.json,
+                                           {"passed": False, "unverified": [], "report": ""})
         if args.stock:
             stock = Path(args.stock).read_bytes()
         else:
             stock = validate.resolve_stock(project, Path.cwd())
+        _announce_user_ops(discovered, args.json)
+        loaded = userop.import_user_ops(discovered)
     except recipe.RecipeError as exc:
         if args.json:
-            print(json.dumps({"passed": False, "errors": [{"code": exc.code,
-                                                           "message": str(exc)}],
+            print(json.dumps({"passed": False, "errors": [exc.to_json()],
                               "unverified": [], "report": ""}, indent=2))
             return 1
         print(f"FAIL: {exc.code}: {exc}", file=sys.stderr)
         return 1
-    res = validate.validate(project, stock, require_verified=args.require_verified)
+    with userop.registered(loaded):
+        res = validate.validate(project, stock, require_verified=args.require_verified)
+    refusal = _user_ops_sends_refusal(project, discovered, res.sends) if res.passed else None
+    if refusal:
+        return _print_user_ops_refusal(*refusal, discovered, args.json,
+                                       {"passed": False, "unverified": res.unverified,
+                                        "report": res.report})
     if args.json:
-        print(json.dumps({"passed": res.passed, "errors": res.errors,
-                          "unverified": res.unverified, "report": res.report},
-                         indent=2, default=str))
+        body = {"passed": res.passed, "errors": res.errors,
+                "unverified": res.unverified, "report": res.report}
+        if discovered:
+            body["user_ops"] = _user_op_rows(discovered)
+        print(json.dumps(body, indent=2, default=str))
         return 0 if res.passed else 1
     print(res.report, file=(sys.stdout if res.passed else sys.stderr))
     return 0 if res.passed else 1
@@ -761,17 +907,100 @@ def _cmd_verify(args: argparse.Namespace) -> int:
     region, a page that fails to render, or a build name equal to stock's."""
     import json
     from . import buildcheck
+    import hashlib
+    scenarios: dict = {}
+    missing: dict = {}
+    digests: dict = {}
+    if args.project:
+        if not args.emulate:
+            print("error: --project names the user ops whose emu_test.py --emulate runs; "
+                  "give --emulate too", file=sys.stderr)
+            return 2
+        from . import recipe, userop
+        try:
+            project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
+            discovered = userop.discover_used_ops(Path(args.project), project)
+        except recipe.RecipeError as exc:
+            print(f"error: {exc.code}: {exc}", file=sys.stderr)
+            return 1
+        # an emu_test.py is the op author's code too: it runs only with the same authorisation
+        if discovered and not args.allow_user_ops:
+            return _print_user_ops_refusal(
+                "USER_OPS", USER_OPS_MSG % ", ".join(d.type for d in discovered), discovered,
+                args.json, {"ok": False})
+        _announce_user_ops(discovered, args.json)
+        try:
+            snaps = userop.verified_snapshots(discovered)
+        except recipe.RecipeError as exc:
+            print(f"error: {exc.code}: {exc}", file=sys.stderr)
+            return 1
+        for d in discovered:
+            body = snaps[d.type].get("emu_test.py")
+            if body is not None:
+                # the worker runs it only if it still holds the bytes the folder hash covered
+                scenarios[d.type] = d.folder / "emu_test.py"
+                digests[d.type] = hashlib.sha256(body).hexdigest()
+            else:
+                missing[d.type] = f"{d.type} has no emu_test.py in {d.folder}"
+    refused = _scenario_refusal(args.scenario, args.allow_user_ops, args.json, {"ok": False})
+    if refused is not None:
+        return refused
+    from .emu.gate import result_key          # light: stdlib only
+    for f in args.scenario:
+        scenarios[result_key(Path(f))] = Path(f)
     build, stock = Path(args.build).read_bytes(), Path(args.stock).read_bytes()
     configs = {Path(c).stem: options.CoachConfig.from_json(c) for c in args.config} \
         or {"no-floorplan": None}
     roots = [_resolve_page_root(stock, n) for n in args.page] + list(args.root) or None
     report = buildcheck.compare(stock, build, configs, roots, render_pages=not args.no_render)
+    emu = None
+    if args.emulate:
+        emu = _emulate_scenarios(Path(args.build), scenarios, args.emulate_timeout, missing,
+                                 digests)
+        if emu is None:
+            return 2
     if args.json:
-        print(json.dumps(report.to_dict(), indent=2))
+        body = report.to_dict()
+        if emu is not None:
+            body["emulation"] = {k: r.to_dict() for k, r in emu.items()}
+        print(json.dumps(body, indent=2))
     else:
         print(buildcheck.format_report(report))
+        if emu is not None:
+            from .emu import gate
+            for line in gate.summary_lines(emu):
+                print(line)
     bad = report.problems or report.unexplained or any(p.error for p in report.pages)
-    return 1 if bad else 0
+    return 1 if bad else 0           # a failing emulator test is reported, never an exit code
+
+
+# The emulator is the `emu` extra (the plugin's hook installs it). Never a bare-name install: a
+# PyPI package called fireflymcf would not be this project (tests/test_install_docs.py).
+EMU_MISSING = ('emulate needs the emu extra: pip install '
+               '"fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git"')
+
+
+def _emulate_scenarios(build: Path, scenarios: dict, timeout_s: float, missing: dict | None = None,
+                       digests: dict | None = None):
+    """Run the scenario files ({sidecar key: file}) on `build` and record them in its sidecar,
+    with a `not emulated` entry for each user op in `missing` (no emu_test.py); None (after
+    saying why) when the request cannot be carried out."""
+    import importlib
+    missing = missing or {}
+    if not scenarios and not missing:
+        print("error: --emulate needs at least one --scenario FILE, or --project with user ops",
+              file=sys.stderr)
+        return None
+    try:
+        importlib.import_module("fireflymcf.emu.machine")
+    except ImportError:
+        print(EMU_MISSING, file=sys.stderr)
+        return None
+    from .emu import gate
+    results = gate.run_scenarios(build, scenarios, timeout_s, digests) if scenarios else {}
+    results.update({k: gate.EmuResult("not emulated", why) for k, why in missing.items()})
+    gate.record(build, results)
+    return results
 
 
 def _cmd_coach_config(args: argparse.Namespace) -> int:
@@ -833,27 +1062,62 @@ def _cmd_ops(args: argparse.Namespace) -> int:
     import textwrap
     from . import ops_doc
     ops = ops_doc.entries()
+    user = []
+    if args.project:
+        from . import recipe, userop
+        try:
+            project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
+            user = [_user_op_entry(d, userop.acceptance(project, d))
+                    for d in userop.discover_user_ops(Path(args.project), project)]
+        except recipe.RecipeError as exc:
+            print(f"error: {exc.code}: {exc}", file=sys.stderr)
+            return 1
     if args.names:
-        by = {e["name"]: e for e in ops}
+        by = {e["name"]: e for e in ops + user}
         unknown = [n for n in args.names if n not in by]
         if unknown:
-            print(f"error: no such op: {', '.join(unknown)} (`fireflymcf ops` lists them)",
+            hint = "" if args.project else "; user ops need --project P"
+            print(f"error: no such op: {', '.join(unknown)} (`fireflymcf ops` lists them{hint})",
                   file=sys.stderr)
             return 1
         ops = [by[n] for n in args.names]
+    elif user:
+        ops = ops + user
     if args.json:
         print(json.dumps(ops, indent=2))
         return 0
     if not args.names:
-        w = max(len(e["name"]) for e in ops)
+        builtin = [e for e in ops if not e.get("user_op")]
+        w = max(len(e["name"]) for e in builtin)
         print(f"{'op':<{w}}  {'class':<10}  verified  purpose")
-        for e in ops:
+        for e in builtin:
             purpose = e["purpose"].split(". ")[0].rstrip(".") + "."
             print(f"{e['name']:<{w}}  {e['class']:<10}  {'yes' if e['verified'] else 'NO':<8}  "
                   f"{textwrap.shorten(purpose, 100)}")
+        if args.project:
+            print("\nUser ops (this project): user-written, checked by no one but their author")
+            for e in user:
+                print(f"  {e['name']}  v{e['manifest'].get('version', '?')}  touches "
+                      f"{', '.join(e['manifest'].get('touches', [])) or 'nothing'}  "
+                      f"{textwrap.shorten(e['purpose'], 80)}")
+                print(f"    {e['folder']}  (sha256 {e['folder_sha256'][:12]}...)")
+                print(f"    {_accepted_text(e['accepted'])}")
+            if not user:
+                print("  none")
         print("\n`fireflymcf ops NAME` for parameters and error codes.")
         return 0
     for e in ops:
+        if e.get("user_op"):
+            print(f"{e['name']}  (user op; verified: NO)")
+            print(f"  folder: {e['folder']}  (sha256 {e['folder_sha256']})")
+            print(f"  {_accepted_text(e['accepted'])}")
+            print("  manifest.json:")
+            print(textwrap.indent(json.dumps(e["manifest"], indent=2), "    "))
+            print("  README.md:" if e["readme"] is not None else "  README.md: none")
+            if e["readme"] is not None:
+                print(textwrap.indent(e["readme"].rstrip(), "    "))
+            print()
+            continue
         print(f"{e['name']}  ({e['class']}; verified: {'yes' if e['verified'] else 'NO'})")
         print(textwrap.fill(e["purpose"], 96, initial_indent="  ", subsequent_indent="  "))
         print(textwrap.fill("status: " + e["status"], 96, initial_indent="  ",
@@ -878,6 +1142,78 @@ def _cmd_ops(args: argparse.Namespace) -> int:
     return 0
 
 
+def _accepted_text(rec) -> str:
+    """The project file's acceptance record for this folder, as `ops --project` prints it. It is
+    whoever wrote that file's yes: a project received from someone else carries theirs."""
+    if not rec:
+        return "not accepted in this project file"
+    return (f"accepted {rec.get('date', '?')}{' (G12 included)' if rec.get('g12') else ''} "
+            "in this project file: if you did not accept it yourself, it is not your yes")
+
+
+def _user_op_entry(d, accepted=None) -> dict:
+    """A discovered user op in `ops_doc.entries` shape, plus its manifest, README, folder and the
+    project file's acceptance record for its current hash (`accepted`, None if none)."""
+    readme = d.folder / "README.md"
+    return {"name": d.type, "class": "user", "verified": False,
+            "purpose": d.manifest.get("description", ""),
+            "status": "user-written: never checked by anyone but its author",
+            "params": {}, "errors": [], "user_op": True, "folder": str(d.folder),
+            "folder_sha256": d.folder_sha256, "manifest": d.manifest, "accepted": accepted,
+            "readme": readme.read_text(encoding="utf-8", errors="replace")
+            if readme.is_file() else None}
+
+
+def _cmd_op(args: argparse.Namespace) -> int:
+    """`fireflymcf op install|pack|accept`: share and accept user ops (`opshare`). None of them
+    imports or runs an op."""
+    import shutil
+    import zipfile
+    import zlib
+    from . import opshare, recipe
+    try:
+        if args.op_command == "install":
+            res = opshare.install(Path(args.project), args.src, replace=args.replace)
+            if args.json:
+                print(json.dumps(dict(res.to_dict(), ok=True), indent=2))
+                return 0
+            print(f"installed {res.type} v{res.manifest.get('version', '?')} into {res.folder} "
+                  f"(sha256 {res.folder_sha256})")
+            print("manifest.json:")
+            print("  " + json.dumps(res.manifest, indent=2).replace("\n", "\n  "))
+            print("files (read every one before building with it: op.py runs with full Python "
+                  "trust when a build passes --allow-user-ops):")
+            for f in res.files:
+                print(f"  {res.folder / f}")
+            return 0
+        if args.op_command == "pack":
+            res = opshare.pack(Path(args.project), args.name, Path(args.out))
+            if args.json:
+                print(json.dumps(dict(res, ok=True), indent=2))
+            else:
+                print(f"wrote {res['out']}: {res['type']} v{res['version']}, "
+                      f"{len(res['files'])} file(s), folder_sha256 {res['folder_sha256']}")
+            return 0
+        rec = opshare.accept(Path(args.project), args.type, g12=args.g12)
+        if args.json:
+            print(json.dumps({"ok": True, "type": args.type, "accepted": rec}, indent=2))
+        else:
+            print(f"accepted {args.type} at sha256 {rec['folder_sha256']}"
+                  f"{' (G12 changes included)' if rec['g12'] else ''} on {rec['date']}; "
+                  "an edit to its folder needs a new acceptance")
+        return 0
+    except (OSError, zipfile.BadZipFile, shutil.Error, zlib.error) as e:
+        # a file the command reads or writes failed (a path, a permission, a corrupt member)
+        err = recipe.RecipeError("OP_IO_ERROR", f"{type(e).__name__}: {e}")
+    except recipe.RecipeError as e:
+        err = e
+    if args.json:
+        print(json.dumps({"ok": False, "errors": [err.to_json()]}, indent=2))
+    else:
+        print(f"error: {err.code}: {err}", file=sys.stderr)
+    return 1
+
+
 def _cmd_compile(args: argparse.Namespace) -> int:
     """Build a project file (`*.ffproj.json`) against its stock image and write the result.
 
@@ -888,19 +1224,27 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     engine's structured error), 2 on a refused write.
     """
     import hashlib
-    from . import recipe
+    from . import recipe, userop
     out, stock_path = Path(args.out), Path(args.stock)
     if not out.name.startswith("mcf-") or not out.name.endswith(".bin"):
         raise ValueError(f"refusing to write {out}: the bootloader lists only mcf-*.bin files")
     _check_writable(out, stock_path)
+    discovered = []
     try:
         project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
+        # R6: discovery reads manifests only; nothing is imported until the owner has authorised it
+        discovered = userop.discover_used_ops(Path(args.project), project)
+        refusal = _user_ops_refusal(project, discovered, args.allow_user_ops)
+        if refusal:
+            return _print_user_ops_refusal(*refusal, discovered, args.json, {"ok": False})
         stock = stock_path.read_bytes()
-        result = recipe.compile_project(project, stock)
+        _announce_user_ops(discovered, args.json)
+        loaded = userop.import_user_ops(discovered)
+        with userop.registered(loaded):
+            result = recipe.compile_project(project, stock)
     except recipe.RecipeError as exc:
         if args.json:
-            print(json.dumps({"ok": False, "errors": [{"code": exc.code, "message": str(exc)}]},
-                             indent=2))
+            print(json.dumps({"ok": False, "errors": [exc.to_json()]}, indent=2))
             return 1
         print(f"error: {exc.code}: {exc}", file=sys.stderr)
         return 1
@@ -915,13 +1259,23 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             for fix in err.get("offers") or []:
                 print(f"  offer: {fix}", file=sys.stderr)
         return 1
-    if result.unverified and not args.allow_unverified:
+    refusal = _user_ops_sends_refusal(project, discovered, result.sends)
+    if refusal:
+        return _print_user_ops_refusal(*refusal, discovered, args.json, {"ok": False})
+    # A user op is unverified by definition and admitted by --allow-user-ops alone; this gate is
+    # the built-in ops' (one flag never implies the other).
+    user_types = {d.type for d in discovered}
+    builtin_unverified = [i for i in result.unverified
+                          if next((s.type for s in project.ops if s.id == i), None)
+                          not in user_types]
+    if builtin_unverified and not args.allow_unverified:
         msg = ("UNVERIFIED: op(s) %s have never run on a coach. Nothing written. If the owner "
                "agrees to be the first, rebuild with --allow-unverified and tell them which "
-               "(`fireflymcf ops NAME` has each op's status)." % ", ".join(result.unverified))
+               "(`fireflymcf ops NAME` has each op's status)." % ", ".join(builtin_unverified))
         if args.json:
-            print(json.dumps({"ok": False, "unverified": result.unverified,
-                              "errors": [{"code": "UNVERIFIED_OPS", "message": msg}]}, indent=2))
+            print(json.dumps({"ok": False, "unverified": builtin_unverified,
+                              "errors": [{"op_id": None, "code": "UNVERIFIED_OPS",
+                                          "message": msg, "offers": []}]}, indent=2))
         else:
             print(f"error: {msg}", file=sys.stderr)
         return 1
@@ -940,6 +1294,8 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                "project": str(args.project), "stock_sha256": project.base_sha256,
                "manifest": result.manifest, "unverified": result.unverified,
                "shifts": result.shifts}
+    if discovered:
+        sidecar["user_ops"] = _sidecar_user_ops(project, discovered)
     Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
     if args.json:
         print(json.dumps(dict(sidecar, ok=True, out=str(out)), indent=2))
@@ -1594,6 +1950,36 @@ def _parse_slot_override(spec: str) -> tuple[int, int]:
         raise ValueError(f"--slot wants two integers (SLOT=VALUE), got {spec!r}")
 
 
+def _cmd_emulate(args: argparse.Namespace) -> int:
+    """Run the panel emulator (the `emu` extra) on an mcf.bin."""
+    import importlib
+
+    refused = _scenario_refusal(args.scenario, args.allow_user_ops, args.json, {"ok": False})
+    if refused is not None:
+        return refused
+    try:
+        importlib.import_module("fireflymcf.emu.machine")
+        emu_main = importlib.import_module("fireflymcf.emu.__main__")
+    except ImportError:
+        print(EMU_MISSING, file=sys.stderr)
+        return 2
+    if args.scenario:
+        results = _emulate_scenarios_on(Path(args.mcf), args.scenario, args.timeout)
+        if args.json:
+            print(json.dumps({k: r.to_dict() for k, r in results.items()}, indent=2))
+        else:
+            from .emu import gate
+            for line in gate.summary_lines(results):
+                print(line)
+        return 0 if all(r.status == "passed" for r in results.values()) else 1
+    return emu_main.run(args)
+
+
+def _emulate_scenarios_on(image: Path, scenarios: list[str], timeout_s: float):
+    from .emu import gate
+    return gate.run_scenarios(image, [Path(s) for s in scenarios], timeout_s)
+
+
 def _cmd_render(args: argparse.Namespace) -> int:
     """Render one GuiData page to an 800x480 PNG at a given coach configuration.
 
@@ -1914,6 +2300,19 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--root", action="append", default=[], type=int, metavar="N",
                    help="render only this root object (repeatable)")
     p.add_argument("--no-render", action="store_true", help="bytes and objects only")
+    p.add_argument("--emulate", action="store_true",
+                   help="also run the --scenario emulator tests on the build and record them "
+                        "in its sidecar (a failure is reported, not an exit code)")
+    p.add_argument("--scenario", action="append", default=[], metavar="FILE",
+                   help="with --emulate: an emulator test file (repeatable)")
+    p.add_argument("--emulate-timeout", type=float, default=300.0, metavar="SECONDS",
+                   help="with --emulate: wall-clock limit per scenario (default 300)")
+    p.add_argument("--project", metavar="P.ffproj.json",
+                   help="with --emulate: also run each of this project's user ops' emu_test.py "
+                        "(sidecar key: the op's type)")
+    p.add_argument("--allow-user-ops", action="store_true",
+                   help="run user ops' emulator tests: --project's emu_test.py files, and a "
+                        "--scenario file in an op folder (the author's code)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_verify)
 
@@ -1936,8 +2335,35 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("ops", help="the recipe ops a project can use: purpose, hardware "
                                    "status, parameters, error codes")
     p.add_argument("names", nargs="*", metavar="NAME", help="show these ops in full")
+    p.add_argument("--project", metavar="P.ffproj.json",
+                   help="also list this project's user ops (manifests only; nothing is run)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_ops)
+
+    p = sub.add_parser("op", help="share and accept user ops: install, pack, accept "
+                                  "(never imports or runs one)")
+    opsub = p.add_subparsers(dest="op_command", required=True)
+    q = opsub.add_parser("install", help="copy an op folder (a folder, a .zip, or a git URL) "
+                                         "into <project dir>/ops/<name>/")
+    q.add_argument("project", help="the project file (*.ffproj.json)")
+    q.add_argument("src", help="a folder, a .zip, or a git URL (https://, file://, an SSH git@ URL)")
+    q.add_argument("--replace", action="store_true", help="overwrite an installed op of that name")
+    q.add_argument("--json", action="store_true", help="emit JSON")
+    q.set_defaults(func=_cmd_op)
+    q = opsub.add_parser("pack", help="zip one of the project's op folders for sharing")
+    q.add_argument("project", help="the project file (*.ffproj.json)")
+    q.add_argument("name", help="the op's folder name or type")
+    q.add_argument("-o", "--out", required=True, metavar="NAME.zip")
+    q.add_argument("--json", action="store_true", help="emit JSON")
+    q.set_defaults(func=_cmd_op)
+    q = opsub.add_parser("accept", help="record the owner's acceptance of a user op's current "
+                                        "folder (an edit voids it)")
+    q.add_argument("project", help="the project file (*.ffproj.json)")
+    q.add_argument("type", help="the user op's type (user:...)")
+    q.add_argument("--g12", action="store_true",
+                   help="the owner accepts that it changes the G12 (required for such an op)")
+    q.add_argument("--json", action="store_true", help="emit JSON")
+    q.set_defaults(func=_cmd_op)
 
     p = sub.add_parser("compile",
                        help="build a *.ffproj.json project against its stock image")
@@ -1947,6 +2373,9 @@ def main(argv: list[str] | None = None) -> int:
                    help="output path; must be named mcf-*.bin and must not exist")
     p.add_argument("--allow-unverified", action="store_true",
                    help="build even if an op has never run on a coach (the owner is first)")
+    p.add_argument("--allow-user-ops", action="store_true",
+                   help="import and run the project's user-written ops (full Python trust; "
+                        "only once the owner has been told what they change)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_compile)
 
@@ -1959,8 +2388,22 @@ def main(argv: list[str] | None = None) -> int:
                         "it among the repo's corpus images by hash")
     p.add_argument("--require-verified", action="store_true",
                    help="FAIL if any op is not hardware-verified (use for owner hand-off builds)")
+    p.add_argument("--allow-user-ops", action="store_true",
+                   help="import and run the project's user-written ops (full Python trust)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_validate)
+
+    p = sub.add_parser("emulate", help="boot an mcf.bin on the panel emulator (needs the emu extra)")
+    from .emu import __main__ as _emu_args       # light: no unicorn until it runs
+    _emu_args.add_arguments(p)
+    p.add_argument("--scenario", action="append", default=[], metavar="FILE",
+                   help="run this emulator test (a file defining scenario(s)) on the image "
+                        "instead of the interactive emulator (repeatable); exit 1 unless all pass")
+    p.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
+                   help="wall-clock limit per scenario (default 300)")
+    p.add_argument("--allow-user-ops", action="store_true",
+                   help="run a --scenario file that sits in an op folder (the op author's code)")
+    p.set_defaults(func=_cmd_emulate)
 
     p = sub.add_parser("render", help="render a GuiData page to an 800x480 PNG")
     p.add_argument("image")
@@ -1993,8 +2436,10 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "json", False):
             # A caller that asked for JSON parses stdout; give it the failure in that form.
             print(json.dumps({"ok": False, "errors": [
-                {"code": getattr(exc, "code", None) or type(exc).__name__,
-                 "message": str(exc)}]}, indent=2))
+                {"op_id": getattr(exc, "op_id", None),
+                 "code": getattr(exc, "code", None) or type(exc).__name__,
+                 "message": str(exc), "offers": list(getattr(exc, "offers", None) or [])}]},
+                indent=2))
             return 2
         print(f"error: {exc}", file=sys.stderr)
         return 2

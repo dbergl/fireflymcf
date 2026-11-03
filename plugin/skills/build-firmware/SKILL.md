@@ -13,10 +13,14 @@ this skill or a command says `fireflymcf` (`F=PATH` below; `fireflymcf-tankpatch
 `fireflymcf-g12flash` are beside it). When the line says it did not install, it gives the `pip
 install` command to run by hand; do that. Without the line (the hook did not run), install it
 from GitHub with `pip install "fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git"`
-(a release: end the URL `fireflymcf.git@v0.4.0`). Never install it by its bare name: a PyPI
+(a release: end the URL `fireflymcf.git@v0.5.0`). Never install it by its bare name: a PyPI
 package of that name would not be this project. The panel checks checksums,
 not whether the content suits the coach, so a build must be right by construction and described
 honestly. One change you can stand behind beats four you guessed at.
+
+**Unofficial, no warranty.** fireflymcf is not affiliated with, endorsed by or supported by
+Firefly Integrations, Jayco or any maker, and comes without warranty of any kind. Say so when an
+owner asks what they are running.
 
 ## What you need first
 
@@ -28,9 +32,17 @@ honestly. One change you can stand behind beats four you guessed at.
    a `candump -L` log of the bus with `--capture LOG` (the coach's own settings). Ask; if you
    cannot, render every listed floorplan, change each variant the page draws, and say so.
 3. **Whether stock is what the coach runs now.** A build replaces GuiCode and GuiData together, so
-   it erases any earlier custom build.
+   it erases any earlier custom build. If the owner says a recipe is running, compiling it from
+   their stock reproduces that build; to compare against the image they flashed, ask for its file.
+   Work only from the files the owner points you at: never search the computer for other
+   firmware, builds or captures. A file found elsewhere is not known to be this coach's, and the
+   owner did not offer it.
 4. Each request restated as one line. Anything that reads two ways (which "blue", which button)
    is a question, not a guess.
+5. **Whether the project already has user ops** (an `ops/` folder beside the `*.ffproj.json`, or
+   `ext_ops` in it): `$F ops --project P.ffproj.json` lists them from their manifests without
+   running them. A project with user ops is built with the `write-new-op` skill's rules: read
+   every op in full before anything runs it, the risk statement, `--allow-user-ops`.
 
 ## Inspect (all read-only)
 
@@ -82,6 +94,11 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
 - **Map each request to an op** with `$F ops`. `verified: NO`, or a status of built-not-flashed,
   means no coach has run it: use it only if the owner agrees to be first. An op this coach already
   runs in its current build carries no new risk; say so instead of asking again.
+
+**When no op or combination of ops does it**, say which part of the request is missing and
+hand off to the `write-new-op` skill: it checks composition once more, then writes a user op
+(a folder of Python the engine gates and the emulator tests) with the owner's agreement. A user op
+has no hardware record, so it is never the quiet answer to a request an existing op covers.
 
 **Say up front what cannot be done:** a value the panel never receives (the file holds widgets,
 not data); a colour not in `--list-colors`; floorplan option defaults (emitted by code, not
@@ -168,6 +185,22 @@ A failure names the op id and an error code (`$F ops NAME` explains it), sometim
 `compile` refuses a project with an unverified op; add `--allow-unverified` only after the owner
 has agreed to be first.
 
+**User ops** (`user:` types) are refused (`USER_OPS`) until `--allow-user-ops` is given, which is
+separate from `--allow-unverified`. Before the first build that runs one, give the owner the risk
+statement word for word, then pass the flag:
+
+- an op that changes only the panel: "This changes what your panel shows or sends. Worst case the
+  panel draws wrongly or a button misbehaves; you can always flash your stock mcf.bin from USB to
+  undo it."
+- an op that changes the G12, or makes the panel send what the G12 acts on: "This changes your
+  G12 configuration, which drives real loads: pumps, slides, heaters, lights. A mistake can switch
+  something on or off when you don't expect it. Do you want to go ahead?" Only on a yes:
+  `$F op accept P.ffproj.json user:<name> --g12`.
+
+Then verify with the emulator as well: `$F verify NEW.bin $M --config coach.json --emulate
+--project P.ffproj.json --allow-user-ops` runs each user op's `emu_test.py` and records the
+result in the sidecar. The `write-new-op` skill has the details.
+
 ## Verify the whole build, not only your change
 
 ```bash
@@ -196,7 +229,10 @@ The owner's message has **every** slot below, in this order:
 
 1. **File:** path, SHA-256, and the build name the boot menu will show.
 2. **Done:** each change in the owner's words. **Not done:** each request left out, and why.
-3. **Unverified:** ops no coach has run yet, or "none".
+3. **Unverified:** ops no coach has run yet, or "none". **Every user op** is listed here by
+   type, version and folder hash (the sidecar's `user_ops`), with what it changes, that the owner
+   accepted it after the risk statement, and its emulator result, exactly one of "emulated, not
+   flashed", "not emulated: <reason>" or "emulator test FAILED: <reason>".
 4. **Replaces:** it replaces everything the panel runs now, including any earlier custom build.
 5. **Flash:** FAT32 stick → folder `SpyderConfig` → the build, the stock `mcf.bin` and `cli.bin`
    inside (the loader needs `cli.bin`) → power-cycle the panel → choose the build → touch each

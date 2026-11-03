@@ -9,7 +9,7 @@ what a safe-to-flash build is. Read-only: it writes no image.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import recipe
@@ -30,6 +30,7 @@ class ValidationResult:
     report: str
     unverified: list
     errors: list
+    sends: dict = field(default_factory=dict)   # CompileResult.sends of a pass
 
 
 def resolve_stock(project: "recipe.Project", repo_root: Path) -> bytes:
@@ -69,7 +70,9 @@ def validate(project: "recipe.Project", stock: bytes,
     try:
         result = recipe.compile_project(project, stock)
     except (recipe.RecipeError, AssertionError) as exc:
-        return ValidationResult(False, "FAIL: %s" % exc, [], [{"code": getattr(exc, "code", "ERROR"), "message": str(exc)}])
+        err = exc.to_json() if isinstance(exc, recipe.RecipeError) else {
+            "op_id": None, "code": "ERROR", "message": str(exc), "offers": []}
+        return ValidationResult(False, "FAIL: %s" % exc, [], [err])
     if not result.ok:
         report = "FAIL:\n" + "\n".join(
             "  %s: %s" % (e.get("code"), e.get("message")) for e in result.errors)
@@ -79,5 +82,5 @@ def validate(project: "recipe.Project", stock: bytes,
     if require_verified and result.unverified:
         return ValidationResult(
             False, body + "\nFAIL: unverified ops present and --require-verified set",
-            result.unverified, [])
-    return ValidationResult(True, body + "\nPASS", result.unverified, [])
+            result.unverified, [], result.sends)
+    return ValidationResult(True, body + "\nPASS", result.unverified, [], result.sends)

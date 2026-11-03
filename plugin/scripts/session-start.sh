@@ -14,5 +14,5 @@ for py in python3 python "py -3"; do
 done
 echo "fireflymcf plugin hook: no Python 3.10+ found (tried python3, python, py -3), so" \
      "fireflymcf is not installed. Install Python 3.10+, then run:" \
-     "pip install \"fireflymcf[full] @ git+https://github.com/dbergl/fireflymcf.git\""
+     "pip install \"fireflymcf[full,emu] @ git+https://github.com/dbergl/fireflymcf.git\""
 exit 0
