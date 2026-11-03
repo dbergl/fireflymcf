@@ -55,10 +55,12 @@ class Project:
     # a compile or alter an output byte; `tests/test_recipe.py` pins that.
     preview: dict = dataclasses.field(default_factory=dict)
     # User-op folders outside `<project dir>/ops/` (paths relative to the project file), and the
-    # owner's acceptance records for user ops (`userop`; the CLI fills it). Both are written only
-    # when non-empty, so a project without user ops serialises exactly as before.
+    # owner's acceptance records for user ops (`userop`; `fireflymcf op accept` fills it), and where
+    # each installed user op came from (`fireflymcf op install`: {type: {source, folder_sha256}}).
+    # Each is written only when non-empty, so a project without user ops serialises as before.
     ext_ops: list = dataclasses.field(default_factory=list)
     user_op_acceptance: dict = dataclasses.field(default_factory=dict)
+    user_op_sources: dict = dataclasses.field(default_factory=dict)
 
     @classmethod
     def from_json(cls, text: str) -> "Project":
@@ -103,8 +105,13 @@ class Project:
         if not isinstance(acceptance, dict):
             raise RecipeError("BAD_PROJECT", "field 'user_op_acceptance' must be an object, "
                               "got %r" % (acceptance,))
+        sources = doc.get("user_op_sources") or {}
+        if not isinstance(sources, dict):
+            raise RecipeError("BAD_PROJECT", "field 'user_op_sources' must be an object, "
+                              "got %r" % (sources,))
         return cls(base_sha256=doc["base_sha256"], build_name=doc["build_name"], ops=ops,
-                   preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance)
+                   preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance,
+                   user_op_sources=sources)
 
     def to_json(self) -> str:
         doc = {
@@ -119,6 +126,8 @@ class Project:
             doc["ext_ops"] = self.ext_ops
         if self.user_op_acceptance:
             doc["user_op_acceptance"] = self.user_op_acceptance
+        if self.user_op_sources:
+            doc["user_op_sources"] = self.user_op_sources
         return json.dumps(doc, indent=2)
 
 

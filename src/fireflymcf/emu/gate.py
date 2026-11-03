@@ -8,6 +8,7 @@ being written (the caller records it in the sidecar). Only 13.6 is emulated: any
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -29,9 +30,15 @@ class EmuResult:
 
 
 def result_key(path: Path) -> str:
-    """The sidecar key a scenario's result is stored under (the file stem; Task 10 switches this
-    to the op type)."""
+    """The sidecar key an explicitly named scenario file's result is stored under: its stem. A
+    user op's `emu_test.py` found through the project is keyed by the op's type instead
+    (`run_scenarios` with a mapping), so two ops' `emu_test.py` never collide."""
     return Path(path).stem
+
+
+def _file_key(key: str) -> str:
+    """`key` made safe for a file name and a module name (an op type carries `:`)."""
+    return re.sub(r"[^A-Za-z0-9_.-]", "_", key)
 
 
 def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
@@ -42,7 +49,7 @@ def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
     if not ok:
         return EmuResult("not emulated", reason)
     path = Path(path)
-    key = key or result_key(path)
+    key = _file_key(key or result_key(path))
     out = Path(out_dir) if out_dir else Path(tempfile.mkdtemp(prefix="fireflymcf-emu-"))
     out.mkdir(parents=True, exist_ok=True)
     img = out / f"{key}-image.bin"
@@ -69,13 +76,16 @@ def run_scenario_file(image: bytes, path: Path, timeout_s: float = 300, *,
     return EmuResult("failed", f"worker exited {proc.returncode} without a result: {tail}")
 
 
-def run_scenarios(build: Path, scenarios: list[Path], timeout_s: float = 300) -> dict[str, EmuResult]:
+def run_scenarios(build: Path, scenarios, timeout_s: float = 300) -> dict[str, EmuResult]:
     """Run each scenario file against the image at `build`; screenshots and frame logs go to
-    `<build>.emu/`. Keyed by `result_key`."""
+    `<build>.emu/`. `scenarios` is a list of files (keyed by `result_key`) or a {key: file}
+    mapping (the CLI keys a user op's `emu_test.py` by its type)."""
+    if not isinstance(scenarios, dict):
+        scenarios = {result_key(p): p for p in scenarios}
     image = Path(build).read_bytes()
     out = Path(str(build) + ".emu")
-    return {result_key(p): run_scenario_file(image, p, timeout_s, out_dir=out)
-            for p in scenarios}
+    return {k: run_scenario_file(image, p, timeout_s, out_dir=out, key=k)
+            for k, p in scenarios.items()}
 
 
 def record(build: Path, results: dict[str, EmuResult]) -> Path:

@@ -536,6 +536,9 @@ def project_schema(registry: dict | None = None) -> dict:
                                        "to the project file"},
             "user_op_acceptance": {"type": "object",
                                    "description": "the owner's acceptance of each user op"},
+            "user_op_sources": {"type": "object",
+                                "description": "where each installed user op came from: "
+                                               "{type: {source, folder_sha256}}"},
         },
         "$defs": {"op": {
             "type": "object",

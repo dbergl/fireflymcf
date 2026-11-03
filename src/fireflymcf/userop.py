@@ -305,14 +305,21 @@ class LoadedOp:
     folder_sha256: str
 
 
+IGNORED = frozenset({"__pycache__", ".git"})      # folder names never hashed, packed or copied
+
+
+def ignored(rel: Path) -> bool:
+    """Whether a path relative to an op folder is outside what the folder hash covers."""
+    return rel.suffix == ".pyc" or any(part in IGNORED for part in Path(rel).parts)
+
+
 def folder_hash(folder: Path) -> str:
     """sha256 over the folder's files, sorted by posix relative path (path, NUL, length, bytes
-    per file), ignoring `__pycache__` and `*.pyc`."""
+    per file), ignoring `__pycache__`, `*.pyc` and `.git` (`IGNORED`)."""
     folder = Path(folder)
     h = hashlib.sha256()
     files = sorted((p.relative_to(folder).as_posix(), p) for p in folder.rglob("*")
-                   if p.is_file() and p.suffix != ".pyc"
-                   and "__pycache__" not in p.relative_to(folder).parts)
+                   if p.is_file() and not ignored(p.relative_to(folder)))
     for rel, p in files:
         body = p.read_bytes()
         h.update(rel.encode() + b"\0" + len(body).to_bytes(8, "little"))
@@ -424,12 +431,26 @@ def _folders(project_path: Path, project: recipe.Project) -> list[Path]:
     return unique
 
 
-def load_user_ops(project_path: Path, project: recipe.Project) -> list[LoadedOp]:
+@dataclass
+class DiscoveredOp:
+    """An op folder whose manifest has been read and checked, and whose files are hashed. Nothing
+    in it has been imported: discovery is what `ops`, `op install`/`pack`/`accept`, and every
+    refusal before `--allow-user-ops` read (R6)."""
+    type: str
+    folder: Path
+    manifest: dict
+    folder_sha256: str
+
+    @property
+    def touches(self) -> list:
+        return list(self.manifest.get("touches", []))
+
+
+def discover_user_ops(project_path: Path, project: recipe.Project) -> list[DiscoveredOp]:
     """Every op folder beside the project (`<project dir>/ops/*/`) and in `project.ext_ops`,
-    validated and imported. Nothing enters `recipe.REGISTRY`: compile inside
-    `with registered(loaded):`. Raises RecipeError (`BAD_USER_OP`, `USER_OP_NAME`,
-    `USER_OP_DUPLICATE`) on the first bad folder."""
-    loaded: list[LoadedOp] = []
+    its manifest validated and its folder hashed. Never imports `op.py`. Raises RecipeError
+    (`BAD_USER_OP`, `USER_OP_NAME`, `USER_OP_DUPLICATE`) on the first bad folder."""
+    found: list[DiscoveredOp] = []
     by_type: dict[str, Path] = {}
     for folder in _folders(project_path, project):
         m = _read_manifest(folder)
@@ -441,8 +462,48 @@ def load_user_ops(project_path: Path, project: recipe.Project) -> list[LoadedOp]
             sha = folder_hash(folder)
         except OSError as e:
             raise _bad(folder, f"cannot read the op folder: {e}")
-        loaded.append(LoadedOp(m["type"], _import(folder, m, sha), folder, m, sha))
+        found.append(DiscoveredOp(m["type"], folder, m, sha))
+    return found
+
+
+def import_user_ops(discovered: list[DiscoveredOp]) -> list[LoadedOp]:
+    """Import each discovered op's `op.py`: this runs the op's code with full Python trust, so the
+    caller must hold the owner's authorization (`--allow-user-ops`). A folder whose files changed
+    since discovery is refused, so what was shown (and accepted) is what runs."""
+    loaded: list[LoadedOp] = []
+    for d in discovered:
+        try:
+            now = folder_hash(d.folder)
+        except OSError as e:
+            raise _bad(d.folder, f"cannot read the op folder: {e}")
+        if now != d.folder_sha256:
+            raise _bad(d.folder, f"its files changed since they were read (sha256 "
+                       f"{d.folder_sha256[:12]}... is now {now[:12]}...); run the command again")
+        loaded.append(LoadedOp(d.type, _import(d.folder, d.manifest, d.folder_sha256),
+                               d.folder, d.manifest, d.folder_sha256))
     return loaded
+
+
+def load_user_ops(project_path: Path, project: recipe.Project) -> list[LoadedOp]:
+    """`discover_user_ops` then `import_user_ops`: validated and imported. Nothing enters
+    `recipe.REGISTRY`: compile inside `with registered(loaded):`."""
+    return import_user_ops(discover_user_ops(project_path, project))
+
+
+def acceptance(project: recipe.Project, d: DiscoveredOp) -> dict | None:
+    """The owner's acceptance record for `d`, if it names `d`'s current folder hash; else None
+    (never accepted, or accepted before an edit)."""
+    rec = project.user_op_acceptance.get(d.type)
+    if isinstance(rec, dict) and rec.get("folder_sha256") == d.folder_sha256:
+        return rec
+    return None
+
+
+def needs_g12_ack(project: recipe.Project, discovered: list[DiscoveredOp]) -> list[DiscoveredOp]:
+    """The discovered ops whose manifest `touches` the G12 and whose current folder the owner has
+    not accepted with `g12: true` (`fireflymcf op accept PROJECT TYPE --g12`)."""
+    return [d for d in discovered if "g12" in d.touches
+            and (acceptance(project, d) or {}).get("g12") is not True]
 
 
 @contextlib.contextmanager
