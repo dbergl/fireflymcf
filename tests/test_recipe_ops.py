@@ -2409,3 +2409,18 @@ def test_fill_to_capsule_refuses_a_non_fill(stock, stock_hash):
     r = compile_ops(stock, stock_hash, recipe.OpSpec(id="h", type="fill_to_capsule", params={
         "target": 380, "selector": {"wtype": 0x21}, "radius": 10}))
     assert not r.ok and r.errors[0]["code"] == "NOT_A_FILL", r.errors
+
+
+def test_level_page_frame_check_ignores_colour_modes_but_not_structure(stock):
+    """`add_level_page.verify` keeps its frame records' structure: a valueless colour-mode
+    change (dark ink on the title) passes, a geometry change does not."""
+    from fireflymcf.recipe_ops import AddLevelPage
+    gs, tab = _gs_tab_t(stock)
+    rec = records.object_records(stock, gs + tab[380])[3]          # 'ON', fillA mode 2
+    before = AddLevelPage._structure_hex(stock, rec)
+    buf = bytearray(stock)
+    buf[rec.offset + 3] = (buf[rec.offset + 3] & ~7) | 1          # ink -> mode 1
+    assert AddLevelPage._structure_hex(bytes(buf), rec) == before
+    off = records.geom_offset(stock, rec, 2)
+    buf[off] ^= 1                                                  # width changes
+    assert AddLevelPage._structure_hex(bytes(buf), rec) != before

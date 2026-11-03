@@ -10754,6 +10754,17 @@ class AddLevelPage(Op):
         gs, tab = _gs_tab(data)
         return records.object_records(data, gs + tab[self.ROOT])
 
+    @staticmethod
+    def _structure_hex(data, r):
+        """A kept root record's bytes with its four colour-mode fields masked (header byte 3
+        bits 0-5, byte 5 bits 1-6): a later op may switch a valueless colour mode (dark ink on
+        the title, `set_record_color`) without the frame counting as changed. Anything that
+        moves, resizes or re-types the record still shows."""
+        raw = bytearray(data[r.offset:r.end])
+        raw[3] &= 0xC0
+        raw[5] &= 0x81
+        return raw.hex()
+
     def apply(self, data, ctx):
         root = self._root_records(data)
         body_ref = root[self.KEPT_ROOT_RECORDS] if len(root) > self.KEPT_ROOT_RECORDS else None
@@ -10761,7 +10772,7 @@ class AddLevelPage(Op):
             raise RecipeError("PAGE_REFUSED", "root %d record %d does not name object %d"
                               % (self.ROOT, self.KEPT_ROOT_RECORDS, self.BODY),
                               op_id=self.spec.id)
-        kept = [data[r.offset:r.end].hex() for r in root[:self.KEPT_ROOT_RECORDS]]
+        kept = [self._structure_hex(data, r) for r in root[:self.KEPT_ROOT_RECORDS]]
         slot, char = self.arrow
         try:
             font = glyphs.font_for_slot(data, slot)
@@ -11070,7 +11081,7 @@ class AddLevelPage(Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         root = self._root_records(data)
-        got = [data[r.offset:r.end].hex() for r in root[:self.KEPT_ROOT_RECORDS]]
+        got = [self._structure_hex(data, r) for r in root[:self.KEPT_ROOT_RECORDS]]
         assert got == h["root_records"], "root %d records 0-%d changed" % (
             self.ROOT, self.KEPT_ROOT_RECORDS - 1)
         assert root[self.KEPT_ROOT_RECORDS].child_index == self.BODY, \
