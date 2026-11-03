@@ -39,20 +39,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-from . import (container, followchannel, growsection, guidata, optionrow, patch, pumpauto,
-               register, sramreach, theme, thumb)
+from . import (colourcell, container, followchannel, growsection, guidata, optionrow, patch,
+               pumpauto, register, sramreach, theme, thumb)
 from .recipe import RecipeError
 
 __all__ = ["PRIMITIVES", "RoutineKitError", "TickPlan", "TickInstall", "tick_install_plan",
            "install_tick_routine", "install_tick", "slot_addr", "resolve_register",
            "fresh_sram", "find_config_toggle", "config_frame", "emit_prologue", "emit_tail",
            "emit_send_frame", "assemble_tick", "thumb", "PROLOGUE_TEXT", "EPILOGUE_TEXT",
-           "GuiCodeView", "guicode", "find_tag", "tick_chain"]
+           "GuiCodeView", "guicode", "find_tag", "tick_chain", "own_colour_cell", "ColourCell"]
 
 
 class RoutineKitError(RecipeError):
     """A primitive refused. Codes: STALE_PLAN, BAD_ROUTINE, BAD_HOOK, NO_SRAM, NO_SUCH_REGISTER,
-    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT, NO_TAG, AMBIGUOUS_TAG.
+    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT, NO_TAG, AMBIGUOUS_TAG, and
+    `own_colour_cell`'s (`colourcell.ColourCellError`'s codes).
     `RoutineKitError(msg)` (one
     argument, as `thumb.Routine(error=...)` raises it) is BAD_ROUTINE."""
 
@@ -334,6 +335,46 @@ def find_config_toggle(data: bytes, selector: int) -> tuple[bytes, int | None]:
         raise RoutineKitError("AMBIGUOUS_TOGGLE", str(e)) from e
 
 
+ColourCell = colourcell.ColourCell
+
+
+def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int | None = None,
+                    expect: bytes | None = None) -> tuple[bytes, ColourCell]:
+    """Give one record's `field` ("border" or "fill") of object `object_index` (an object-table
+    index, never a screen id) a private run-time colour cell: a new row of the display-cell
+    table, on 4 fresh bytes of SRAM, that the field now names in mode 7.
+
+    `record` picks the record within the object (its index in `records.object_records`'s list);
+    without it the object must have exactly one record with that field. Fields by widget type
+    (`GUICODE.md` Finding 28): wtype 3 and 32 (rounded box, tank well) border = fillA, fill =
+    fillB; wtype 33 (solid panel or level fill) fill = fillA. `expect`, the record's bytes as the
+    op was written against them, refuses FIRMWARE_MISMATCH on any other bytes.
+
+    Returns `ColourCell`: `addr` (the SRAM word a tick routine stores, `width` 4, `encoding`
+    "rgb888", i.e. `0x00RRGGBB`), `cell_index`, and the colour the field drew before
+    (`before` (r, g, b) and `before_word`, read from the image as it stands, so after any earlier
+    op such as `set_theme`; `before_cell_addr`, for a field that named a row before, is that
+    row's SRAM word, which a routine can copy to follow it at run time).
+
+    **The cell is not initialised at boot** (SRAM above `0x2000AD98` is garbage at power-on):
+    the op must install a tick routine that stores a colour into `addr` on every tick, in every
+    branch. The chain runs before `FUN_00247BF8` draws anything, so the control never shows the
+    garbage (`colourcell`'s docstring has the argument). A new colour shows at the control's
+    next repaint, not at the store.
+
+    Changes GuiCode and GuiData (the cell table's grow repoints GuiCode literals): declare both
+    in `touches`. Refuses (codes of `colourcell.ColourCellError`): BAD_OBJECT, NO_COLOUR_FIELD,
+    AMBIGUOUS_RECORD, UNSUPPORTED_FIELD, UNSUPPORTED_MODE (the field inherits, mode 0/4/5, or is
+    the theme default, mode 1), STATEFUL_RECORD (a record on a value slot draws its on/off
+    pair), INHERITED_COLOUR (a later record of the object inherits the field's colour),
+    FIRMWARE_MISMATCH, NO_DISPLAY_CELL, BAD_EDIT."""
+    try:
+        return colourcell.own_colour_cell(data, object_index, field, record=record,
+                                          expect=expect)
+    except colourcell.ColourCellError as e:
+        raise RoutineKitError(e.code, str(e)) from e
+
+
 PRIMITIVES: dict = {
     "tick_install_plan": tick_install_plan,
     "install_tick_routine": install_tick_routine,
@@ -341,6 +382,7 @@ PRIMITIVES: dict = {
     "resolve_register": resolve_register,
     "fresh_sram": fresh_sram,
     "find_config_toggle": find_config_toggle,
+    "own_colour_cell": own_colour_cell,
 }
 
 

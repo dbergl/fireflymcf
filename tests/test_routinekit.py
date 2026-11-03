@@ -231,7 +231,7 @@ def test_fresh_sram_and_registers(mcf_136):
 def test_primitives_registered():
     assert set(routinekit.PRIMITIVES) == {"tick_install_plan", "install_tick_routine",
                                           "slot_addr", "resolve_register", "fresh_sram",
-                                          "find_config_toggle"}
+                                          "find_config_toggle", "own_colour_cell"}
 
 
 # --- emulator ---------------------------------------------------------------------------------
