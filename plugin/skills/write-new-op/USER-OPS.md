@@ -27,7 +27,10 @@ executes it, with your permissions, before any check runs. The engine replays th
 ledger against its input and refuses an image the ledger does not account for. That replay is a
 correctness gate. It is not a sandbox, and it cannot stop an op from doing anything else Python
 can do. Read an op before you allow it (`--allow-user-ops`).
-The same holds for its `emu_test.py`, which the emulator gate runs. Before running anything
+The same holds for its `emu_test.py`, which the emulator gate runs: `verify --emulate
+--project`, `emulate --scenario` and `verify --emulate --scenario` refuse (`USER_OPS`) to run a
+test file from an op folder without `--allow-user-ops`. The gate checks your op; it does not
+sandbox your scenario's code, which can also report its own result. Before running anything
 from an op someone else wrote, read every file in it and know what it touches.
 
 ## Writing a user op
@@ -105,7 +108,7 @@ class MyOp(UserOp):
 |---|---|
 | list the project's user ops (manifests only, nothing runs) | `fireflymcf ops --project P.ffproj.json` |
 | one op's manifest and README | `fireflymcf ops user:my-op --project P.ffproj.json` |
-| run the test while writing (fails on stock first) | `fireflymcf emulate MCF --scenario ops/my-op/emu_test.py` |
+| run the test while writing (fails on stock first) | `fireflymcf emulate MCF --scenario ops/my-op/emu_test.py --allow-user-ops` |
 | gate and build | `fireflymcf compile P.ffproj.json STOCK -o build/mcf-NAME.bin --allow-user-ops` |
 | record the owner's acceptance | `fireflymcf op accept P.ffproj.json user:my-op [--g12]` |
 | verify and emulate | `fireflymcf verify build/mcf-NAME.bin STOCK --emulate --project P.ffproj.json --allow-user-ops` |

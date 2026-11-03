@@ -83,7 +83,7 @@ The test states what the owner asked for, in the emulator's terms, before any op
 watch it fail on the image without the op:
 
 ```bash
-$F emulate $M --scenario ops/my-op/emu_test.py      # exit 1 unless it passes: it must FAIL here
+$F emulate $M --scenario ops/my-op/emu_test.py --allow-user-ops   # exit 1 unless it passes: it must FAIL here
 ```
 
 The file defines `scenario(s)`; `s` is a `fireflymcf.emu.scenario.Scenario` on the built image,
@@ -208,7 +208,7 @@ $F ops --project P.ffproj.json               # lists the user ops it found (read
 $F validate P.ffproj.json $M --allow-user-ops
 $F compile  P.ffproj.json $M -o build/mcf-NAME.bin --allow-user-ops
 $F verify build/mcf-NAME.bin $M --config coach.json --emulate --project P.ffproj.json --allow-user-ops
-$F emulate build/mcf-NAME.bin --scenario ops/my-op/emu_test.py    # fast loop while debugging
+$F emulate build/mcf-NAME.bin --scenario ops/my-op/emu_test.py --allow-user-ops   # fast loop while debugging
 ```
 
 Pass `--allow-user-ops` only after the risk statement (section 6). Without it `compile`

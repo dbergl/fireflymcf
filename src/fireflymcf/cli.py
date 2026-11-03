@@ -785,6 +785,38 @@ def _print_user_ops_refusal(code: str, msg: str, discovered, as_json: bool, shap
     return 1
 
 
+def _op_folder_of(path: Path) -> Path | None:
+    """The op folder (`manifest.json` and `op.py`) that holds `path`, if any."""
+    for d in Path(path).resolve().parents:
+        if (d / "manifest.json").is_file() and (d / "op.py").is_file():
+            return d
+    return None
+
+
+def _scenario_refusal(files, allowed: bool, as_json: bool, shape: dict) -> int | None:
+    """Refuse (USER_OPS, exit 1) to run a scenario file from an op folder without
+    `--allow-user-ops`: it is that op's author's code, as its `op.py` is. None when it may run.
+    A scenario of your own outside any op folder runs like any script you start."""
+    if allowed:
+        return None
+    held = [(Path(f), _op_folder_of(Path(f))) for f in files]
+    held = [(f, d) for f, d in held if d is not None]
+    if not held:
+        return None
+    msg = ("USER_OPS: %s %s in an op folder, the op author's code, never checked by anyone but "
+           "them. Nothing run. Run it again with --allow-user-ops once you have read it."
+           % (", ".join(str(f) for f, _ in held), "is" if len(held) == 1 else "are"))
+    if as_json:
+        print(json.dumps(dict(shape, errors=[{"op_id": None, "code": "USER_OPS",
+                                              "message": msg, "offers": []}],
+                              folders=[str(d) for _, d in held]), indent=2))
+    else:
+        print(f"error: {msg}", file=sys.stderr)
+        for _, d in held:
+            print(f"  {d}", file=sys.stderr)
+    return 1
+
+
 def _announce_user_ops(discovered, as_json: bool) -> None:
     """Say what runs before anything is imported: type, folder, folder hash."""
     if as_json or not discovered:
@@ -887,6 +919,9 @@ def _cmd_verify(args: argparse.Namespace) -> int:
                 scenarios[d.type] = t
             else:
                 missing[d.type] = f"{d.type} has no emu_test.py in {d.folder}"
+    refused = _scenario_refusal(args.scenario, args.allow_user_ops, args.json, {"ok": False})
+    if refused is not None:
+        return refused
     from .emu.gate import result_key          # light: stdlib only
     for f in args.scenario:
         scenarios[result_key(Path(f))] = Path(f)
@@ -1887,6 +1922,9 @@ def _cmd_emulate(args: argparse.Namespace) -> int:
     """Run the panel emulator (the `emu` extra) on an mcf.bin."""
     import importlib
 
+    refused = _scenario_refusal(args.scenario, args.allow_user_ops, args.json, {"ok": False})
+    if refused is not None:
+        return refused
     try:
         importlib.import_module("fireflymcf.emu.machine")
         emu_main = importlib.import_module("fireflymcf.emu.__main__")
@@ -2241,7 +2279,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="with --emulate: also run each of this project's user ops' emu_test.py "
                         "(sidecar key: the op's type)")
     p.add_argument("--allow-user-ops", action="store_true",
-                   help="with --project: run the user ops' emu_test.py (the author's code)")
+                   help="run user ops' emulator tests: --project's emu_test.py files, and a "
+                        "--scenario file in an op folder (the author's code)")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_verify)
 
@@ -2330,6 +2369,8 @@ def main(argv: list[str] | None = None) -> int:
                         "instead of the interactive emulator (repeatable); exit 1 unless all pass")
     p.add_argument("--timeout", type=float, default=300.0, metavar="SECONDS",
                    help="wall-clock limit per scenario (default 300)")
+    p.add_argument("--allow-user-ops", action="store_true",
+                   help="run a --scenario file that sits in an op folder (the op author's code)")
     p.set_defaults(func=_cmd_emulate)
 
     p = sub.add_parser("render", help="render a GuiData page to an 800x480 PNG")

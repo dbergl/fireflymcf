@@ -25,6 +25,10 @@ RV-C devices. Runs at about 2x real time (1.3x while booting/redrawing, 2.7x idl
 HOME; `python -m fireflymcf.emu.tools.bench` measures it), and the GUI is paced to real time.
 See [EMULATOR-NOTES.md](EMULATOR-NOTES.md).
 
+A scenario (an op's `emu_test.py`, or any `--scenario` file) is Python that runs with your
+permissions, and it reports its own result. The emulator gate checks your op; it does not sandbox
+your scenario's code. A scenario inside an op folder runs only with `--allow-user-ops`.
+
 ### RV-C network
 
 `--network demo` (default) puts simulated devices on the bus; `--network none`
@@ -48,9 +52,22 @@ answer for the coach's own):
 python -m fireflymcf.emu MCF --gui --network none --can ssh:USER@HOST:CHANNEL
 ```
 
-This link is **listen-only**: the emulated panel claims the real panel's
-address (0x9F), so its frames never reach the coach, and the real panel's
-frames are dropped on the way in (the firmware resets on an address conflict).
+By default this link is **listen-only**: the emulated panel claims the real
+panel's address (0x9F), so its frames never reach the coach, and the real
+panel's frames are dropped on the way in (the firmware resets on an address
+conflict).
+
+`--can-tx` joins the remote bus as the panel instead; the coach's real panel
+must be disconnected. `--can-tx dry` sends nothing and logs what it would have
+sent (`--tx-log`). **`--can-tx live` transmits on the coach's bus**: the
+emulated panel's commands reach the G12 and switch real loads. Settings writes
+are held back unless `--allow-config` is also given; with it, the panel's G12
+configuration writes (`1FED9` D1/D2) and option broadcasts (`1EE00`) are sent
+too, and they change the G12's stored configuration. Use `live` only on a coach
+you are watching, and `--allow-config` only when you mean to change it. Both
+flags work on `python -m fireflymcf.emu` and `fireflymcf emulate`. The
+emulator gate (`verify --emulate`, `emulate --scenario`) never uses them and
+touches no hardware.
 
 To drive the panel with a recorded coach instead of simulated devices, replay a
 `candump -l` log (frames from the recorded panel, SA 0x9F, are skipped):

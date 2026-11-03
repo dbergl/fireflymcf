@@ -599,3 +599,26 @@ def test_ops_listing_shows_the_projects_acceptance(tmp_path, mcf_136, capsys):
     assert entry["accepted"] == rec
     assert main(["ops", "--project", str(pf)]) == 0
     assert "accepted 2026-01-01 (G12 included)" in capsys.readouterr().out
+
+
+# --- a scenario from an op folder is that op's code (final review M1) ----------------------------
+
+def test_scenario_from_an_op_folder_needs_allow_user_ops(tmp_path, mcf_136, capsys):
+    marker = tmp_path / "RAN"
+    folder = tmp_path / "ops" / "hook_nop"
+    shutil.copytree(FIX / "hook_nop", folder)
+    test = folder / "emu_test.py"
+    test.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('ran')\n"
+                    "def scenario(s):\n    pass\n")
+    build = tmp_path / "mcf-x.bin"
+    build.write_bytes(mcf_136)
+
+    assert main(["emulate", str(build), "--scenario", str(test)]) == 1
+    err = capsys.readouterr().err
+    assert "USER_OPS" in err and str(folder.resolve()) in err
+    assert main(["emulate", str(build), "--scenario", str(test), "--json"]) == 1
+    assert json.loads(capsys.readouterr().out)["errors"][0]["code"] == "USER_OPS"
+    assert main(["verify", str(build), STOCK, "--no-render", "--emulate",
+                 "--scenario", str(test)]) == 1
+    assert "USER_OPS" in capsys.readouterr().err
+    assert not marker.exists()
