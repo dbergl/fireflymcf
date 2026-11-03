@@ -70,7 +70,9 @@ def validate(project: "recipe.Project", stock: bytes,
     try:
         result = recipe.compile_project(project, stock)
     except (recipe.RecipeError, AssertionError) as exc:
-        return ValidationResult(False, "FAIL: %s" % exc, [], [{"code": getattr(exc, "code", "ERROR"), "message": str(exc)}])
+        err = exc.to_json() if isinstance(exc, recipe.RecipeError) else {
+            "op_id": None, "code": "ERROR", "message": str(exc), "offers": []}
+        return ValidationResult(False, "FAIL: %s" % exc, [], [err])
     if not result.ok:
         report = "FAIL:\n" + "\n".join(
             "  %s: %s" % (e.get("code"), e.get("message")) for e in result.errors)

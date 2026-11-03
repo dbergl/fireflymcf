@@ -366,7 +366,7 @@ def test_studio_refuses_user_ops(mcf_136):
     proj = recipe.Project.from_json(json.dumps(_doc(mcf_136, ("nop", "user:hook-nop"))))
     eng = Engine(mcf_136, proj.base_sha256)
     res, _ = eng.compile("p", proj)
-    assert not res.ok and res.errors[0]["code"] == "USER_OPS_UNSUPPORTED"
+    assert not res.ok and res.errors[0]["code"] == "USER_OPS"       # the CLI's code (M5)
     assert "--allow-user-ops" in res.errors[0]["message"] and res.errors[0]["op_id"] == "nop"
 
 
@@ -626,3 +626,22 @@ def test_scenario_from_an_op_folder_needs_allow_user_ops(tmp_path, mcf_136, caps
                  "--scenario", str(test)]) == 1
     assert "USER_OPS" in capsys.readouterr().err
     assert not marker.exists()
+
+
+def test_json_refusals_have_the_compile_error_shape(tmp_path, mcf_136, capsys):
+    """Every JSON refusal entry has `CompileResult.errors`' keys (final review M5)."""
+    keys = {"op_id", "code", "message", "offers"}
+    pf = _project(tmp_path, mcf_136, ("nop", "user:hook-nop"))
+    out = tmp_path / "mcf-u.bin"
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--json"]) == 1          # USER_OPS
+    assert set(json.loads(capsys.readouterr().out)["errors"][0]) == keys
+    assert main(["validate", str(pf), STOCK, "--json"]) == 1
+    assert set(json.loads(capsys.readouterr().out)["errors"][0]) == keys
+    doc = _doc(mcf_136, ("tank", "tank_heater_names"))
+    doc["base_sha256"] = "0" * 64                                                    # a RecipeError
+    pf.write_text(json.dumps(doc))
+    assert main(["compile", str(pf), STOCK, "-o", str(out), "--json"]) == 1
+    err = json.loads(capsys.readouterr().out)["errors"][0]
+    assert set(err) == keys and err["code"] == "BASE_MISMATCH"
+    assert main(["validate", str(pf), STOCK, "--json"]) == 1
+    assert set(json.loads(capsys.readouterr().out)["errors"][0]) == keys

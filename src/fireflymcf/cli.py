@@ -776,7 +776,8 @@ def _user_ops_sends_refusal(project, discovered, sends: dict):
 
 def _print_user_ops_refusal(code: str, msg: str, discovered, as_json: bool, shape: dict) -> int:
     if as_json:
-        print(json.dumps(dict(shape, errors=[{"code": code, "message": msg}],
+        print(json.dumps(dict(shape, errors=[{"op_id": None, "code": code, "message": msg,
+                                              "offers": []}],
                               user_ops=_user_op_rows(discovered)), indent=2))
     else:
         print(f"error: {msg}", file=sys.stderr)
@@ -861,8 +862,7 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         loaded = userop.import_user_ops(discovered)
     except recipe.RecipeError as exc:
         if args.json:
-            print(json.dumps({"passed": False, "errors": [{"code": exc.code,
-                                                           "message": str(exc)}],
+            print(json.dumps({"passed": False, "errors": [exc.to_json()],
                               "unverified": [], "report": ""}, indent=2))
             return 1
         print(f"FAIL: {exc.code}: {exc}", file=sys.stderr)
@@ -1223,8 +1223,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
             result = recipe.compile_project(project, stock)
     except recipe.RecipeError as exc:
         if args.json:
-            print(json.dumps({"ok": False, "errors": [{"code": exc.code, "message": str(exc)}]},
-                             indent=2))
+            print(json.dumps({"ok": False, "errors": [exc.to_json()]}, indent=2))
             return 1
         print(f"error: {exc.code}: {exc}", file=sys.stderr)
         return 1
@@ -1254,7 +1253,8 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                "(`fireflymcf ops NAME` has each op's status)." % ", ".join(builtin_unverified))
         if args.json:
             print(json.dumps({"ok": False, "unverified": builtin_unverified,
-                              "errors": [{"code": "UNVERIFIED_OPS", "message": msg}]}, indent=2))
+                              "errors": [{"op_id": None, "code": "UNVERIFIED_OPS",
+                                          "message": msg, "offers": []}]}, indent=2))
         else:
             print(f"error: {msg}", file=sys.stderr)
         return 1
@@ -2415,8 +2415,10 @@ def main(argv: list[str] | None = None) -> int:
         if getattr(args, "json", False):
             # A caller that asked for JSON parses stdout; give it the failure in that form.
             print(json.dumps({"ok": False, "errors": [
-                {"code": getattr(exc, "code", None) or type(exc).__name__,
-                 "message": str(exc)}]}, indent=2))
+                {"op_id": getattr(exc, "op_id", None),
+                 "code": getattr(exc, "code", None) or type(exc).__name__,
+                 "message": str(exc), "offers": list(getattr(exc, "offers", None) or [])}]},
+                indent=2))
             return 2
         print(f"error: {exc}", file=sys.stderr)
         return 2
