@@ -1153,6 +1153,9 @@ def _user_op_entry(d, accepted=None) -> dict:
 def _cmd_op(args: argparse.Namespace) -> int:
     """`fireflymcf op install|pack|accept`: share and accept user ops (`opshare`). None of them
     imports or runs an op."""
+    import shutil
+    import zipfile
+    import zlib
     from . import opshare, recipe
     try:
         if args.op_command == "install":
@@ -1185,12 +1188,16 @@ def _cmd_op(args: argparse.Namespace) -> int:
                   f"{' (G12 changes included)' if rec['g12'] else ''} on {rec['date']}; "
                   "an edit to its folder needs a new acceptance")
         return 0
-    except recipe.RecipeError as exc:
-        if args.json:
-            print(json.dumps({"ok": False, "errors": [exc.to_json()]}, indent=2))
-        else:
-            print(f"error: {exc.code}: {exc}", file=sys.stderr)
-        return 1
+    except (OSError, zipfile.BadZipFile, shutil.Error, zlib.error) as e:
+        # a file the command reads or writes failed (a path, a permission, a corrupt member)
+        err = recipe.RecipeError("OP_IO_ERROR", f"{type(e).__name__}: {e}")
+    except recipe.RecipeError as e:
+        err = e
+    if args.json:
+        print(json.dumps({"ok": False, "errors": [err.to_json()]}, indent=2))
+    else:
+        print(f"error: {err.code}: {err}", file=sys.stderr)
+    return 1
 
 
 def _cmd_compile(args: argparse.Namespace) -> int:

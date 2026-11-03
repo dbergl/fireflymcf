@@ -27,6 +27,9 @@ _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 # Only these git URL forms; no `ext::`, no option-shaped arguments, no whitespace.
 _GIT_URL = re.compile(r"^(?:https://[^\s]+|file://[^\s]+|git@[A-Za-z0-9][A-Za-z0-9.-]*:[^\s-][^\s]*)$")
 _ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+# An op pack is source text: refuse a zip that unpacks to more than this, or holds more members
+MAX_ZIP_BYTES = 64 * 1024 * 1024
+MAX_ZIP_MEMBERS = 10_000
 
 
 # --- the project file --------------------------------------------------------------------------
@@ -178,7 +181,13 @@ def _extract_zip(src: str, dest: Path) -> str | None:
     except (zipfile.BadZipFile, OSError) as e:
         raise RecipeError("BAD_SOURCE", f"{src}: not a readable zip: {e}")
     with zf:
-        for info in zf.infolist():
+        infos = zf.infolist()
+        if len(infos) > MAX_ZIP_MEMBERS:
+            raise _unsafe(src, f"it holds {len(infos)} members, more than {MAX_ZIP_MEMBERS}")
+        total = sum(i.file_size for i in infos)
+        if total > MAX_ZIP_BYTES:
+            raise _unsafe(src, f"it unpacks to {total} bytes, more than {MAX_ZIP_BYTES}")
+        for info in infos:
             n = info.filename.replace("\\", "/")
             if n.startswith("/") or re.match(r"^[A-Za-z]:", n):
                 raise _unsafe(src, f"member {info.filename!r} has an absolute path")

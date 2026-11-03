@@ -645,3 +645,31 @@ def test_json_refusals_have_the_compile_error_shape(tmp_path, mcf_136, capsys):
     assert set(err) == keys and err["code"] == "BASE_MISMATCH"
     assert main(["validate", str(pf), STOCK, "--json"]) == 1
     assert set(json.loads(capsys.readouterr().out)["errors"][0]) == keys
+
+
+# --- op install / pack: limits and I/O failures are structured -----------------------------------
+
+def test_install_refuses_a_zip_too_large_unpacked(tmp_path, mcf_136, capsys, monkeypatch):
+    from fireflymcf import opshare
+    pf = _project(tmp_path / "a", mcf_136)
+    z = tmp_path / "hook_nop.zip"
+    assert main(["op", "pack", str(pf), "hook_nop", "-o", str(z)]) == 0
+    size = sum(i.file_size for i in zipfile.ZipFile(z).infolist())
+    monkeypatch.setattr(opshare, "MAX_ZIP_BYTES", size - 1)
+    pf2 = _empty_project(tmp_path / "b", mcf_136)
+    capsys.readouterr()
+    assert main(["op", "install", str(pf2), str(z), "--json"]) == 1
+    err = json.loads(capsys.readouterr().out)["errors"][0]
+    assert err["code"] == "UNSAFE_SOURCE" and "unpacks to" in err["message"]
+    assert not (tmp_path / "b" / "ops").exists()
+
+
+def test_op_io_failure_is_structured(tmp_path, mcf_136, capsys):
+    pf = _project(tmp_path / "a", mcf_136)
+    (tmp_path / "file").write_text("x")
+    assert main(["op", "pack", str(pf), "hook_nop", "-o", str(tmp_path / "file" / "x.zip"),
+                 "--json"]) == 1
+    err = json.loads(capsys.readouterr().out)["errors"][0]
+    assert err["code"] == "OP_IO_ERROR" and set(err) == {"op_id", "code", "message", "offers"}
+    assert main(["op", "pack", str(pf), "hook_nop", "-o", str(tmp_path / "file" / "x.zip")]) == 1
+    assert "OP_IO_ERROR" in capsys.readouterr().err
