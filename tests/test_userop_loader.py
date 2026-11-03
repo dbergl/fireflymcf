@@ -392,3 +392,60 @@ def test_symlink_in_op_folder_refused(tmp_path, mcf_136):
     assert code == "BAD_USER_OP" and "key.txt" in msg and "symbolic link" in msg
     code, _ = _code(lambda: userop.folder_hash(tmp_path / "ops" / "hook_nop"))
     assert code == "BAD_USER_OP"
+
+
+# --- review fix round 2: descriptors and the header count; resealing alone never does ---------
+
+def _desc_offset(data: bytes, marker: str) -> int:
+    c = container.parse_container(data)
+    i = next(s.index for s in c.sections if marker in s.name)
+    return container._descriptor_offsets(data, c.section_count, c.header_word_20)[i]
+
+
+DESC_PATCH = '''from fireflymcf import container, recipe
+from fireflymcf.userop import UserOp
+
+
+@recipe.op("user:hook-nop")
+class DescPatch(UserOp):
+    def build(self, ed, ctx):
+        off = {off}
+        old = ed.data[off:off + 1]
+        ed.patch(off, old, bytes([old[0] ^ 1]), "flip a byte outside every payload")
+
+    def check(self, data, ctx):
+        return "flipped"
+'''
+
+
+@pytest.mark.parametrize("where, field, kind", [
+    ("G12", 0x5C, "g12"),           # the first tagged entry's value
+    ("G12", 0x44, "g12"),           # the descriptor type byte
+    ("LCD", 0x5C, "lcd"),           # the LCD flash destination
+    (None, 0x30, "header"),         # the container header (config name)
+])
+def test_descriptor_and_header_changes_are_touches(tmp_path, mcf_136, where, field, kind):
+    off = (_desc_offset(mcf_136, where) if where else 0) + field
+    pf = _setup(tmp_path, "hook_nop", op_py=DESC_PATCH.replace("{off}", hex(off)))
+    assert userop.touched_sections(mcf_136, _flip(mcf_136, off)) == {kind}
+    proj = _project(mcf_136, ("d", "user:hook-nop"))           # declares only guicode
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert not res.ok and res.errors[0]["code"] == "USER_OP_UNDECLARED_TOUCH", res.errors
+    assert kind in res.errors[0]["message"]
+
+
+def _flip(data: bytes, off: int) -> bytes:
+    return data[:off] + bytes([data[off] ^ 1]) + data[off + 1:]
+
+
+def test_resealing_alone_touches_nothing(mcf_136):
+    """An earlier op left GuiData edited but unsealed; growing GuiCode reseals the image. Only
+    GuiCode counts as touched: GuiData's checksum changed, its content did not."""
+    gd = next(s for s in container.parse_container(mcf_136).sections if "GuiData" in s.name)
+    stale = _flip(mcf_136, gd.offset + 0x100)
+    ed = userop.Editor(stale)
+    ed.grow_guicode(bytes(8), "pad")
+    assert userop.touched_sections(stale, ed.data) == {"guicode"}
+    from fireflymcf import patch
+    assert userop.touched_sections(stale, patch.reseal(stale)[0]) == set()

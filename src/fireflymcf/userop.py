@@ -222,21 +222,47 @@ SECTION_TOUCHES = (("GuiCode", "guicode"), ("GuiData", "guidata"), ("G12", "g12"
                    ("LCD", "lcd"))
 
 
-def _sections_by_touch(data: bytes) -> dict:
+HEADER = "header"                  # the touch key for bytes outside every section; undeclarable
+
+
+def _layout(data: bytes) -> dict:
+    """{touch key: [(section name, payload, masked descriptor)]}, plus HEADER: every byte that is
+    neither a payload nor a descriptor (container header, pointer array, gaps), in file order.
+
+    The image is resealed first, so a checksum differs only where the bytes it covers do: an op
+    whose reseal rewrites a stale checksum left by an earlier op has not touched that section.
+    A descriptor is compared with its payload offset and length and its own checksum masked (a
+    growth moves later payloads and lengthens the grown one, which the payload already shows);
+    every other descriptor byte (type, tagged entries, flash destination) is the section's."""
+    from . import patch
+    data, _ = patch.reseal(data)
+    c = container.parse_container(data)
+    descs = container._descriptor_offsets(data, c.section_count, c.header_word_20)
     out: dict = {}
-    for s in container.parse_container(data).sections:
+    claimed = []
+    for s, d in zip(c.sections, descs):
+        entry = bytearray(s.raw_entry)
+        entry[container.DESC_EXTENT_OFFSET:container.DESC_EXTENT_OFFSET + 8] = bytes(8)
+        entry[len(entry) - 4:len(entry) - 2] = bytes(2)
         key = next((t for m, t in SECTION_TOUCHES if m in s.name), s.name)
-        out.setdefault(key, []).append((s.name, bytes(data[s.offset:s.offset + s.length])))
+        out.setdefault(key, []).append((s.name, bytes(data[s.offset:s.offset + s.length]),
+                                        bytes(entry)))
+        claimed += [(s.offset, s.offset + s.length), (d, d + len(s.raw_entry))]
+    rest, pos = [], 0
+    for a, b in sorted(claimed):
+        if a > pos:
+            rest.append(data[pos:a])
+        pos = max(pos, b)
+    rest.append(data[pos:])
+    out[HEADER] = [("container header", b"".join(rest), b"")]
     return out
 
 
 def _touched(before: bytes, after: bytes) -> dict:
-    """{touch value: section name} for each section whose bytes differ between the two images,
-    matched by section identity, not offset (a growth shifts later sections without changing
-    them). A section's trailing checksum is its own bytes, so it differs only when its content
-    does; the container header is no section and never counts. An unknown section is keyed by
-    its own name, which no manifest can declare."""
-    a, b = _sections_by_touch(before), _sections_by_touch(after)
+    """{touch key: section name} for each section whose payload or descriptor differs between the
+    two images (matched by section identity, not offset), and HEADER when anything outside them
+    does. An unknown section is keyed by its own name; neither it nor HEADER can be declared."""
+    a, b = _layout(before), _layout(after)
     out = {}
     for k in a.keys() | b.keys():
         if a.get(k) != b.get(k):

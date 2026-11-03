@@ -248,7 +248,7 @@ def install(project_path: Path, src: str, replace: bool = False) -> Installed:
         stage = Path(tempfile.mkdtemp(prefix=f".{name}.install-", dir=_mkdir(ops_dir)))
         try:
             shutil.rmtree(stage)
-            shutil.copytree(op_root, stage, ignore=lambda d, names: [
+            shutil.copytree(op_root, stage, symlinks=True, ignore=lambda d, names: [
                 n for n in names if n in userop.IGNORED or n.endswith(".pyc")])
             sha = userop.folder_hash(stage)
             if expected is not None and sha != expected:
