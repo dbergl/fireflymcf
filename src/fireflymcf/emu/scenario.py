@@ -56,6 +56,7 @@ Finding 83), so `tap` presses, holds for `max(hold_s, PRESS_S)`, releases, and r
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import struct
 import tempfile
@@ -101,6 +102,39 @@ class ScenarioError(Exception):
     """A scenario step could not be carried out (unknown control, no path, timeout, fault)."""
 
 
+# What the emulator models: 13.6's LCD firmware (section 0), identified by name and sha256 (no
+# op touches it, so a compiled build keeps it), and its GuiCode section's name (which carries the
+# version, "Lyra 13v6 GuiCode"). 11.23 and 14.7 share one other LCD firmware (sha256 cbed1028...).
+SUPPORTED_LCD_NAME = "LCD Firmware"
+SUPPORTED_LCD_SHA256 = "a55344f9b224f917b5bf16dec752224f31df9d6beb0ef2b944f2c215edc49b87"
+SUPPORTED_GUICODE_NAME = "Lyra 13v6 GuiCode"
+
+
+def supported(image: bytes) -> tuple[bool, str]:
+    """Whether the emulator models this image: 13.6 only. Anything else is `not emulated`, never
+    a pass."""
+    from ..container import parse_container
+
+    def refuse(what: str) -> tuple[bool, str]:
+        return False, (f"not emulated: LCD firmware {what} is not one the emulator models "
+                       "(13.6 only)")
+
+    try:
+        secs = parse_container(bytes(image)).sections
+    except ValueError as e:
+        return refuse(f"unreadable ({e})")
+    lcd = next((s for s in secs if s.name == SUPPORTED_LCD_NAME), None)
+    if lcd is None:
+        return refuse("missing")
+    digest = hashlib.sha256(bytes(image)[lcd.offset:lcd.offset + lcd.length]).hexdigest()
+    if digest != SUPPORTED_LCD_SHA256:
+        return refuse(f"{lcd.name} sha256 {digest[:12]}")
+    code = [s.name for s in secs if s.name.endswith("GuiCode")]
+    if code != [SUPPORTED_GUICODE_NAME]:
+        return refuse(f"{lcd.name} with GuiCode {code[0] if code else 'missing'!r}")
+    return True, "supported: 13.6"
+
+
 @dataclass(frozen=True)
 class Frame:
     """One frame seen on the emulated bus. `t` is simulated seconds since boot."""
@@ -134,6 +168,9 @@ class Scenario:
     def __init__(self, image: bytes, *, eeprom: Path | None = None, timeout_s: float = 300.0):
         from .machine import Machine
 
+        ok, reason = supported(image)
+        if not ok:
+            raise ScenarioError(reason)
         self._t0 = time.monotonic()
         self.timeout_s = timeout_s
         self.image = bytes(image)

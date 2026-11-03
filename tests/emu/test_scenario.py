@@ -133,3 +133,50 @@ def test_renamed_home_header_still_home(mcf_136):
     assert s.screen == 0
     s.goto("MYCOACHNAME")                       # the drawn header is an alias of screen 0
     assert s.screen == 0
+
+
+# --- support detection -----------------------------------------------------------------------
+
+def _compiled_saffron_substitute(stock):
+    """v54-Saffron stand-in (`builds/` is not linked): option follower, pump auto off, readout."""
+    import hashlib
+    import json
+
+    from fireflymcf import recipe
+    ops = [
+        {"id": "link", "type": "add_option_follower", "enabled": True,
+         "params": {"watch_channel": 25, "target_channel": 44, "gate_mask": 0xFF00,
+                    "gate_on_value": 0x100}},
+        {"id": "pump", "type": "add_pump_auto_off", "enabled": True,
+         "params": {"allow_disable": True}},
+        {"id": "f", "type": "append_filter", "enabled": True,
+         "params": {"dgn": 0x1FFD7, "mode": 2, "payload_byte": 3, "instance": 0x41,
+                    "compare_byte": 0}},
+        {"id": "r", "type": "add_register_readout", "enabled": True,
+         "params": {"register": {"ref": "f"}, "sub": 32000, "shift": 1, "draw": False}},
+    ]
+    p = {"schema": 1, "base_sha256": hashlib.sha256(stock).hexdigest(),
+         "build_name": "support-test", "ops": ops}
+    res = recipe.compile_project(recipe.Project.from_json(json.dumps(p)), stock)
+    assert res.ok, res.errors
+    return res.data
+
+
+def test_supported_136_stock_and_builds(mcf_136):
+    from fireflymcf.emu.scenario import supported
+    assert supported(mcf_136) == (True, "supported: 13.6")
+    ok, reason = supported(_compiled_saffron_substitute(mcf_136))
+    assert ok and reason == "supported: 13.6"
+
+
+def test_unsupported_build_not_emulated(mcf_1123, mcf_147):
+    from fireflymcf.emu.scenario import supported
+    for img in (mcf_1123, mcf_147):
+        ok, reason = supported(img)
+        assert not ok
+        assert reason.startswith("not emulated: LCD firmware ")
+        assert "13.6 only" in reason
+    with pytest.raises(ScenarioError, match="not emulated"):
+        Scenario(mcf_1123)
+    ok, reason = supported(b"not an mcf")
+    assert not ok and "not emulated" in reason
