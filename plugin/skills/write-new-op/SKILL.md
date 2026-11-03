@@ -21,6 +21,12 @@ must match the bytes it expects, the op's ledger must replay to its output, ever
 must be declared in `touches`) are correctness gates. They are not a sandbox. Never pass
 `--allow-user-ops` for code you have not read.
 
+**Where the docs are.** The package installs code only. The repository documents this skill
+cites (`docs/BUS-BASELINE.md`, `docs/GUICODE.md`, `docs/CHANGE-CATALOG.md` and the rest of that folder)
+are read on GitHub: https://github.com/dbergl/fireflymcf/tree/main/docs, raw text at
+`https://raw.githubusercontent.com/dbergl/fireflymcf/main/docs/<NAME>.md`. The installed
+package's own source (its docstrings name the proof behind each op) is the other reference.
+
 ## 1. Check composition first
 
 A new op is the last resort. Run `$F ops` (and `$F ops NAME` for an op's parameters and proof)
@@ -79,14 +85,30 @@ not yet booted (`help()` on that class is the full reference):
 | `s.run(seconds)`, `s.now` | advance simulated time; seconds since boot |
 | `s.set_tank_raw(sensor, raw)` | the G12's raw tank input (1 fresh, 2 grey, 3 black, 4 grey 2; high is empty), read once a second |
 | `s.g12_selector(sel)` | the emulated G12's stored value for a config selector (None: unset) |
+| `s.set_g12_selector(sel, value)` | give the G12 a stored value (before `boot()`: the coach comes up that way); the panel learns it from the G12's report, so run a few seconds |
 | `s.frames(dgn=, sa=0x9F, since=)` | frames on the bus (`.t`, `.can_id`, `.dgn`, `.sa`, `.data`); `sa=None` for every sender |
 | `s.read_mem(addr, n)` | emulated RAM, e.g. a cell your routine owns |
 | `s.screen`, `s.page`, `s.control_box(c)` | the screen id and header showing; a control's touch box |
 | `s.screenshot(path)`, `s.image` | save the display; the image bytes under test |
 
+Only the calls in this table are the API; a name starting with `_` can change in any release.
+Start the coach in the state the owner runs it (`set_g12_selector` for a setting the fresh
+emulated G12 leaves unset), and make every manual change the way the owner would, with `tap`.
+If the table cannot express a case, say so to the owner as a gap in the test; do not reach
+into the emulator.
+
+**One case per clause of the request.** Write down each thing the owner said the change must
+do and each thing it must *not* do, then give each its own case: every "only if", "unless",
+"but leave it when" and "if I change it by hand" is a case where the op must stay silent. For
+each threshold or delay, test both sides of it (a little short of it: nothing; past it: the
+action), in each direction the owner named. Where the op shares a setting or a cell with
+something else, assert that the other part is unchanged after every step.
+
 Assert crossings and counts, not single readings: "after X, exactly one frame with payload P
-within 5 s, and none before". Assert what the owner would see (a selector's value, a cell a widget
-draws), not only that your code ran. Anything that raises fails the test with its line.
+within 5 s, and none before". When asserting that nothing was sent, count every frame the op
+could produce on that DGN and selector (any function byte), not only the kind it is meant to
+send. Assert what the owner would see (a selector's value, a cell a widget draws), not only
+that your code ran. Anything that raises fails the test with its line.
 
 **Run every assertion on stock first.** The stock panel is not silent: stock 13.6 sends a D1
 config write on selector `0x9B` at boot (observed in the emulator, not checked against a

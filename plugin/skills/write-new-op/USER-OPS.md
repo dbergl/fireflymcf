@@ -15,6 +15,10 @@ complete, tested example op.
 - *emulator*: observed in the emulator, not checked against a capture.
 - *library*: what this library's code does, pinned by its tests.
 
+The repository's documents are not installed with the package; read them on GitHub,
+https://github.com/dbergl/fireflymcf/tree/main/docs (raw text at
+`https://raw.githubusercontent.com/dbergl/fireflymcf/main/docs/<NAME>.md`).
+
 fireflymcf is unofficial (not affiliated with Firefly Integrations or any coach maker) and comes
 without warranty of any kind. A user op has been checked by nobody but its author.
 
@@ -132,9 +136,10 @@ class MyOp(UserOp):
 
 `emu_test.py` defines `scenario(s)`; `s` is a `fireflymcf.emu.scenario.Scenario` on the built
 image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page=)`,
-`s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`, `s.frames(dgn=,
-sa=, since=)`, `s.read_mem(addr, n)`, `s.screen`, `s.page`, `s.screenshot(path)` and `s.image` are
-its surface; its docstrings are the reference. Anything that raises fails the test with its line.
+`s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`,
+`s.set_g12_selector(selector, value)`, `s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
+`s.screen`, `s.page`, `s.control_box(control)`, `s.screenshot(path)` and `s.image` are its
+surface (a name starting with `_` is not); its docstrings are the reference. Anything that raises fails the test with its line.
 Write it first and run it on the image without the op: it must fail there. Assert only what the op
 changes: stock 13.6 itself sends a D1 config write on selector `0x9B` at boot (*emulator*: observed
 in the emulator, not checked against a capture), so "the panel sent nothing" is false without any

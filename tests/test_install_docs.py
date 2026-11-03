@@ -188,3 +188,36 @@ def test_the_cli_names_this_repository_when_the_emulator_is_missing():
     from fireflymcf import cli
     assert "git+https://github.com/dbergl/fireflymcf.git" in cli.EMU_MISSING
     assert _by_name(cli.EMU_MISSING) == []
+
+
+# --- a skill that cites the repository's docs says where to read them --------------------------
+# The package ships no docs (see above), so a cited `docs/X.md` must come with the public URL.
+# Run 1 of the 2026-11-02 acceptance went looking for the docs on the local disk instead.
+DOCS_URL = "https://github.com/dbergl/fireflymcf/tree/main/docs"
+RAW_URL = "https://raw.githubusercontent.com/dbergl/fireflymcf/main/docs/"
+
+
+@pytest.mark.parametrize("path", [p for p in SKILL_FILES if p.suffix == ".md"],
+                         ids=lambda p: str(p.relative_to(PLUGIN)))
+def test_a_file_citing_repository_docs_names_where_they_are(path):
+    cited = file_refs(path.read_text(encoding="utf-8")) & REPO_CITATIONS
+    if not cited:
+        return
+    text = path.read_text(encoding="utf-8")
+    assert DOCS_URL in text and RAW_URL in text, (sorted(cited), "no docs URL")
+
+
+def test_the_scenario_calls_the_skill_lists_exist():
+    """Every `s.NAME(` the write-new-op skill and guide list is a public Scenario member."""
+    import inspect
+
+    pytest.importorskip("unicorn")
+    from fireflymcf.emu.scenario import Scenario
+    for name in ("SKILL.md", "USER-OPS.md"):
+        text = (PLUGIN / "skills" / "write-new-op" / name).read_text(encoding="utf-8")
+        calls = set(re.findall(r"`s\.([a-z][a-z0-9_]*)", text))
+        assert "set_g12_selector" in calls, name
+        src = Path(inspect.getsourcefile(Scenario)).read_text(encoding="utf-8")
+        missing = sorted(c for c in calls
+                         if not hasattr(Scenario, c) and f"self.{c} = " not in src)
+        assert missing == [], (name, missing)
