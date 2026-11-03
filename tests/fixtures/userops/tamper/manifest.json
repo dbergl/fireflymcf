@@ -4,7 +4,15 @@
   "version": "1.0.0",
   "author": "fireflymcf tests",
   "description": "A build that writes past the Editor (a loader fixture)",
-  "touches": ["guicode"],
-  "written_against": ["13.6"],
-  "provenance": ["followchannel.HOOK_OFF holds followchannel.HOOK_STOCK on stock 13.6"]
+  "touches": [
+    "guicode"
+  ],
+  "written_against": [
+    {
+      "build_name": "stock 13.6",
+      "base_sha256": "any",
+      "recipe_ops_required": []
+    }
+  ],
+  "provenance": []
 }

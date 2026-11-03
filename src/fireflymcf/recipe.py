@@ -436,6 +436,19 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     return CompileResult(True, data, [], manifest, unverified, shifts)
 
 
+def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
+                      ops: list) -> CompileResult:
+    """`_finish`, except that a user op's refusal (`userop` tags it `user_op`) surfacing in its
+    verify or capability_delta comes back as a failed CompileResult, the shape every other
+    user-op failure has. A built-in op's or the project's RecipeError still raises as before."""
+    try:
+        return _finish(project, stock, data, ctx, ops)
+    except RecipeError as e:
+        if not getattr(e, "user_op", False):
+            raise
+        return CompileResult(False, None, [e.to_json()], [], [])
+
+
 def compile_project(project: Project, stock: bytes) -> CompileResult:
     if hashlib.sha256(stock).hexdigest() != project.base_sha256:
         raise RecipeError("BASE_MISMATCH",
@@ -457,7 +470,7 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
             e.op_id = e.op_id or o.spec.id
             return CompileResult(False, None, [e.to_json()], [], [])
 
-    return _finish(project, stock, data, ctx, ops)
+    return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
 def _prefix_key(base_hash: str, specs: list) -> str:
@@ -529,7 +542,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
         cache[_prefix_key(project.base_sha256, enabled[:i + 1])] = (
             data, _snapshot(ctx))
 
-    return _finish(project, stock, data, ctx, ops)
+    return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
 from fireflymcf import recipe_ops  # noqa: E402,F401  (populates REGISTRY)

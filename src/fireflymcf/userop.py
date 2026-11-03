@@ -170,6 +170,9 @@ TOUCHES = frozenset({"guicode", "guidata", "g12", "lcd"})
 MANIFEST_FIELDS = {"name": str, "type": str, "version": str, "author": str,
                    "description": str, "touches": list, "written_against": list,
                    "provenance": list}
+# What each list field's items must be: `touches` names sections; `written_against` and
+# `provenance` hold objects (the design's {build_name, base_sha256, ...} / {kind, ...}).
+MANIFEST_ITEMS = {"touches": str, "written_against": dict, "provenance": dict}
 PREFIX = "user:"
 
 
@@ -201,8 +204,15 @@ def _rel(filename: str, folder: Path | None) -> str:
 
 
 def _crashed(type_name: str, exc: BaseException, folder: Path | None, op_id=None) -> RecipeError:
-    return RecipeError("USER_OP_CRASHED", f"{type_name}: {type(exc).__name__}: {exc} "
-                       f"(at {_where(exc, folder)})", op_id=op_id)
+    return _mark(RecipeError("USER_OP_CRASHED", f"{type_name}: {type(exc).__name__}: {exc} "
+                             f"(at {_where(exc, folder)})", op_id=op_id))
+
+
+def _mark(e: RecipeError) -> RecipeError:
+    """Tag a refusal as a user op's, so `recipe._finish_or_refuse` returns it as a failed
+    CompileResult wherever in the compile it surfaced (verify and the capability gate included)."""
+    e.user_op = True
+    return e
 
 
 class UserOp(recipe.Op):
@@ -216,13 +226,39 @@ class UserOp(recipe.Op):
     folder_sha256: str = ""
     folder: Path | None = None
 
-    def __init__(self, spec: recipe.OpSpec):
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        # `capability_delta` is the one Op hook a user op may override (an op that changes a
+        # binding declares it). The engine calls it from `_finish`, so it gets the same boundary.
+        own = cls.__dict__.get("capability_delta")
+        if own is not None and not getattr(own, "_user_op_guarded", False):
+            def capability_delta(self, ctx, _own=own):
+                out = self._guard(spec_id=self.spec.id, fn=_own, args=(self, ctx))
+                if not (isinstance(out, tuple) and len(out) == 2
+                        and all(isinstance(x, (set, frozenset)) for x in out)):
+                    raise _mark(RecipeError(
+                        "USER_OP_CRASHED", f"{self.type}: capability_delta returned {out!r}, "
+                        "not (lost, gained) sets", op_id=self.spec.id))
+                return out
+            capability_delta._user_op_guarded = True
+            cls.capability_delta = capability_delta
+
+    def _guard(self, *, spec_id, fn, args):
+        """Run user code: a RecipeError passes through (tagged), any other exception, SystemExit
+        included, becomes USER_OP_CRASHED. Only KeyboardInterrupt escapes: it is the user's."""
         try:
-            super().__init__(spec)          # runs the subclass's validate()
-        except RecipeError:
+            return fn(*args)
+        except KeyboardInterrupt:
             raise
-        except Exception as e:  # noqa: BLE001
-            raise _crashed(self.type, e, self.folder, spec.id) from e
+        except RecipeError as e:
+            e.op_id = e.op_id or spec_id
+            raise _mark(e)
+        except BaseException as e:  # noqa: BLE001 - a user op's crash is a structured refusal
+            raise _crashed(self.type, e, self.folder, spec_id) from e
+
+    def __init__(self, spec: recipe.OpSpec):
+        # runs the subclass's validate()
+        self._guard(spec_id=spec.id, fn=super().__init__, args=(spec,))
 
     def build(self, ed: Editor, ctx: recipe.Ctx) -> None:
         raise NotImplementedError
@@ -232,37 +268,30 @@ class UserOp(recipe.Op):
 
     def apply(self, data: bytes, ctx: recipe.Ctx) -> bytes:
         ed = Editor(data)
-        try:
-            self.build(ed, ctx)
-        except RecipeError:
-            raise
-        except Exception as e:  # noqa: BLE001 - a user op's crash is a structured refusal
-            raise _crashed(self.type, e, self.folder, self.spec.id) from e
+        self._guard(spec_id=self.spec.id, fn=self.build, args=(ed, ctx))
         out = ed.data
         try:
             replayed, edits = _replay(data, ed.ledger)
         except RecipeError as e:
-            raise RecipeError("USER_OP_TAMPERED", f"{self.type}: its ledger does not replay "
-                              f"on its input ({e.code}: {e})", op_id=self.spec.id) from e
+            raise _mark(RecipeError("USER_OP_TAMPERED", f"{self.type}: its ledger does not "
+                                    f"replay on its input ({e.code}: {e})",
+                                    op_id=self.spec.id)) from e
         if replayed != out:
             diff = next((i for i, (a, b) in enumerate(zip(replayed, out)) if a != b),
                         min(len(replayed), len(out)))
-            raise RecipeError("USER_OP_TAMPERED", f"{self.type}: its output differs from the "
-                              f"replay of its ledger (first at file offset {diff:#x}): a byte "
-                              "was written outside the Editor", op_id=self.spec.id)
+            raise _mark(RecipeError("USER_OP_TAMPERED", f"{self.type}: its output differs "
+                                    f"from the replay of its ledger (first at file offset "
+                                    f"{diff:#x}): a byte was written outside the Editor",
+                                    op_id=self.spec.id))
         ctx.edits.extend(edits)
         return out
 
     def verify(self, data: bytes, ctx: recipe.Ctx) -> str:
-        try:
-            line = self.check(data, ctx)
-        except RecipeError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise _crashed(self.type, e, self.folder, self.spec.id) from e
+        line = self._guard(spec_id=self.spec.id, fn=self.check, args=(data, ctx))
         if not isinstance(line, str):
-            raise RecipeError("USER_OP_CRASHED", f"{self.type}: check returned "
-                              f"{type(line).__name__}, not a manifest line", op_id=self.spec.id)
+            raise _mark(RecipeError("USER_OP_CRASHED", f"{self.type}: check returned "
+                                    f"{type(line).__name__}, not a manifest line",
+                                    op_id=self.spec.id))
         return "user op %s v%s (%s): %s" % (self.type, self.manifest.get("version", "?"),
                                             self.folder_sha256[:12], line)
 
@@ -302,8 +331,12 @@ def _read_manifest(folder: Path) -> dict:
     if not (folder / "op.py").is_file():
         raise _bad(folder, "no op.py")
     try:
-        m = json.loads(mf.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        text = mf.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise _bad(folder, f"cannot read manifest.json: {e}")
+    try:
+        m = json.loads(text)
+    except (ValueError, RecursionError) as e:
         raise _bad(folder, f"manifest.json is not valid JSON: {e}")
     if not isinstance(m, dict):
         raise _bad(folder, "manifest.json must be an object")
@@ -311,6 +344,11 @@ def _read_manifest(folder: Path) -> dict:
         if not isinstance(m.get(k), kind):
             raise _bad(folder, f"manifest field {k!r} must be a {kind.__name__}, "
                        f"got {m.get(k)!r}")
+    for k, kind in MANIFEST_ITEMS.items():
+        wrong = [x for x in m[k] if not isinstance(x, kind)]
+        if wrong:
+            raise _bad(folder, f"manifest field {k!r} must hold only "
+                       f"{'strings' if kind is str else 'objects'}, got {wrong[0]!r}")
     bad = [t for t in m["touches"] if t not in TOUCHES]
     if bad:
         raise _bad(folder, f"manifest 'touches' has {bad}; allowed: {sorted(TOUCHES)}")
@@ -332,7 +370,10 @@ def _import(folder: Path, manifest: dict, sha: str) -> type:
     sys.modules[name] = module
     try:
         spec.loader.exec_module(module)
-    except Exception as e:  # noqa: BLE001 - a broken op.py is a structured refusal
+    except KeyboardInterrupt:
+        sys.modules.pop(name, None)
+        raise
+    except BaseException as e:  # noqa: BLE001 - a broken op.py (SystemExit too) is a refusal
         sys.modules.pop(name, None)
         raise _bad(folder, f"importing op.py failed: {type(e).__name__}: {e} "
                    f"(at {_where(e, folder)})") from e
@@ -396,7 +437,10 @@ def load_user_ops(project_path: Path, project: recipe.Project) -> list[LoadedOp]
             raise RecipeError("USER_OP_DUPLICATE", f"user op type {m['type']!r} is defined "
                               f"in both {by_type[m['type']]} and {folder}")
         by_type[m["type"]] = folder
-        sha = folder_hash(folder)
+        try:
+            sha = folder_hash(folder)
+        except OSError as e:
+            raise _bad(folder, f"cannot read the op folder: {e}")
         loaded.append(LoadedOp(m["type"], _import(folder, m, sha), folder, m, sha))
     return loaded
 
