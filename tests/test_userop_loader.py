@@ -281,3 +281,114 @@ def test_validate_exception_is_structured(tmp_path, mcf_136):
         res = recipe.compile_project(proj, mcf_136)
     assert not res.ok and res.errors[0]["code"] == "USER_OP_CRASHED"
     assert "IndexError" in res.errors[0]["message"] and res.errors[0]["op_id"] == "nop"
+
+
+# --- review fix round 1: touches enforced, source-only import, no symlinks ---------------------
+
+G12_FLIP = '''from fireflymcf import recipe
+from fireflymcf.userop import UserOp
+
+
+@recipe.op("user:hook-nop")
+class FlipG12(UserOp):
+    """Flip the G12 section's last byte."""
+    def build(self, ed, ctx):
+        s = ed.section("G12")
+        off = s.offset + s.length - 1
+        old = ed.data[off:off + 1]
+        ed.patch(off, old, bytes([old[0] ^ 1]), "flip a G12 byte")
+
+    def check(self, data, ctx):
+        return "flipped"
+'''
+
+
+def test_undeclared_touch_refused(tmp_path, mcf_136):
+    """`touches` is enforced: a G12 edit by an op declaring only guicode is refused."""
+    pf = _setup(tmp_path, "hook_nop", op_py=G12_FLIP)          # manifest: touches ["guicode"]
+    proj = _project(mcf_136, ("g", "user:hook-nop"))
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert not res.ok
+    [err] = res.errors
+    assert err["code"] == "USER_OP_UNDECLARED_TOUCH" and err["op_id"] == "g"
+    assert "g12" in err["message"] and "G12" in err["message"]
+
+
+def test_declared_touch_passes(tmp_path, mcf_136):
+    """Declaring g12 admits the edit at the op's own gate (the flipped byte would then fail the
+    image's coverage gate, which is not what this tests)."""
+    pf = _setup(tmp_path, "hook_nop", op_py=G12_FLIP, manifest={"touches": ["g12"]})
+    loaded = userop.load_user_ops(pf, _project(mcf_136))
+    o = loaded[0].cls(recipe.OpSpec(id="g", type="user:hook-nop", params={}))
+    ctx = recipe.Ctx(stock=mcf_136, edits=[], insertions=[], handles={})
+    out = o.apply(mcf_136, ctx)
+    assert userop.touched_sections(mcf_136, out) == {"g12"}
+
+
+def test_growth_counts_only_the_grown_section(tmp_path, mcf_136):
+    """Growing GuiCode shifts GuiData and G12 in the file; only GuiCode counts as touched."""
+    src = ('from fireflymcf import recipe\nfrom fireflymcf.userop import UserOp\n\n\n'
+           '@recipe.op("user:hook-nop")\nclass Grow(UserOp):\n'
+           '    def build(self, ed, ctx):\n        ed.grow_guicode(bytes(8), "pad")\n\n'
+           '    def check(self, data, ctx):\n        return "grown"\n')
+    pf = _setup(tmp_path, "hook_nop", op_py=src)               # touches ["guicode"]
+    loaded = userop.load_user_ops(pf, _project(mcf_136))
+    o = loaded[0].cls(recipe.OpSpec(id="g", type="user:hook-nop", params={}))
+    ctx = recipe.Ctx(stock=mcf_136, edits=[], insertions=[], handles={})
+    assert len(o.apply(mcf_136, ctx)) == len(mcf_136) + 8
+    assert userop.touched_sections(mcf_136, o.apply(mcf_136, ctx)) == {"guicode"}
+
+
+def _stale_pyc(src_path: Path, stale_source: str) -> None:
+    """Plant `__pycache__/<name>.cpython-*.pyc` compiled from `stale_source`, which has the same
+    size as the real source, with the real source's mtime: CPython's default loader would run it."""
+    import importlib.util
+    import os
+    import py_compile
+    real = src_path.read_text()
+    assert len(stale_source.encode()) == len(real.encode())
+    st = src_path.stat()
+    tmp = src_path.with_name("_stale_tmp.py")
+    tmp.write_text(stale_source)
+    os.utime(tmp, ns=(st.st_atime_ns, st.st_mtime_ns))
+    py_compile.compile(str(tmp), cfile=importlib.util.cache_from_source(str(src_path)),
+                       doraise=True)
+    tmp.unlink()
+    os.utime(src_path, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+
+def test_import_runs_the_hashed_source_not_stale_bytecode(tmp_path, mcf_136):
+    """R7: what runs is the source that was hashed, for op.py and for a sibling it imports."""
+    src = (FIX / "hook_nop" / "op.py").read_text().replace(
+        'return "hook at', 'return helper.WORD + " hook at').replace(
+        "from fireflymcf.userop import UserOp", "from fireflymcf.userop import UserOp\n"
+        "from . import helper\nWHO = 'SOURCE'")
+    pf = _setup(tmp_path, "hook_nop", op_py=src)
+    folder = tmp_path / "ops" / "hook_nop"
+    (folder / "helper.py").write_text("WORD = 'SOURCE'\n")
+    _stale_pyc(folder / "op.py", src.replace("WHO = 'SOURCE'", "WHO = 'STALE!'"))
+    _stale_pyc(folder / "helper.py", "WORD = 'STALE!'\n")
+    pycs = sorted(p.name for p in (folder / "__pycache__").iterdir())
+
+    proj = _project(mcf_136, ("nop", "user:hook-nop"))
+    loaded = userop.load_user_ops(pf, proj)
+    mod = __import__("sys").modules[loaded[0].cls.__module__]
+    assert mod.WHO == "SOURCE"
+    with userop.registered(loaded):
+        res = recipe.compile_project(proj, mcf_136)
+    assert res.ok, res.errors
+    assert ": SOURCE hook at" in res.manifest[0]
+    # and nothing new was written to (or rewritten in) the cache
+    assert sorted(p.name for p in (folder / "__pycache__").iterdir()) == pycs
+
+
+def test_symlink_in_op_folder_refused(tmp_path, mcf_136):
+    secret = tmp_path / "secret.key"
+    secret.write_text("PRIVATE")
+    pf = _setup(tmp_path, "hook_nop")
+    (tmp_path / "ops" / "hook_nop" / "key.txt").symlink_to(secret)
+    code, msg = _code(lambda: userop.discover_user_ops(pf, _project(mcf_136)))
+    assert code == "BAD_USER_OP" and "key.txt" in msg and "symbolic link" in msg
+    code, _ = _code(lambda: userop.folder_hash(tmp_path / "ops" / "hook_nop"))
+    assert code == "BAD_USER_OP"

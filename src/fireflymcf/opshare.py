@@ -77,7 +77,8 @@ def find(project_path: Path, project: recipe.Project, name: str) -> userop.Disco
 def files_of(folder: Path) -> list[str]:
     folder = Path(folder)
     return sorted(p.relative_to(folder).as_posix() for p in folder.rglob("*")
-                  if p.is_file() and not userop.ignored(p.relative_to(folder)))
+                  if p.is_file() and not p.is_symlink()
+                  and not userop.ignored(p.relative_to(folder)))
 
 
 # --- accept --------------------------------------------------------------------------------------
@@ -110,6 +111,7 @@ def pack(project_path: Path, name: str, out: Path) -> dict:
         raise RecipeError("BAD_PACK", f"refusing to overwrite the existing file {out}")
     project = load_project(project_path)
     d = find(project_path, project, name)
+    _no_links(name, d.folder)              # never pack a link's target (a key file, say)
     files = files_of(d.folder)
     meta = {"folder_sha256": d.folder_sha256, "type": d.type,
             "version": d.manifest.get("version")}

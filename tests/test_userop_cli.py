@@ -406,3 +406,13 @@ def test_verify_emulate_project_keys_by_type(tmp_path, mcf_136, monkeypatch, cap
     assert "emulated, not flashed" not in capsys.readouterr().out    # c was not emulated
 
     assert main(["verify", str(build), STOCK, "--no-render", "--project", str(pf)]) == 2
+
+
+def test_pack_refuses_a_symlink(tmp_path, mcf_136, capsys):
+    secret = tmp_path / "secret.key"
+    secret.write_text("PRIVATE")
+    pf = _project(tmp_path / "a", mcf_136)
+    (tmp_path / "a" / "ops" / "hook_nop" / "id_rsa").symlink_to(secret)
+    z = tmp_path / "out.zip"
+    assert main(["op", "pack", str(pf), "hook_nop", "-o", str(z)]) == 1
+    assert "symbolic link" in capsys.readouterr().err and not z.exists()

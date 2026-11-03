@@ -15,6 +15,8 @@ from __future__ import annotations
 import contextlib
 import copy
 import hashlib
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import json
 import sys
@@ -215,6 +217,38 @@ def _mark(e: RecipeError) -> RecipeError:
     return e
 
 
+# Section name marker -> the `touches` value that declares it (as `Editor.section` matches).
+SECTION_TOUCHES = (("GuiCode", "guicode"), ("GuiData", "guidata"), ("G12", "g12"),
+                   ("LCD", "lcd"))
+
+
+def _sections_by_touch(data: bytes) -> dict:
+    out: dict = {}
+    for s in container.parse_container(data).sections:
+        key = next((t for m, t in SECTION_TOUCHES if m in s.name), s.name)
+        out.setdefault(key, []).append((s.name, bytes(data[s.offset:s.offset + s.length])))
+    return out
+
+
+def _touched(before: bytes, after: bytes) -> dict:
+    """{touch value: section name} for each section whose bytes differ between the two images,
+    matched by section identity, not offset (a growth shifts later sections without changing
+    them). A section's trailing checksum is its own bytes, so it differs only when its content
+    does; the container header is no section and never counts. An unknown section is keyed by
+    its own name, which no manifest can declare."""
+    a, b = _sections_by_touch(before), _sections_by_touch(after)
+    out = {}
+    for k in a.keys() | b.keys():
+        if a.get(k) != b.get(k):
+            out[k] = (a.get(k) or b.get(k))[0][0]
+    return out
+
+
+def touched_sections(before: bytes, after: bytes) -> set[str]:
+    """The `touches` values (section kinds) whose bytes differ from `before` to `after`."""
+    return set(_touched(before, after))
+
+
 class UserOp(recipe.Op):
     """A user-written op. Subclasses implement `build` (every write through the `Editor`) and
     `check` (returns the manifest line); they must not override `apply` or `verify`, which are
@@ -283,6 +317,20 @@ class UserOp(recipe.Op):
                                     f"from the replay of its ledger (first at file offset "
                                     f"{diff:#x}): a byte was written outside the Editor",
                                     op_id=self.spec.id))
+        declared = set(self.manifest.get("touches", []))
+        try:
+            touched = _touched(data, out)
+        except Exception as e:  # noqa: BLE001 - an unreadable output is the op's failure
+            raise _mark(RecipeError("USER_OP_UNDECLARED_TOUCH", f"{self.type}: its output is "
+                                    f"not a readable container ({e})", op_id=self.spec.id))
+        undeclared = {k: n for k, n in touched.items() if k not in declared}
+        if undeclared:
+            raise _mark(RecipeError(
+                "USER_OP_UNDECLARED_TOUCH",
+                f"{self.type}: it changed the {', '.join(sorted(undeclared.values()))} "
+                f"section(s) ({', '.join(sorted(undeclared))}), which its manifest's 'touches' "
+                f"{sorted(declared)} does not declare; an op may change only what it declares "
+                "(and a G12 change needs the owner's acceptance)", op_id=self.spec.id))
         ctx.edits.extend(edits)
         return out
 
@@ -313,18 +361,38 @@ def ignored(rel: Path) -> bool:
     return rel.suffix == ".pyc" or any(part in IGNORED for part in Path(rel).parts)
 
 
-def folder_hash(folder: Path) -> str:
-    """sha256 over the folder's files, sorted by posix relative path (path, NUL, length, bytes
-    per file), ignoring `__pycache__`, `*.pyc` and `.git` (`IGNORED`)."""
+def _snapshot(folder: Path) -> dict[str, bytes]:
+    """Every hashed file's bytes, by posix relative path: what `folder_hash` covers and what the
+    loader compiles from. A symbolic link is refused, never followed: following one would hash,
+    run or pack a file from outside the folder."""
     folder = Path(folder)
+    snap: dict[str, bytes] = {}
+    for p in sorted(folder.rglob("*")):
+        rel = p.relative_to(folder)
+        if ignored(rel):
+            continue
+        if p.is_symlink():
+            raise _bad(folder, f"{rel.as_posix()} is a symbolic link; an op folder holds only "
+                       "regular files")
+        if p.is_file():
+            snap[rel.as_posix()] = p.read_bytes()
+    return snap
+
+
+def _hash_snapshot(snap: dict[str, bytes]) -> str:
     h = hashlib.sha256()
-    files = sorted((p.relative_to(folder).as_posix(), p) for p in folder.rglob("*")
-                   if p.is_file() and not ignored(p.relative_to(folder)))
-    for rel, p in files:
-        body = p.read_bytes()
+    for rel in sorted(snap):
+        body = snap[rel]
         h.update(rel.encode() + b"\0" + len(body).to_bytes(8, "little"))
         h.update(body)
     return h.hexdigest()
+
+
+def folder_hash(folder: Path) -> str:
+    """sha256 over the folder's files, sorted by posix relative path (path, NUL, length, bytes
+    per file), ignoring `__pycache__`, `*.pyc` and `.git` (`IGNORED`). Raises BAD_USER_OP on a
+    symbolic link."""
+    return _hash_snapshot(_snapshot(folder))
 
 
 def _bad(folder: Path, why: str) -> RecipeError:
@@ -368,9 +436,79 @@ def _read_manifest(folder: Path) -> dict:
     return m
 
 
-def _import(folder: Path, manifest: dict, sha: str) -> type:
+class _SourceLoader(importlib.abc.Loader):
+    """Compiles the exact source bytes the folder hash covered; never reads or writes bytecode
+    (R7: a stale `__pycache__` must not run in place of the accepted source)."""
+
+    def __init__(self, source: bytes, path: Path, is_package: bool):
+        self.source, self.path, self._is_package = source, str(path), is_package
+
+    def create_module(self, spec):
+        return None
+
+    def exec_module(self, module):
+        code = compile(self.source, self.path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+
+    def is_package(self, fullname):
+        return self._is_package
+
+    def get_source(self, fullname):
+        return importlib.util.decode_source(self.source)
+
+
+def _spec(name: str, folder: Path, snap: dict, rel: str, package_dir: str | None):
+    spec = importlib.machinery.ModuleSpec(name, _SourceLoader(snap[rel], folder / rel,
+                                                              package_dir is not None),
+                                          origin=str(folder / rel),
+                                          is_package=package_dir is not None)
+    spec.has_location = True
+    if package_dir is not None:
+        spec.submodule_search_locations = [str(folder / package_dir) if package_dir
+                                           else str(folder)]
+    return spec
+
+
+class _OpFinder(importlib.abc.MetaPathFinder):
+    """Resolves `<op package>.x[.y]` (an op's `from . import x`) from the op's hashed snapshot.
+    A name under an op package that the snapshot lacks is an error, never a search on disk, so a
+    sourceless `.pyc` or an extension module beside op.py cannot be imported."""
+    packages: dict = {}                    # package name -> (folder, snapshot)
+
+    def find_spec(self, fullname, path=None, target=None):
+        pkg, dot, rest = fullname.partition(".")
+        if not dot or pkg not in self.packages:
+            return None
+        folder, snap = self.packages[pkg]
+        rel = rest.replace(".", "/")
+        if f"{rel}.py" in snap:
+            return _spec(fullname, folder, snap, f"{rel}.py", None)
+        if f"{rel}/__init__.py" in snap:
+            return _spec(fullname, folder, snap, f"{rel}/__init__.py", rel)
+        raise ModuleNotFoundError(f"no module {rest!r} in the op folder {folder} (a sibling "
+                                  "module is imported as `from . import name`, from its .py "
+                                  "source)", name=fullname)
+
+
+_FINDER = _OpFinder()
+
+
+def _forget(name: str) -> None:
+    for k in [k for k in sys.modules if k == name or k.startswith(name + ".")]:
+        sys.modules.pop(k, None)
+
+
+def _import(folder: Path, manifest: dict, sha: str, snap: dict) -> type:
+    """Import op.py as the package `fireflymcf_userop_<sha12>` from `snap`, the source bytes
+    that hash to `sha`."""
     name = f"fireflymcf_userop_{sha[:12]}"
-    spec = importlib.util.spec_from_file_location(name, folder / "op.py")
+    if "op.py" not in snap:
+        raise _bad(folder, "no op.py")
+    if _FINDER not in sys.meta_path:
+        sys.meta_path.insert(0, _FINDER)
+    _forget(name)                          # a sibling cached under this name is from this hash
+    _OpFinder.packages[name] = (folder, snap)
+    spec = _spec(name, folder, snap, "op.py", "")
     module = importlib.util.module_from_spec(spec)
     captured: dict = {}
     token = recipe._CAPTURE.set(captured)
@@ -378,10 +516,10 @@ def _import(folder: Path, manifest: dict, sha: str) -> type:
     try:
         spec.loader.exec_module(module)
     except KeyboardInterrupt:
-        sys.modules.pop(name, None)
+        _forget(name)
         raise
     except BaseException as e:  # noqa: BLE001 - a broken op.py (SystemExit too) is a refusal
-        sys.modules.pop(name, None)
+        _forget(name)
         raise _bad(folder, f"importing op.py failed: {type(e).__name__}: {e} "
                    f"(at {_where(e, folder)})") from e
     finally:
@@ -473,13 +611,14 @@ def import_user_ops(discovered: list[DiscoveredOp]) -> list[LoadedOp]:
     loaded: list[LoadedOp] = []
     for d in discovered:
         try:
-            now = folder_hash(d.folder)
+            snap = _snapshot(d.folder)     # read once: these bytes are hashed and compiled
         except OSError as e:
             raise _bad(d.folder, f"cannot read the op folder: {e}")
+        now = _hash_snapshot(snap)
         if now != d.folder_sha256:
             raise _bad(d.folder, f"its files changed since they were read (sha256 "
                        f"{d.folder_sha256[:12]}... is now {now[:12]}...); run the command again")
-        loaded.append(LoadedOp(d.type, _import(d.folder, d.manifest, d.folder_sha256),
+        loaded.append(LoadedOp(d.type, _import(d.folder, d.manifest, d.folder_sha256, snap),
                                d.folder, d.manifest, d.folder_sha256))
     return loaded
 
