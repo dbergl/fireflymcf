@@ -31,7 +31,7 @@ from .recipe import RecipeError
 
 
 class EditorError(RecipeError):
-    """Codes: FIRMWARE_MISMATCH, NOT_A_PRIMITIVE, BAD_EDIT."""
+    """Codes: FIRMWARE_MISMATCH, NOT_A_PRIMITIVE, BAD_EDIT, GUIDATA_TOO_LARGE."""
 
 
 @dataclass(frozen=True)
@@ -148,7 +148,9 @@ class Editor:
         descriptor's flash destination, `0x90000000` on 11.23, 13.6 and 14.7) plus the offset, the
         coordinates `patch_addr("GuiData", ...)` takes; a GuiData descriptor without a flash
         destination refuses (BAD_EDIT) rather than borrow GuiCode's base. Recorded padded, so
-        replay appends exactly the same bytes. Refuses (BAD_EDIT) an empty payload. The bytes
+        replay appends exactly the same bytes. Refuses (BAD_EDIT) an empty payload, and
+        (GUIDATA_TOO_LARGE) one that would end GuiData past the flash ceiling
+        (`limits.GUIDATA_END_MAX`). The bytes
         spend GuiData's tail headroom (`coverage.CoverageReport.tail_headroom`): the coverage
         gate refuses an append that nothing names past it."""
         payload = bytes(payload)
@@ -158,10 +160,13 @@ class Editor:
         gd = self.section("GuiData")
         base = self._base(gd)
         at = gd.length - 4
+        from . import limits
         try:
             out, _ = relocate.relocate(self._buf, at, payload)
         except relocate.RelocationError as e:
             raise EditorError("BAD_EDIT", str(e)) from e
+        except limits.GuiDataTooLarge as e:
+            raise EditorError(limits.CODE, str(e)) from e
         self._buf = out
         self._ledger.append(Step("grow_guidata", (payload,), note))
         return base + at

@@ -56,7 +56,8 @@ level cell changes), and read that input from its receive slot, which the routin
 
 Refusals (`ColourCellError.code`): BAD_OBJECT, NO_COLOUR_FIELD, AMBIGUOUS_RECORD,
 UNSUPPORTED_FIELD, UNSUPPORTED_MODE, STATEFUL_RECORD, INHERITED_COLOUR, FIRMWARE_MISMATCH,
-NO_DISPLAY_CELL, BAD_EDIT.
+NO_DISPLAY_CELL, BAD_EDIT, GUIDATA_TOO_LARGE (GuiData would end past the flash ceiling,
+`limits.GUIDATA_END_MAX`).
 """
 from __future__ import annotations
 
@@ -289,6 +290,15 @@ def _swap_record(data: bytes, plan: _Plan) -> bytes:
 
 
 def own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
+    """See `_own_colour_cells`; the flash ceiling's refusal is GUIDATA_TOO_LARGE."""
+    from . import limits
+    try:
+        return _own_colour_cells(data, requests)
+    except limits.GuiDataTooLarge as e:
+        raise ColourCellError(limits.CODE, str(e)) from e
+
+
+def _own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
     """Give each request's field a private mode-7 colour cell, with ONE grow of the cell table
     for all of them; return the new image and a `ColourCell` per request, in order.
 

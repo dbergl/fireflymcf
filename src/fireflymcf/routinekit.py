@@ -371,7 +371,7 @@ def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int |
     pair), INHERITED_COLOUR (a later record of the object inherits the field's colour, or the
     object ends before any record sets it again),
     FIRMWARE_MISMATCH, NO_DISPLAY_CELL, BAD_EDIT (a relocation failure names GuiData's tail
-    headroom). For more than one field use `own_colour_cells`: one grow for all of them."""
+    headroom), GUIDATA_TOO_LARGE (GuiData would end past `limits.GUIDATA_END_MAX`). For more than one field use `own_colour_cells`: one grow for all of them."""
     try:
         return colourcell.own_colour_cell(data, object_index, field, record=record,
                                           expect=expect)

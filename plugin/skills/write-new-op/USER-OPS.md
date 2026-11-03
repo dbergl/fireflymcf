@@ -376,9 +376,14 @@ addr, ...)` takes it as it is. Keep these points in mind (*library*, pinned by i
 - Appended bytes are data nothing reads until something points at them: a record field, a
   table row, a routine's literal.
 - They spend GuiData's **tail headroom**. The coverage gate claims every GuiData byte by
-  structure; bytes after the last object that it cannot name are bounded by the size of the
-  largest object in that table (18,124 bytes left on stock 13.6, `coverage.analyse(data,
-  deep=True).tail_headroom`). An append past it is refused (`BAD_EDIT`).
+  structure; bytes after the last object that it cannot name, zeros included, are bounded by
+  the size of the largest object in that table (18,124 bytes left on stock 13.6,
+  `coverage.analyse(data, deep=True).tail_headroom`). An append past it is refused
+  (`BAD_EDIT`).
+- GuiData must end by `0x903F0000` (4,128,768 bytes): the QSPI flash it is written to is 4 MiB
+  (*proven-from-code*: FSIZE `0x15` at LCD `0x00216E0E`) and its top erase block, *inferred* to
+  be 64 KB, holds the configurator's files. Every grow and every compile checks it; past it
+  the call refuses `GUIDATA_TOO_LARGE` and nothing is written.
 
 ### Colour cells
 
@@ -453,6 +458,7 @@ It refuses these (`RoutineKitError` codes):
 | `INHERITED_COLOUR` | a later record of the object takes this field's colour (the colour state persists from record to record, Finding 29), or draws a child before setting it again, or the object ends before any record sets it again (whatever the page draws next could inherit it) |
 | `FIRMWARE_MISMATCH` | `expect` differs from the record |
 | `NO_DISPLAY_CELL`, `BAD_EDIT` | the table could not grow, or a structural gate failed; a relocation failure names GuiData's tail headroom |
+| `GUIDATA_TOO_LARGE` | GuiData would end past `0x903F0000`, the flash ceiling ("Growing a section") |
 
 **The cell holds garbage at power-on.** The C runtime initialises SRAM only up to `0x2000AD98`,
 and the cell is above it. Your op must install a tick routine of this shape:
