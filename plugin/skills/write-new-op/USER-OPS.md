@@ -240,8 +240,11 @@ mismatch. `r.b(label)` and `r.bcc(cond, label)` write a narrow branch with that 
 a pool word. The encoders cover the T1 loads and stores (`ldr_imm`, `str_imm`, `ldrb_imm`,
 `strb_imm`, `ldrh_imm`, `strh_imm`, and `strb_imm12` for `strb.w`), `movs_imm`, `movw`,
 `cmp_imm8`, `cmp_reg`, `adds_imm8`, `subs_imm8`, `adds_reg`, `subs_reg`, `ands_reg`, `lsls_imm`,
-`lsrs_imm` and `muls`; capstone prints an immediate in decimal below 10 and in hex from 10.
-Use `thumb.Routine(pool, error=routinekit.RoutineKitError)`, so an assembly failure is reported
+`lsrs_imm` and `muls`. For the text of an instruction you emit, `thumb.imm_text(v)` spells an
+immediate as capstone does (`#9`, `#0xa`, `#-0x10`) and `thumb.mem_text(rn, imm)` a memory
+operand (`[r0]` for a zero offset, `[r0, #4]`, `[sp, #8]`, `[pc, #0]`). Other operand forms
+(register lists, shifts) follow capstone's own output; run `thumb.disassemble` on the bytes when
+unsure. Use `thumb.Routine(pool, error=routinekit.RoutineKitError)`, so an assembly failure is reported
 as the op's refusal.
 
 ### Sending a frame

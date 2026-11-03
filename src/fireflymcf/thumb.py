@@ -417,8 +417,26 @@ def pop_w_reglist(regs) -> bytes:
 
 
 def _imm(v: int) -> str:
-    """An immediate as capstone prints it: decimal below 10, hex from 10."""
+    """An immediate's magnitude as capstone prints it: decimal below 10, hex from 10."""
     return f"{v:#x}" if v >= 10 else str(v)
+
+
+def imm_text(v: int) -> str:
+    """An immediate operand as capstone prints it, `#` included: `#9`, `#0xa`, `#-0x10`. The
+    text to give `Routine.emit` for an immediate."""
+    return "#-" + _imm(-v) if v < 0 else "#" + _imm(v)
+
+
+_REG_TEXT = {13: "sp", 14: "lr", 15: "pc"}
+
+
+def mem_text(rn: int, imm: int = 0) -> str:
+    """A `[base, #imm]` memory operand as capstone prints it: `[r0]` for a zero offset,
+    `[r0, #4]`, `[sp, #8]`; a pc-relative operand keeps `#0`."""
+    base = _REG_TEXT.get(rn, f"r{rn}")
+    if imm == 0 and rn != 15:
+        return f"[{base}]"
+    return f"[{base}, {imm_text(imm)}]"
 
 
 class Routine:
@@ -460,8 +478,14 @@ class Routine:
             self.emit(2, fn)
 
     def b(self, name: str) -> None:
-        """`b label`: T2 narrow unconditional branch (+-2 KB), with capstone's text."""
-        self.emit(2, lambda h, s: (b_n(h, s(name)), f"b #{s(name):#x}"))
+        """`b label`: T2 narrow unconditional branch (+-2 KB), with capstone's text. Out of
+        range is the routine's error, as for `bcc`."""
+        def fn(h, s):
+            try:
+                return b_n(h, s(name)), f"b #{s(name):#x}"
+            except ValueError as e:
+                raise self.error(str(e)) from None
+        self.emit(2, fn)
 
     def bcc(self, cond: str, name: str) -> None:
         """`b<cond> label`: T1 narrow conditional branch (+-256 B). `cond` is any key of

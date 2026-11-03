@@ -357,3 +357,45 @@ def test_ldr_lit_text_at_offset_zero():
     r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
     blob, dis = r.assemble(0x259C00)
     assert dis[0][1] == "ldr r0, [pc, #0]" and blob[-4:] == (7).to_bytes(4, "little")
+
+
+def test_routine_b_out_of_range_is_the_routines_error():
+    """`Routine.b` routes its range error through `error`, as `bcc` does (final review)."""
+    class Refused(Exception):
+        pass
+    r = thumb.Routine({}, error=Refused)
+    r.b("far")
+    for _ in range(1100):
+        r.emit(2, lambda h, s: (thumb.NOP2, "nop"))
+    r.label("far")
+    with pytest.raises(Refused, match="out of range"):
+        r.assemble(0x259C00)
+
+
+@pytest.mark.parametrize("v", [0, 1, 9, 10, 0x40, 255, 0xFFF])
+def test_imm_text_is_capstones_spelling(v):
+    assert _dis(thumb.movw(0, v)) == [f"movw r0, {thumb.imm_text(v)}"]
+
+
+@pytest.mark.parametrize("enc,rn,imm", [
+    (lambda: thumb.ldr_imm(1, 0, 0), 0, 0), (lambda: thumb.ldr_imm(1, 0, 4), 0, 4),
+    (lambda: thumb.ldr_imm(1, 0, 0x40), 0, 0x40), (lambda: thumb.ldrb_imm(1, 2, 10), 2, 10),
+    (lambda: thumb.str_sp_imm(1, 8), 13, 8), (lambda: thumb.strb_imm12(1, 3, 0x123), 3, 0x123)])
+def test_mem_text_is_capstones_spelling(enc, rn, imm):
+    text = _dis(enc())[0]
+    assert text.endswith(", " + thumb.mem_text(rn, imm)), text
+
+
+def test_mem_text_pc_and_negative():
+    """A pc-relative operand keeps `#0`; a negative offset is `#-` and the magnitude."""
+    assert thumb.mem_text(15, 0) == "[pc, #0]"
+    assert thumb.mem_text(15, -0x10) == "[pc, #-0x10]"
+    assert thumb.imm_text(-5) == "#-5"
+    blob, dis = _ldr_w_back()
+    assert dis.endswith(thumb.mem_text(15, -0x10)), dis
+
+
+def _ldr_w_back():
+    at = 0x259C20
+    raw = thumb.ldr_literal_w(0, at, ((at + 4) & ~3) - 0x10)
+    return raw, _dis(raw, at)[0]
