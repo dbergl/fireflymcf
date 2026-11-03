@@ -185,6 +185,7 @@ class Scenario:
         finally:
             os.unlink(tmp)
         self._booted = False
+        self._g12_preset: dict[int, int] = {}
         self._recorder: _Recorder | None = None
         self._screen = layout.Screen(self.image)
         self._screen_map = layout.screen_object_map(self.image)
@@ -200,26 +201,40 @@ class Scenario:
         hits = {r.screen for r in navmap.routes(self.image) if r.touch_id == touch_id}
         return hits.pop() if len(hits) == 1 else None
 
-    def _rail_ids(self) -> dict[int, int]:
-        """{screen 0-4: rail touch id}, found structurally on HOME's static layout: the object
-        whose touch regions `navmap` routes to screens 1, 2 and 3 is the rail; its five regions,
-        top to bottom, are screens 0-4 (the HOME and SETTINGS taps are stores `navmap` does not
-        resolve, so their ids come from their place on the rail). Empty if not found."""
+    def _rail_ids(self, regions: list | None = None) -> dict[int, int]:
+        """{screen 0-4: rail touch id}, found structurally: the object whose touch regions
+        `navmap` routes to screens 1, 2 and 3 is the rail. Screens 1-3 are the regions routed
+        to them; HOME (0) is the rail's top region and SETTINGS (4) its bottom one (their taps
+        are stores `navmap` does not resolve, so their ids come from their place on the rail).
+        The rail may carry more than five icons (`show_nav_slides_icon` adds a sixth, between
+        CLIMATE and SETTINGS), and it sits under a variant switch, so `regions` should be the
+        LIVE walk of a rail page (`goto` passes the page showing); without it, HOME's static
+        walk is used, which takes the switch's base arm. Empty if not found."""
         from .. import navmap
 
-        home = self._screen_map.get(0)
-        if home is None:
-            return {}
+        if regions is None:
+            home = self._screen_map.get(0)
+            if home is None:
+                return {}
+            regions = self._regions(self._screen.walk(home))
         routes = {}
         for r in navmap.routes(self.image):
             routes.setdefault(r.touch_id, set()).add(r.screen)
-        regions = self._regions(self._screen.walk(home))
         objs = {o for _, t, o in regions if routes.get(t, set()) & {1, 2, 3}}
-        for obj in objs:
+        for obj in sorted(objs):
             mine = sorted((b[1], t) for b, t, o in regions if o == obj)
-            if len(mine) == 5 and all(i in routes.get(t, ()) for i, (_, t) in
-                                      enumerate(mine) if i in (1, 2, 3)):
-                return {i: t for i, (_, t) in enumerate(mine)}
+            if len(mine) < 5:
+                continue
+            ids = {}
+            for sid in (1, 2, 3):
+                hits = [t for _, t in mine if sid in routes.get(t, ())]
+                if len(hits) != 1:
+                    break
+                ids[sid] = hits[0]
+            else:
+                top, bottom = mine[0][1], mine[-1][1]
+                if top not in ids.values() and bottom not in ids.values():
+                    return {0: top, **ids, 4: bottom}
         return {}
 
     # -- static reads of the image -------------------------------------------------------
@@ -301,6 +316,8 @@ class Scenario:
         self._recorder = self._m.canbus.add_peer(_Recorder(self._m))
         demo_network(self._m.canbus, self._m.guidata)
         self._booted = True
+        for sel, value in self._g12_preset.items():
+            self._store_g12_selector(sel, value)
         self.run(BOOT_S)
         if not accept_terms:
             return
@@ -375,8 +392,11 @@ class Scenario:
 
     def _floorplan_region(self) -> tuple[tuple, int, list]:
         """SETTINGS' Floorplan button: the touch region around the floorplan-name switch
-        (`options._find_floorplan_switch`'s slot), found in the live walk's trace."""
-        slot, _ = options._find_floorplan_switch(self.image)
+        (`options._find_floorplan_switch`'s slot), found in the live walk's trace. Other
+        switches key on the floorplan slot too (13.6's wireless-keypad tile, drawn once the
+        network has run a few seconds), so when several regions qualify, the one kept is the
+        one that draws the current floorplan's name."""
+        slot, names = options._find_floorplan_switch(self.image)
         root = self._page_root(None)
         trace: list = []
         values = self._slot_values()
@@ -389,6 +409,12 @@ class Scenario:
                 for r in regions:
                     if r[0][0] <= x < r[0][2] and r[0][1] <= y < r[0][3]:
                         hits.add(r)
+        name = names.get(values.get(slot))
+        if len(hits) > 1 and name:
+            drawn = [((q.x0 + q.x1) // 2, (q.y0 + q.y1) // 2)
+                     for q in self._labels(name, root, placed)]
+            hits = {r for r in hits if any(r[0][0] <= x < r[0][2] and r[0][1] <= y < r[0][3]
+                                           for x, y in drawn)}
         if len(hits) != 1:
             raise ScenarioError(f"goto OPTIONS: {len(hits)} touch regions hold the floorplan "
                                 "name on SETTINGS, expected 1")
@@ -401,10 +427,13 @@ class Scenario:
         targets = self._screens_for(page)
         if self._screen_id() in targets:
             return
-        rail = targets & set(self._rail)
+        root = self._root()
+        live = self._rail_ids(self._regions(self._placed(root))) if root is not None else {}
+        rail_ids = live or self._rail
+        rail = targets & set(rail_ids)
         if rail:
             sid = rail.pop()
-            self._tap_touch_id(self._rail[sid], page)
+            self._tap_touch_id(rail_ids[sid], page)
             self._await({sid}, f"goto {page!r}")
         elif self._options_screen is not None and targets == {self._options_screen}:
             self.goto("SETTINGS")
@@ -576,6 +605,32 @@ class Scenario:
             v = g12.cell(selector)
             return None if v == 0xFFFF else v
         return g12.sel.get(selector)
+
+    def set_g12_selector(self, selector: int, value: int) -> None:
+        """Give the emulated G12 a stored value for configuration selector `selector`, as if
+        the owner had set it before this test (the G12's NVM; a fresh emulated G12 holds most
+        selectors unset, so `g12_selector` reads None until something writes them). Call it
+        before `boot()` to have the coach come up that way, or after to change it behind the
+        panel's back. The panel learns the value only the way it does on a coach, from the
+        G12's report of that selector, so run a few simulated seconds before asserting on what
+        the panel shows or on a register your routine reads. No frame is sent for it."""
+        if not 0 <= selector <= 0xFF:
+            raise ScenarioError(f"selector {selector} is not a byte")
+        if not 0 <= value <= 0xFFFF:
+            raise ScenarioError(f"selector value {value} is not a u16")
+        if not self._booted:
+            self._g12_preset[selector] = value
+            return
+        self._store_g12_selector(selector, value)
+
+    def _store_g12_selector(self, selector: int, value: int) -> None:
+        g12 = self._g12()
+        if g12 is None:
+            raise ScenarioError("no emulated G12 on the bus")
+        if hasattr(g12, "set_cell"):
+            g12.set_cell(selector, value)
+        else:
+            g12.sel[selector] = value
 
     def frames(self, *, dgn: int | None = None, sa: int | None = PANEL_SA,
                since: float = 0.0) -> list[Frame]:

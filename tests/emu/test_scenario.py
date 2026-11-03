@@ -180,3 +180,59 @@ def test_unsupported_build_not_emulated(mcf_1123, mcf_147):
         Scenario(mcf_1123)
     ok, reason = supported(b"not an mcf")
     assert not ok and "not emulated" in reason
+
+
+# --- navigation on owners' builds ------------------------------------------------------------
+
+def _compile(stock, ops):
+    import hashlib
+
+    from fireflymcf import recipe
+    project = recipe.Project(base_sha256=hashlib.sha256(stock).hexdigest(), build_name=None,
+                             ops=[recipe.OpSpec(id=i, type=t, params=p) for i, t, p in ops])
+    built = recipe.compile_project(project, stock)
+    assert built.ok, built.errors
+    return built.data
+
+
+def test_goto_on_a_six_icon_rail(mcf_136):
+    """`show_nav_slides_icon` gives the rail a sixth icon under a variant switch: the static
+    walk shows a rail without ELECTRICAL and the live one has six regions. goto resolves the
+    rail from the live walk, by route, with HOME on top and SETTINGS at the bottom."""
+    img = _compile(mcf_136, [("nav", "show_nav_slides_icon", {"screen": 29})])
+    s = Scenario(img, timeout_s=300)
+    s.boot()
+    for page, screen in (("ELECTRICAL", 1), ("LIGHTS", 2), ("CLIMATE", 3), ("SETTINGS", 4),
+                         ("HOME", 0)):
+        s.goto(page)
+        assert s.screen == screen, (page, s.screen)
+
+
+def test_goto_options_once_the_keypad_tile_draws(booted):
+    """After a few seconds on the network SETTINGS draws the wireless-keypad tile, a second
+    switch keyed on the floorplan slot; goto still finds the Floorplan button, by the
+    floorplan name it draws."""
+    booted.run(8.0)
+    booted.goto("ELECTRICAL")
+    booted.goto("OPTIONS")
+    assert booted.page == "OPTIONS"
+
+
+def test_set_g12_selector_before_and_after_boot(mcf_136):
+    """A preset reaches the G12's store and, through the G12's report, the panel's receive
+    register for that selector; a change after boot does too."""
+    from fireflymcf import register
+    slot = register.resolve_register(mcf_136, dgn="DGN_CONFIG",
+                                     selector=HEAT_PUMP_SELECTOR).slot_addr
+    s = Scenario(mcf_136, timeout_s=240)
+    s.set_g12_selector(HEAT_PUMP_SELECTOR, 1)
+    s.boot()
+    assert s.g12_selector(HEAT_PUMP_SELECTOR) == 1
+    s.run(12.0)
+    assert int.from_bytes(s.read_mem(slot, 2), "little") & 0xFF == 1
+    s.set_g12_selector(HEAT_PUMP_SELECTOR, 0)
+    assert s.g12_selector(HEAT_PUMP_SELECTOR) == 0
+    s.run(12.0)
+    assert int.from_bytes(s.read_mem(slot, 2), "little") & 0xFF == 0
+    with pytest.raises(ScenarioError, match="u16"):
+        s.set_g12_selector(HEAT_PUMP_SELECTOR, 0x10000)
