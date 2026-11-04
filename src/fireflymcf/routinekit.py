@@ -40,7 +40,7 @@ from dataclasses import dataclass
 from typing import Callable, Iterable
 
 from . import (colourcell, container, followchannel, growsection, guidata, optionrow, patch,
-               pumpauto, register, sramreach, theme, thumb)
+               pumpauto, register, repaint, sramreach, theme, thumb)
 from .recipe import RecipeError
 
 __all__ = ["PRIMITIVES", "RoutineKitError", "TickPlan", "TickInstall", "tick_install_plan",
@@ -48,13 +48,15 @@ __all__ = ["PRIMITIVES", "RoutineKitError", "TickPlan", "TickInstall", "tick_ins
            "fresh_sram", "find_config_toggle", "config_frame", "emit_prologue", "emit_tail",
            "emit_send_frame", "assemble_tick", "thumb", "PROLOGUE_TEXT", "EPILOGUE_TEXT",
            "GuiCodeView", "guicode", "find_tag", "tick_chain", "own_colour_cell",
-           "own_colour_cells", "ColourCell"]
+           "own_colour_cells", "ColourCell", "repaint_on_cell", "own_repaint_trigger",
+           "Repaint", "RepaintTrigger"]
 
 
 class RoutineKitError(RecipeError):
     """A primitive refused. Codes: STALE_PLAN, BAD_ROUTINE, BAD_HOOK, NO_SRAM, NO_SUCH_REGISTER,
-    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT, NO_TAG, AMBIGUOUS_TAG, and
-    `own_colour_cell`'s (`colourcell.ColourCellError`'s codes).
+    AMBIGUOUS_REGISTER, AMBIGUOUS_TOGGLE, BAD_FRAME, BAD_SLOT, NO_TAG, AMBIGUOUS_TAG,
+    `own_colour_cell`'s (`colourcell.ColourCellError`'s codes) and `repaint_on_cell`'s
+    (`repaint.RepaintError`'s).
     `RoutineKitError(msg)` (one
     argument, as `thumb.Routine(error=...)` raises it) is BAD_ROUTINE."""
 
@@ -340,7 +342,8 @@ ColourCell = colourcell.ColourCell
 
 
 def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int | None = None,
-                    expect: bytes | None = None) -> tuple[bytes, ColourCell]:
+                    expect: bytes | None = None, repaint: bool = False
+                    ) -> tuple[bytes, ColourCell]:
     """Give one record's `field` ("border" or "fill") of object `object_index` (an object-table
     index, never a screen id) a private run-time colour cell: a new row of the display-cell
     table, on 4 fresh bytes of SRAM, that the field now names in mode 7.
@@ -362,7 +365,10 @@ def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int |
     unconditionally and then, when its condition holds, the new colour over it. The chain runs
     before `FUN_00247BF8` draws anything, so the control never shows the
     garbage (`colourcell`'s docstring has the argument). A new colour shows at the control's
-    next repaint, not at the store.
+    next repaint, not at the store, unless `repaint` is set: then the object's enrolled
+    containers watch the cell too (`repaint_on_cell`), and a store of a different colour
+    repaints the object in place in the same tick's live redraw (`ColourCell.repaint` says
+    which containers). `repaint` also refuses as `repaint_on_cell` does.
 
     Changes GuiCode and GuiData (the cell table's grow repoints GuiCode literals): declare both
     in `touches`. Refuses (codes of `colourcell.ColourCellError`): BAD_OBJECT, NO_COLOUR_FIELD,
@@ -374,21 +380,67 @@ def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int |
     headroom), GUIDATA_TOO_LARGE (GuiData would end past `limits.GUIDATA_END_MAX`). For more than one field use `own_colour_cells`: one grow for all of them."""
     try:
         return colourcell.own_colour_cell(data, object_index, field, record=record,
-                                          expect=expect)
+                                          expect=expect, repaint=repaint)
     except colourcell.ColourCellError as e:
         raise RoutineKitError(e.code, str(e)) from e
 
 
-def own_colour_cells(data: bytes, requests: list) -> tuple[bytes, list[ColourCell]]:
+def own_colour_cells(data: bytes, requests: list, *,
+                     repaint: bool = False) -> tuple[bytes, list[ColourCell]]:
     """`own_colour_cell` for several fields with ONE grow of the cell table: each request is
     `[object_index, field]`, `[object_index, field, record]` or a dict with keys `object`,
-    `field` and optionally `record` and `expect`. Returns a `ColourCell` per request, in order,
+    `field` and optionally `record`, `expect` and `repaint` (default: the call's `repaint`).
+    Returns a `ColourCell` per request, in order,
     on consecutive rows. Every request is checked before anything changes; one refusal
     refuses them all, and the same field twice is BAD_EDIT. Prefer it to one call per field:
     each grow copies the whole table to the end of GuiData."""
     try:
-        return colourcell.own_colour_cells(data, requests)
+        return colourcell.own_colour_cells(data, requests, repaint=repaint)
     except colourcell.ColourCellError as e:
+        raise RoutineKitError(e.code, str(e)) from e
+
+
+Repaint = repaint.Repaint
+RepaintTrigger = repaint.RepaintTrigger
+
+
+def repaint_on_cell(data: bytes, object_index: int,
+                    cell_index: int) -> tuple[bytes, Repaint]:
+    """Repaint object `object_index` in place whenever the u32 at display-cell row
+    `cell_index` changes: every enrolled wt-5 container that draws the object gets a mode-7
+    colour field on the row, and the panel's live redraw re-checks those rows every tick
+    (`FUN_002588A8` -> `FUN_002568A0` -> `FUN_00256868`, *proven-from-code*; `repaint`'s
+    docstring has the instructions). The container's field is one the object's first record
+    sets itself, so the cell's word never reaches a drawn pixel through the container.
+
+    Pass a `ColourCell.cell_index` to repaint when the colour changes (or use
+    `own_colour_cell(..., repaint=True)`). Returns `Repaint`: `addr` (the row's SRAM word),
+    `watchers` ((parent, record, role) per container bound) and `skipped` (containers of the
+    object without the enrol bit; those pages show a change only at their next draw).
+
+    Changes GuiData and GuiCode (each parent object grows 2 bytes and is swapped back in at its
+    own index, which shifts GuiCode's literals into later GuiData): declare both.
+    Refuses (codes of `repaint.RepaintError`): BAD_OBJECT, BAD_CELL, NO_LIVE_CONTAINER (no
+    enrolled container draws the object), UNSUPPORTED_CONTAINER (a container has no mode-0
+    field the object's first record sets, or stores coordinates to registers),
+    CHILD_INHERITS (the object's first record sets no colour field itself), BAD_EDIT,
+    GUIDATA_TOO_LARGE."""
+    try:
+        return repaint.repaint_on_cell(data, object_index, cell_index)
+    except repaint.RepaintError as e:
+        raise RoutineKitError(e.code, str(e)) from e
+
+
+def own_repaint_trigger(data: bytes, object_index: int) -> tuple[bytes, RepaintTrigger]:
+    """A private 4-byte cell (a new display-cell row on fresh SRAM, as `own_colour_cell`
+    grows) bound to object `object_index` by `repaint_on_cell`: a tick routine that stores a
+    word different from the last tick's (`adds` one, say) repaints the object once, for a
+    repaint that follows no colour. Garbage at power-on, so the first tick's store may repaint
+    once. Changes GuiCode and GuiData (the grow repoints GuiCode literals): declare both.
+    Refuses as `repaint_on_cell`, and NO_DISPLAY_CELL when the table cannot grow."""
+    try:
+        return repaint.own_repaint_trigger(data, object_index)
+    except repaint.RepaintError as e:
         raise RoutineKitError(e.code, str(e)) from e
 
 
@@ -401,6 +453,8 @@ PRIMITIVES: dict = {
     "find_config_toggle": find_config_toggle,
     "own_colour_cell": own_colour_cell,
     "own_colour_cells": own_colour_cells,
+    "repaint_on_cell": repaint_on_cell,
+    "own_repaint_trigger": own_repaint_trigger,
 }
 
 

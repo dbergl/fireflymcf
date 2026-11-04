@@ -88,6 +88,13 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
   specification's name, which may not match what Firefly calls that tank. Where the two
   disagree, a panel name lists variants (`GREY / GREY1`), or the owner's floorplan draws
   no such gauge, ask the owner before silencing it.
+- **A number or quantity the owner names: search every page before saying it does not
+  exist.** Run `labels --containing` on the owner's words across every page `pages` lists,
+  hidden diagnostic pages included (PROBE TANK DIAGNOSTICS shows each tank's "ADC Raw Value"),
+  and `bus-map --name` on the quantity, and compare the number's size with what each candidate
+  holds. A tank "above 62000" is the raw 16-bit ADC count on `0BFC1` (high = empty; the gauge
+  reads 0 % from 54000 up, PC.10), not the 0-100 % gauge. Two sessions missed it, and one told
+  the owner the condition could never be true.
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.
@@ -168,7 +175,11 @@ from `add_rvc_button`, `add_button_status` and `add_enum_label` rather than a on
 ```
 
 `fireflymcf schema` prints the file's JSON Schema. `build_name` is what the boot menu lists:
-keep the vendor prefix; make it distinct from stock and from earlier builds. Ops apply in order;
+keep the vendor prefix; make it distinct from stock and from earlier builds. **Before choosing
+the name and its number, read what the owner already has:** every `build_name` in the
+project folder's `*.ffproj.json` files and build sidecars (`build/*.json`, `<build>.json`), and
+the `mcf-*.bin` file names beside them; take a number above the highest. When the folder does
+not settle it, ask. Two sessions reused a build number the owner already had. Ops apply in order;
 `{"ref": "<id>"}` names an earlier op. Every change goes in one project, compiled from stock.
 Never patch a patched file.
 

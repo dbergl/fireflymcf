@@ -67,6 +67,23 @@ def test_tank_buckets_and_grey2_gated_by_floorplan():
     assert {d[0] for d in h.frames(rvc.TANK_STATUS, t1)} == {0, 1, 2, 0x12}
 
 
+def test_bucketer_boundaries():
+    """The MCF's own G12 bucketer, from a cold start: a reading AT a threshold is the emptier
+    bucket (raw >= CC 0 %, CD <= raw < CC 33 %, CE <= raw < CD 67 %, raw < CE 100 %; level of
+    resolution 3), and each tank's 0BFC1 and 1FFB7 go out once a second. `peers.ProtocolG12`
+    is pinned to the same rule."""
+    want = {65535: 0, 54000: 0, 53999: 1, 40000: 1, 39999: 2, 25000: 2, 24999: 3, 0: 3}
+    for raw, level in want.items():
+        h = Harness(inputs={"tanks": {1: raw, 2: 30000, 3: 30000}, "house": 13.1})
+        h.advance(8.0)
+        t0 = h.m.cycles
+        h.advance(3.0)
+        fresh = [d for d in h.frames(rvc.TANK_STATUS, t0) if d[0] == 0]
+        assert {(d[1], d[2]) for d in fresh} == {(level, 3)}, raw
+        assert 3 <= len(fresh) <= 4
+        assert 3 <= sum(1 for d in h.frames(0x0BFC1, t0) if d[0] == 1) <= 4
+
+
 def test_black_tank_option_switches_its_broadcast():
     h = Harness()
     h.advance(2.0)

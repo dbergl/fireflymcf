@@ -232,7 +232,8 @@ def test_primitives_registered():
     assert set(routinekit.PRIMITIVES) == {"tick_install_plan", "install_tick_routine",
                                           "slot_addr", "resolve_register", "fresh_sram",
                                           "find_config_toggle", "own_colour_cell",
-                                          "own_colour_cells"}
+                                          "own_colour_cells", "repaint_on_cell",
+                                          "own_repaint_trigger"}
 
 
 # --- emulator ---------------------------------------------------------------------------------

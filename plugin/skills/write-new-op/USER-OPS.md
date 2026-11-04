@@ -55,10 +55,15 @@ ops/my-op/
 | `name` | string | the folder name |
 | `type` | string | `user:<name>`; the recipe's op type. A built-in's name is refused |
 | `version` | string | the op's own version |
-| `author`, `description` | string | who wrote it; one line of what it does |
+| `author`, `description` | string | who wrote it (a name; see below); one line of what it does |
 | `touches` | list of strings | every section the op changes: `guicode`, `guidata`, `g12`, `lcd` |
 | `written_against` | list of objects | `{build_name, base_sha256, recipe_ops_required}` per base it was written for |
 | `provenance` | list of objects | `{kind: "emulated" or "flashed", base_sha256, date, by, note}` |
+
+**`author` travels with the op.** `op pack` puts the manifest in the zip, so whatever `author`
+says goes to everyone the op is shared with. Write a name only (`"Dan, written with Claude"`).
+Ask the owner before putting an email address, phone number or any other contact detail there,
+even one you can see in their files or git configuration.
 
 The engine compares the op's input and output section by section and refuses
 (`USER_OP_UNDECLARED_TOUCH`) a change to a section `touches` does not name. A section's
@@ -394,8 +399,8 @@ mode 2 (white), 3 (an inline colour) or 6 (a palette entry) is a constant. So a 
 colour should change at run time needs its field in mode 7 on a row nothing else names. Most
 rows are shared: on stock 13.6 every tank well's interior names row 161, the button colour.
 
-**`own_colour_cell(data, object_index, field, *, record=None, expect=None) -> (data,
-ColourCell)`** gives one record's `field`, `"border"` or `"fill"`, its own row:
+**`own_colour_cell(data, object_index, field, *, record=None, expect=None, repaint=False) ->
+(data, ColourCell)`** gives one record's `field`, `"border"` or `"fill"`, its own row:
 
 - `object_index` is an object-table index (`fireflymcf labels`, `bus-map`, `records`), never a
   screen id. `record` is the record's index in the object's record list; without it the object
@@ -423,9 +428,10 @@ literal at `0x2535AC` when the pointer is null (`cbnz`), and otherwise reads the
 (`ldr r2,[r3]`). It never reads the type table on this path. The new row's type byte is 10,
 which matters only to the library's own SRAM reach (`sramreach`, where type 10 is 4 bytes wide).
 
-**`own_colour_cells(data, requests) -> (data, [ColourCell, ...])`** does the same for several
-fields with **one** grow. A request is `[object_index, field]`, `[object_index, field, record]`
-or `{"object": ..., "field": ..., "record": ..., "expect": ...}`. The cells are on consecutive
+**`own_colour_cells(data, requests, *, repaint=False) -> (data, [ColourCell, ...])`** does the
+same for several fields with **one** grow. A request is `[object_index, field]`,
+`[object_index, field, record]` or `{"object": ..., "field": ..., "record": ..., "expect": ...,
+"repaint": ...}` (a request's `repaint` overrides the call's). The cells are on consecutive
 rows, in request order. Every request is checked before anything changes, one refusal refuses
 them all, and the same field twice is `BAD_EDIT`. Prefer it whenever an op drives more than
 one field: each grow copies the whole table (about 5 bytes a row, some 3.3 KB on 13.6) to the
@@ -444,6 +450,8 @@ GuiData's tail headroom, but they do spend flash.
   it at run time to follow whatever writes it.
 - `object_index`, `record`, `role` (`"fillA"` or `"fillB"`), and `initialised_at_boot`, which
   is always `False`.
+- `repaint`: with `repaint=True`, the `Repaint` that binds the cell for repainting (below);
+  otherwise `None`.
 
 It refuses these (`RoutineKitError` codes):
 
@@ -460,6 +468,9 @@ It refuses these (`RoutineKitError` codes):
 | `NO_DISPLAY_CELL`, `BAD_EDIT` | the table could not grow, or a structural gate failed; a relocation failure names GuiData's tail headroom |
 | `GUIDATA_TOO_LARGE` | GuiData would end past `0x903F0000`, the flash ceiling ("Growing a section") |
 
+With `repaint=True` it also refuses as `repaint_on_cell` does ("Repainting"), before anything
+changes.
+
 **The cell holds garbage at power-on.** The C runtime initialises SRAM only up to `0x2000AD98`,
 and the cell is above it. Your op must install a tick routine of this shape:
 
@@ -474,12 +485,14 @@ in the same uninitialised SRAM, so no page is drawn before the chain first runs.
 a cell seeded with magenta before the first tick never draws magenta, and the outline has the
 routine's colour in the first screenshot of HOME (*emulator*).
 
-**A store repaints nothing.** The panel repaints a control when a cell it watches changes or its
-page is drawn, and no container watches a colour row. The new colour shows at the control's next
-repaint. Drive it from the input that repaints the control (a tank gauge repaints when its level
-changes), and read that input from its receive slot (`resolve_register`), which the routine sees
-before `FUN_00247BF8` copies it on (*inference*; *emulator*: the fresh gauge's outline turns red
-and back with its level).
+**A store alone repaints nothing; `repaint=True` makes it repaint.** Between page draws the
+panel repaints a control only through its live redraw, which re-checks the records it enrolled
+when it drew the page. The field `own_colour_cell` rewrites is inside the object; what the
+live redraw watches is the enrolled container that draws the object. Without `repaint` the new
+colour shows at the control's next repaint: when the value its container watches changes (a
+tank gauge's level) or its page is drawn. That can be never: on the coach a tank gauge reads 0 %
+from 54000 raw upward (*hardware*: PC.10), so a colour driven from the raw reading above that
+changes no percentage and the outline stays stale. Pass `repaint=True` (next section).
 
 **Theme.** `before` is read when your op runs. Put the op after `set_theme` in the project, so the
 colour you restore is the themed one; a header rename can still come last.
@@ -527,6 +540,114 @@ The `0xFFFF` the slot holds before any report reads as above 10 %. A pool word a
 share a name. For several gauges, take every cell in one `own_colour_cells` call and drive them
 from one routine.
 
+### Repainting
+
+**`repaint_on_cell(data, object_index, cell_index) -> (data, Repaint)`** makes object
+`object_index` repaint in place whenever the u32 at display-cell row `cell_index` changes.
+`own_colour_cell(..., repaint=True)` is `own_colour_cell` and then this call on the new cell's
+row, so **one store of a new colour repaints the control**. Use it whenever the colour must show
+without waiting for the control's own value to change.
+
+How the panel does it (*proven-from-code*, 13.6 GuiCode, `GUICODE.md` Finding 87). Every tick,
+after the tick chain (`GuiCode_entry1`: `0x24EE3C` runs the chain, `0x24EEB8 bl 0x2588A8` the live
+redraw), `FUN_002588A8` asks `FUN_002568A0` of each enrolled widget whether it changed. That makes
+four change-detect reads (`FUN_00256868`, at `0x2568F2`, `0x256910`, `0x256920`, `0x25693A`) on the
+widget's own record's mode-7 colour rows, comparing each row's u32 with the word it last saw, and
+on a change draws the widget again from its saved render state. A widget is a record with the
+enrol bit (header byte 4 bit `0x20`; `0x256C98 tst.w r3, #0x20`), and the rows are the ones its
+own colour fields named when it was enrolled (`0x2533D8 strh.w r0, [r3, #0x74]` for fillA). An
+object is drawn by the wt-5 containers whose `child_index` names it, and an enrolled container
+redraws its whole child. `repaint_on_cell` gives each enrolled container of the object a mode-7
+field on your row.
+
+What it rewrites, and why nothing else changes:
+
+- Only a container field in **mode 0** (it set no colour) that the object's **first record sets
+  itself** (mode 1, 2, 3, 6 or 7). The word sits in the render state from the container's decode
+  until that first record overwrites it, and nothing draws in between, so the container's copy
+  reaches no pixel. A container whose coordinates store to registers is refused (the decoder
+  copies colour words into registers there too). Only **fillA**, then **fillA2**: the wt-5
+  case fills the container's box with its fillB or fillB2 word when the renderer's `+0x704C`
+  flag is set (`0x257AFC bl 0x255F44`), and never reads fillA or fillA2 (*proven-from-code*,
+  Finding 87). So an object has at most two watchable fields, and on the tank gauges one
+  (their first record sets fillA but not fillA2): watch **one** cell per object, the one that
+  changes whenever the control's look does (or an `own_repaint_trigger` the routine bumps),
+  and write the object's other cells in the same tick. A second bind on such an object refuses
+  `UNSUPPORTED_CONTAINER`.
+- That nothing after the child sees the word (the parent's later records) rests on the child's
+  walk not ending before its first record decodes: *inference*, not traced in
+  `FUN_00257BFC`. In the emulator a full compose of HOME with the alarm word set draws exactly
+  what the unbound op's compose draws, which is consistent with it but would not catch every
+  leak (HOME's compose does not take the `+0x704C` box fill).
+- Each parent object's container record grows by 2 bytes and the parent is swapped back in at
+  its own index, every other byte of every record unchanged; later GuiData moves, so GuiCode's
+  literals into it are shifted: **declare `guicode` and `guidata`**.
+- No slot, no receive entry, no cell another widget reads is written: the tank reading and every
+  other real value are what they were. The repaint draws the object from its own records, as a
+  level change does.
+
+`Repaint` has `object_index`, `cell_index`, `addr` (the row's SRAM word), `watchers` (one
+`Watcher(parent, record, role)` per bound container; every placement of the object is bound, so
+an object drawn on several pages repaints on each) and `skipped` (containers of the object
+without the enrol bit; a page drawing the object through one shows a change only at its next
+draw).
+
+**`own_repaint_trigger(data, object_index) -> (data, RepaintTrigger)`** is a private trigger: a
+new display-cell row on 4 fresh bytes of SRAM (the same grow as `own_colour_cell`), bound by
+`repaint_on_cell`. A routine that stores a word different from the last tick's (add one to it)
+repaints the object once. `RepaintTrigger` has `addr`, `width` (4), `cell_index`, `repaint` and
+`initialised_at_boot` (`False`: the first store after power-on may repaint once). Touches GuiCode
+and GuiData.
+
+Both refuse (`RoutineKitError` codes):
+
+| code | when |
+|---|---|
+| `BAD_OBJECT` | the index is outside the object table |
+| `BAD_CELL` | the row is outside the display-cell table, or its pointer is null |
+| `NO_LIVE_CONTAINER` | no enrolled wt-5 container draws the object: nothing on the live redraw can repaint it |
+| `CHILD_INHERITS` | the object's first record sets no colour field itself, so a container's field would reach what it draws |
+| `UNSUPPORTED_CONTAINER` | a container has no mode-0 field the object's first record sets (all taken, or it sets colours itself), or stores coordinates to registers |
+| `BAD_EDIT`, `NO_DISPLAY_CELL`, `GUIDATA_TOO_LARGE` | a structural gate failed, the trigger's table could not grow, or GuiData would end past the flash ceiling |
+
+On stock 13.6, 31 objects can be bound, among them the four tank gauges (719, 721, 723, 725)
+(*library*: `repaint.plan` over every object).
+
+**The routine shape: store, overwrite, repaint on change.** With `repaint=True` the routine is the
+one above and nothing more:
+
+1. every tick, store `before_word` into `cell.addr` (the theme's colour, never garbage);
+2. when the alarm holds, store the alarm colour over it;
+3. there is no step 3: the live redraw runs after the chain and sees only the word the routine
+   left, so it repaints exactly in the tick where that word differs from the last tick's. The
+   two stores of one tick are never seen apart (*proven-from-code*: one function,
+   `GuiCode_entry1`, runs the chain and then the redraw).
+
+To repaint on some other decision, add one to an `own_repaint_trigger`'s word in the tick where
+you decide (`ldr r1, [r0]; adds r1, #1; str r1, [r0]`).
+
+**Worked pattern: the outline turns red on a raw reading the gauge does not show.** The owner
+asks for FRESH's outline to go red once the tank's raw reading has stayed above 62000 for 10 s,
+and back once it has stayed below 58000 for 10 s. "62000" is not a percentage: it is the raw
+16-bit ADC count the G12 reports on `0BFC1` (`G12_TANK_LEVEL_SENSOR`, instance 1 fresh, u16 at
+byte 1), which the hidden PROBE TANK DIAGNOSTICS page shows as "ADC Raw Value"
+(`resolve_register(dgn=0x0BFC1, instance=1)`). The gauge reads 0 % from 54000 up, so no level
+change ever repaints it there:
+
+```python
+reg = ed.call("resolve_register", dgn=0x0BFC1, instance=1)        # raw fresh ADC
+cell = ed.call("own_colour_cell", 721, "border", repaint=True)   # guicode, guidata
+st = ed.call("fresh_sram", 8, taken=list(range(cell.addr, cell.addr + 4)))
+# routine: str before_word -> cell; hold-timed hysteresis on [reg.slot_addr] (state in st,
+# the ms clock at [r4, #0x204]); while alarmed, str 0xFF0000 -> cell. Nothing else.
+```
+
+The library runs this op in the emulator (`tests/test_repaint.py`, *emulator*): with FRESH at
+56000, then 63000, then 57000 raw (0 % throughout) and HOME never left, the outline turns red 10 s
+after the reading passes 62000 and white again 10 s after it drops below 58000, and no pixel
+outside the gauge changes. The same op without `repaint` writes the same words at the same ticks
+and HOME never shows them. Not yet seen on the coach.
+
 ### Worked hints
 
 - **Find what an earlier op built from the image, not from its params.** A routine's cells are
@@ -565,6 +686,7 @@ safe; only an `Editor` writes. The reader names below are part of the stable sur
   offset of one field of a decoded record, which is what an `Editor.patch` needs.
 - `relocate.object_table_bounds(data, index)` gives an object's record span.
 
-`ed.grow_guidata` appends to GuiData, and `own_colour_cell` grows the cell table; growing any
+`ed.grow_guidata` appends to GuiData, and `own_colour_cell` and `own_repaint_trigger` grow the
+cell table; growing any
 other GuiData table (inserting inside the section) is not a primitive yet. It will be added, with
 its own test, when a user op first needs it.

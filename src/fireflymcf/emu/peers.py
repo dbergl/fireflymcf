@@ -169,9 +169,20 @@ class ProtocolG12(Peer):
     #                     2 gray, 3 black, 4 gray 2); % via thresholds CC/CD/CE
     # The panel's tank gauges read standard TANK_STATUS (1FFB7: 0 fresh, 1 black,
     # 2 gray, 18 gray 2), so the G12 is modelled as relaying its raw sensors
-    # through the thresholds (bucketed 0/33/67/100 %, ascending -- an assumption).
+    # through the thresholds, bucketed 0/33/67/100 % of resolution 100 (the real G12, `emu.g12`,
+    # sends the bucket 0-3 of resolution 3 instead). Raw ADC counts, HIGH = EMPTY
+    # (BUS-BASELINE PC.10: 0% <- CC 54000 -> 33% <- CD 40000 -> 67% <- CE 25000 -> 100%).
+    # The boundary rule (a reading AT a threshold is the emptier bucket) is the one the
+    # G12's own bucketer gives when the MCF's G12 blob runs (`emu.g12.G12`, arms
+    # +0x1858.. `cmp r0,r7`; tests/emu/test_g12.py::test_bucketer_boundaries) from a cold
+    # start; the blob's hysteresis between buckets is not modelled here.
     # The raw values show on HOME > hold a tank gauge ~5.5 s (PROBE TANK DIAGNOSTICS).
     TANK_STATUS_INSTANCE = {1: 0, 3: 1, 2: 2, 4: 18}
+    # The coach's thresholds (BUS-BASELINE PC.10; G12-CODE "IDENTIFIED -- they are the TANK
+    # LEVEL THRESHOLDS"), the defaults until a write or a stored selector says otherwise.
+    TANK_THRESHOLDS = {0xCC: 54000, 0xCD: 40000, 0xCE: 25000}
+    # One 0BFC1 and one 1FFB7 per tank per second (BUS-BASELINE PC.62: "four instances x 1 Hz").
+    TANK_PERIOD_S = 1.0
 
     def __init__(self, selectors=None, path=None, tanks=None):
         self.sel = {0xF1: 0x0D, 0xF2: 0x06, 0xF5: 0}
@@ -187,6 +198,8 @@ class ProtocolG12(Peer):
         if selectors:
             for k, v in selectors.items():
                 self.sel.setdefault(k, v)
+        for k, v in self.TANK_THRESHOLDS.items():    # stored, then given, then the coach's
+            self.sel.setdefault(k, v)
         self._sweep = 0
 
     def attach(self, bus):
@@ -194,11 +207,11 @@ class ProtocolG12(Peer):
         self.every(1.0, self._heartbeat)
         self.every(0.1, self._next_sweep)
         for i, inst in enumerate(self.tanks):
-            self.every(2.0, lambda inst=inst: (self.TANK_DGN,
+            self.every(self.TANK_PERIOD_S, lambda inst=inst: (self.TANK_DGN,
                                                [inst, *int(self.tanks[inst]).to_bytes(2, "little")]),
                        phase=0.05 * i)
             if inst in self.TANK_STATUS_INSTANCE:
-                self.every(2.0, lambda inst=inst: (rvc.TANK_STATUS, rvc.tank_status(
+                self.every(self.TANK_PERIOD_S, lambda inst=inst: (rvc.TANK_STATUS, rvc.tank_status(
                     self.TANK_STATUS_INSTANCE[inst], self.tank_percent(inst), 100)),
                            phase=0.05 * i + 0.02)
 
@@ -207,7 +220,7 @@ class ProtocolG12(Peer):
         steps = [self.sel.get(k) for k in (0xCC, 0xCD, 0xCE)]
         if None in steps:
             return 0xFF
-        return (0, 33, 67, 100)[sum(raw >= t for t in steps)]
+        return (0, 33, 67, 100)[sum(raw < t for t in steps)]    # high raw = empty
 
     def _heartbeat(self):
         g = self.sel.get
@@ -377,14 +390,13 @@ DEMO_G12_SELECTORS = {
     0x2C: 0 | 7 << 8,        # quiet time stop 07:00
     0x0A: rvc.volts(52.8),   # measured battery voltage
     0x05: 0,                 # AES state: disabled
-    0xCC: 100,               # tank thresholds (raw sensor units): 33 % / 67 % / 100 %
-    0xCD: 200,
-    0xCE: 300,
+    # tank thresholds, raw ADC counts, high = empty: 0 % / 33 % / 67 % / 100 % boundaries
+    **ProtocolG12.TANK_THRESHOLDS,       # the coach's 54000 / 40000 / 25000 (PC.10)
 }
-DEMO_TANKS = {1: 250, 2: 120, 3: 60, 4: 20}  # ProtocolG12 raw levels: fresh, gray, black, gray 2
-# Real-G12 raw sensor values (high = empty; buckets at CC/CD/CE = 54000/40000/25000):
-# fresh full, grey 2/3, black 1/3, grey 2 empty.
-DEMO_G12_INPUTS = {"tanks": {1: 20000, 2: 30000, 3: 45000, 4: 60000},
+# Raw sensor values (high = empty; buckets at CC/CD/CE = 54000/40000/25000), for both G12
+# models: fresh full, grey 2/3, black 1/3, grey 2 empty.
+DEMO_TANKS = {1: 20000, 2: 30000, 3: 45000, 4: 60000}
+DEMO_G12_INPUTS = {"tanks": dict(DEMO_TANKS),
                    "house": 13.1, "chassis": 12.6, "ambient": 21.0, "lpg": 80}
 # The reference coach: floorplan WD, AES mode (EF = 3).  The G12 logic's own
 # mode-change handler then applies the AES profile on its first tick.

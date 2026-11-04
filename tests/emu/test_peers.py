@@ -88,12 +88,52 @@ def test_g12_d2_is_delta_like_the_panel_steppers():
     assert g.sel[0x31] == 1000
 
 
-def test_g12_tank_relay_uses_thresholds():
+def test_g12_tank_relay_buckets_like_the_coach():
+    """High raw means empty (BUS-BASELINE PC.10): 0 % at or above CC, 33 % from CD up to CC,
+    67 % from CE up to CD, 100 % below CE. The boundaries are those the G12's own bucketer gives
+    when the MCF's G12 blob runs (`tests/emu/test_g12.py::test_bucketer_boundaries`)."""
     from fireflymcf.emu.peers import ProtocolG12 as G12
-    g = G12({0xCC: 100, 0xCD: 200, 0xCE: 300}, tanks={1: 50, 2: 150, 3: 250})
-    assert [g.tank_percent(i) for i in (1, 2, 3)] == [0, 33, 67]
-    g.tanks[1] = 300
-    assert g.tank_percent(1) == 100
+    g = G12(tanks={1: 0})
+    want = {65535: 0, 54001: 0, 54000: 0, 53999: 33, 40000: 33, 39999: 67, 25000: 67,
+            24999: 100, 0: 100}
+    got = {}
+    for raw in want:
+        g.tanks[1] = raw
+        got[raw] = g.tank_percent(1)
+    assert got == want
+
+
+def test_g12_tank_thresholds_default_to_the_coach():
+    """Unset thresholds are the coach's (PC.10: CC/CD/CE = 54000/40000/25000), and the demo
+    network's selectors and tanks are on that scale."""
+    from fireflymcf.emu.peers import DEMO_G12_SELECTORS, DEMO_TANKS, ProtocolG12 as G12
+    assert {k: G12().sel[k] for k in (0xCC, 0xCD, 0xCE)} == {0xCC: 54000, 0xCD: 40000,
+                                                             0xCE: 25000}
+    assert {k: DEMO_G12_SELECTORS[k] for k in (0xCC, 0xCD, 0xCE)} == {0xCC: 54000, 0xCD: 40000,
+                                                                      0xCE: 25000}
+    g = G12(DEMO_G12_SELECTORS, tanks=DEMO_TANKS)
+    assert [g.tank_percent(i) for i in (1, 2, 3, 4)] == [100, 67, 33, 0]
+    g = G12({0xCC: 60000, 0xCD: 30000, 0xCE: 1000}, tanks={1: 45000})   # given ones win
+    assert (g.sel[0xCC], g.tank_percent(1)) == (60000, 33)
+
+
+def test_g12_tank_broadcasts_at_one_hertz():
+    """Each tank's 0BFC1 raw report and its 1FFB7 TANK_STATUS go out about once a second, as on
+    the coach (PC.62: "four instances x 1 Hz")."""
+    from fireflymcf.emu.peers import ProtocolG12 as G12
+    m = Machine()
+    g = m.canbus.add_peer(G12(tanks={1: 20000, 2: 30000, 3: 45000, 4: 60000}))
+    sent = []
+    g.send = lambda dgn, data, prio=6: sent.append((dgn, list(data)))
+    for k in range(1, 1001):                                      # 10 s in 10 ms steps
+        m.cycles = k * m.cpu_hz // 100
+        m.canbus.next_event()
+    for dgn in (G12.TANK_DGN, rvc.TANK_STATUS):
+        per = {}
+        for d, data in sent:
+            if d == dgn:
+                per[data[0]] = per.get(data[0], 0) + 1
+        assert len(per) == 4 and all(9 <= n <= 11 for n in per.values()), (hex(dgn), per)
 
 
 def test_g12_relays_grey2_as_tank_instance_18():

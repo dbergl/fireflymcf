@@ -219,6 +219,10 @@ twice been read as contradicting it and was wrong both times.
   any instance regardless of the pin sheet.
 - The live-redraw invariant: `fillA` index, box `value_slot` and caption `value_slot` are one cell; a
   donor must carry `value_slot` on both.
+- Between page draws a control repaints only through the live redraw (`FUN_002588A8`, after the
+  tick chain): an enrolled widget is redrawn when its value bytes or one of its OWN record's mode-7
+  colour rows change (`GUICODE.md` Finding 87). A colour cell inside an object is not its
+  container's row: `own_colour_cell(..., repaint=True)` / `repaint_on_cell` binds it.
 - Repointing a control is two edits in two sections (binding byte and the GuiCode `ldrsh.w`).
 - `set_binding_dgn` and `set_channel` cost the pin its switching; both gate on
   `allow_capability_change`.
