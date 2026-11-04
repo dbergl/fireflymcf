@@ -5080,7 +5080,7 @@ selection* was stale. That isolates the fault to compose-time evaluation and rul
 the filter and the state machine in one stroke.
 
 *Honest limit:* the "no bridge block, therefore no repaint" step is `inferred`, because the widget
-redraw dispatch itself is still unlocated (see the correction in `CLAUDE.md`'s "Adding a new
+redraw dispatch itself was still unlocated (located since: Finding 87, `FUN_002588A8`) (see the correction in `CLAUDE.md`'s "Adding a new
 button"). What is proven is the premise — nothing reads the byte — and the inference matches the
 reported behaviour exactly.
 
@@ -6402,6 +6402,59 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 (a redefinition ends a pointer's lifetime; a parameter survives a call only through a copy), the
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
+
+## Finding 87 — the live redraw re-checks every enrolled widget's mode-7 colour rows each tick, so a colour cell can repaint its control — `proven-from-code`, checked `observed-in-emulation`, 2026-11-03
+
+**The question.** `own_colour_cell` gives a control a private mode-7 colour row a tick routine
+writes, and the guide said a store "repaints nothing: no container watches a colour row". A tank
+outline driven from the raw ADC reading (`0BFC1`) then stays stale indefinitely on the coach,
+because the gauge already reads 0 % from 54000 up (`BUS-BASELINE.md` PC.10) and no percentage
+change repaints it. What does the panel re-check between page draws?
+
+**When.** `GuiCode_entry1` (`0x24EE28`) runs the per-tick hook (`0x24EE3C bl 0x247BF8`, the chain
+every appended tick routine is on), then in the same call either composes a page
+(`0x24EE8C bl 0x258650`) or runs the live redraw (`0x24EEB8 bl 0x2588A8`). A routine's stores are
+complete before the redraw reads them.
+
+**What.** `FUN_002588A8` walks the enrolled widgets (`0x2588BE bl 0x256264`, the first;
+`0x258978 bl 0x258550`, the next), asks `FUN_002568A0` of each (`0x25891E`), and on a non-zero
+answer restores the widget's saved render state (`0x258928 bl 0x256720`, `0x258934 bl 0x2591F2`
+with `r2 = #0x98`) and draws it again (`0x2588E6 bl 0x256278`; `0x258902 bl 0x256C54`, `r0 = 2`).
+The widgets live at `0x200301B0 + i·0xE0` (`0x2565D4`'s literal), at most 120 (`cmp r3, #0x77`).
+
+**The check.** `FUN_002568A0` makes four change-detect reads `FUN_00256868` (`0x2568F2`, `0x256910`,
+`0x256920`, `0x25693A`) on the rows the widget saved at `+0x138/+0x13A/+0x13C/+0x13E`, against
+cached words at `+0x128..+0x134`, and ORs them into its answer (`orrs r4, r0`). A value widget
+(`+0x154 == 1`, every widget on HOME) first compares its value bytes (`0x256994 bl 0x2591D4`,
+a byte compare of `+0x18A` bytes at the value pointer) and then branches to `0x2568D2` for the
+same four reads, so the colour rows count for both kinds. `FUN_00256868` (Finding 5's
+change-detect read) returns 0 for `0xFFFF` and for a row past the bound (`0x256870 cmp.w r1,
+#0x298`, a site the cell-table grow rebumps: `#0x29c` after `own_colour_cell`), and otherwise
+stores a changed u32 to the cache and returns 1.
+
+**Which rows.** `FUN_00256C54` enrols a record whose render-state flags carry `0x20`
+(`0x256C98 tst.w r3, #0x20`) through `0x256D5C bl 0x256450`, which copies 0x98 bytes of render
+state into the widget (`0x25652A movs r2, #0x98`; `0x256530 bl 0x2591F2`): state `+0x74..+0x7A`
+become the saved rows, the colour words `+0x64..+0x70` the first cached values. The record decoder
+`FUN_00252CB0` resets each field's row to `0xFFFF` before decoding it (fillA:
+`0x253342 strh.w r2, [r3, #0x74]`) and writes it only in mode 7 (`0x2533D8 strh.w r0,
+[r3, #0x74]`). So **an enrolled record repaints when the u32 at any of its own mode-7 colour rows
+changes.** The stock containers of the four tank gauges set no colour (all four fields mode 0),
+which is why a colour row of the gauge's own well was never watched.
+
+**What it gives.** `repaint.repaint_on_cell` puts the caller's row on a mode-0 field of every
+enrolled wt-5 container of an object, choosing a field the object's first record sets itself, so
+the container's copy of the word reaches no pixel; `own_colour_cell(..., repaint=True)` does it on
+the colour cell, so the routine's store of a new colour is the store that repaints. *Emulator*
+(`tests/test_repaint.py`): FRESH held at 56000 then 63000 then 57000 raw (0 % throughout, HOME
+never left), the outline turns red 10 s after crossing 62000 and white 10 s after dropping below
+58000, and nothing outside the gauge changes; the same op without the bind writes the same words
+and HOME never shows them. Not yet seen on the coach.
+
+**Correction carried.** Finding 55's "the widget redraw dispatch itself is still unlocated" is
+answered here for widgets: the redraw is `FUN_002588A8`, and its triggers are a value widget's
+value bytes and every enrolled widget's mode-7 colour rows. A type-6 switch's *selection* is still
+made only by the walk.
 
 ## Finding 86 — the FAULTS list has exactly three entries in 13.6, and the panel never reads cell `0x05` — `proven-from-code` (the object tree, the writers), checked `observed-in-emulation`, 2026-10-22
 

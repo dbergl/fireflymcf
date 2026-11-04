@@ -47,22 +47,24 @@ routine's store precedes the control's first draw. In the emulator a cell seeded
 before the first tick never draws magenta, and the outline shows the routine's colour in the
 first screenshot of HOME (`tests/test_colourcell.py`, *emulator*).
 
-**When the new colour shows.** A write to the cell repaints nothing by itself: the panel repaints
-a control when a cell it watches changes or its page is drawn, and no container watches a colour
-row. Drive the colour from the same input that repaints the control (a tank gauge repaints when its
-level cell changes), and read that input from its receive slot, which the routine sees before
-`FUN_00247BF8` copies it on, so the colour is written no later than the tick that repaints
-(*inference*; *emulator*: the fresh gauge's outline turns red and back with its level).
+**When the new colour shows.** A write to the cell repaints nothing by itself: the live redraw
+(`FUN_002588A8`, `GUICODE.md` Finding 87) repaints an enrolled widget when one of ITS OWN record's
+mode-7 colour rows changes, or its value bytes, and the field rewritten here belongs to a record
+inside the object, not to the enrolled container that draws it. So without more the new colour
+shows at the control's next repaint: a change of the value its container watches (a tank gauge's
+level) or a page draw (*emulator*). With `repaint=True` the object's enrolled containers watch the
+cell too (`repaint.repaint_on_cell`), and the store of a new colour repaints it in place in the
+same tick's live redraw (*proven-from-code*; *emulator*: `tests/test_repaint.py`).
 
 Refusals (`ColourCellError.code`): BAD_OBJECT, NO_COLOUR_FIELD, AMBIGUOUS_RECORD,
 UNSUPPORTED_FIELD, UNSUPPORTED_MODE, STATEFUL_RECORD, INHERITED_COLOUR, FIRMWARE_MISMATCH,
 NO_DISPLAY_CELL, BAD_EDIT, GUIDATA_TOO_LARGE (GuiData would end past the flash ceiling,
-`limits.GUIDATA_END_MAX`).
+`limits.GUIDATA_END_MAX`), and with `repaint` `repaint.RepaintError`'s codes.
 """
 from __future__ import annotations
 
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from . import celltables, guidata, pagedraw, readout, records, relocate, render, theme
 
@@ -108,6 +110,9 @@ class ColourCell:
     record: int                     # the record's index within the object
     role: str                       # the record's colour field ("fillA", "fillB")
     initialised_at_boot: bool = False   # never: the routine must write it every tick
+    repaint: object = None          # `repaint.Repaint` when the request asked for it: the
+                                    # object's enrolled containers watch this cell, so a store
+                                    # of a different colour repaints it in place
 
 
 def _object_records(data: bytes, object_index: int):
@@ -289,35 +294,51 @@ def _swap_record(data: bytes, plan: _Plan) -> bytes:
     return out
 
 
-def own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
+def own_colour_cells(data: bytes, requests, *, repaint: bool = False
+                     ) -> tuple[bytes, list[ColourCell]]:
     """See `_own_colour_cells`; the flash ceiling's refusal is GUIDATA_TOO_LARGE."""
     from . import limits
+    from . import repaint as _repaint
     try:
-        return _own_colour_cells(data, requests)
+        return _own_colour_cells(data, requests, repaint)
     except limits.GuiDataTooLarge as e:
         raise ColourCellError(limits.CODE, str(e)) from e
+    except _repaint.RepaintError as e:
+        raise ColourCellError(e.code, str(e)) from e
 
 
-def _own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
+def _own_colour_cells(data: bytes, requests, repaint_all: bool = False
+                      ) -> tuple[bytes, list[ColourCell]]:
     """Give each request's field a private mode-7 colour cell, with ONE grow of the cell table
     for all of them; return the new image and a `ColourCell` per request, in order.
 
     A request is `[object_index, field]`, `[object_index, field, record]`, or a dict with keys
-    `object`, `field` and optionally `record` and `expect` (`own_colour_cell`'s arguments).
-    Every request is checked before anything changes; the same field twice is refused. One
+    `object`, `field` and optionally `record`, `expect` and `repaint` (`own_colour_cell`'s
+    arguments; `repaint` defaults to the call's). A request with `repaint` also has the object's
+    enrolled containers watch its cell (`repaint.repaint_on_cell`), so a routine's store of a new
+    colour repaints the object in place; without it the image is byte-identical to before the
+    option existed. Every request is checked before anything changes; the same field twice is
+    refused. One
     grow costs GuiData about 5 bytes per stock row plus 5 per new row, once, where one
     `own_colour_cell` call per field pays the whole table each time."""
     data = bytes(data)
-    reqs = []
+    if not isinstance(repaint_all, bool):
+        raise ColourCellError("BAD_EDIT", f"repaint {repaint_all!r} is not a bool")
+    reqs, wants = [], []
     for q in list(requests):
         if isinstance(q, dict):
-            unknown = set(q) - {"object", "field", "record", "expect"}
+            unknown = set(q) - {"object", "field", "record", "expect", "repaint"}
             if unknown or "object" not in q or "field" not in q:
                 raise ColourCellError("BAD_EDIT", f"request {q!r}: want object, field and "
-                                      "optionally record and expect")
+                                      "optionally record, expect and repaint")
+            rp = q.get("repaint", repaint_all)
+            if not isinstance(rp, bool):
+                raise ColourCellError("BAD_EDIT", f"request {q!r}: repaint is not a bool")
             reqs.append((q["object"], q["field"], q.get("record"), q.get("expect")))
+            wants.append(rp)
         elif isinstance(q, (list, tuple)) and len(q) in (2, 3):
             reqs.append((q[0], q[1], q[2] if len(q) == 3 else None, None))
+            wants.append(repaint_all)
         else:
             raise ColourCellError("BAD_EDIT", f"request {q!r} is not [object, field(, record)] "
                                   "or a dict")
@@ -331,6 +352,10 @@ def _own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
     # 1. check every request on the input, then rewrite each field onto the row the grow will
     #    add for it (`allocate_fresh_cells` appends rows at row_count, in spec order)
     plans = [_plan(data, oi, f, r, x, rows + k) for k, (oi, f, r, x) in enumerate(reqs)]
+    from . import repaint as _repaint
+    for p, rp in zip(plans, wants):
+        if rp:      # refuse before anything changes (a field this call rewrites is mode 2, 3,
+            _repaint.plan(data, p.object_index)     # 6 or 7 before and after: set either way)
     seen = set()
     for p in plans:
         key = (p.object_index, p.record, p.role)
@@ -373,13 +398,25 @@ def _own_colour_cells(data: bytes, requests) -> tuple[bytes, list[ColourCell]]:
     addrs = [a for c in result for a in range(c.addr, c.addr + WIDTH)]
     if len(set(addrs)) != len(addrs):
         raise ColourCellError("BAD_EDIT", "two cells share SRAM")
+
+    # 4. the repaint watches, on the grown image (the rows exist now)
+    for k, rp in enumerate(wants):
+        if rp:
+            out, bound = _repaint._repaint_on_cell(out, result[k].object_index,
+                                                   result[k].cell_index)
+            if bound.addr != result[k].addr:
+                raise ColourCellError("BAD_EDIT", f"row {bound.cell_index} watched at "
+                                      f"{bound.addr:#x}, not the cell {result[k].addr:#x}")
+            result[k] = replace(result[k], repaint=bound)
     return out, result
 
 
 def own_colour_cell(data: bytes, object_index: int, field: str, *, record: int | None = None,
-                    expect: bytes | None = None) -> tuple[bytes, ColourCell]:
+                    expect: bytes | None = None, repaint: bool = False
+                    ) -> tuple[bytes, ColourCell]:
     """Give `field` ("border" or "fill") of one record of object `object_index` a private mode-7
     colour cell; return the new image and a `ColourCell`. See the module docstring."""
     out, (cell,) = own_colour_cells(data, [{"object": object_index, "field": field,
-                                            "record": record, "expect": expect}])
+                                            "record": record, "expect": expect,
+                                            "repaint": repaint}])
     return out, cell
