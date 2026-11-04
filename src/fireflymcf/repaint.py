@@ -51,11 +51,17 @@ enrolled container of the object a mode-7 colour field on the caller's row. The 
 also sits in that colour field of the render state, from the container's decode until the
 child's first record sets the field: so the call requires the child's first record to set the
 field itself (mode 1, 2, 3, 6 or 7), and the container's field to be mode 0 (it set nothing)
-and its coordinate out-registers to be zero (the decoder copies each colour word and row into a
+its field to be fillA or fillA2 (the wt-5 case paints the container's box with its fillB or
+fillB2 word when the renderer's `+0x704C` flag is set: `0x257AFC bl 0x255F44`, r0 = fillB/fillB2;
+it never reads fillA/fillA2), and its coordinate out-registers to be zero (the decoder copies each colour word and row into a
 register slot under 2-bit fields at shifts 2 and 6, `0x252EE2 ands r2, r4, #0xc` ..
 `0x252F68`; that these are the out-register bytes is *inference* from the layout `records`
-decodes, so the check refuses any out-register). Under those three conditions no drawn
-pixel can read the cell's word through the container: the only reader the edit adds is the
+decodes, so the check refuses any out-register). Under those conditions no drawn
+pixel can read the cell's word through the container (*proven-from-code* for the container's
+own case; that `FUN_00257BFC`'s walk of the child cannot leave before the child's first record
+decodes, which would let the word reach the parent's later mode-0 siblings, is *inference*;
+a full compose of HOME with the alarm word set draws what the unbound op's does, *emulator*,
+a weak check: HOME's compose takes no `+0x704C` box fill): the only reader the edit adds is the
 change-detect.
 
 **Composing it with a colour cell.** `colourcell.own_colour_cells(..., repaint=True)` (or this
@@ -86,9 +92,15 @@ from . import celltables, guidata, memo, pagedraw, records, relocate
 
 ENROLL_BIT = 0x20                 # header byte 4: the decoder sets render-state flag 0x20
 CONTAINER_WTYPE = 5
-# The fields a container can watch, in preference order. All four are read in mode 7 by the
-# decoder (rows at render-state +0x74/+0x76/+0x78/+0x7A, all four checked by FUN_002568A0).
-ROLES = ("fillA", "fillB", "fillA2", "fillB2")
+# The fields a container can watch, in preference order: only the two the wt-5 case never
+# paints with. All four are read in mode 7 and checked by FUN_002568A0, but FUN_00256C54 holds
+# fillA/fillA2 in r6 and fillB/fillB2 in r7 (+0x64/+0x68 at 0x256D8E/0x256D90, +0x6C/+0x70 at
+# 0x256CB6/0x256CB8 under +0x704F), and its wt-5 case (0x257AA4) fills the container's box with
+# r7 when +0x704C is set and state+4 > 0 (`0x257AFC bl 0x255F44`, r0 = r7, which reaches
+# FUN_0025572C at 0x255F74 unless the transparency bit r4 is set), before recursing into the
+# child at 0x257AC8. r6 is not read on that path (0x257AA4-0x257AF8; it is reloaded at
+# 0x257B2E only in the type-6 branch), so a word in fillA or fillA2 reaches no pixel there.
+ROLES = ("fillA", "fillA2")
 _EXPLICIT = (1, 2, 3, 6, 7)       # modes that set the field (0/4 inherit; 5 is fillB's
                                   # transparency in block B and an inherit in block A)
 TRIGGER_TYPE = 10                 # a 4-byte word in `sramreach._TYPE_WIDTH`, as colourcell's

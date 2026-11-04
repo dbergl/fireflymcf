@@ -158,6 +158,12 @@ The earlier hypothesis (missing network data) was wrong. Causes, in order:
   TANK_STATUS. *Superseded by running the G12 logic (below):* the bucketer is
   descending (raw >= CC 54000 = empty ... < CE 25000 = full) and TANK_STATUS
   carries level 0-3 with **resolution 3**, as on the coach (`00 00 03`).
+  The fallback `peers.ProtocolG12` (used only when the MCF's G12 logic cannot run) buckets
+  the same way (descending, a reading at a threshold is the emptier bucket, thresholds
+  defaulting to the coach's 54000/40000/25000, each tank's 0BFC1 and 1FFB7 at 1 Hz) but encodes
+  TANK_STATUS as **level/100** (0, 33, 67, 100 of resolution 100), where the real G12 sends
+  level/3, so a test that reads the TANK_STATUS slot's bytes sees different values under the
+  two models.
 * **Inverter** (GuiCode FUN_0024f1fc ev_113acf0b, toggle FUN_0024f6d8 ev_1848006f):
   binds up to two inverters by the source address of the first INVERTER_STATUS
   1FFD4 for instance 1/2; widget follows status byte 1 (0 disabled, 1 invert...).

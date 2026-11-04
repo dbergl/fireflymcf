@@ -566,8 +566,19 @@ What it rewrites, and why nothing else changes:
   itself** (mode 1, 2, 3, 6 or 7). The word sits in the render state from the container's decode
   until that first record overwrites it, and nothing draws in between, so the container's copy
   reaches no pixel. A container whose coordinates store to registers is refused (the decoder
-  copies colour words into registers there too). Fields are tried in the order fillA, fillB,
-  fillA2, fillB2.
+  copies colour words into registers there too). Only **fillA**, then **fillA2**: the wt-5
+  case fills the container's box with its fillB or fillB2 word when the renderer's `+0x704C`
+  flag is set (`0x257AFC bl 0x255F44`), and never reads fillA or fillA2 (*proven-from-code*,
+  Finding 87). So an object has at most two watchable fields, and on the tank gauges one
+  (their first record sets fillA but not fillA2): watch **one** cell per object, the one that
+  changes whenever the control's look does (or an `own_repaint_trigger` the routine bumps),
+  and write the object's other cells in the same tick. A second bind on such an object refuses
+  `UNSUPPORTED_CONTAINER`.
+- That nothing after the child sees the word (the parent's later records) rests on the child's
+  walk not ending before its first record decodes: *inference*, not traced in
+  `FUN_00257BFC`. In the emulator a full compose of HOME with the alarm word set draws exactly
+  what the unbound op's compose draws, which is consistent with it but would not catch every
+  leak (HOME's compose does not take the `+0x704C` box fill).
 - Each parent object's container record grows by 2 bytes and the parent is swapped back in at
   its own index, every other byte of every record unchanged; later GuiData moves, so GuiCode's
   literals into it are shifted: **declare `guicode` and `guidata`**.

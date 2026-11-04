@@ -169,7 +169,8 @@ class ProtocolG12(Peer):
     #                     2 gray, 3 black, 4 gray 2); % via thresholds CC/CD/CE
     # The panel's tank gauges read standard TANK_STATUS (1FFB7: 0 fresh, 1 black,
     # 2 gray, 18 gray 2), so the G12 is modelled as relaying its raw sensors
-    # through the thresholds, bucketed 0/33/67/100 %. Raw ADC counts, HIGH = EMPTY
+    # through the thresholds, bucketed 0/33/67/100 % of resolution 100 (the real G12, `emu.g12`,
+    # sends the bucket 0-3 of resolution 3 instead). Raw ADC counts, HIGH = EMPTY
     # (BUS-BASELINE PC.10: 0% <- CC 54000 -> 33% <- CD 40000 -> 67% <- CE 25000 -> 100%).
     # The boundary rule (a reading AT a threshold is the emptier bucket) is the one the
     # G12's own bucketer gives when the MCF's G12 blob runs (`emu.g12.G12`, arms

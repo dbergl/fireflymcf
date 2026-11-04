@@ -117,25 +117,41 @@ def test_own_colour_cell_repaint_is_the_two_calls(mcf_136):
 
 
 def test_batched_cells_repaint_per_request(mcf_136):
-    """A batch binds only the requests that ask; two cells of one object take two fields."""
+    """A batch binds only the requests that ask; any one cell of an object can be the watched
+    one (the container watches it through fillA whatever field the cell colours)."""
     ed = userop.Editor(mcf_136)
-    border, fill, grey = ed.call("own_colour_cells", [
-        {"object": FRESH, "field": "border", "repaint": True},
+    fill, grey = ed.call("own_colour_cells", [
         {"object": FRESH, "field": "fill", "record": 1, "repaint": True},
         [723, "border"]])
-    assert {w.role for w in border.repaint.watchers} == {"fillA"}
-    assert {w.role for w in fill.repaint.watchers} == {"fillB"}   # 721[0]'s fillB is mode 7
+    assert {w.role for w in fill.repaint.watchers} == {"fillA"}
     assert grey.repaint is None
     for p, k, _e in repaint.containers(mcf_136, FRESH):
         colors = dict((r, (m, v)) for r, m, v in _recs(ed.data, p)[k].colors)
-        assert colors["fillA"] == (7, border.cell_index) and colors["fillB"] == (7, fill.cell_index)
+        assert colors["fillA"] == (7, fill.cell_index) and colors["fillB"] == (0, None)
     for p, k, _e in repaint.containers(mcf_136, 723):
         assert _recs(ed.data, p)[k].colors == _recs(mcf_136, p)[k].colors
     assert userop.replay(mcf_136, ed.ledger) == ed.data
-    # the gauge's first record sets fillA and fillB itself, and both are taken now
+
+
+def test_fillb_is_never_watched(mcf_136):
+    """A container's fillB/fillB2 word is painted over the container's box when the renderer's
+    +0x704C flag is set (`0x257AFC bl 0x255F44`, r0 = r7 = fillB/fillB2), before the child's
+    first record resets anything. So once fillA is taken, the gauge's only other field its first
+    record sets (fillB, mode 7) is refused, in a batch, a second bind and a trigger alike."""
+    assert repaint.ROLES == ("fillA", "fillA2")
     with pytest.raises(routinekit.RoutineKitError) as e:
-        ed.call("repaint_on_cell", FRESH, border.cell_index)
+        routinekit.own_colour_cells(mcf_136, [
+            {"object": FRESH, "field": "border", "repaint": True},
+            {"object": FRESH, "field": "fill", "record": 1, "repaint": True}])
     assert e.value.code == "UNSUPPORTED_CONTAINER"
+    ed = userop.Editor(mcf_136)
+    border = ed.call("own_colour_cell", FRESH, "border", repaint=True)
+    for name, args in (("repaint_on_cell", (FRESH, border.cell_index)),
+                       ("own_repaint_trigger", (FRESH,))):
+        with pytest.raises(routinekit.RoutineKitError) as e:
+            ed.call(name, *args)
+        assert e.value.code == "UNSUPPORTED_CONTAINER", name
+        assert "fillB" not in str(e.value).split("among")[1].split("(")[0]
 
 
 def test_own_repaint_trigger(mcf_136):
@@ -364,6 +380,13 @@ def _run(image, tmp_path):
     look("below-7s")
     s.run(7.0)
     look("below-14s")
+    s.set_tank_raw(1, 63000)                                 # red again, then a full compose
+    s.run(14.0)
+    look("red-again")
+    s.goto("SETTINGS")
+    s.goto("HOME")
+    s.run(2.0)
+    look("composed-red")
     return {"box": box, "screen": screen, "steps": {x["name"]: x for x in steps}}
 
 
@@ -432,4 +455,22 @@ def test_without_the_repaint_the_same_check_fails(runs):
         _outline_repainted_live(runs[False])
     st = runs[False]["steps"]
     for x in st.values():
-        assert np.array_equal(x["img"], st["start"]["img"]), x["name"]
+        if x["name"] != "composed-red":
+            assert np.array_equal(x["img"], st["start"]["img"]), x["name"]
+
+
+def test_a_full_compose_draws_the_same_with_and_without_the_bind(runs):
+    """HOME composed with the alarm word set is pixel for pixel the unbound op's compose (which
+    draws the red from the gauge's own record), and the same as the live repaint drew. This is
+    consistency evidence, not a test of the leak paths: binding fillB or an inherited fillB2
+    instead also passes it, because HOME's compose takes neither the `+0x704C` box fill nor a
+    path that draws the inherited field. The fillB refusal is pinned by
+    `test_fillb_is_never_watched` from the code."""
+    bound, unbound = runs[True]["steps"], runs[False]["steps"]
+    for st in (bound, unbound):
+        assert st["composed-red"]["word"] == RED and st["composed-red"]["page"] == "HOME"
+        assert st["red-again"]["word"] == RED
+    assert np.array_equal(bound["composed-red"]["img"], unbound["composed-red"]["img"])
+    assert np.array_equal(bound["composed-red"]["img"], bound["red-again"]["img"])
+    assert np.array_equal(bound["red-again"]["img"], bound["above-14s"]["img"])
+    assert _count(_band(unbound["composed-red"]["img"], runs[False]["box"]), (255, 0, 0)) > 150
