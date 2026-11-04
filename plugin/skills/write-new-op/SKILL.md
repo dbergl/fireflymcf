@@ -62,6 +62,17 @@ behind the widget and the message that fills it (`bus-map --name`, `bus-map --dg
 `slot-source`). The emulator's own model of the G12 and its peers (`fireflymcf.emu`, in the
 installed package) says what it sends, which a test needs anyway.
 
+**A number or quantity the owner names exists somewhere until every page says otherwise.**
+Before concluding a value does not exist, or that a condition on it can never be true, search
+**every** page `pages` lists, the hidden diagnostic pages included (PROBE TANK DIAGNOSTICS and
+its "ADC Raw Value" readouts, the thresholds view), with `labels --containing` on the words the
+owner used and on the unit's, and run `bus-map --name` on the quantity. Compare the number's
+size with what each candidate can hold. Example: "the fresh tank above 62000" is not the gauge,
+which reads 0-100 %; it is the raw 16-bit ADC count the G12 reports on `0BFC1` (instance 1
+fresh), the number PROBE TANK DIAGNOSTICS shows as "ADC Raw Value" (*hardware*: PC.10, high
+raw = empty; the gauge reads 0 % from 54000 up). Two sessions missed this; one concluded "> 62000
+can never be true". If after all that the value is still not found, say what you searched.
+
 **Ask the owner only what no tool can answer**: what they want, what they see on their coach,
 whether to go ahead. Which message, which bytes, which slot are yours to find in their file,
 the library's docstrings and the emulator's model. Ask for a capture only after those, and say
@@ -148,7 +159,10 @@ that counts in fresh SRAM: manifest, `op.py`, `emu_test.py`, README). Copy it to
 `ops/<name>/` beside the owner's `*.ffproj.json` and change it.
 
 **`manifest.json`:** `name` (the folder name), `type` (`user:<name>`; a user op can never take a
-built-in's name), `version`, `author`, `description`, `touches` (any of `guicode`, `guidata`,
+built-in's name), `version`, `author` (a name only, by default: `op pack` ships the manifest to
+everyone the op is shared with, so **ask the owner before putting an email address or any other
+contact detail there**, even one you can see in their files or git configuration),
+`description`, `touches` (any of `guicode`, `guidata`,
 `g12`, `lcd`: every section the op changes; the build refuses an undeclared change, and the
 container header can never be declared), `written_against` (a list of objects: `build_name`,
 `base_sha256`, `recipe_ops_required`), `provenance` (a list of objects: `kind` `emulated` or
@@ -186,8 +200,10 @@ with JSON-able or bytes arguments (lists, not sets):
 | `config_frame(selector, value, function)` | a 12-byte `0x1FED9` OPTIONS frame template (`0xD1` write, `0xD2` delta, `0xD3` read-back) |
 | `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
-| `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); touches GuiCode and GuiData |
-| `ed.call("own_colour_cells", [[object_index, field], ...])` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells |
+| `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=, repaint=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); with `repaint=True` a store of a new colour also repaints the control in place (without it, the colour shows only at the control's next repaint); touches GuiCode and GuiData |
+| `ed.call("own_colour_cells", [[object_index, field], ...], repaint=)` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells; a dict request takes its own `"repaint"` |
+| `ed.call("repaint_on_cell", object_index, cell_index)` | the object repaints in place whenever the u32 at that display-cell row changes (its enrolled containers watch the row); touches GuiCode and GuiData |
+| `ed.call("own_repaint_trigger", object_index)` | a private 4-byte word bound the same way: store a different word (add one) to repaint the object once |
 | `guicode(data)`, `find_tag(data, tag)`, `tick_chain(data)` | readers: GuiCode at its runtime base; the address of a tag you put in a prefix; the tick chain |
 
 `thumb` encoders (`thumb.ldr_imm`, `ldrh_imm`, `strb_imm`, `cmp_imm8`, `movw`, …) and the
@@ -205,6 +221,12 @@ primitives (`emit_send_frame`); a call to any other GuiCode function needs its o
 ## 5. Compile and emulate
 
 The project lists the op like any other: `{"id": "my", "type": "user:<name>", "params": {...}}`.
+Give the build a `build_name` and a file name (`build/mcf-NAME.bin`) no earlier build of this
+owner's uses: read every `build_name` in the project folder's `*.ffproj.json` files and in the
+build sidecars there (`build/*.json`, `<build>.json`), and the `mcf-*.bin` names beside them,
+and take the next number after the highest. When the folder does not settle it (builds kept
+elsewhere, a gap in the numbers), ask the owner. Two sessions gave a new build the number of one
+the owner already had.
 Put it after the ops whose results it uses; a page-header rename and `set_theme` stay last,
 except that an op calling `own_colour_cell(s)` goes after `set_theme`, so the colour it restores is
 the themed one.
@@ -347,6 +369,11 @@ pinned by its tests). `PC.N` and `Finding N` name entries in the fireflymcf repo
   sites register more, so treat it as at least 66). Every new subscription counts.
 - **Most touch actions run on release** (*proven-from-code*: the finger-lifted `0xFF` handler,
   Finding 83), so a test taps and releases; the scenario's `tap` does.
+- **A colour store shows only at a repaint.** Writing a colour cell repaints nothing by itself;
+  the live redraw repaints a control when a colour row of its enrolled container changes, so
+  pass `repaint=True` to `own_colour_cell(s)` (*proven-from-code*: Finding 87; *emulator*).
+  Never fake the value a control shows to force a repaint: change the tank reading, a slot or
+  another widget's cell and the owner sees a false number.
 - **A received value is drawn only if GuiCode copies its slot to a cell a widget draws**
   (*proven-from-code*, Finding 82). A new subscription alone shows nothing; `bus-map` says which
   entries reach a widget.
