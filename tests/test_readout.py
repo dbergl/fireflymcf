@@ -124,11 +124,11 @@ from fireflymcf import register, thumb
 SIM_LOAD = 0x00300000
 
 
-def _plan(stock, *, width=2, mask=0xFFFF, add=0, shift=0, sub=0):
+def _plan(stock, *, width=2, mask=0xFFFF, add=0, shift=0, sub=0, mul=1):
     reg = register.resolve_register(stock, dgn="DGN_CONFIG", selector=0xEE)
     _img, cell, _e = readout.allocate_display_cell(stock, width)
     return readout.resolve(stock, register=reg, cell=cell, mask=mask, add=add, shift=shift,
-                           sub=sub)
+                           sub=sub, mul=mul)
 
 
 def _run(plan, blob, disasm, word):
@@ -190,7 +190,8 @@ def test_a_byte_readout_stores_the_low_byte_and_the_sentinel_as_ff(stock):
 
 
 def test_resolve_refuses_out_of_range_arithmetic(stock):
-    for kw in (dict(mask=0), dict(mask=0x10000), dict(add=256), dict(shift=16)):
+    # add above 255 is a movw + adds since mul (2026-11-05): 0x10000 is the bound now
+    for kw in (dict(mask=0), dict(mask=0x10000), dict(add=0x10000), dict(shift=16)):
         with pytest.raises(readout.ReadoutError):
             _plan(stock, **kw)
 
@@ -309,3 +310,44 @@ def test_sub_zero_emits_the_same_routine_as_before(stock):
 def test_resolve_refuses_an_out_of_range_sub(stock):
     with pytest.raises(readout.ReadoutError):
         _plan(stock, sub=0x10000)
+
+
+def _kelvin32(celsius):
+    """The RV-C temperature word: 0.03125 degC steps from -273 degC."""
+    return round((celsius + 273) * 32)
+
+
+def test_mul_converts_rvc_temperature_to_tenths_of_a_degree_f(stock):
+    # (raw - 8167) * 9 + 7 >> 4: within half a tenth of raw * 9/16 - 4594
+    plan = _plan(stock, sub=8167, mul=9, add=7, shift=4)
+    blob, disasm = readout.build(plan, SIM_LOAD)
+    assert any(t == "muls r1, r2, r1" for _a, t in disasm)
+    for c, f10 in ((20, 680), (0, 320), (37, 986), (-10, 140), (100, 2120)):
+        assert _run(plan, blob, disasm, _kelvin32(c)) == f10, c
+    for raw in range(8200, 0xFFF0, 997):
+        exact = (raw / 32 - 273) * 9 / 5 + 32
+        assert abs(_run(plan, blob, disasm, raw) / 10 - exact) <= 0.05 + 1e-9, raw  # ties
+    assert _run(plan, blob, disasm, _kelvin32(-20)) == 0        # below -17.8 degC (0 F): clamp
+    assert _run(plan, blob, disasm, 0xFFFF) == 0xFFFF            # no data stays dashes
+
+
+def test_wide_add_rounds_a_whole_degree_conversion(stock):
+    # whole degrees F: (raw - 8167) * 1843 + 16384 >> 15 (1843 / 32768 ~ 9 / 160)
+    plan = _plan(stock, sub=8167, mul=1843, add=16384, shift=15)
+    blob, disasm = readout.build(plan, SIM_LOAD)
+    assert any(t == "adds r1, r1, r2" for _a, t in disasm)
+    assert [_run(plan, blob, disasm, _kelvin32(c)) for c in (20, 0, 37)] == [68, 32, 99]
+
+
+def test_mul_one_emits_the_same_routine_as_before(stock):
+    a, _ = readout.build(_plan(stock, shift=1, add=7), SIM_LOAD)
+    b, _ = readout.build(_plan(stock, shift=1, add=7, mul=1), SIM_LOAD)
+    assert a == b
+    assert not any(t.startswith(("muls", "adds r1, r1")) for _a, t in readout.build(
+        _plan(stock, shift=1, add=255), SIM_LOAD)[1])
+
+
+@pytest.mark.parametrize("kw", [{"mul": 0}, {"mul": 0x10000}, {"add": 0x10000}])
+def test_resolve_refuses_an_out_of_range_mul_or_add(stock, kw):
+    with pytest.raises(readout.ReadoutError):
+        _plan(stock, **kw)

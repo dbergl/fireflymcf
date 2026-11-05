@@ -198,6 +198,7 @@ twice been read as contradicting it and was wrong both times.
 | claim an icon font's unused block character for new artwork; re-icon one of several icons | `install_glyph` `claim_block`; `set_icon` `current` | built 2026-09-28 |
 | Inverter-card readouts (AC In V, In/Out Amps with the RV-C offset, house-battery Batt Amps, later inverter DC current (slot 652)); Ignore Alarms BMS button with bit status | `add_card_readouts`, `add_register_readout` `sub`/`draw`; `add_aes_batt_heat` `enable_wire`/`off_wire`/`group_pool`, `add_aes_bms_button_status` | flashed 2026-10-15 (readouts live); the caption fixes built 2026-10-15 |
 | ELECTRICAL as four cards (Batteries, Inverter, Auto Engine Start, Water Pump); "Battery Heater" caption; AES DISABLED half in navy | `aes_card_layout`; `add_aes_batt_heat` `text` + status `button` ref | flashed 2026-10-15 (draws; three defects, fixed in the next build) |
+| a button showing one of N reported states (caption, glyph, colour per state), a mode button that sends the state after the reported one, a display-only tile; a linear readout conversion (RV-C temperature as degrees F) | `add_rvc_button` `cycle` / `display` + `add_button_states`; `add_register_readout` `mul` | **unverified** (emulated 2026-11-05; ported from a user op whose author ran its cycle on another coach) |
 
 **Constraints that bind:**
 

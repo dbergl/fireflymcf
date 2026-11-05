@@ -61,6 +61,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
+| [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. | **no** |
 | [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to 829 is verified); it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
@@ -68,7 +69,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
-| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo). | **no** |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). | **no** |
 | [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). | **no** |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
@@ -83,7 +84,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_aes_low_volts_trigger`](#add_aes_low_volts_trigger) | guicode | Add a live, recolouring Low Volts arm indicator to the compact AES frame. | Flashed 2026-09-01. | yes |
 | [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes |
 | [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes |
-| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance. | yes |
+| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. | yes |
 | [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes |
 | [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes |
 | [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. | yes |
@@ -651,6 +652,31 @@ Error codes:
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
 
+### add_button_states
+
+Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm.
+
+- **Hardware status:** UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state.
+- **Proof:** `statelights.py`, `statusfold.py`
+- **Implementation:** `recipe_ops.AddButtonStates`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `buttons` | array | yes |  | [{button: {ref}, states: [{match, text?, glyph?, lit?, colour?}], unknown?, check_order?, wrap?, lit_when?}] |
+| `off_colour` | array |  | [65, 81, 163] | [r, g, b] unlit body fill; a palette colour |
+| `on_colour` | array |  | [0, 174, 239] | [r, g, b] lit body fill; a palette colour |
+
+Error codes:
+
+- `BAD_PARAMS` — no entries, a malformed entry, state or match, unknown keys, a state count a cycle does not have, a check_order that is not a permutation, a text or glyph the button's shape lacks, a toggle button, or a button another op already lit.
+- `BAD_REF` — a button or source names no matching handle.
+- `NO_SUCH_REGISTER` — a source resolves to no live variable-table entry.
+- `NO_GLYPH` — a state's glyph falls back to the placeholder.
+- `NO_DISPLAY_CELL` — the cell table could not be grown.
+- `NO_BODY_COLOUR` — a colour is not in this build's palette.
+- `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, a wrap changes any other record, or an arm draws out of place.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+
 ### add_button_status
 
 Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.
@@ -859,9 +885,9 @@ Error codes:
 
 ### add_rvc_button
 
-Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
+Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
 
-- **Hardware status:** UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo).
+- **Hardware status:** UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo).
 - **Proof:** `rvcbutton.py`, `enumlabel.py`
 - **Implementation:** `recipe_ops.AddRvcButton`
 
@@ -875,16 +901,18 @@ Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0
 | `text` | string\|null |  | null | caption; \n makes two lines |
 | `glyph` | object\|null |  | null | {slot, char}: an installed glyph drawn above the caption |
 | `font` | integer\|null |  | null | caption font slot; null keeps the donor's |
-| `dgn` | integer | yes |  | 18-bit DGN every binding sends |
+| `dgn` | integer |  |  | 18-bit DGN every binding sends |
 | `tap` | object\|null |  | null | {payload}: 8-byte hex sent once per press |
 | `hold` | object\|null |  | null | {payload, seconds}: sent once after a hold of seconds (1-15) |
 | `toggle` | object\|null |  | null | {off_payload, on_payload}: 8-byte hex each; a later add_button_status must drive it |
+| `cycle` | object\|null |  | null | {payloads: [2-16 x 8-byte hex]}: variant k sends payload k; a later add_button_states must drive it |
+| `display` | boolean |  | false | true: no touch region and no group; the button only draws (no dgn) |
 | `colour` | array |  | [65, 81, 163] | [r, g, b] body fill; a palette colour |
 | `group_pool` | string {"free", "hold_safe"} |  |  | where the group comes from (default hold_safe when hold or toggle is given, else free) |
 
 Error codes:
 
-- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle` with `tap` or `hold`, the `free` pool with a hold or a toggle, or a box too small for its glyph and caption.
+- `BAD_PARAMS` — a malformed param or payload, no gesture, `toggle`, `cycle` or `display` with another gesture, `dgn` missing (or given with `display`), the `free` pool with a hold, a toggle or a cycle, or a box too small for its glyph and caption.
 - `BAD_REF` — a `parent` ref names no earlier op's object.
 - `NO_FREE_GROUP` — the group pool is empty.
 - `NO_GLYPH` — the glyph falls back to the placeholder (or icon font 24's unused block).
@@ -894,6 +922,7 @@ Error codes:
 - `GROW_REFUSED` — the gesture donor groups or the binding table (arena, gates) refused.
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
+- `CYCLE_UNDRIVEN` — (compile) a cycle that no later enabled `add_button_states` drives.
 
 ### add_text_label
 
@@ -1241,9 +1270,9 @@ Error codes:
 
 ### add_register_readout
 
-Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`).
+Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`.
 
-- **Hardware status:** Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells report unverified per instance.
+- **Hardware status:** Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance.
 - **Proof:** `readout.py`, `BUS-BASELINE.md` PC.59, PC.60
 - **Implementation:** `recipe_ops.AddRegisterReadout`
 
@@ -1254,6 +1283,7 @@ Show any register as a live number on any page, or feed an existing readout's ce
 | `add` | integer |  | 0 |  |
 | `shift` | integer |  | 0 |  |
 | `sub` | integer |  | 0 | subtracted after the mask, clamped at 0 (RV-C AC current is 20*A + 32000: sub 32000, shift 1 gives tenths of an amp) |
+| `mul` | integer |  | 1 | multiplied after sub, before add: (max(v - sub, 0) * mul + add) >> shift. RV-C temperature (1/32 degC from -273) as tenths of a degree F: sub 8167, mul 9, add 7, shift 4 (format places 1) |
 | `draw` | boolean |  | true | false: allocate the cell and chain the routine but draw nothing; the handle's display_slot is for another op to draw (add_card_readouts); excludes page/x/y/format/donor |
 | `width_bytes` | integer {1, 2} |  | 2 |  |
 | `page` | integer |  |  | parent object index |

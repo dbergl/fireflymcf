@@ -6233,6 +6233,11 @@ class AddRegisterReadout(Op):
             "sub": {"type": "integer", "default": 0,
                     "description": "subtracted after the mask, clamped at 0 (RV-C AC current is "
                                    "20*A + 32000: sub 32000, shift 1 gives tenths of an amp)"},
+            "mul": {"type": "integer", "default": 1,
+                    "description": "multiplied after sub, before add: (max(v - sub, 0) * mul + "
+                                   "add) >> shift. RV-C temperature (1/32 degC from -273) as "
+                                   "tenths of a degree F: sub 8167, mul 9, add 7, shift 4 "
+                                   "(format places 1)"},
             "draw": {"type": "boolean", "default": True,
                      "description": "false: allocate the cell and chain the routine but draw "
                                     "nothing; the handle's display_slot is for another op to "
@@ -6261,12 +6266,14 @@ class AddRegisterReadout(Op):
         self.add = self._param("add", 0, kind=int)
         self.shift = self._param("shift", 0, kind=int)
         self.sub = self._param("sub", 0, kind=int)
+        self.mul = self._param("mul", 1, kind=int)
         self.draw = self._param("draw", True, kind=bool)
         self.width_bytes = self._param("width_bytes", 2, kind=int)
         params = self.spec.params or {}
         self.cell_slot = params.get("cell_slot")
-        if self.sub:
-            # a new routine shape (subtract + clamp), not yet run on the coach
+        if self.sub or self.mul != 1 or self.add > 0xFF:
+            # a new routine shape (subtract + clamp; multiply; a movw add), not yet run on the
+            # coach
             self.hardware_verified = False
         if not self.draw:
             clash = [k for k in ("page", "x", "y", "format", "donor", "cell_slot", "silence")
@@ -6347,7 +6354,8 @@ class AddRegisterReadout(Op):
             else:
                 out, cell, cell_edits = readout.allocate_display_cell(data, self.width_bytes)
             plan = readout.resolve(out, register=reg, cell=cell, mask=self.mask,
-                                   add=self.add, shift=self.shift, sub=self.sub)
+                                   add=self.add, shift=self.shift, sub=self.sub,
+                                   mul=self.mul)
         except readout.ReadoutError as e:
             code = "NO_DISPLAY_CELL" if "NO_DISPLAY_CELL" in str(e) else "READOUT_REFUSED"
             raise RecipeError(code, str(e), op_id=self.spec.id)
@@ -6521,9 +6529,9 @@ class AddRegisterReadout(Op):
                 h["display_slot"], h["display_addr"])
         if not self.draw:
             return ("add_register_readout: cell %d @ %#x (tier %d, fresh=%s), routine @ %#x, "
-                    "sub %d; no widget (drawn by another op) -- HARDWARE-%s"
+                    "sub %d, mul %d; no widget (drawn by another op) -- HARDWARE-%s"
                     % (h["display_slot"], h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                       self.sub, "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                       self.sub, self.mul, "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
         return ("add_register_readout: object %d at (%d,%d) on root %d (of %s), cell %d @ %#x "
                 "(tier %d, fresh=%s), routine @ %#x -- HARDWARE-%s"
                 % (h["object_index"], self.x, self.y, h["root"], h["roots"], h["display_slot"],
@@ -7286,7 +7294,7 @@ class AddAesBattHeat(Op):
             "enable_wire": self.enable_wire, "off_wire": self.off_wire,
             "glyph": None, "glyph_x_bearing": 0, "font": None,
             "parent": aescompact.ELECTRICAL_AES_BODY,
-            "placement": "append", "toggle": None,
+            "placement": "append", "toggle": None, "cycle": None, "body_span": None,
             # the keys an `add_rvc_button` handle carries, with the values this preset builds:
             # the static fill index's colour (None when this build's palette does not resolve
             # it), the BMS DGN, the tap-or-hold form on the donor's hold nibble, off on a tap
@@ -8939,6 +8947,464 @@ class AddTextLabel(_LabelBox, Op):
                                             h["h"], framed_at, h["object"], h["parent"]))
 
 
+_STATE_KEYS = {"match", "text", "glyph", "lit", "colour"}
+_UNKNOWN_KEYS = {"text", "glyph", "lit", "colour", "variant"}
+_MATCH_KEYS = {"source", "mask", "shift", "eq", "range"}
+_STATES_ENTRY_KEYS = {"button", "states", "unknown", "check_order", "wrap", "lit_when"}
+
+
+@op("add_button_states")
+class AddButtonStates(Op):
+    """Show which of N states a unit reports on a button, and (for a cycle button) make a tap
+    send the NEXT state: the generalised toggle.
+
+    Each entry names an `add_rvc_button` and lists its states, each with a `match` on a receive
+    slot (`(slot & mask) >> shift` equal to `eq`, or within `range` [lo, hi]; every state may
+    read its own slot) and how the button draws in it: `text`, `glyph`, and a body colour
+    (`colour`, else `lit` picks `on_colour` over `off_colour`). ONE per-tick routine for every
+    entry (`statusfold.States`, chained once on the per-tick hook) tries the states in
+    `check_order` and writes the first match's index to the entry's own fresh display cell, or
+    N when none matches (nothing received yet, a stale slot, a value no state names). The
+    button's static body becomes ONE enrolled wtype-6 switch on that cell (`statelights`): the
+    `0xFFFF` default arm draws the `unknown` state, arm k draws state k, each a whole button
+    rebuilt by the button's own builder (`statelights.state_arm`), so a state change repaints
+    the whole button in place. The coach-verified mechanism is the same switch with four arms
+    (the battery-heater status, verified through every transition 2026-09-22).
+
+    **Cycle buttons.** On an `add_rvc_button` with `cycle` (N payloads), the routine then calls
+    `setVariant(group, next)` every tick, `statusfold.Light`'s call: `next` is the state after
+    the reported one ((k + 1) mod N, or N-1 at the end with `wrap: false`) and `unknown.variant`
+    (default 0) with no report. A tap so sends exactly one frame, one step on from what the
+    unit is really doing, and a second tap before the unit reports again sends the same frame
+    again. The state count must equal the cycle's payload count. Any other button form (`tap`,
+    `hold`, `display`) only draws; a `toggle` is `add_button_status`'s to drive.
+
+    **lit_when** (a match): while it does not hold, every state draws in `off_colour` (its
+    text and glyph unchanged) -- e.g. a fan-speed button lit only while the A/C runs. The cell
+    then holds the state's index plus N+1, arms N+1..2N drawing the gated states; the unknown
+    state draws as itself either way.
+
+    Every page reaching the button is walked before and after the wrap in every switch-arm set,
+    and after it in every one of the new switch's arms: nothing but the button's own records
+    may change, and each arm must draw its records in the base arm's boxes (a glyph's box
+    follows its character). Every arm has the button's shape: a caption iff the button has one,
+    with as many lines, and a glyph iff it has one.
+
+    Params:
+      buttons: 1+ entries, each {button: {ref}, states, unknown?, check_order?, wrap?,
+               lit_when?}:
+        button: an `add_rvc_button` handle (any form but toggle).
+        states: 2-16 entries {match, text?, glyph?, lit?, colour?}; a cycle button needs one
+                per payload, in payload order.
+          match: {source, mask?, shift?, eq | range: [lo, hi]}; source {var} | {ref} |
+                 {dgn, instance|selector}, resolved like `add_button_status`'s. mask default
+                 0xFFFF, shift 0; 0 <= lo <= hi <= 0xFFFE (a slot still 0xFFFF is stale and
+                 never matches). RV-C's 0xFF "not available" on a byte field matches only a
+                 state whose range names it.
+          text: the caption (default the button's); glyph {slot, char} (default the button's);
+          lit: default false; colour [r, g, b] overrides lit.
+        unknown: {text?, glyph?, lit?, colour?, variant?} with no match (default the
+                 button's own text and glyph, off, variant 0).
+        check_order: the state indices in the order the routine tries them (default 0..N-1):
+                     with overlapping matches the first listed wins.
+        wrap: default true; false stops the cycle at the last state.
+        lit_when: a match (as a state's) gating the colour.
+      off_colour / on_colour: [r, g, b] (default [65, 81, 163] / [0, 174, 239]); palette
+                              colours.
+
+    Error codes:
+      BAD_PARAMS        -- no entries, a malformed entry, state or match, unknown keys, a state
+                           count a cycle does not have, a check_order that is not a
+                           permutation, a text or glyph the button's shape lacks, a toggle
+                           button, or a button another op already lit.
+      BAD_REF           -- a button or source names no matching handle.
+      NO_SUCH_REGISTER  -- a source resolves to no live variable-table entry.
+      NO_GLYPH          -- a state's glyph falls back to the placeholder.
+      NO_DISPLAY_CELL   -- the cell table could not be grown.
+      NO_BODY_COLOUR    -- a colour is not in this build's palette.
+      INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, a wrap
+                           changes any other record, or an arm draws out of place.
+      DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+    """
+
+    hardware_verified = False
+
+    PARAMS = {
+        "properties": {
+            "buttons": {"type": "array",
+                        "description": "[{button: {ref}, states: [{match, text?, glyph?, lit?, "
+                                       "colour?}], unknown?, check_order?, wrap?, lit_when?}]"},
+            "off_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_OFF_RGB),
+                           "description": "[r, g, b] unlit body fill; a palette colour"},
+            "on_colour": {"type": "array", "default": list(aescompact.BATT_HEAT_ON_RGB),
+                          "description": "[r, g, b] lit body fill; a palette colour"},
+        },
+        "required": ["buttons"],
+    }
+
+    def _bad(self, msg):
+        return RecipeError("BAD_PARAMS", msg, op_id=self.spec.id)
+
+    _rgb = AddButtonStatus._rgb
+
+    def _u16(self, name, v, top=0xFFFF):
+        if not (isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= top):
+            raise self._bad("%s must be an integer 0..%#x, got %r" % (name, top, v))
+        return v
+
+    def _match(self, where, m):
+        if not isinstance(m, dict):
+            raise self._bad("%s must be an object, got %r" % (where, m))
+        extra = set(m) - _MATCH_KEYS
+        if extra:
+            raise self._bad("%s has unknown keys %s" % (where, sorted(extra)))
+        if not isinstance(m.get("source"), dict):
+            raise self._bad("%s.source must be an object, got %r" % (where, m.get("source")))
+        if ("eq" in m) == ("range" in m):
+            raise self._bad("%s needs exactly one of eq or range" % where)
+        if "eq" in m:
+            lo = hi = self._u16("%s.eq" % where, m["eq"], 0xFFFE)
+        else:
+            rng = m["range"]
+            if not (isinstance(rng, list) and len(rng) == 2):
+                raise self._bad("%s.range must be [lo, hi], got %r" % (where, rng))
+            lo = self._u16("%s.range[0]" % where, rng[0], 0xFFFE)
+            hi = self._u16("%s.range[1]" % where, rng[1], 0xFFFE)
+            if lo > hi:
+                raise self._bad("%s.range [%d, %d] has lo above hi" % (where, lo, hi))
+        mask = self._u16("%s.mask" % where, m.get("mask", 0xFFFF))
+        if mask == 0:
+            raise self._bad("%s.mask must be 1..0xFFFF" % where)
+        shift = m.get("shift", 0)
+        if not (isinstance(shift, int) and not isinstance(shift, bool) and 0 <= shift <= 15):
+            raise self._bad("%s.shift must be 0..15, got %r" % (where, shift))
+        return {"source": m["source"], "mask": mask, "shift": shift, "lo": lo, "hi": hi}
+
+    def _look(self, where, spec, keys):
+        if not isinstance(spec, dict):
+            raise self._bad("%s must be an object, got %r" % (where, spec))
+        extra = set(spec) - keys
+        if extra:
+            raise self._bad("%s has unknown keys %s" % (where, sorted(extra)))
+        out = {}
+        if "text" in spec:
+            text = spec["text"]
+            if not (isinstance(text, str) and text and text.isascii() and len(text) <= 0xFE):
+                raise self._bad("%s.text must be a non-empty ASCII string, got %r"
+                                % (where, text))
+            out["text"] = text
+        if "glyph" in spec:
+            g = spec["glyph"]
+            if not (isinstance(g, dict) and set(g) == {"slot", "char"}
+                    and isinstance(g["slot"], int) and not isinstance(g["slot"], bool)
+                    and 0 <= g["slot"] <= 0xFE and isinstance(g["char"], str)
+                    and len(g["char"]) == 1 and ord(g["char"]) <= 0xFF):
+                raise self._bad("%s.glyph must be {slot: 0..254, char: one latin-1 "
+                                "character}, got %r" % (where, g))
+            out["glyph"] = (g["slot"], g["char"])
+        lit = spec.get("lit", False)
+        if not isinstance(lit, bool):
+            raise self._bad("%s.lit must be true or false, got %r" % (where, lit))
+        out["lit"] = lit
+        if spec.get("colour") is not None:
+            out["colour"] = self._rgb("%s.colour" % where, spec["colour"])
+        return out
+
+    def validate(self):
+        self.off_colour = self._rgb("off_colour", self._param(
+            "off_colour", list(aescompact.BATT_HEAT_OFF_RGB)))
+        self.on_colour = self._rgb("on_colour", self._param(
+            "on_colour", list(aescompact.BATT_HEAT_ON_RGB)))
+        buttons = self._param("buttons", kind=list)
+        if not buttons:
+            raise self._bad("buttons needs at least one entry")
+        self.entries, refs = [], set()
+        for n, e in enumerate(buttons):
+            where = "buttons[%d]" % n
+            if not isinstance(e, dict):
+                raise self._bad("%s must be an object, got %r" % (where, e))
+            extra = set(e) - _STATES_ENTRY_KEYS
+            if extra:
+                raise self._bad("%s has unknown keys %s" % (where, sorted(extra)))
+            button = e.get("button")
+            if not (isinstance(button, dict) and isinstance(button.get("ref"), str)):
+                raise self._bad("%s.button must be {ref: op id}, got %r" % (where, button))
+            if button["ref"] in refs:
+                raise self._bad("%s names button %r a second time" % (where, button["ref"]))
+            refs.add(button["ref"])
+            states = e.get("states")
+            if not (isinstance(states, list)
+                    and 2 <= len(states) <= rvcbutton.MAX_CYCLE_STATES):
+                raise self._bad("%s.states must list 2..%d states, got %r"
+                                % (where, rvcbutton.MAX_CYCLE_STATES, states))
+            looks, matches = [], []
+            for k, st in enumerate(states):
+                w = "%s.states[%d]" % (where, k)
+                looks.append(self._look(w, st, _STATE_KEYS))
+                if not isinstance(st, dict) or "match" not in st:
+                    raise self._bad("%s needs a match" % w)
+                matches.append(self._match("%s.match" % w, st["match"]))
+            unknown = self._look("%s.unknown" % where, e.get("unknown", {}), _UNKNOWN_KEYS)
+            variant = (e.get("unknown") or {}).get("variant", 0)
+            if not (isinstance(variant, int) and not isinstance(variant, bool)
+                    and 0 <= variant < len(states)):
+                raise self._bad("%s.unknown.variant must be a state index 0..%d, got %r"
+                                % (where, len(states) - 1, variant))
+            order = e.get("check_order", list(range(len(states))))
+            if not (isinstance(order, list) and sorted(order) == list(range(len(states)))
+                    and all(isinstance(k, int) and not isinstance(k, bool) for k in order)):
+                raise self._bad("%s.check_order must list each state index once, got %r"
+                                % (where, order))
+            wrap = e.get("wrap", True)
+            if not isinstance(wrap, bool):
+                raise self._bad("%s.wrap must be true or false, got %r" % (where, wrap))
+            gate = (None if e.get("lit_when") is None
+                    else self._match("%s.lit_when" % where, e["lit_when"]))
+            self.entries.append({"ref": button["ref"], "looks": looks, "matches": matches,
+                                 "unknown": unknown, "unknown_variant": variant,
+                                 "order": order, "wrap": wrap, "gate": gate})
+
+    def _button(self, ctx, ref):
+        h = ctx.handles.get(ref)
+        if h is None or not all(k in h for k in ("object", "group", "w", "h", "text", "form")):
+            raise RecipeError("BAD_REF", "button ref %r is not an add_rvc_button handle"
+                              % (ref,), op_id=self.spec.id)
+        if h.get("status") is not None:
+            raise self._bad("button %r is already lit by op %r; one status op per button"
+                            % (ref, h["status"]))
+        if h["form"] == "toggle":
+            raise self._bad("button %r is a toggle: add_button_status drives a toggle; give "
+                            "it a 2-payload cycle to drive it from here" % ref)
+        return h
+
+    def _resolved_look(self, data, e, bh, look, where):
+        """`(text, glyph, fill_index)` for one state's look, with the button's shape enforced."""
+        bglyph = None if bh.get("glyph") is None else (bh["glyph"]["slot"], bh["glyph"]["char"])
+        text = look.get("text", bh["text"])
+        glyph = look.get("glyph", bglyph)
+        if (text is None) != (bh["text"] is None) or (
+                text is not None and text.count("\n") != bh["text"].count("\n")):
+            raise self._bad("button %r %s: text %r does not have the button's shape (caption "
+                            "%r): every arm draws in the stream's boxes" % (e["ref"], where,
+                                                                           text, bh["text"]))
+        if (glyph is None) != (bglyph is None):
+            raise self._bad("button %r %s: a glyph is drawn iff the button has one (%r)"
+                            % (e["ref"], where, bglyph))
+        if glyph is not None and rvcbutton.glyph_missing(data, *glyph):
+            raise RecipeError("NO_GLYPH", "button %r %s: font slot %d has no glyph for %r"
+                              % ((e["ref"], where) + tuple(glyph)), op_id=self.spec.id)
+        rgb = look.get("colour") or (self.on_colour if look["lit"] else self.off_colour)
+        try:
+            fill = theme.resolve_fill_index(data, color=rgb)
+        except theme.PaletteError as err:
+            raise RecipeError("NO_BODY_COLOUR", str(err), op_id=self.spec.id)
+        return text, glyph, fill
+
+    def _item(self, e, bh, srcs, gate_src, cell_addr):
+        n = len(e["matches"])
+        rules = tuple(statusfold.Match(slot_addr=srcs[k][0], mask=e["matches"][k]["mask"],
+                                       shift=e["matches"][k]["shift"],
+                                       lo=e["matches"][k]["lo"], hi=e["matches"][k]["hi"])
+                      for k in e["order"])
+        gate = None
+        if e["gate"] is not None:
+            g = e["gate"]
+            gate = statusfold.Match(slot_addr=gate_src[0], mask=g["mask"], shift=g["shift"],
+                                    lo=g["lo"], hi=g["hi"])
+        cycle = bh["form"] == "cycle"
+        variants = ()
+        if cycle:
+            variants = tuple(((k + 1) % n if e["wrap"] else min(k + 1, n - 1))
+                             for k in range(n)) + (e["unknown_variant"],)
+        return statusfold.States(rules=rules, values=tuple(e["order"]), unknown=n,
+                                 cell_addr=cell_addr,
+                                 variant_group=bh["group"] if cycle else None,
+                                 variants=variants, gate=gate,
+                                 gate_offset=n + 1 if gate is not None else 0)
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        plans = []
+        for e in self.entries:
+            bh = self._button(ctx, e["ref"])
+            n = len(e["matches"])
+            if bh["form"] == "cycle" and n != len(bh["cycle"]):
+                raise self._bad("button %r cycles %d payloads; give one state per payload, not "
+                                "%d" % (e["ref"], len(bh["cycle"]), n))
+            srcs = [_resolve_status_source(data, ctx, m["source"], oid) for m in e["matches"]]
+            gate_src = (None if e["gate"] is None
+                        else _resolve_status_source(data, ctx, e["gate"]["source"], oid))
+            looks = [self._resolved_look(data, e, bh, lk, "state %d" % k)
+                     for k, lk in enumerate(e["looks"])]
+            unknown = self._resolved_look(data, e, bh, e["unknown"], "unknown")
+            off = theme.resolve_fill_index(data, color=self.off_colour)
+            plans.append((e, bh, srcs, gate_src, looks, unknown, off))
+
+        try:
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, readout._TYPE_FOR_WIDTH[2])] * len(plans))
+        except readout.ReadoutError as err:
+            raise RecipeError("NO_DISPLAY_CELL", str(err), op_id=oid)
+        ctx.edits.extend(cell_edits)
+        ctx.authored_cells.update(c.slot for c in cells)
+        items = [self._item(e, bh, srcs, gate_src, cell.addr)
+                 for (e, bh, srcs, gate_src, *_r), cell in zip(plans, cells)]
+        out, plan, code_load_addr, blob = _append_statusfold(
+            out, items, ctx, oid, refused="INDICATOR_REFUSED", what="button states",
+            describe="; ".join("%s: %d states (vars %s)%s -> cell %d @ %#x"
+                               % (e["ref"], len(e["matches"]), [s[1] for s in srcs],
+                                  "" if bh["form"] != "cycle"
+                                  else ", variant group %d" % bh["group"], cell.slot, cell.addr)
+                               for (e, bh, srcs, *_r), cell in zip(plans, cells)))
+
+        drawn = []
+        for (e, bh, srcs, gate_src, looks, unknown, off), cell, item in zip(plans, cells, items):
+            n = len(looks)
+            # (match value, (text, glyph, fill)): the default arm first (the unknown state),
+            # then DESCENDING: the panel scans the whole band for the value, and an ascending
+            # 0, 1, 2 among the new match entries makes `find_match_table` outscore the real
+            # table with a shifted window (`enumlabel` module docstring)
+            rest = [(k, looks[k]) for k in range(n)]
+            if e["gate"] is not None:
+                rest += [(n + 1 + k, (looks[k][0], looks[k][1], off)) for k in range(n)]
+            arm_looks = [(0xFFFF, unknown)] + sorted(rest, key=lambda a: -a[0])
+            try:
+                arm_objects = [statelights.state_arm(ctx.stock, out, fill_index=fill,
+                                                     w=bh["w"], h=bh["h"], text=text,
+                                                     glyph=glyph, font=bh.get("font"))
+                               for _v, (text, glyph, fill) in arm_looks]
+                bglyph = (None if bh.get("glyph") is None
+                          else (bh["glyph"]["slot"], bh["glyph"]["char"]))
+                span = None if bh.get("body_span") is None else tuple(bh["body_span"])
+                wrapped, info = statelights.wrap_button(
+                    out, object_index=bh["object"], value_slot=cell.slot, donors=ctx.stock,
+                    arms=tuple((v, False, False) for v, _l in arm_looks), off_index=off,
+                    on_index=off, w=bh["w"], h=bh["h"], text=bh["text"], glyph=bglyph,
+                    font=bh.get("font"), touch_id=bh["group"] if span is None else None,
+                    arm_objects=arm_objects, span=span)
+                bad = statelights.foreign_deltas(out, wrapped, bh["object"], info["span"],
+                                                 loose_glyphs=True)
+                bad += self._arm_deltas(wrapped, bh["object"], info,
+                                        [v for v, _l in arm_looks[1:]])
+            except (ValueError, relocate.RelocationError) as err:
+                raise RecipeError("INDICATOR_REFUSED", "button %r: %s" % (e["ref"], err),
+                                  op_id=oid)
+            if bad:
+                raise RecipeError("INDICATOR_REFUSED", "drawing button %r's states changes "
+                                  "%d record(s) besides its own:\n%s"
+                                  % (e["ref"], len(bad), pagewalk.describe(bad[:20])),
+                                  op_id=oid)
+            out, _ = patch.reseal(wrapped)
+
+            def look_json(lk):
+                text, glyph, fill = lk
+                return {"text": text, "glyph": None if glyph is None
+                        else {"slot": glyph[0], "char": glyph[1]}, "fill": fill}
+
+            drawn.append({"ref": e["ref"], "object": bh["object"], "group": bh["group"],
+                          "form": bh["form"], "slot": cell.slot, "cell_addr": cell.addr,
+                          "vars": [s[1] for s in srcs],
+                          "arms": [[v, look_json(lk)] for v, lk in arm_looks],
+                          "arms_base": info["arms_base"], "w": bh["w"], "h": bh["h"],
+                          "item": item})
+            bh["status"] = oid
+            bh["status_base"] = look_json(unknown)
+        ctx.handles[oid] = {"buttons": drawn, "entry": code_load_addr + readout.ENTRY_OFF,
+                            "code_load_addr": code_load_addr, "plan": plan,
+                            "blob_len": len(blob)}
+        return out
+
+    @staticmethod
+    def _arm_deltas(data, object_index, info, values):
+        """Every record a non-default arm of the new switch draws out of place: with the arm
+        selected, each record outside the switch must be walked exactly as with the default
+        arm (box and inherited state, `pagewalk.diff`; the wrap's inert colour delta aside),
+        and the arm's own records in the default arm's boxes (a glyph's box aside)."""
+        bad = []
+        base = info["arms_base"]
+        roots = pagewalk.reaching_roots(data, object_index)
+        for root in roots:
+            ref = pagewalk.walk_records(data, root)
+            sws = [r for r in ref if r.obj == object_index and r.wtype == 6
+                   and r.index == info["switch_index"]]
+            if not sws:
+                continue
+            k = sws[0].key
+
+            def split(walk):
+                inside = [r for r in walk if len(r.key) > len(k) and r.key[:len(k)] == k]
+                outside = [r for r in walk if not (len(r.key) > len(k) and r.key[:len(k)] == k)]
+                return inside, outside
+
+            ref_in, ref_out = split(ref)
+            for v in values:
+                arm_in, arm_out = split(pagewalk.walk_records(data, root,
+                                                              switch_values={base: v}))
+                shape = [(r.wtype, None if r.wtype == 0 else r.box) for r in ref_in]
+                if [(r.wtype, None if r.wtype == 0 else r.box) for r in arm_in] != shape:
+                    first = arm_in[0] if arm_in else sws[0]
+                    bad.append(pagewalk.Delta(first.key, first.wtype, first.label, "moved",
+                                              None, first))
+                bad += [d for d in pagewalk.diff(ref_out, arm_out)
+                        if not statelights._inert_colour_delta(d, object_index)]
+        return bad
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        cells = status_map.cell_table(data)
+        inset = aescompact.PUMP_OUTLINE_INSET
+        lines = []
+        for b in h["buttons"]:
+            recs = records.object_records(data, gs + tab[b["object"]])
+            sw = [r for r in recs if r.wtype == 6 and r.value_slot == b["slot"]]
+            assert len(sw) == 1 and sw[0].count == len(b["arms"]), \
+                "button %r: expected one %d-arm switch on cell %d" % (b["ref"], len(b["arms"]),
+                                                                     b["slot"])
+            assert sw[0].header[4] & _ENROLL_BIT, "button %r: switch not enrolled" % b["ref"]
+            assert sw[0].child_index == b["arms_base"]
+            assert cells[b["slot"]] == b["cell_addr"]
+            cands = guidata.switch_candidates(data, sw[0], guidata.find_match_table(data))
+            assert [v for v, _o in cands] == [v for v, _l in b["arms"]], \
+                "button %r: arm matches %s" % (b["ref"], cands)
+            for (_v, look), (_m, obj) in zip(b["arms"], cands):
+                arm = records.object_records(data, gs + tab[obj])
+                assert arm[0].wtype == 33 and arm[0].colors[0] == ("fillA", 7, look["fill"]) \
+                    and arm[0].geom[2:4] == [b["w"] - 2 * inset, b["h"] - 2 * inset], \
+                    "button %r: arm %d does not draw the full button" % (b["ref"], obj)
+                assert [r.label for r in arm if r.wtype == 11 and r.label] == \
+                    ([] if look["text"] is None else [look["text"]]), \
+                    "button %r: arm %d lacks its caption %r" % (b["ref"], obj, look["text"])
+                g = look["glyph"]
+                assert [(r.font, r.label) for r in arm if r.wtype == 0] == \
+                    ([] if g is None else [(g["slot"], g["char"])]), \
+                    "button %r: arm %d lacks its glyph" % (b["ref"], obj)
+            if b["form"] == "cycle":
+                grp = guidata.group_table(data)[b["group"]]
+                assert grp.raw[0] & 0x0F == len(b["item"].rules) - 1 and grp.raw[1] == 0x80, \
+                    "button %r: group %d prefix %s is no %d-state cycle" % (
+                        b["ref"], b["group"], grp.raw[:2].hex(), len(b["item"].rules))
+            lines.append("%r: %d states on vars %s via fresh cell %d%s"
+                         % (b["ref"], len(b["item"].rules), b["vars"], b["slot"],
+                            "" if b["form"] != "cycle"
+                            else ", cycling group %d" % b["group"]))
+        assert h["entry"] in followchannel.chain_from_hook(data), \
+            "the per-tick chain does not reach the routine at %#x" % h["entry"]
+        plan = h["plan"]
+        items = tuple(b["item"] for b in h["buttons"])
+        assert items == plan.items, "the handle's entries differ from the plan the op built"
+        want, _ = statusfold.build(dataclasses.replace(plan, items=items), h["code_load_addr"])
+        gc = theme.guicode_section(data)
+        at = gc.offset + h["code_load_addr"] - theme.GUICODE_BASE_DEFAULT
+        assert len(want) == h["blob_len"] and data[at:at + len(want)] == want, \
+            "the routine at %#x is not the one its entries build" % h["code_load_addr"]
+        return ("add_button_states: %s; one routine at %#x; UNVERIFIED on the coach"
+                % ("; ".join(lines), h["entry"]))
+
+
 @op("add_rvc_button")
 class AddRvcButton(Op):
     """Add a button that sends RV-C frames, on any page: a tap, a hold, both, or a toggle.
@@ -8975,22 +9441,36 @@ class AddRvcButton(Op):
     (`recipe._check_toggles_driven`): its variant would sit at 0 and it would only send "on".
     A toggle's group comes from the `hold_safe` pool only (never a GuiCode-driven group).
 
+    The cycle form (`cycle`) generalises the toggle to N states (2-16): one `hold_safe` group,
+    byte 1 `0x80`, byte 0's low nibble N-1, and N bindings on `dgn` and mask 0x06, binding k
+    sending payload k as variant k. A LATER `add_button_states` entry naming this button sets
+    the variant every tick to the state after the one the unit reports, so each tap moves the
+    unit one step from what it is really doing (compile refuses an undriven cycle,
+    `CYCLE_UNDRIVEN`). *Emulator*: every variant sends its own payload; not run on a coach of
+    this project.
+
+    The display form (`display: true`) sends nothing: the records carry no touch region and no
+    group is taken. It is a tile for `add_button_states` (or `add_button_status`) to draw a
+    reported state on; `dgn` is not given.
+
     Params:
       parent: object index | {ref} -- the object the button is drawn on (it needs a wtype-5
               attach record to clone).
       x, y, w, h: the absolute box on the 800x480 canvas.
       text: caption (`\\n` makes two lines), or null. glyph: {slot, char} or null; font: the
             caption's font slot, or null for the donor's.
-      dgn: the 18-bit DGN every binding sends. tap: {payload}; hold: {payload, seconds 1-15};
-           toggle: {off_payload, on_payload} (alone: no tap or hold).
+      dgn: the 18-bit DGN every binding sends (not with display). tap: {payload}; hold:
+           {payload, seconds 1-15}; toggle: {off_payload, on_payload} (alone: no tap or hold);
+           cycle: {payloads: [2-16 hex payloads]} (alone); display: true (alone, no dgn).
       colour: [r, g, b] body fill (default [65, 81, 163]); must be a palette colour.
       group_pool: "free" | "hold_safe" (default "hold_safe" with a hold or a toggle, else
                   "free").
 
     Error codes:
-      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle` with `tap` or
-                        `hold`, the `free` pool with a hold or a toggle, or a box too small for
-                        its glyph and caption.
+      BAD_PARAMS     -- a malformed param or payload, no gesture, `toggle`, `cycle` or
+                        `display` with another gesture, `dgn` missing (or given with
+                        `display`), the `free` pool with a hold, a toggle or a cycle, or a box
+                        too small for its glyph and caption.
       BAD_REF        -- a `parent` ref names no earlier op's object.
       NO_FREE_GROUP  -- the group pool is empty.
       NO_GLYPH       -- the glyph falls back to the placeholder (or icon font 24's unused block).
@@ -9002,6 +9482,7 @@ class AddRvcButton(Op):
                         cannot be handed back, a pasted record would inherit a value slot, or
                         the placement changes another record.
       TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
+      CYCLE_UNDRIVEN  -- (compile) a cycle that no later enabled `add_button_states` drives.
     """
 
     hardware_verified = False
@@ -9025,13 +9506,19 @@ class AddRvcButton(Op):
             "toggle": {"type": ["object", "null"], "default": None,
                        "description": "{off_payload, on_payload}: 8-byte hex each; a later "
                                       "add_button_status must drive it"},
+            "cycle": {"type": ["object", "null"], "default": None,
+                      "description": "{payloads: [2-16 x 8-byte hex]}: variant k sends payload "
+                                     "k; a later add_button_states must drive it"},
+            "display": {"type": "boolean", "default": False,
+                        "description": "true: no touch region and no group; the button only "
+                                       "draws (no dgn)"},
             "colour": {"type": "array", "default": [0x41, 0x51, 0xA3],
                        "description": "[r, g, b] body fill; a palette colour"},
             "group_pool": {"type": "string", "enum": list(rvcbutton.POOLS),
                            "description": "where the group comes from (default hold_safe "
                                           "when hold or toggle is given, else free)"},
         },
-        "required": ["parent", "x", "y", "w", "h", "dgn"],
+        "required": ["parent", "x", "y", "w", "h"],
     }
 
     def _bad(self, msg):
@@ -9081,11 +9568,36 @@ class AddRvcButton(Op):
         self.font = self._int("font", None)
         if self.font is not None and not 0 <= self.font <= 0xFE:
             raise self._bad("font must be a slot 0..254, got %d" % self.font)
-        self.dgn = self._int("dgn")
-        if not 0 <= self.dgn <= 0x3FFFF:
-            raise self._bad("dgn %#x is not an 18-bit value" % self.dgn)
+        self.display = self._param("display", False, kind=bool)
+        params = self.spec.params or {}
+        if self.display:
+            if params.get("dgn") is not None:
+                raise self._bad("a display button sends nothing: give no dgn")
+            self.dgn = None
+        else:
+            if params.get("dgn") is None:
+                raise self._bad("dgn is required (every binding sends it)")
+            self.dgn = self._int("dgn")
+            if not 0 <= self.dgn <= 0x3FFFF:
+                raise self._bad("dgn %#x is not an 18-bit value" % self.dgn)
         tap, hold = self._param("tap", None), self._param("hold", None)
         toggle = self._param("toggle", None)
+        cycle = self._param("cycle", None)
+        self.cycle = None
+        if self.display and any(v is not None for v in (tap, hold, toggle, cycle)):
+            raise self._bad("display takes no tap, hold, toggle or cycle: it sends nothing")
+        if cycle is not None:
+            if any(v is not None for v in (tap, hold, toggle)):
+                raise self._bad("cycle takes no tap, hold or toggle: its bindings are the "
+                                "gesture")
+            pays = cycle.get("payloads") if isinstance(cycle, dict) else None
+            if not (isinstance(cycle, dict) and set(cycle) == {"payloads"}
+                    and isinstance(pays, list)
+                    and 2 <= len(pays) <= rvcbutton.MAX_CYCLE_STATES):
+                raise self._bad("cycle must be {payloads: [2..%d hex payloads]}, got %r"
+                                % (rvcbutton.MAX_CYCLE_STATES, cycle))
+            self.cycle = [self._payload("cycle.payloads[%d]" % k, {"payload": p}, ("payload",))
+                          for k, p in enumerate(pays)]
         self.off = self.on = None
         if toggle is not None:
             if tap is not None or hold is not None:
@@ -9103,9 +9615,13 @@ class AddRvcButton(Op):
                 raise self._bad("hold seconds must be 1..%d, got %r"
                                 % (rvcbutton.MAX_HOLD_SECONDS, s))
             self.seconds = s
-        if self.tap is None and self.hold is None and toggle is None:
-            raise self._bad("a button needs a gesture: tap, hold, both, or toggle")
-        self.form = ("toggle" if toggle is not None
+        if (self.tap is None and self.hold is None and toggle is None and self.cycle is None
+                and not self.display):
+            raise self._bad("a button needs a gesture: tap, hold, both, toggle or cycle (or "
+                            "display: true for one that sends nothing)")
+        self.form = ("display" if self.display
+                     else "cycle" if self.cycle is not None
+                     else "toggle" if toggle is not None
                      else "tap_hold" if self.tap is not None and self.hold is not None
                      else "tap" if self.tap is not None else "hold")
         colour = self._param("colour", [0x41, 0x51, 0xA3])
@@ -9114,17 +9630,20 @@ class AddRvcButton(Op):
                         for c in colour)):
             raise self._bad("colour must be [r, g, b] of 0..255, got %r" % (colour,))
         self.colour = tuple(colour)
-        self.group_pool = self._param("group_pool", "hold_safe" if self.hold or toggle
-                                      else "free")
+        self.group_pool = self._param("group_pool", "hold_safe"
+                                      if self.hold or toggle or self.cycle else "free")
+        if self.display and "group_pool" in params:
+            raise self._bad("a display button takes no group, so no group_pool")
         if self.group_pool not in rvcbutton.POOLS:
             raise self._bad("group_pool must be one of %s, got %r"
                             % (list(rvcbutton.POOLS), self.group_pool))
         if self.hold is not None and self.group_pool == "free":
             raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
                             "is dead (coach, 2026-09-30)")
-        if toggle is not None and self.group_pool == "free":
-            raise self._bad("a toggle needs the hold_safe pool: GuiCode drives its own groups' "
-                            "variants, and would fight the status op's setVariant")
+        if (toggle is not None or self.cycle is not None) and self.group_pool == "free":
+            raise self._bad("a %s needs the hold_safe pool: GuiCode drives its own groups' "
+                            "variants, and would fight the status op's setVariant"
+                            % ("toggle" if toggle is not None else "cycle"))
         if (self.x < 0 or self.y < 0 or self.x + self.w > _CANVAS_W
                 or self.y + self.h > _CANVAS_H):
             raise RecipeError("OFF_CANVAS", "the button box (%d,%d,%d,%d) leaves the %dx%d "
@@ -9145,26 +9664,29 @@ class AddRvcButton(Op):
             raise RecipeError("NO_GLYPH", "font slot %d has no glyph for %r (it falls back to a "
                               "placeholder); run install_glyph for this (font, char) earlier in "
                               "the project" % self.glyph, op_id=oid)
-        try:
-            slots = rvcbutton.allocate(data, pool=self.group_pool)
-        except rvcbutton.RvcButtonError as e:
-            raise RecipeError("NO_FREE_GROUP", str(e), op_id=oid)
-        if not slots:
-            raise RecipeError("NO_FREE_GROUP", "the %r group pool is empty" % self.group_pool,
-                              op_id=oid)
-        group = slots[0]
-
-        # 1. the group and its bindings
-        binding_start = len(guidata.binding_table(data))
-        try:
-            payload = rvcbutton.bindings(self.dgn, form=self.form, tap=self.tap, hold=self.hold,
-                                         off=self.off, on=self.on)
-            entry = rvcbutton.gesture_group(data, form=self.form, hold_seconds=self.seconds,
-                                            binding_start=binding_start,
-                                            count=len(payload) // 12)
-            out, grow_edits = optionrow._grow_bindings(data, payload, [(group, entry)])
-        except (rvcbutton.RvcButtonError, optionrow.OptionRowError) as e:
-            raise RecipeError("GROW_REFUSED", str(e), op_id=oid)
+        # 1. the group and its bindings (a display button has neither)
+        group = binding_start = None
+        out, grow_edits = data, []
+        if not self.display:
+            try:
+                slots = rvcbutton.allocate(data, pool=self.group_pool)
+            except rvcbutton.RvcButtonError as e:
+                raise RecipeError("NO_FREE_GROUP", str(e), op_id=oid)
+            if not slots:
+                raise RecipeError("NO_FREE_GROUP", "the %r group pool is empty"
+                                  % self.group_pool, op_id=oid)
+            group = slots[0]
+            binding_start = len(guidata.binding_table(data))
+            try:
+                payload = rvcbutton.bindings(self.dgn, form=self.form, tap=self.tap,
+                                             hold=self.hold, off=self.off, on=self.on,
+                                             cycle=self.cycle)
+                entry = rvcbutton.gesture_group(data, form=self.form, hold_seconds=self.seconds,
+                                                binding_start=binding_start,
+                                                count=len(payload) // 12)
+                out, grow_edits = optionrow._grow_bindings(data, payload, [(group, entry)])
+            except (rvcbutton.RvcButtonError, optionrow.OptionRowError) as e:
+                raise RecipeError("GROW_REFUSED", str(e), op_id=oid)
 
         # 2. the records, pasted under parent
         try:
@@ -9222,6 +9744,10 @@ class AddRvcButton(Op):
             "parent": parent, "placement": "attach",
             "dgn": self.dgn, "form": self.form, "seconds": self.seconds,
             "tap": self.tap, "hold": self.hold, "glyph_x_bearing": x_bearing,
+            "cycle": self.cycle,
+            # the body's record span `[capsule, end)` in the object (box, anchor, capsule, ...):
+            # a display tile has no touch region to find it by
+            "body_span": [2, len(frags)] if self.display else None,
         }
         return out
 
@@ -9248,19 +9774,37 @@ class AddRvcButton(Op):
             "the button object %d is not attached under %d" % (h["object"], h["parent"])
         recs = records.object_records(data, gs + tab[h["object"]])
         ids = [data[r.end - 2] | (data[r.end - 1] << 8) for r in recs if r.wtype == 12]
-        assert ids == [h["group"]], "touch ids %s, expected [%d]" % (ids, h["group"])
+        assert ids == ([] if h["form"] == "display" else [h["group"]]), \
+            "touch ids %s, expected [%s]" % (ids, h["group"])
         if h.get("status") is not None:
             # lit by `add_button_status`: the body lives in its switch's arms; check the base arm
             (sw,) = [r for r in recs if r.wtype == 6]
             recs = records.object_records(data, gs + tab[sw.child_index])
-        if h["text"] is not None:
-            assert [r.label for r in recs if r.wtype == 11 and r.label] == [h["text"]], \
-                "caption %r missing" % h["text"]
-        if h["glyph"] is not None:
+        # `add_button_states` draws its own caption and glyph in the base (unknown) arm
+        base = h.get("status_base") or {"text": h["text"], "glyph": h["glyph"]}
+        if base["text"] is not None:
+            assert [r.label for r in recs if r.wtype == 11 and r.label] == [base["text"]], \
+                "caption %r missing" % base["text"]
+        if base["glyph"] is not None:
             assert [(r.font, r.label) for r in recs if r.wtype == 0] == \
-                [(h["glyph"]["slot"], h["glyph"]["char"])], "glyph missing"
+                [(base["glyph"]["slot"], base["glyph"]["char"])], "glyph missing"
 
-        # the gesture: group prefix, then every binding's frame, mask and variant
+        frames = []
+        if h["form"] != "display":
+            frames = self._verify_gesture(data, ctx, h)
+        self._verify_box(data, h)
+        line = ("add_rvc_button: %r (object %d under %d, touch id = group %s, %s) sends %s; "
+                "UNVERIFIED on the coach"
+                % (h["text"], h["object"], h["parent"], h["group"], h["form"],
+                   "; ".join(frames) or "nothing"))
+        if h.get("glyph_x_bearing"):
+            line += ("; the glyph has an x bearing %d px: its horizontal placement assumes the "
+                     "page draws it in measuring class 2 (in class 1 it lands %d px right; "
+                     "GUICODE Finding 84)" % (h["glyph_x_bearing"], h["glyph_x_bearing"]))
+        return line
+
+    def _verify_gesture(self, data, ctx, h):
+        """The gesture: group prefix, then every binding's frame, mask and variant."""
         g = guidata.group_table(data)[h["group"]]
         bt = guidata.binding_table(data)
         want = _rvc_button_bindings(h)
@@ -9268,13 +9812,14 @@ class AddRvcButton(Op):
             "group %d slices %d+%d" % (h["group"], g.start, g.count)
         if h["form"] == "tap":
             assert bytes(g.raw[:4]) == bytes.fromhex("10000000"), "tap prefix %s" % g.raw[:4].hex()
-        elif h["form"] == "toggle":
-            assert bytes(g.raw[:4]) == bytes.fromhex("11800000"), \
-                "toggle prefix %s" % g.raw[:4].hex()
+        elif h["form"] in ("toggle", "cycle"):
+            n = len(want) // 12
+            assert bytes(g.raw[:4]) == bytes([0x10 | (n - 1), 0x80, 0, 0]), \
+                "%s prefix %s" % (h["form"], g.raw[:4].hex())
             # Against stock: the finished image's status routine is itself a setVariant
             # caller of this group, which the scan rightly reports.
             assert h["group"] not in newbutton.guicode_selected_groups(ctx.stock), \
-                "toggle group %d is driven by stock GuiCode" % h["group"]
+                "%s group %d is driven by stock GuiCode" % (h["form"], h["group"])
         else:
             assert g.raw[0] >> 4 == h["seconds"], "hold nibble %d" % (g.raw[0] >> 4)
         can_id = (6 << 26) | (h["dgn"] << 8) | 0x9F
@@ -9286,7 +9831,9 @@ class AddRvcButton(Op):
             assert cid == can_id, "binding %d sends %08X, expected %08X" % (g.start + k, cid,
                                                                              can_id)
             frames.append("%08X#%s mask %#x variant %d" % (cid, pay.hex(), raw[3], raw[2] >> 4))
+        return frames
 
+    def _verify_box(self, data, h):
         # the box lands where asked on every page reaching the parent, in every switch-arm set
         # (as apply's gates walk them: a parent may be reached only through a non-base arm)
         want_box = (h["x"], h["y"], h["x"] + h["w"], h["y"] + h["h"])
@@ -9301,14 +9848,6 @@ class AddRvcButton(Op):
                     assert boxes[0] == want_box, \
                         "root %d (arms %s) draws the box at %s" % (root, values, boxes[0])
         assert drawn, "no walk of roots %s reaches the button object %d" % (roots, h["object"])
-        line = ("add_rvc_button: %r (object %d under %d, touch id = group %d, %s) sends %s; "
-                "UNVERIFIED on the coach"
-                % (h["text"], h["object"], h["parent"], h["group"], h["form"], "; ".join(frames)))
-        if h.get("glyph_x_bearing"):
-            line += ("; the glyph has an x bearing %d px: its horizontal placement assumes the "
-                     "page draws it in measuring class 2 (in class 1 it lands %d px right; "
-                     "GUICODE Finding 84)" % (h["glyph_x_bearing"], h["glyph_x_bearing"]))
-        return line
 
 
 def _themed_rgb(ctx, rgb):
@@ -9333,9 +9872,12 @@ def _palette_rgb(data, index):
 
 def _rvc_button_bindings(h):
     """The bindings an `add_rvc_button` handle `h` was built with (`rvcbutton.bindings`)."""
+    if h["form"] == "display":
+        return b""
     t = h.get("toggle") or {}
     return rvcbutton.bindings(h["dgn"], form=h["form"], tap=h["tap"], hold=h["hold"],
-                              off=t.get("off_payload"), on=t.get("on_payload"))
+                              off=t.get("off_payload"), on=t.get("on_payload"),
+                              cycle=h.get("cycle"))
 
 
 @op("add_batt_heat_battery_glyph")

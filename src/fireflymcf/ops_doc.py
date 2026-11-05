@@ -213,9 +213,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "`followchannel.py`"),
     "add_register_readout": ("guicode",
         "Show any register as a live number on any page, or feed an existing readout's cell "
-        "past a stock decode fence (`cell_slot` + `silence`).",
+        "past a stock decode fence (`cell_slot` + `silence`). The value is "
+        "`(max((slot & mask) - sub, 0) * mul + add) >> shift`.",
         "Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) "
-        "cells report unverified per instance.",
+        "cells, `sub`, `mul` and an `add` above 255 report unverified per instance.",
         "`readout.py`, `BUS-BASELINE.md` PC.59, PC.60"),
     "swap_aes_electrical": ("structural",
         "Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, "
@@ -308,10 +309,12 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
         "prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt "
         "Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, "
-        "driven by a later add_button_status), its Batt Heat body (box, capsule, caption, optional glyph, "
+        "driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 "
+        "00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), "
+        "or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, "
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
-        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on (candump, photo).", "`rvcbutton.py`, `enumlabel.py`"),
+        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo).", "`rvcbutton.py`, `enumlabel.py`"),
     "add_button_status": ("structural",
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
@@ -319,6 +322,17 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); "
         "a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.",
         "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).", "`statelights.py`, `statusfold.py`"),
+    "add_button_states": ("structural",
+        "Show which of N states a unit reports on a button and, on a cycle button, make a tap "
+        "send the next one: one per-tick statusfold routine tries each entry's states (each a "
+        "masked, shifted slot equal to a value or within a range; stale never matches) in "
+        "check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and "
+        "sets a cycle's variant to the state after it; each button's static body becomes one "
+        "enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph "
+        "and colour; refused if anything else on the page would change in any arm.",
+        "UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the "
+        "unknown state's with no report, and each state draws its own arm. Bench check: candump "
+        "at each reported state, photo per state.", "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "

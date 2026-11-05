@@ -21,6 +21,13 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
   that nibble (`and r3,#0xf` / `cmp r3,r4` / `blo` @`0x21B60A`-`0x21B610`), so the tap donor's
   0 would refuse variant 1. Stock's setter-driven two-variant groups carry 1 (129, the Low
   Volts toggle, `11 80 0c 80`; 143 and 146).
+- ``cycle``: the toggle's shape with N bindings (2-16): variant k sends payload k, every one on
+  `0x06`, and byte 0's low nibble N-1 so the setter accepts every variant. `add_button_states`
+  drives it (the state after the one the unit reports). *Emulator*: each variant sends its own
+  payload (the 2026-11-05 port of a user op whose author reports its four- and five-state
+  groups reaching an Elwell water heater on another coach); no coach of this project has run it.
+- ``display``: no gesture and no group. The records carry no touch region, so the button only
+  draws (a status tile for `add_button_states` or `add_button_status`).
 
 **Records** (`button_records`), from the stock donors `aescompact` names, in flow order:
 
@@ -35,7 +42,8 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
       above the pen (`metrics.wt0_ink_offset`, GUICODE Finding 84). Across, the pen is the
       bitmap's left edge in measuring class 2 (proven given class 2; a page's class is not
       checked, so `add_rvc_button` names a glyph's nonzero x bearing in its manifest);
-  [6] the touch region 315[9], inner size, carrying the group id.
+  [6] the touch region 315[9], inner size, carrying the group id (none when `touch_id` is
+      None: a display tile).
 
 `text`, `glyph`, `font` None and `fill_index` None give exactly the Batt Heat body.
 
@@ -53,7 +61,8 @@ from __future__ import annotations
 from . import (aescompact, cornermark, enumlabel, glyphs, guidata, insert, layout, levelcontrols,
                metrics, newbutton, optionrow, pagewalk, records, relocate)
 
-FORMS = ("tap", "hold", "tap_hold", "toggle")
+FORMS = ("tap", "hold", "tap_hold", "toggle", "cycle")
+MAX_CYCLE_STATES = 16            # the variant is a nibble
 POOLS = ("free", "hold_safe")
 
 TAP_MASK = 0x06                  # short-tap release + held: one frame per press of any length
@@ -83,7 +92,7 @@ def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
     asserted so another base image cannot silently give another gesture. `hold_seconds` None
     keeps the donor's 1-s hold nibble (Batt Heat's, byte for byte)."""
     gt = guidata.group_table(data)
-    if form in ("tap", "toggle"):
+    if form in ("tap", "toggle", "cycle"):
         raw = bytearray(gt[TAP_DONOR_GROUP].raw)
         if bytes(raw[:4]) != TAP_DONOR_PREFIX:
             raise RvcButtonError(f"tap donor group {TAP_DONOR_GROUP} prefix "
@@ -92,6 +101,11 @@ def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
         raw[3] &= 0x7F
         if form == "toggle":
             raw[0] = (raw[0] & 0xF0) | TOGGLE_VARIANT_MAX
+            raw[1] = NO_CYCLE
+        elif form == "cycle":
+            if not 2 <= count <= MAX_CYCLE_STATES:
+                raise RvcButtonError(f"a cycle takes 2..{MAX_CYCLE_STATES} states, got {count}")
+            raw[0] = (raw[0] & 0xF0) | (count - 1)
             raw[1] = NO_CYCLE
     elif form in ("tap_hold", "hold"):
         raw = bytearray(gt[HOLD_DONOR_GROUP].raw)
@@ -116,9 +130,19 @@ def _wire(name: str, payload) -> bytes:
 
 
 def bindings(dgn: int, *, form: str, tap: bytes | None, hold: bytes | None,
-             off: bytes | None, on: bytes | None) -> bytes:
+             off: bytes | None, on: bytes | None, cycle: list | None = None) -> bytes:
     """The bindings of `form` on `dgn`, concatenated in table order (module docstring). Exactly
-    the payloads `form` uses must be given."""
+    the payloads `form` uses must be given; `cycle` is the list of a cycle's payloads."""
+    if form == "cycle" or cycle is not None:
+        if form != "cycle" or any(v is not None for v in (tap, hold, off, on)):
+            raise RvcButtonError(f"form {form!r}: cycle payloads go with form 'cycle' alone")
+        if not isinstance(dgn, int) or not 0 <= dgn <= 0x3FFFF:
+            raise RvcButtonError(f"DGN {dgn!r} is not an 18-bit value")
+        if not isinstance(cycle, (list, tuple)) or not 2 <= len(cycle) <= MAX_CYCLE_STATES:
+            raise RvcButtonError(f"a cycle takes 2..{MAX_CYCLE_STATES} payloads, got {cycle!r}")
+        return b"".join(newbutton.binding_raw(dgn, _wire("cycle[%d]" % k, p),
+                                              gesture_mask=TAP_MASK, variant=k)
+                        for k, p in enumerate(cycle))
     want = {"tap": ("tap",), "hold": ("hold",), "tap_hold": ("hold", "tap"),
             "toggle": ("on", "off")}
     if form not in want:
@@ -227,7 +251,7 @@ def glyph_record(dx: int, dy: int, slot: int, char: str) -> bytes:
     return rec
 
 
-def button_records(donors: bytes, *, touch_id: int, w: int, h: int, text: str | None,
+def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text: str | None,
                    glyph: tuple[int, str] | None, font: int | None,
                    fill_index: int | None, x: int = 0, y: int = 0,
                    glyph_image: bytes | None = None) -> list[bytes]:
@@ -292,6 +316,8 @@ def button_records(donors: bytes, *, touch_id: int, w: int, h: int, text: str | 
     if glyph is not None:
         frags.append(glyph_record(gx, gy - strip, slot, char))
         frags.append(cornermark.build_empty_record(-gx, -gy))
+    if touch_id is None:                     # a display tile: nothing to touch
+        return frags
     touch = a._clone_with_geom(donors, a.CLUSTER_DONOR_OBJECT, a.PUMP_BUTTON_TOUCH_REC,
                                {2: iw, 3: ih})
     a._set_touch_id(touch, touch_id)
