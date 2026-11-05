@@ -32,13 +32,22 @@ the Ignore Alarms status take, byte-identically.
 **Arms** are `(match, lit, contactor)` triples: `match` the match-table value (the `0xFFFF`
 default arm FIRST, `switchbuild.append_arms`), `lit` picks `on_index` over `off_index`, and
 `contactor` adds the Batt Heat contactor glyph top-right (`aescompact.BATT_HEAT_STATE_ARMS`).
+
+**State arms** (`state_arm`, `add_button_states`): an arm that draws the button with ANOTHER
+caption, glyph and fill, rebuilt by the button's own builder (`rvcbutton.button_records`, minus
+the box, the anchor and the touch region), so an arm for the button's own text and glyph is the
+stream's body byte for byte. `wrap_button(arm_objects=...)` takes such arms ready-made. Every
+arm must have the button's shape (a caption iff the button has one, with as many lines; a glyph
+iff it has one), so each draws its records in the boxes the stream's did; only a glyph's
+character, and so its ink, differs (`foreign_deltas` lets a wtype-0 glyph's box differ in an
+arm, the one record whose box follows its character).
 """
 from __future__ import annotations
 
 import struct
 
 from . import (aescompact, cornermark, guidata, insert, pagewalk, records, relocate,
-               switchbuild)
+               rvcbutton, switchbuild)
 
 
 class StateLightsError(ValueError):
@@ -136,6 +145,31 @@ def build_arm(donors: bytes, *, fill_index: int, body: list[bytes], w: int, h: i
     return payload
 
 
+def state_arm(donors: bytes, image: bytes, *, fill_index: int, w: int, h: int,
+              text: str | None, glyph: tuple[int, str] | None, font: int | None) -> bytes:
+    """One state arm (module docstring, "State arms"): the capsule in `fill_index`, then the
+    caption `text` and the glyph `glyph` as `rvcbutton.button_records` lays them out for a
+    `w` x `h` button, its glyph metrics read from `image`. `<count>` + records, padded to 4."""
+    try:
+        frags = rvcbutton.button_records(donors, touch_id=None, w=w, h=h, text=text,
+                                         glyph=glyph, font=font, fill_index=fill_index,
+                                         glyph_image=image)[2:]
+    except ValueError as e:
+        raise StateLightsError(f"state arm {text!r} / {glyph!r}: {e}") from e
+    payload = cornermark._object(frags)
+    chk = records.object_records(payload, 0)
+    inset = aescompact.PUMP_OUTLINE_INSET
+    if not (len(chk) == len(frags) and chk[0].wtype == 33
+            and chk[0].colors[0] == ("fillA", 7, fill_index)
+            and chk[0].geom[2:4] == [w - 2 * inset, h - 2 * inset]
+            and [r.label for r in chk if r.wtype == 11 and r.label]
+            == ([] if text is None else [text])
+            and [(r.font, r.label) for r in chk if r.wtype == 0]
+            == ([] if glyph is None else [tuple(glyph)])):
+        raise StateLightsError(f"state arm {text!r} (fill {fill_index}) failed its self-decode")
+    return payload
+
+
 def _stream(data: bytes, object_index: int) -> list:
     gs, tab = guidata.guidata_extent(data)[0], guidata.object_tables(data)[1]
     return records.object_records(data, gs + tab[object_index])
@@ -145,19 +179,39 @@ def wrap_button(data: bytes, *, object_index: int, value_slot: int, donors: byte
                 arms: tuple, off_index: int, on_index: int, w: int, h: int,
                 text: str | None, glyph: tuple[int, str] | None = None,
                 font: int | None = None, grow: bool = True,
-                touch_id: int | None = None) -> tuple[bytes, dict]:
+                touch_id: int | None = None, arm_objects: list | None = None,
+                span: tuple[int, int] | None = None) -> tuple[bytes, dict]:
     """Replace the button's static body in object `object_index` with ONE enrolled wtype-6
     switch on cell `value_slot` over whole-button `arms` (module docstring). `grow` False appends
-    the arms without growing the match table (a caller that grew it already). Returns the image
-    (not resealed) and `{arms_base, arm_objects, switch_index, switch_offset, span, value_slot,
-    off_index, on_index}`, `span` the body's `(capsule, end)` before the wrap."""
+    the arms without growing the match table (a caller that grew it already). `arm_objects`, one
+    per arm, replaces the arms `build_arm` would make (`state_arm`'s); `span`, the body's
+    `(capsule, end)` record indices, replaces the search for it (a display tile has no touch
+    region to find it by). Returns the image (not resealed) and `{arms_base, arm_objects,
+    switch_index, switch_offset, span, value_slot, off_index, on_index}`, `span` the body's
+    `(capsule, end)` before the wrap."""
     recs = _stream(data, object_index)
-    cap, end = body_span(data, recs, object_index=object_index, w=w, h=h, text=text,
-                         glyph=glyph, font=font, touch_id=touch_id)
+
+    def find(img, recs):
+        if span is None:
+            return body_span(img, recs, object_index=object_index, w=w, h=h, text=text,
+                             glyph=glyph, font=font, touch_id=touch_id)
+        cap, end = span
+        inset = aescompact.PUMP_OUTLINE_INSET
+        if not (0 <= cap < end <= len(recs) and recs[cap].wtype == 33
+                and recs[cap].geom[2:4] == [w - 2 * inset, h - 2 * inset]
+                and all(r.wtype in (0, 11) for r in recs[cap + 1:end])):
+            raise StateLightsError(f"records {cap}..{end} of object {object_index} are not a "
+                                   f"{w} x {h} button's capsule and body")
+        return cap, end
+
+    cap, end = find(data, recs)
     body = [bytes(data[r.offset:r.offset + r.size]) for r in recs[cap + 1:end]]
-    arm_objects = [build_arm(donors, fill_index=on_index if lit else off_index, body=body,
-                             w=w, h=h, text=text, contactor=contactor)
-                   for _match, lit, contactor in arms]
+    if arm_objects is None:
+        arm_objects = [build_arm(donors, fill_index=on_index if lit else off_index, body=body,
+                                 w=w, h=h, text=text, contactor=contactor)
+                       for _match, lit, contactor in arms]
+    elif len(arm_objects) != len(arms):
+        raise StateLightsError(f"{len(arm_objects)} arm objects for {len(arms)} arms")
     out = data
     if grow:
         out, arms_base = switchbuild.append_arms(out, arm_objects, [m for m, _l, _c in arms])
@@ -172,8 +226,7 @@ def wrap_button(data: bytes, *, object_index: int, value_slot: int, donors: byte
     switch = switchbuild.author_switch(out, value_slot=value_slot, arms_base=arms_base,
                                        count=len(arms))
     recs = _stream(out, object_index)
-    if body_span(out, recs, object_index=object_index, w=w, h=h, text=text, glyph=glyph,
-                 font=font, touch_id=touch_id) != (cap, end):
+    if find(out, recs) != (cap, end):
         raise StateLightsError("the button body moved while its arms were appended")
     stream = [out[r.offset:r.offset + r.size] for r in recs]
     stream[cap:end] = [switch]
@@ -210,14 +263,16 @@ def _inert_colour_delta(d, object_index: int) -> bool:
             and (b.font, b.align, b.value_slot) == (a.font, a.align, a.value_slot))
 
 
-def foreign_deltas(before: bytes, after: bytes, object_index: int, span: tuple[int, int]) -> list:
+def foreign_deltas(before: bytes, after: bytes, object_index: int, span: tuple[int, int], *,
+                   loose_glyphs: bool = False) -> list:
     """Every `pagewalk.diff` delta, over each page root reaching `object_index` and each of its
     switch-arm sets, that is not the wrap itself: the body records `span` leave, the switch and
     its arm's records appear, and every other record keeps its box and state. Each walk also
     checks the selected arm draws the body where the stream drew it (the same wtype and box, in
     order; a contactor glyph after them aside); a mismatch is returned as the arm's first
-    record. Colour-only deltas on the object's own empty labels are not foreign
-    (`_inert_colour_delta`)."""
+    record. `loose_glyphs` lets a wtype-0 glyph's box differ (a state arm drawing another
+    character, module docstring); its wtype and order still must not. Colour-only deltas on
+    the object's own empty labels are not foreign (`_inert_colour_delta`)."""
     cap, end = span
     roots = pagewalk.reaching_roots(after, object_index)
     bad = []
@@ -240,7 +295,11 @@ def foreign_deltas(before: bytes, after: bytes, object_index: int, span: tuple[i
                 was = [(r.wtype, r.box) for r in b if r.key[:-1] == k[:-1]
                        and r.key[-1][0] == object_index and cap <= r.key[-1][1] < end]
                 drawn = [r for r in a if len(r.key) == len(k) + 1 and r.key[:-1] == k]
-                if [(r.wtype, r.box) for r in drawn][:len(was)] != was:
+
+                def shape(wt, box):
+                    return (wt, None if loose_glyphs and wt == 0 else box)
+
+                if [shape(r.wtype, r.box) for r in drawn][:len(was)] != [shape(*x) for x in was]:
                     first = drawn[0] if drawn else sw
                     bad.append(pagewalk.Delta(first.key, first.wtype, first.label, "moved",
                                               None, first))

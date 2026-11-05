@@ -390,33 +390,39 @@ def _build_ops(specs: list) -> tuple:
 
 def _check_toggles_driven(specs: list) -> list:
     """`TOGGLE_UNDRIVEN` for every enabled `add_rvc_button` with `toggle` that no enabled
-    `add_button_status` LATER in `specs` lights (an entry whose `button.ref` is its id). A toggle
-    sends by its variant, which only that op's routine sets (`setVariant(group, lit)`); undriven,
-    the variant sits at 0 and the button only ever sends "on". A disabled spec drives nothing,
-    and a status op before the button cannot name it. Static: no op is constructed or applied,
-    so a malformed status op simply drives nothing (its own validation reports it)."""
+    `add_button_status` LATER in `specs` lights (an entry whose `button.ref` is its id), and
+    `CYCLE_UNDRIVEN` for every one with `cycle` that no later enabled `add_button_states`
+    names. A toggle or cycle sends by its variant, which only that op's routine sets
+    (`setVariant`); undriven, the variant sits at 0 and the button only ever sends its first
+    payload. A disabled spec drives nothing, and a status op before the button cannot name it.
+    Static: no op is constructed or applied, so a malformed status op simply drives nothing (its
+    own validation reports it)."""
+    kinds = (("toggle", "add_button_status", "TOGGLE_UNDRIVEN", "toggle", "on_payload"),
+             ("cycle", "add_button_states", "CYCLE_UNDRIVEN", "cycle", "first payload"))
     errors = []
     for i, spec in enumerate(specs):
-        if not (spec.enabled and spec.type == "add_rvc_button"
-                and isinstance(spec.params, dict) and spec.params.get("toggle") is not None):
+        if not (spec.enabled and spec.type == "add_rvc_button" and isinstance(spec.params, dict)):
             continue
-        driven = False
-        for later in specs[i + 1:]:
-            if not (later.enabled and later.type == "add_button_status"
-                    and isinstance(later.params, dict)):
+        for key, driver, code, what, sends in kinds:
+            if spec.params.get(key) is None:
                 continue
-            entries = later.params.get("buttons")
-            if not isinstance(entries, list):
-                continue
-            if any(isinstance(e, dict) and isinstance(e.get("button"), dict)
-                   and e["button"].get("ref") == spec.id for e in entries):
-                driven = True
-                break
-        if not driven:
-            errors.append(RecipeError(
-                "TOGGLE_UNDRIVEN", "toggle button %r is driven by no later add_button_status: "
-                "its variant would stay 0 and it would only ever send its on_payload" % spec.id,
-                op_id=spec.id))
+            driven = False
+            for later in specs[i + 1:]:
+                if not (later.enabled and later.type == driver
+                        and isinstance(later.params, dict)):
+                    continue
+                entries = later.params.get("buttons")
+                if not isinstance(entries, list):
+                    continue
+                if any(isinstance(e, dict) and isinstance(e.get("button"), dict)
+                       and e["button"].get("ref") == spec.id for e in entries):
+                    driven = True
+                    break
+            if not driven:
+                errors.append(RecipeError(
+                    code, "%s button %r is driven by no later %s: its variant would stay 0 and "
+                    "it would only ever send its %s" % (what, spec.id, driver, sends),
+                    op_id=spec.id))
     return errors
 
 

@@ -98,6 +98,7 @@
                 "add_alt_reboot",
                 "add_batt_heat_battery_glyph",
                 "add_button",
+                "add_button_states",
                 "add_button_status",
                 "add_card_readouts",
                 "add_corner_mark",
@@ -1315,6 +1316,50 @@
           "if": {
             "properties": {
               "type": {
+                "const": "add_button_states"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "buttons": {
+                    "type": "array",
+                    "description": "[{button: {ref}, states: [{match, text?, glyph?, lit?, colour?}], unknown?, check_order?, wrap?, lit_when?}]"
+                  },
+                  "off_colour": {
+                    "type": "array",
+                    "default": [
+                      65,
+                      81,
+                      163
+                    ],
+                    "description": "[r, g, b] unlit body fill; a palette colour"
+                  },
+                  "on_colour": {
+                    "type": "array",
+                    "default": [
+                      0,
+                      174,
+                      239
+                    ],
+                    "description": "[r, g, b] lit body fill; a palette colour"
+                  }
+                },
+                "required": [
+                  "buttons"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "add_button_status"
               }
             }
@@ -1913,6 +1958,19 @@
                     "default": null,
                     "description": "{off_payload, on_payload}: 8-byte hex each; a later add_button_status must drive it"
                   },
+                  "cycle": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{payloads: [2-16 x 8-byte hex]}: variant k sends payload k; a later add_button_states must drive it"
+                  },
+                  "display": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "true: no touch region and no group; the button only draws (no dgn)"
+                  },
                   "colour": {
                     "type": "array",
                     "default": [
@@ -1936,8 +1994,7 @@
                   "x",
                   "y",
                   "w",
-                  "h",
-                  "dgn"
+                  "h"
                 ]
               }
             }
@@ -2690,6 +2747,11 @@
                     "type": "integer",
                     "default": 0,
                     "description": "subtracted after the mask, clamped at 0 (RV-C AC current is 20*A + 32000: sub 32000, shift 1 gives tenths of an amp)"
+                  },
+                  "mul": {
+                    "type": "integer",
+                    "default": 1,
+                    "description": "multiplied after sub, before add: (max(v - sub, 0) * mul + add) >> shift. RV-C temperature (1/32 degC from -273) as tenths of a degree F: sub 8167, mul 9, add 7, shift 4 (format places 1)"
                   },
                   "draw": {
                     "type": "boolean",

@@ -269,27 +269,37 @@ class ReadoutPlan:
     hook_old: bytes
     tail_target: int
     sub: int = 0          # subtracted after the mask, clamped at 0 (RV-C's +1600 A current offset)
+    mul: int = 1          # multiplied after the clamp, before `add` (a unit conversion)
 
 
 def resolve(data: bytes, *, register: Register, cell: DisplayCell, mask: int = 0xFFFF,
-            add: int = 0, shift: int = 0, sub: int = 0) -> ReadoutPlan:
+            add: int = 0, shift: int = 0, sub: int = 0, mul: int = 1) -> ReadoutPlan:
     if not 1 <= mask <= 0xFFFF:
         raise ReadoutError(f"mask must be 1..0xFFFF, got {mask:#x}")
-    if not 0 <= add <= 0xFF:
-        raise ReadoutError(f"add must fit `adds rN,#imm8` (0..255), got {add}")
+    if not 0 <= add <= 0xFFFF:
+        raise ReadoutError(f"add must fit `movw` (0..0xFFFF), got {add}")
+    if not 1 <= mul <= 0xFFFF:
+        raise ReadoutError(f"mul must be 1..0xFFFF (a u16 field times it stays below 2**32), "
+                           f"got {mul}")
     if not 0 <= shift <= 15:
         raise ReadoutError(f"shift must be 0..15, got {shift}")
     if not 0 <= sub <= 0xFFFF:
         raise ReadoutError(f"sub must fit `movw` (0..0xFFFF), got {sub}")
     hook_old, tail = followchannel.hook_state(data)
     return ReadoutPlan(register.slot_addr, mask, add, shift, cell,
-                       followchannel.HOOK_OFF, hook_old, tail, sub)
+                       followchannel.HOOK_OFF, hook_old, tail, sub, mul)
 
 
 def build(plan: ReadoutPlan, code_load_addr: int) -> tuple[bytes, list]:
-    """The per-tick copy: (max(slot & mask - sub, 0) + add) >> shift -> cell, sentinel passed
-    through. `sub` is an unsigned subtract clamped at 0 (`subs` sets C on no borrow; `bhs`
-    keeps the difference, otherwise it becomes 0) -- RV-C AC current is 20*A + 32000.
+    """The per-tick copy: (max(slot & mask - sub, 0) * mul + add) >> shift -> cell, sentinel
+    passed through. `sub` is an unsigned subtract clamped at 0 (`subs` sets C on no borrow; `bhs`
+    keeps the difference, otherwise it becomes 0) -- RV-C AC current is 20*A + 32000. `mul`
+    (`muls`, 32-bit: a u16 field times a u16 cannot wrap) makes it any linear unit conversion:
+    RV-C's temperature (0.03125 degC, offset -273 degC) in tenths of a degree F is `sub 8167,
+    mul 9, add 7, shift 4` (exact: raw*9/16 - 4594 = (raw*9 - 73504)/16; 8167*9 = 73503, so
+    add = 73503 - 73504 + 8, the 8 rounding to nearest: within half a tenth). `mul` 1 and an
+    `add` up to 255 emit exactly the routine they always have; a larger `add` goes through
+    `movw r2` + `adds r1, r1, r2`. The stored value is the low 16 (or 8) bits.
     Same stream/label/pool builder as pumpauto.build; the blob is verified instruction for
     instruction by `thumb.assert_disassembles_to` before it is returned."""
     if code_load_addr % 4:
@@ -328,8 +338,14 @@ def build(plan: ReadoutPlan, code_load_addr: int) -> tuple[bytes, list]:
         emit(2, lambda h, s: (thumb.bcc_n(h, s("nonneg"), "cs"), f"bhs #{s('nonneg'):#x}"))
         emit(2, lambda h, s: (thumb.movs_imm(1, 0), "movs r1, #0"))
         label("nonneg")
-    if plan.add:
+    if plan.mul != 1:
+        emit(4, lambda h, s: (thumb.movw(2, plan.mul), f"movw r2, #{imm(plan.mul)}"))
+        emit(2, lambda h, s: (thumb.muls(1, 2), "muls r1, r2, r1"))
+    if 0 < plan.add <= 0xFF:
         emit(2, lambda h, s: (thumb.adds_imm8(1, plan.add), f"adds r1, #{imm(plan.add)}"))
+    elif plan.add:
+        emit(4, lambda h, s: (thumb.movw(2, plan.add), f"movw r2, #{imm(plan.add)}"))
+        emit(2, lambda h, s: (thumb.adds_reg(1, 1, 2), "adds r1, r1, r2"))
     if plan.shift:
         emit(2, lambda h, s: (thumb.lsrs_imm(1, 1, plan.shift), f"lsrs r1, r1, #{imm(plan.shift)}"))
     label("store")
