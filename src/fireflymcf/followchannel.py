@@ -389,32 +389,66 @@ def hook_state(data: bytes) -> tuple[bytes, int]:
         f"[{STOCK_APPEND_POINT:#x},{append_point:#x}); refusing to detour")
 
 
-def chain_from_hook(data: bytes, limit: int = 16) -> list[int]:
+# How many authored per-tick routines a project may chain before compile refuses it
+# (`recipe.Project.tick_chain_limit` raises it). Not a panel limit: the chain itself has none, each
+# link restores the stack before its tail-branch. It is a budget on per-tick work no coach has run
+# past; every routine runs on every screen refresh.
+DEFAULT_TICK_CHAIN_LIMIT = 16
+
+
+class TickChainFull(FollowChannelError):
+    """The chain is longer than the caller's `limit`. `count` is its routine count."""
+
+    def __init__(self, count: int, limit: int):
+        super().__init__(f"the per-tick chain has {count} routines, over the limit of {limit}")
+        self.count = count
+        self.limit = limit
+
+
+def chain_from_hook(data: bytes, limit: int | None = None) -> list[int]:
     """The per-tick call chain the hook reaches, as runtime addresses: each appended routine's
     entry in call order, ending with TAIL_TARGET (the displaced paint fn). On stock this is just
     `[TAIL_TARGET]`. Each link is found by disassembling linearly from its entry to its first
     `b.w` -- the only wide unconditional branch a routine here emits is its tail-branch, and the
-    literal pool sits after it. Refuses a link that leaves the appended region or a chain longer
-    than `limit` (a loop)."""
+    literal pool sits after it. Refuses a link that leaves the appended region and a link seen
+    before (a loop). Any length is walked; `limit`, when given, raises `TickChainFull` once the
+    chain holds more than `limit` routines."""
     sec = theme.guicode_section(data)
     section = data[sec.offset:sec.offset + sec.length]
     base = theme.GUICODE_BASE_DEFAULT
     append_point = base + sec.length - 4
     _, target = hook_state(data)
     chain = []
+    seen = set()
     while target != TAIL_TARGET:
         if not (STOCK_APPEND_POINT <= target < append_point):
             raise FollowChannelError(f"chain link {target:#x} is outside the appended region")
-        if len(chain) >= limit:
-            raise FollowChannelError(f"per-tick chain exceeds {limit} links: {chain}")
+        if target in seen:
+            raise FollowChannelError(f"per-tick chain loops back to {target:#x}: "
+                                     f"{[hex(c) for c in chain]}")
+        seen.add(target)
         chain.append(target)
         code = section[target - base:append_point - base]
         tail = next((t for _, t in thumb.disassemble(code, target) if t.startswith("b.w #")), None)
         if tail is None:
             raise FollowChannelError(f"routine at {target:#x} has no b.w tail-branch")
         target = int(tail[5:], 16)
+    if limit is not None and len(chain) > limit:
+        raise TickChainFull(len(chain), limit)
     chain.append(TAIL_TARGET)
     return chain
+
+
+def hook_bytes(data: bytes) -> bytes | None:
+    """The 4 raw bytes at GuiCode+HOOK_OFF, unvalidated, or None when the image has no GuiCode
+    that long. A cheap test of whether an edit touched the per-tick hook."""
+    try:
+        sec = theme.guicode_section(data)
+    except ValueError:
+        return None
+    if sec.length < HOOK_OFF + 4:
+        return None
+    return bytes(data[sec.offset + HOOK_OFF:sec.offset + HOOK_OFF + 4])
 
 
 def _check_hook(data: bytes) -> bytes:

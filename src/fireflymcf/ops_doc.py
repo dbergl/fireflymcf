@@ -554,6 +554,10 @@ def project_schema(registry: dict | None = None) -> dict:
             "user_op_sources": {"type": "object",
                                 "description": "where each installed user op came from: "
                                                "{type: {source, folder_sha256}}"},
+            "tick_chain_limit": {"type": "integer", "minimum": 1,
+                                 "description": "how many authored per-tick routines the "
+                                                "project may chain (default 16); raise it only "
+                                                "when compile refuses with TICK_CHAIN_FULL"},
         },
         "$defs": {"op": {
             "type": "object",

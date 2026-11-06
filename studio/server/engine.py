@@ -185,7 +185,7 @@ class Engine:
 
     def etag(self, project: recipe.Project) -> str:
         enabled = [s for s in project.ops if s.enabled]
-        key = recipe._prefix_key(project.base_sha256, enabled)
+        key = recipe._prefix_key(project.base_sha256, enabled, project.tick_chain_limit)
         return hashlib.sha256((key + "|" + (project.build_name or ""))
                               .encode()).hexdigest()
 
