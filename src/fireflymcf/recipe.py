@@ -13,7 +13,7 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import coverage, guidata, patch, relocate, theme
+from fireflymcf import coverage, followchannel, guidata, patch, relocate, theme
 
 SCHEMA = 1
 
@@ -72,6 +72,16 @@ class Project:
     ext_ops: list = dataclasses.field(default_factory=list)
     user_op_acceptance: dict = dataclasses.field(default_factory=dict)
     user_op_sources: dict = dataclasses.field(default_factory=dict)
+    # How many authored per-tick routines this project may chain on the GuiCode hook; None is
+    # `followchannel.DEFAULT_TICK_CHAIN_LIMIT`. Compile refuses an op that goes past it
+    # (TICK_CHAIN_FULL). Written only when set, so a project that never raised it serialises as
+    # before.
+    tick_chain_limit: int | None = None
+
+    @property
+    def effective_tick_chain_limit(self) -> int:
+        return (followchannel.DEFAULT_TICK_CHAIN_LIMIT if self.tick_chain_limit is None
+                else self.tick_chain_limit)
 
     @classmethod
     def from_json(cls, text: str) -> "Project":
@@ -120,9 +130,14 @@ class Project:
         if not isinstance(sources, dict):
             raise RecipeError("BAD_PROJECT", "field 'user_op_sources' must be an object, "
                               "got %r" % (sources,))
+        limit = doc.get("tick_chain_limit")
+        if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int)
+                                  or limit < 1):
+            raise RecipeError("BAD_PROJECT", "field 'tick_chain_limit' must be a positive "
+                              "integer, got %r" % (limit,))
         return cls(base_sha256=doc["base_sha256"], build_name=doc["build_name"], ops=ops,
                    preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance,
-                   user_op_sources=sources)
+                   user_op_sources=sources, tick_chain_limit=limit)
 
     def to_json(self) -> str:
         doc = {
@@ -139,6 +154,8 @@ class Project:
             doc["user_op_acceptance"] = self.user_op_acceptance
         if self.user_op_sources:
             doc["user_op_sources"] = self.user_op_sources
+        if self.tick_chain_limit is not None:
+            doc["tick_chain_limit"] = self.tick_chain_limit
         return json.dumps(doc, indent=2)
 
 
@@ -510,6 +527,29 @@ def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
         return CompileResult(False, None, [e.to_json()], [], [])
 
 
+def _check_tick_chain(before: bytes, after: bytes, limit: int) -> None:
+    """Refuse (TICK_CHAIN_FULL) an op that left more than `limit` authored per-tick routines on
+    the GuiCode hook. Only an op that changed the hook's 4 bytes can have added one, so the chain
+    is walked only then. A hook that is not a chain is not this check's to refuse."""
+    if followchannel.hook_bytes(after) == followchannel.hook_bytes(before):
+        return
+    try:
+        followchannel.chain_from_hook(after, limit)
+    except followchannel.TickChainFull as e:
+        raise RecipeError(
+            "TICK_CHAIN_FULL",
+            "this op adds per-tick routine %d; the project allows %d. Every routine runs on each "
+            "screen refresh. The panel sets no limit of its own, but the default (%d) is as many "
+            "as fireflymcf expects a build to need. To allow more, add \"tick_chain_limit\": %d "
+            "(or higher) at the top level of the project file and compile again."
+            % (e.count, limit, followchannel.DEFAULT_TICK_CHAIN_LIMIT, e.count),
+            offers=["raise_tick_chain_limit"]) from e
+    except followchannel.FollowChannelError:
+        # The hook holds something other than a chain (an op patched the site itself). There is
+        # no routine to count; whether those bytes are sound is the op's own verify's question.
+        return
+
+
 def compile_project(project: Project, stock: bytes) -> CompileResult:
     if hashlib.sha256(stock).hexdigest() != project.base_sha256:
         raise RecipeError("BASE_MISMATCH",
@@ -524,9 +564,12 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
 
     ctx = Ctx(stock=stock, edits=[], insertions=[], handles={})
     data = stock
+    limit = project.effective_tick_chain_limit
     for o in ops:
         try:
+            before = data
             data = o.apply(data, ctx)
+            _check_tick_chain(before, data, limit)
         except RecipeError as e:
             e.op_id = e.op_id or o.spec.id
             return CompileResult(False, None, [e.to_json()], [], [])
@@ -534,18 +577,22 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
     return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
-def _prefix_key(base_hash: str, specs: list) -> str:
+def _prefix_key(base_hash: str, specs: list, tick_chain_limit: int | None = None) -> str:
     """A cache key for the state after applying exactly `specs`, in order, to
     `base_hash`'s stock. Keyed on (id, type, params) only — `enabled`/`note` never
     reach here since callers always filter to the enabled list first, and `note` has
-    no effect on the compiled bytes."""
+    no effect on the compiled bytes. A set `tick_chain_limit` joins the key: it changes no
+    byte, but a cached prefix was checked against the limit it was compiled under, so a
+    lowered limit must recompile to be enforced. Unset, the key is unchanged."""
     user = _user_ops()
     # A user op's bytes come from its folder, not the package: its folder hash joins the key, so
     # an edited op misses. Built-in entries keep their 3-tuple, so their keys are unchanged.
     doc = [(s.id, s.type, s.params) + ((user[s.type].folder_sha256,) if s.type in user else ())
            for s in specs]
-    return hashlib.sha256((base_hash + json.dumps(doc, sort_keys=True))
-                          .encode()).hexdigest()
+    text = base_hash + json.dumps(doc, sort_keys=True)
+    if tick_chain_limit is not None:
+        text += "|tick_chain_limit=%d" % tick_chain_limit
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def _snapshot(ctx: Ctx) -> tuple:
@@ -581,7 +628,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
     start = 0
     data, snap = stock, ([], [], {}, set())
     for i in range(len(enabled), 0, -1):
-        key = _prefix_key(project.base_sha256, enabled[:i])
+        key = _prefix_key(project.base_sha256, enabled[:i], project.tick_chain_limit)
         if key in cache:
             data, snap = cache[key]
             start = i
@@ -594,13 +641,16 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
     if errors:
         return CompileResult(False, None, [e.to_json() for e in errors], [], [])
 
+    limit = project.effective_tick_chain_limit
     for i in range(start, len(enabled)):
         try:
+            before = data
             data = ops[i].apply(data, ctx)
+            _check_tick_chain(before, data, limit)
         except RecipeError as e:
             e.op_id = e.op_id or ops[i].spec.id
             return CompileResult(False, None, [e.to_json()], [], [])
-        cache[_prefix_key(project.base_sha256, enabled[:i + 1])] = (
+        cache[_prefix_key(project.base_sha256, enabled[:i + 1], project.tick_chain_limit)] = (
             data, _snapshot(ctx))
 
     return _finish_or_refuse(project, stock, data, ctx, ops)

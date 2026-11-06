@@ -236,7 +236,9 @@ GuiCode in between. It also refuses (`BAD_ROUTINE`) a blob whose entry breaks th
 and (`BAD_HOOK`) any install after which `chain_from_hook` does not list the new entry first and
 every earlier link after it. `TickInstall` has these fields: `load_addr`, `entry_addr`,
 `tail_target`, `hook_old`, `hook_new`. This is the same grow, assert and detour sequence as
-`add_pump_auto_off` and `add_register_readout`.
+`add_pump_auto_off` and `add_register_readout`. Each install is one more routine against the
+project's `tick_chain_limit` (16 unless the project raises it); compile refuses the op that goes
+past it (`TICK_CHAIN_FULL`), so an op should install one routine, not one per item.
 
 **`install_tick(ed, build, note) -> TickInstall`** (helper). Installs a routine in two phases,
 because an editor call cannot carry a callable:

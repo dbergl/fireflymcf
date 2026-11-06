@@ -204,6 +204,11 @@ A failure names the op id and an error code (`$F ops NAME` explains it), sometim
 `compile` refuses a project with an unverified op; add `--allow-unverified` only after the owner
 has agreed to be first.
 
+Ops that show live status add a routine that runs on every screen refresh. A project may chain 16;
+the 17th refuses with `TICK_CHAIN_FULL`. The panel has no such limit; it is a budget on per-refresh
+work. When a build needs more, tell the owner, then add `"tick_chain_limit": N` at the top level of
+the project (beside `build_name`), with N the count the error names. Don't raise it in advance.
+
 **User ops** (`user:` types) are refused (`USER_OPS`) until `--allow-user-ops` is given, which is
 separate from `--allow-unverified`. Before the first build that runs one, give the owner the risk
 statement word for word, then pass the flag:
