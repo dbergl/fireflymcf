@@ -68,3 +68,18 @@ def test_ops_json_is_the_entries(capsys):
 def test_ops_refuses_an_unknown_name(capsys):
     assert cli.main(["ops", "no_such_op"]) == 1
     assert "no such op" in capsys.readouterr().err
+
+
+def test_entries_carry_firmware_support():
+    e = {x["name"]: x for x in ops_doc.entries(recipe.REGISTRY)}
+    assert e["set_theme"]["firmwares"] == ["13.6"]
+    assert e["set_theme"]["verified_on"] == ["13.6"] and e["set_theme"]["emulated_on"] == []
+    assert "| Firmware |" in ops_doc.render(recipe.REGISTRY)
+
+
+def test_an_unverified_op_is_verified_on_no_firmware():
+    e = {x["name"]: x for x in ops_doc.entries(recipe.REGISTRY)}
+    unverified = [n for n, x in e.items() if not x["verified"]]
+    assert unverified
+    for n in unverified:
+        assert e[n]["verified_on"] == [], n

@@ -1120,6 +1120,7 @@ def _cmd_ops(args: argparse.Namespace) -> int:
             continue
         print(f"{e['name']}  ({e['class']}; verified: {'yes' if e['verified'] else 'NO'})")
         print(textwrap.fill(e["purpose"], 96, initial_indent="  ", subsequent_indent="  "))
+        print("  firmware: " + ops_doc._firmware_cell(e))
         print(textwrap.fill("status: " + e["status"], 96, initial_indent="  ",
                             subsequent_indent="    "))
         props = e["params"].get("properties", {})

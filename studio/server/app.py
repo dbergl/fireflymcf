@@ -75,7 +75,11 @@ def create_app(stock_path: str = "firefly-13.6/mcf.bin",
         for name, cls in sorted(recipe.REGISTRY.items()):
             doc = (cls.__doc__ or name).strip().splitlines()[0]
             out[name] = {"params": cls.PARAMS, "doc": doc,
-                         "hardware_verified": cls.hardware_verified}
+                         "hardware_verified": cls.hardware_verified,
+                         "firmwares": sorted(cls.firmwares),
+                         "verified_on": (sorted(cls.verified_on)
+                                         if cls.hardware_verified else []),
+                         "emulated_on": sorted(cls.emulated_on)}
         return out
 
     # HTTPException is raised directly by several routes below (export_file,

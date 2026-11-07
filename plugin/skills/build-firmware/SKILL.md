@@ -204,6 +204,13 @@ A failure names the op id and an error code (`$F ops NAME` explains it), sometim
 `compile` refuses a project with an unverified op; add `--allow-unverified` only after the owner
 has agreed to be first.
 
+Each op lists the firmware it has been tested on (`$F ops NAME` shows `firmware:`, marking any
+that no coach has run). An owner on 14.x has a stock image fireflymcf identifies, and a build for
+it uses only the ops that list 14.7. `UNSUPPORTED_FIRMWARE` means "not yet on this firmware": tell
+the owner, and never work around it by editing another build's addresses or switching the base
+image. `--allow-unverified` is per firmware: it covers an op unverified on the owner's firmware,
+not one that is simply unsupported there.
+
 Ops that show live status add a routine that runs on every screen refresh. A project may chain 16;
 the 17th refuses with `TICK_CHAIN_FULL`. The panel has no such limit; it is a budget on per-refresh
 work. When a build needs more, tell the owner, then add `"tick_chain_limit": N` at the top level of
