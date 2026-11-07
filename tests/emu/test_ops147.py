@@ -168,7 +168,8 @@ def _draws_glyph(crop: np.ndarray, rows, visible: float = 0.9) -> bool:
 
 @pytest.fixture(scope="module")
 def stock(mcf_147, tmp_path_factory):
-    """Stock 14.7's settled HOME, and what tapping two of its controls sends."""
+    """Stock 14.7's settled HOME, its controls' touch boxes, and what a press at Tank Heater's
+    centre sends (taken last: the press toggles the heater)."""
     tmp = tmp_path_factory.mktemp("stock147")
     s = _settled(mcf_147)
     out = {"home": _shot(s, tmp, "home"),
@@ -176,7 +177,11 @@ def stock(mcf_147, tmp_path_factory):
            "water_pump": s.control_box("Water Pump"),
            "ext": s.control_box("EXT"),
            "ret": s.control_box("RET"),
-           "awning": s.control_box("Awning")}
+           "awning": s.control_box("Awning"),
+           "tank_heater": s.control_box("Tank Heater")}
+    t = _press_at(s, *_centre(out["tank_heater"]))
+    s.run(1.0)
+    out["tank_heater_sends"] = [f.data for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
     return out
 
 
@@ -235,14 +240,35 @@ def _assert_translated(before, after, box, dx):
 
 
 def test_move_element(mcf_147, stock, tmp_path):
-    # Tank Heater's box (record 1 of 816, x 140); its label and region follow it.
+    """Tank Heater's box (record 1 of 816, x 140) to x 180; its label and region (no x of
+    their own) follow it. A control is three records: it must draw at its new place and
+    answer a press there, and a press where it was must reach nothing."""
+    x_was, x_now = 140, 180
+    dx = x_now - x_was
     img = _build(mcf_147, [("m", "move_element",
                             {"target": TANK_HEATER_ARM, "selector": {"wtype": 0x21},
-                             "set": {"x": 180}, "expect": {"x": 140}})])
+                             "set": {"x": x_now}, "expect": {"x": x_was}})])
     s = _settled(img)
-    box = s.control_box("Tank Heater")
-    old = (box[0] - 40, box[1], box[2] - 40, box[3])
-    _assert_translated(stock["home"], _shot(s, tmp_path, "b"), old, 40)
+    old = stock["tank_heater"]
+    new = s.control_box("Tank Heater")
+    assert new == (old[0] + dx, old[1], old[2] + dx, old[3]), (old, new)
+    _assert_translated(stock["home"], _shot(s, tmp_path, "b"), old, dx)
+
+    assert stock["tank_heater_sends"], "stock's Tank Heater press sent no 1FEDB"
+    cx, cy = _centre(new)
+    t = _press_at(s, cx, cy)
+    s.run(1.0)
+    sent = [f.data for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
+    assert sent == stock["tank_heater_sends"], f"a press at its new centre: {sent}"
+    # Tank Heater toggles (on, then off), so the second press is judged by whom it addresses.
+    t = _press_at(s, (old[2] + new[2]) // 2, cy)        # where only the new box is
+    s.run(1.0)
+    sent = [f.data for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
+    assert sent and [d[0] for d in sent] == [d[0] for d in stock["tank_heater_sends"]], \
+        f"a press where only the new box is: {sent}"
+    t = _press_at(s, (old[0] + new[0]) // 2, cy)        # where only the old box was
+    s.run(1.0)
+    assert _panel_sends(s, DC_DIMMER_COMMAND_2, t) == [], "the old place still answers"
 
 
 def test_move_attach(mcf_147, stock, tmp_path):
