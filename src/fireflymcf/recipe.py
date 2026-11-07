@@ -1,4 +1,7 @@
-"""The recipe engine: a PROJECT is an ordered list of typed ops applied to stock 13.6.
+"""The recipe engine: a PROJECT is an ordered list of typed ops applied to a stock image.
+
+Each op lists the firmware it may compile on (`Op.firmwares`); compile refuses it elsewhere,
+and refuses an image `firmware.identify` does not know (UNSUPPORTED_FIRMWARE).
 
 Every op wraps an
 existing hardware-proven primitive; this module holds no byte-format knowledge of its
@@ -13,7 +16,7 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import coverage, followchannel, guidata, patch, relocate, theme
+from fireflymcf import coverage, firmware, followchannel, guidata, patch, relocate, theme
 
 SCHEMA = 1
 
@@ -168,6 +171,9 @@ class Ctx:
     # +0x44BC8 display-cell indices an op minted fresh (via readout.allocate_fresh_cells). The
     # cell-aliasing gate asserts each is a freshly-GROWN index, never a reused stock index.
     authored_cells: set = dataclasses.field(default_factory=set)
+    # The stock image's `firmware.KNOWN` key; compile refuses an image it cannot identify, so in a
+    # compile this is never None
+    firmware: str | None = None
 
 
 REGISTRY: dict[str, type] = {}
@@ -206,6 +212,14 @@ def _lookup(type_name: str):
 
 class Op:
     type: str = "?"
+    # The firmware keys (`firmware.KNOWN`) this op may compile on. Compile refuses it on any other
+    # (UNSUPPORTED_FIRMWARE) before any op code runs. A firmware joins the list only with a test
+    # that compiles the op there.
+    firmwares: frozenset = frozenset({"13.6"})
+    # Where a coach has run it: `hardware_verified` (and its instance overrides) means "verified on
+    # the firmware in `verified_on`". `emulated_on` is information only; it never verifies.
+    verified_on: frozenset = frozenset({"13.6"})
+    emulated_on: frozenset = frozenset()
     hardware_verified = True     # False marks the feature for the export manifest
     PARAMS = {"properties": {}, "required": []}  # subclasses override; this default
     # keeps a future op that forgets to set PARAMS from 500ing /api/schemas.
@@ -247,6 +261,10 @@ class Op:
     def capability_delta(self, ctx: Ctx):
         return set(), set()
 
+    def is_verified(self, fw: str | None) -> bool:
+        """True when a coach on firmware `fw` has run this op's mechanism."""
+        return bool(self.hardware_verified) and fw in self.verified_on
+
 
 def resolve_target(ctx: Ctx, target) -> int:
     if isinstance(target, int):
@@ -276,6 +294,8 @@ class CompileResult:
     # changed, or by the frames its tick routines send (`userop.routine_frames`). The CLI asks the
     # owner's G12 acceptance for these (`G12_ACK_REQUIRED`); additive
     sends: dict = dataclasses.field(default_factory=dict)
+    # The `firmware.KNOWN` key of the stock image; `unverified` is judged for this firmware
+    firmware: str | None = None
 
 
 # ctx.handles key under which a user op's apply records the capabilities it changed
@@ -386,12 +406,39 @@ def _assert_authored_cells_fresh(ctx: Ctx) -> None:
         "background-bar aliasing). Use readout.allocate_fresh_cells." % (reused, stock_len)))
 
 
-def _build_ops(specs: list) -> tuple:
+def _check_firmware(specs: list, stock: bytes) -> tuple:
+    """(firmware key, refusals). An image `firmware.identify` does not know is refused for every
+    spec (once, op_id None, when there is none): it is never guessed. A built-in op whose
+    `firmwares` does not list the image's firmware is refused. User ops (`user_op`) skip the list,
+    since their own checks are their evidence, but not the identification. Static: reads only each
+    op's class, so a refused op's code never runs. An unknown type is `_build_ops`' to report."""
+    fw = firmware.identify(stock)
+    if fw is None:
+        msg = ("this firmware is not one fireflymcf has been tested on (%s)"
+               % firmware.describe(stock))
+        return None, ([RecipeError("UNSUPPORTED_FIRMWARE", msg, op_id=s.id) for s in specs]
+                      or [RecipeError("UNSUPPORTED_FIRMWARE", msg)])
+    errors = []
+    for spec in specs:
+        cls = _lookup(spec.type)
+        if cls is None or getattr(cls, "user_op", False) or fw in cls.firmwares:
+            continue
+        errors.append(RecipeError(
+            "UNSUPPORTED_FIRMWARE", "%s is not supported on firmware %s (%s): it has been tested "
+            "on %s" % (spec.type, fw, firmware.describe(stock), ", ".join(sorted(cls.firmwares))),
+            op_id=spec.id))
+    return fw, errors
+
+
+def _build_ops(specs: list, refused: set = frozenset()) -> tuple:
     """Construct+validate an Op instance for each spec. Returns (ops, errors); an
     unknown type or a validation failure appends a RecipeError to `errors` instead of
-    raising, so the caller can collect every problem in one pass."""
+    raising, so the caller can collect every problem in one pass. A spec whose id is in
+    `refused` (`_check_firmware` refused it) is not constructed."""
     ops, errors = [], []
     for spec in specs:
+        if spec.id in refused:
+            continue
         cls = _lookup(spec.type)
         if cls is None:
             errors.append(RecipeError("UNKNOWN_OP", "no op type %r" % spec.type,
@@ -441,6 +488,19 @@ def _check_toggles_driven(specs: list) -> list:
                     "it would only ever send its %s" % (what, spec.id, driver, sends),
                     op_id=spec.id))
     return errors
+
+
+def _prepare(enabled: list, stock: bytes) -> tuple:
+    """(firmware key, ops, errors) for the enabled specs: the firmware refusals, then each op
+    constructed (a refused one is not), then the toggle check. Every refusal is collected before
+    any apply, and both compile paths take it before reading their cache."""
+    fw, errors = _check_firmware(enabled, stock)
+    if fw is None:
+        return None, [], errors
+    ops, build_errors = _build_ops(enabled, {e.op_id for e in errors})
+    errors += build_errors
+    errors += _check_toggles_driven(enabled)
+    return fw, ops, errors
 
 
 def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
@@ -498,12 +558,13 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     manifest = [o.verify(data, ctx) for o in ops]
     res, ch = patch.reseal(data)
     _gate(res == data, "NOT_SEALED", "image not sealed after verify: %s" % ch)
-    unverified = [o.spec.id for o in ops if not o.hardware_verified]
+    fw = ctx.firmware
+    unverified = [o.spec.id for o in ops if not o.is_verified(fw)]
     # An op's shift report joins its own line: the manifest stays one entry per op
     shifts, texts = recipe_ops.shift_report(ops, ctx)
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
-    return CompileResult(True, data, [], manifest, unverified, shifts, sends)
+    return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw)
 
 
 def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
@@ -520,11 +581,11 @@ def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
         # user op's doing, and it comes back in the same shape as the user op's own refusals.
         if not any(getattr(o, "user_op", False) for o in ops):
             raise
-        return CompileResult(False, None, [e.to_json()], [], [])
+        return CompileResult(False, None, [e.to_json()], [], [], firmware=ctx.firmware)
     except RecipeError as e:
         if not getattr(e, "user_op", False):
             raise
-        return CompileResult(False, None, [e.to_json()], [], [])
+        return CompileResult(False, None, [e.to_json()], [], [], firmware=ctx.firmware)
 
 
 def _check_tick_chain(before: bytes, after: bytes, limit: int) -> None:
@@ -557,12 +618,11 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
                           "(sha256 %s...)" % project.base_sha256[:12])
     enabled = [s for s in project.ops if s.enabled]
 
-    ops, errors = _build_ops(enabled)
-    errors += _check_toggles_driven(enabled)
+    fw, ops, errors = _prepare(enabled, stock)
     if errors:
-        return CompileResult(False, None, [e.to_json() for e in errors], [], [])
+        return CompileResult(False, None, [e.to_json() for e in errors], [], [], firmware=fw)
 
-    ctx = Ctx(stock=stock, edits=[], insertions=[], handles={})
+    ctx = Ctx(stock=stock, edits=[], insertions=[], handles={}, firmware=fw)
     data = stock
     limit = project.effective_tick_chain_limit
     for o in ops:
@@ -572,7 +632,7 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
             _check_tick_chain(before, data, limit)
         except RecipeError as e:
             e.op_id = e.op_id or o.spec.id
-            return CompileResult(False, None, [e.to_json()], [], [])
+            return CompileResult(False, None, [e.to_json()], [], [], firmware=fw)
 
     return _finish_or_refuse(project, stock, data, ctx, ops)
 
@@ -625,6 +685,12 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
                           "(sha256 %s...)" % project.base_sha256[:12])
     enabled = [s for s in project.ops if s.enabled]
 
+    # Every refusal comes before the cache is read: a cached prefix never carries an op past
+    # the firmware gate.
+    fw, ops, errors = _prepare(enabled, stock)
+    if errors:
+        return CompileResult(False, None, [e.to_json() for e in errors], [], [], firmware=fw)
+
     start = 0
     data, snap = stock, ([], [], {}, set())
     for i in range(len(enabled), 0, -1):
@@ -634,12 +700,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
             start = i
             break
     ctx = Ctx(stock=stock, edits=list(snap[0]), insertions=list(snap[1]),
-             handles=copy.deepcopy(snap[2]), authored_cells=set(snap[3]))
-
-    ops, errors = _build_ops(enabled)
-    errors += _check_toggles_driven(enabled)
-    if errors:
-        return CompileResult(False, None, [e.to_json() for e in errors], [], [])
+             handles=copy.deepcopy(snap[2]), authored_cells=set(snap[3]), firmware=fw)
 
     limit = project.effective_tick_chain_limit
     for i in range(start, len(enabled)):
@@ -649,7 +710,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
             _check_tick_chain(before, data, limit)
         except RecipeError as e:
             e.op_id = e.op_id or ops[i].spec.id
-            return CompileResult(False, None, [e.to_json()], [], [])
+            return CompileResult(False, None, [e.to_json()], [], [], firmware=fw)
         cache[_prefix_key(project.base_sha256, enabled[:i + 1], project.tick_chain_limit)] = (
             data, _snapshot(ctx))
 

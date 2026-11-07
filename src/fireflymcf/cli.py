@@ -1269,9 +1269,10 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                           if next((s.type for s in project.ops if s.id == i), None)
                           not in user_types]
     if builtin_unverified and not args.allow_unverified:
-        msg = ("UNVERIFIED: op(s) %s have never run on a coach. Nothing written. If the owner "
-               "agrees to be the first, rebuild with --allow-unverified and tell them which "
-               "(`fireflymcf ops NAME` has each op's status)." % ", ".join(builtin_unverified))
+        msg = ("UNVERIFIED: op(s) unverified on hardware for firmware %s: %s have never run on "
+               "a coach on this firmware. Nothing written. If the owner agrees to be the first, "
+               "rebuild with --allow-unverified and tell them which (`fireflymcf ops NAME` has "
+               "each op's status)." % (result.firmware, ", ".join(builtin_unverified)))
         if args.json:
             print(json.dumps({"ok": False, "unverified": builtin_unverified,
                               "errors": [{"op_id": None, "code": "UNVERIFIED_OPS",
