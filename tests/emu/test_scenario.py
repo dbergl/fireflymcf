@@ -169,13 +169,16 @@ def test_supported_136_stock_and_builds(mcf_136):
     assert ok and reason == "supported: 13.6"
 
 
-def test_unsupported_build_not_emulated(mcf_1123, mcf_147):
+def test_supported_147_stock(mcf_147):
     from fireflymcf.emu.scenario import supported
-    for img in (mcf_1123, mcf_147):
-        ok, reason = supported(img)
-        assert not ok
-        assert reason.startswith("not emulated: LCD firmware ")
-        assert "13.6 only" in reason
+    assert supported(mcf_147) == (True, "supported: 14.7")
+
+
+def test_unsupported_build_not_emulated(mcf_1123):
+    from fireflymcf.emu.scenario import supported
+    ok, reason = supported(mcf_1123)
+    assert not ok
+    assert reason == "not emulated: Lyra 11v23 GuiCode + LCD cbed1028d988 (13.6, 14.7)"
     with pytest.raises(ScenarioError, match="not emulated"):
         Scenario(mcf_1123)
     ok, reason = supported(b"not an mcf")

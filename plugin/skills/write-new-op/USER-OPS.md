@@ -146,7 +146,7 @@ class MyOp(UserOp):
   Give any op whose effect reaches the G12 the `--g12` acceptance whatever the engine asks.
 - `verify --emulate --project` runs each op's `emu_test.py` and records the result in the
   build's sidecar under the op's type: `passed`, `failed` with its reason, or `not emulated` with
-  its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 only). It
+  its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 and 14.7). It
   needs `--allow-user-ops`, because the test is the author's code, but not the G12 acceptance:
   emulation touches no hardware. A failing test is reported; it never stops the image being
   written. A gate failure (expected bytes, replay, touches, `verify`) does.
@@ -168,7 +168,8 @@ class MyOp(UserOp):
 `emu_test.py` defines `scenario(s)`; `s` is a `fireflymcf.emu.scenario.Scenario` on the built
 image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page=)`,
 `s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`,
-`s.set_g12_selector(selector, value)`, `s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
+`s.set_g12_selector(selector, value)`, `s.set_g12_output(instance, level)`,
+`s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
 `s.screen`, `s.page`, `s.control_box(control)`, `s.screenshot(path)` and `s.image` are its
 surface (a name starting with `_` is not); its docstrings are the reference. Anything that raises fails the test with its line.
 Write it first and run it on the image without the op: it must fail there. Assert only what the op

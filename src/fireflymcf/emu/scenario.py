@@ -29,7 +29,7 @@ screen is a candidate of that wtype-6 switch (`layout._screen_switch_record`, lo
 structurally), so the slot it carries (`value_slot`, 2 on 13.6 -> SRAM `0x2003A1FC`, u8, through
 `layout.variable_register`) holds the id of the screen drawn, and `layout.screen_object_map`
 maps that id to its page. (`GuiCodeState+0x20A`, the navigation byte, is not it: it stays 0 while
-the terms page, screen 96, is up.) The emulator gate is 13.6-only.
+the terms page, screen 96, is up.) The emulator gate accepts 13.6 and 14.7 (`supported`).
 
 **Pages are screen ids, not header text.** A header rename is the commonest user edit, so HOME
 is screen 0 whatever its title says. The rail pages are screens 0-4 (the screen switch is by
@@ -38,8 +38,9 @@ Options" tab's touch id `MAIN_OPTIONS_ID`. The names HOME, ELECTRICAL, LIGHTS, C
 SETTINGS, OPTIONS and any header the image draws are aliases resolving to those screens.
 
 **Navigation** (`goto`) knows the rail and OPTIONS, all without reading a caption:
-* the rail: the object on HOME whose touch regions `navmap` routes to screens 1-3; its five
-  regions top to bottom are screens 0-4 (13.6: ids `0x7D0`-`0x7D3`, `0x838`);
+* the rail: the innermost object on the page showing whose touch regions, its switch arms'
+  included, `navmap` routes to screens 1-3; its five regions top to bottom are screens 0-4
+  (13.6 and 14.7: ids `0x7D0`-`0x7D3`, `0x838`; on 14.7 `0x7D1` is a switch arm's, `_rail_ids`);
 * OPTIONS: SETTINGS, hold (`FLOORPLAN_HOLD_S`; ~3.2 s on the panel, `EMULATOR-NOTES.md`) the touch
   region around the floorplan-name switch (`options._find_floorplan_switch`) -> ADDITIONAL OPTIONS,
   touch id `PROCEED_ID` -> FLOORPLAN SELECTION, touch id `MAIN_OPTIONS_ID` -> OPTIONS. Each step
@@ -56,7 +57,6 @@ Finding 83), so `tap` presses, holds for `max(hold_s, PRESS_S)`, releases, and r
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import struct
 import tempfile
@@ -103,37 +103,23 @@ class ScenarioError(Exception):
     """A scenario step could not be carried out (unknown control, no path, timeout, fault)."""
 
 
-# What the emulator models: 13.6's LCD firmware (section 0), identified by name and sha256 (no
-# op touches it, so a compiled build keeps it), and its GuiCode section's name (which carries the
-# version, "Lyra 13v6 GuiCode"). 11.23 and 14.7 share one other LCD firmware (sha256 cbed1028...).
-SUPPORTED_LCD_NAME = "LCD Firmware"
-SUPPORTED_LCD_SHA256 = "a55344f9b224f917b5bf16dec752224f31df9d6beb0ef2b944f2c215edc49b87"
-SUPPORTED_GUICODE_NAME = "Lyra 13v6 GuiCode"
+# What the emulator models, by `firmware.identify` (GuiCode name and LCD firmware sha256
+# together; no op touches either, so a compiled build keeps its stock's identity). 14.7 runs the
+# LCD firmware 11.23 also runs (sha256 cbed1028...); 14.7 is accepted on what
+# tests/emu/test_scenario147.py shows: boot, the five rail pages, a tap that sends on the bus, a
+# G12 status that reaches its slot and repaints. 11.23 has not been shown and stays refused.
+EMULATED = ("13.6", "14.7")
 
 
 def supported(image: bytes) -> tuple[bool, str]:
-    """Whether the emulator models this image: 13.6 only. Anything else is `not emulated`, never
-    a pass."""
-    from ..container import parse_container
+    """Whether the emulator models this image: identified 13.6 or 14.7. Anything else (11.23,
+    a mixed or unknown pair, an unreadable file) is `not emulated`, never a pass."""
+    from .. import firmware
 
-    def refuse(what: str) -> tuple[bool, str]:
-        return False, (f"not emulated: LCD firmware {what} is not one the emulator models "
-                       "(13.6 only)")
-
-    try:
-        secs = parse_container(bytes(image)).sections
-    except ValueError as e:
-        return refuse(f"unreadable ({e})")
-    lcd = next((s for s in secs if s.name == SUPPORTED_LCD_NAME), None)
-    if lcd is None:
-        return refuse("missing")
-    digest = hashlib.sha256(bytes(image)[lcd.offset:lcd.offset + lcd.length]).hexdigest()
-    if digest != SUPPORTED_LCD_SHA256:
-        return refuse(f"{lcd.name} sha256 {digest[:12]}")
-    code = [s.name for s in secs if s.name.endswith("GuiCode")]
-    if code != [SUPPORTED_GUICODE_NAME]:
-        return refuse(f"{lcd.name} with GuiCode {code[0] if code else 'missing'!r}")
-    return True, "supported: 13.6"
+    fw = firmware.identify(bytes(image))
+    if fw in EMULATED:
+        return True, f"supported: {fw}"
+    return False, f"not emulated: {firmware.describe(bytes(image))} ({', '.join(EMULATED)})"
 
 
 @dataclass(frozen=True)
@@ -203,28 +189,48 @@ class Scenario:
         hits = {r.screen for r in navmap.routes(self.image) if r.touch_id == touch_id}
         return hits.pop() if len(hits) == 1 else None
 
-    def _rail_ids(self, regions: list | None = None) -> dict[int, int]:
-        """{screen 0-4: rail touch id}, found structurally: the object whose touch regions
-        `navmap` routes to screens 1, 2 and 3 is the rail. Screens 1-3 are the regions routed
-        to them; HOME (0) is the rail's top region and SETTINGS (4) its bottom one (their taps
-        are stores `navmap` does not resolve, so their ids come from their place on the rail).
+    def _rail_ids(self, root: int | None = None,
+                  slot_values: dict | None = None) -> dict[int, int]:
+        """{screen 0-4: rail touch id}, found structurally: the innermost object whose touch
+        regions `navmap` routes to screens 1, 2 and 3 (one each) is the rail. Screens 1-3 are
+        the regions routed to them; HOME (0) is the rail's top region and SETTINGS (4) its
+        bottom one (on 13.6 their taps are stores `navmap` does not resolve, so their ids come
+        from their place on the rail).
+
+        A region belongs to every object on its walk path, not only the object whose record it
+        is: on 14.7 the rail (object 343) carries a type-6 switch (`value_slot` 165) whose arm,
+        object 1, holds ELECTRICAL's region (`0x7D1`), while on 13.6 all five regions are the
+        rail object's own records. Of the objects that qualify the one with the fewest regions
+        is the rail (an enclosing page root holds the rail's regions and more); two different
+        smallest ones are ambiguous and nothing is returned.
+
         The rail may carry more than five icons (`show_nav_slides_icon` adds a sixth, between
-        CLIMATE and SETTINGS), and it sits under a variant switch, so `regions` should be the
-        LIVE walk of a rail page (`goto` passes the page showing); without it, HOME's static
-        walk is used, which takes the switch's base arm. Empty if not found."""
+        CLIMATE and SETTINGS), and it sits under a variant switch, so `root` should be a rail
+        page walked LIVE (`goto` passes the page showing and the slot values now); without it,
+        HOME's static walk is used, which takes each switch's base arm. Empty if not found."""
         from .. import navmap
 
-        if regions is None:
-            home = self._screen_map.get(0)
-            if home is None:
+        if root is None:
+            root = self._screen_map.get(0)
+            if root is None:
                 return {}
-            regions = self._regions(self._screen.walk(home))
+        trace: list = []
+        placed = self._screen.walk(root, slot_values=slot_values, trace=trace)
+        owners: dict[int, set] = {}
+        for key, _obj, _ri, rec, *_ in trace:
+            if rec.wtype == 12:
+                owners.setdefault(rec.offset, set()).update(o for o, _ in key)
+        regions = [(q, *r) for q, r in zip((q for q in placed if q.wtype == 12),
+                                           self._regions(placed))]
         routes = {}
         for r in navmap.routes(self.image):
             routes.setdefault(r.touch_id, set()).add(r.screen)
-        objs = {o for _, t, o in regions if routes.get(t, set()) & {1, 2, 3}}
+        objs = {o for q, _, t, _ in regions if routes.get(t, set()) & {1, 2, 3}
+                for o in owners.get(q.record_offset, ())}
+        found = []
         for obj in sorted(objs):
-            mine = sorted((b[1], t) for b, t, o in regions if o == obj)
+            mine = sorted({(b[1], t) for q, b, t, _ in regions
+                           if obj in owners.get(q.record_offset, ())})
             if len(mine) < 5:
                 continue
             ids = {}
@@ -236,8 +242,12 @@ class Scenario:
             else:
                 top, bottom = mine[0][1], mine[-1][1]
                 if top not in ids.values() and bottom not in ids.values():
-                    return {0: top, **ids, 4: bottom}
-        return {}
+                    found.append((len(mine), {0: top, **ids, 4: bottom}))
+        if not found:
+            return {}
+        least = min(n for n, _ in found)
+        rails = [r for n, r in found if n == least]
+        return rails[0] if all(r == rails[0] for r in rails) else {}
 
     # -- static reads of the image -------------------------------------------------------
     def _page_headers(self) -> dict[int, str]:
@@ -433,7 +443,7 @@ class Scenario:
             return
         root = self._root()
         regions = self._regions(self._placed(root)) if root is not None else []
-        live = self._rail_ids(regions) if root is not None else {}
+        live = self._rail_ids(root, self._slot_values()) if root is not None else {}
         rail_ids = live or self._rail
         rail = targets & set(rail_ids)
         on_page = {t for _, t, _ in regions}
@@ -649,6 +659,28 @@ class Scenario:
             g12.set_cell(selector, value)
         else:
             g12.sel[selector] = value
+
+    def set_g12_output(self, instance: int, level: int) -> None:
+        """Switch the emulated G12's output `instance` to `level` (0 off, 1-200) by itself, as
+        a wall switch wired to the G12 would: the G12 reports it the way it reports any change
+        (1FEDA at once, then on its own cadence; `g12out.py`), and the panel learns it only
+        from that report. Nothing is sent from the panel. Needs the G12 that runs the image's
+        own logic (`demo_network` builds it whenever the image carries a G12 section)."""
+        from .g12out import FULL, SET
+
+        if not self._booted:
+            raise ScenarioError("boot() the scenario before switching a G12 output")
+        if not 0 <= level <= FULL:
+            raise ScenarioError(f"output level {level} is not 0-{FULL}")
+        outputs = getattr(self._g12(), "outputs", None)
+        if outputs is None:
+            raise ScenarioError("no emulated G12 drives outputs on this bus")
+        if not outputs.owns(instance):
+            raise ScenarioError(f"G12 output {instance} does not exist (the G12 drives "
+                                f"{min(outputs.out)}-{max(outputs.out)})")
+        # A DC_DIMMER_COMMAND_2 that only the G12 sees (not put on the bus): set level.
+        outputs.command(bytes([instance, 0xFF, level, SET, 0xFF, 0xFF, 0xFF, 0xFF]),
+                        external=False)
 
     def frames(self, *, dgn: int | None = None, sa: int | None = PANEL_SA,
                since: float = 0.0) -> list[Frame]:

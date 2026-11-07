@@ -109,6 +109,7 @@ not yet booted (`help()` on that class is the full reference):
 | `s.set_tank_raw(sensor, raw)` | the G12's raw tank input (1 fresh, 2 grey, 3 black, 4 grey 2; high is empty), read once a second |
 | `s.g12_selector(sel)` | the emulated G12's stored value for a config selector (None: unset) |
 | `s.set_g12_selector(sel, value)` | give the G12 a stored value (before `boot()`: the coach comes up that way); the panel learns it from the G12's report, so run a few seconds |
+| `s.set_g12_output(inst, level)` | the G12 switches its output `inst` (1-44) to `level` (0 off, 1-200) by itself, as a wall switch would, and reports it on 1FEDA; the panel sends nothing |
 | `s.frames(dgn=, sa=0x9F, since=)` | frames on the bus (`.t`, `.can_id`, `.dgn`, `.sa`, `.data`); `sa=None` for every sender |
 | `s.read_mem(addr, n)` | emulated RAM, e.g. a cell your routine owns |
 | `s.screen`, `s.page`, `s.control_box(c)` | the screen id and header showing; a control's touch box |
@@ -148,7 +149,7 @@ config write on selector `0x9B` at boot (observed in the emulator, not checked a
 capture). "Nothing was sent" is false on stock; a test must assert only what the op changes.
 
 **What emulated means.** The emulator runs the panel's own code against a simulated G12 and RV-C
-network on 13.6 only. Any other build reports `not emulated: <reason>`, never a pass. It is not
+network on 13.6 and 14.7. Any other build reports `not emulated: <reason>`, never a pass. It is not
 the coach: a pass says the panel does what the test asserts against simulated peers. When a coach
 capture disagrees, the capture wins.
 

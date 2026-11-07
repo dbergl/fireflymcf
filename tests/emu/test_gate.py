@@ -63,10 +63,10 @@ def test_worker_crash_is_failure(mcf_136, tmp_path):
     assert res.status == "failed" and "worker" in res.reason
 
 
-def test_unsupported_build_not_emulated(mcf_147, tmp_path):
+def test_unsupported_build_not_emulated(mcf_1123, tmp_path):
     p = _scn(tmp_path, "s.boot()\n")
-    res = gate.run_scenario_file(mcf_147, p, timeout_s=60)
-    assert res.status == "not emulated" and "13.6 only" in res.reason
+    res = gate.run_scenario_file(mcf_1123, p, timeout_s=60)
+    assert res.status == "not emulated" and "(13.6, 14.7)" in res.reason
 
 
 def test_verify_emulate_writes_sidecar(mcf_136, tmp_path, capsys):
