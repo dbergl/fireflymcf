@@ -38,7 +38,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 
-from . import celltables, guidata, memo, patch, relocate, status_map, theme
+from . import celltables, firmware, guidata, memo, patch, relocate, status_map, theme
 
 DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 
@@ -54,7 +54,6 @@ SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
 # The G12 drives 44 outputs (`g12_config`: 8 relay + 12 half-bridge + 24 high-current).
 PIN_MIN, PIN_MAX = 1, 44
 
-GUIDATA_CHECKSUM = "section-checksum:Lyra 13v6 GuiData"
 GUICODE_CHECKSUM = "section-checksum:Lyra 13v6 GuiCode"
 
 
@@ -205,7 +204,7 @@ def set_filter_instance(data: bytes, var: int, instance: int) -> tuple:
     edits = [relocate.Edit(off, old, bytes([instance]), "filter-instance",
                            f"variable-table entry {var} +{FILTER_INSTANCE_FIELD} instance "
                            f"{old[0]} -> {instance}")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -322,7 +321,7 @@ def retarget_filter(data: bytes, var: int, dgn: int, mode: int, payload_byte: in
     edits = [relocate.Edit(off, old, bytes(new), "filter-dgn",
                            f"variable-table entry {var}: DGN {entry.dgn_low:#06x} -> {dgn:#07x}, "
                            f"mode {mode} ({LIVE_MODES[mode]}) of payload[{payload_byte}]")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 def pin_filter_instance(data: bytes, var: int, instance: int, *,
@@ -397,7 +396,7 @@ def pin_filter_instance(data: bytes, var: int, instance: int, *,
                            f"variable-table entry {var} ({dgn:#07x}) +{FILTER_INSTANCE_FIELD}: "
                            f"{'any instance' if from_instance is None else f'{from_instance:#04x}'} -> payload[{old[FILTER_COMPARE_FIELD] & 0xF}] == "
                            f"{instance:#04x}")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -442,7 +441,7 @@ def set_extract_mode(data: bytes, var: int, mode: int) -> tuple:
     out[off] = new_byte
     edits = [relocate.Edit(off, old, bytes([new_byte]), "var-extract-mode",
                            f"var {var} extraction mode {was} -> {mode}")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -477,7 +476,7 @@ def index_cell(data: bytes, index: int, cell: int) -> tuple:
     edits = [relocate.Edit(off, old, bytes(out[off:off + 4]), "cell-table-entry",
                            f"+0x44BC8[{index}] {struct.unpack('<I', old)[0]:#010x} -> "
                            f"{cell:#010x}")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -527,7 +526,7 @@ def set_variable_type(data: bytes, index: int, vtype: int) -> tuple:
     out[off] = vtype
     edits = [relocate.Edit(off, old, bytes([vtype]), "variable-type",
                            f"+{type_off:#x}[{index}] type {data[off]} -> {vtype}")]
-    return _reseal_with(bytes(out), edits, [GUIDATA_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guidata_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
