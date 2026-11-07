@@ -12,6 +12,8 @@ THEME_PARAMS = {"colours": {"bg": [10, 20, 30]}}
 # (`fireflymcf labels MCF --containing TEXT`).
 RENAME_136 = {"object": 5, "old": "ELECTRICAL", "new": "ELECTRICAX"}
 RENAME_147 = {"object": 11, "old": "LIGHTS", "new": "LIGHTX"}
+# Object 240 is 14.7's Star Link button (group 17, one toggle).
+GESTURE_147 = {"target": 240, "kind": "hold_to_toggle"}
 USEROPS = Path(__file__).resolve().parent / "fixtures" / "userops"
 
 
@@ -114,13 +116,14 @@ def test_a_cached_prefix_does_not_let_an_unsupported_op_through(mcf_147, monkeyp
     """A prefix compiled while an op was listed for 14.7 stays in the cache; once the op is no
     longer listed, the cached prefix must not carry it past the gate."""
     cache = {}
-    cls = recipe.REGISTRY["rename_label"]
+    # set_gesture lists only 13.6 (its 14.7 emulator test fails: tests/emu/test_ops147.py)
+    cls = recipe.REGISTRY["set_gesture"]
     with monkeypatch.context() as m:
         m.setattr(cls, "firmwares", frozenset({"13.6", "14.7"}))
-        assert recipe.compile_cached(_project(mcf_147, [("r", "rename_label", RENAME_147)]),
+        assert recipe.compile_cached(_project(mcf_147, [("r", "set_gesture", GESTURE_147)]),
                                      mcf_147, cache).ok
     assert cache
-    res = recipe.compile_cached(_project(mcf_147, [("r", "rename_label", RENAME_147)]),
+    res = recipe.compile_cached(_project(mcf_147, [("r", "set_gesture", GESTURE_147)]),
                                 mcf_147, cache)
     assert [(e["code"], e["op_id"]) for e in res.errors] == [("UNSUPPORTED_FIRMWARE", "r")]
 

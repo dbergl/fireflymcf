@@ -92,6 +92,10 @@ class RenameLabel(Op):
     Returns sealed image with the label field updated (and, on a grow, the image
     relocated) and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "object": {"type": "integer", "description": "stock object index holding the label"},
@@ -228,6 +232,10 @@ class MoveElement(Op):
     `CompileResult.shifts`, the sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
     the op is the form that does.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -338,6 +346,10 @@ class SetCornerRadius(Op):
     The object is drawn wherever it is attached: an object shared by several pages changes on
     all of them.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -468,6 +480,10 @@ class SetRecordColor(Op):
     `set_theme` runs after it and remaps an inline colour equal to a theme colour, as it does
     every inline field.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -583,6 +599,10 @@ class FillToCapsule(Op):
       NOT_A_FILL -- the record is not wtype 4
       POINTER_INSIDE / RELOCATE_REFUSED -- as `set_record_color`
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -658,6 +678,10 @@ class MoveAttach(Op):
 
     Returns sealed image with geometry fields updated and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "page": {"type": ["string", "integer"],
@@ -842,6 +866,10 @@ class SetIcon(Op):
 
     Returns sealed image with icon record and/or caption updated and edits logged.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -989,6 +1017,10 @@ class Recolor(Op):
 
     Returns sealed image with box fill colour repointed and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "object": {"type": ["integer", "object"],
@@ -1381,6 +1413,10 @@ class DropFromMaster(Op):
     produces. The build's capability gate then surfaces the intended loss instead of a
     repurposed group silently eating a real control.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = True     # FLASHED AND VERIFIED 2026-09-14
     PARAMS = {
         "properties": {
@@ -2854,6 +2890,10 @@ class InstallGlyph(Op):
     checksum word -- the documented trap (`CLAUDE.md` "Traps"). `-4` lands the
     insertion just before that word instead.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "slot": {"type": "integer", "description": "icon/value font slot; must be a 4bpp font"},
@@ -3296,6 +3336,10 @@ class RemoveRecords(Op):
     region were removed from the compact AES card (object 1427) with the gear button's offset
     restored; the card draws without it and the moved control works on the settings page.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = True
 
     PARAMS = {
@@ -4752,6 +4796,10 @@ class RemoveControl(Op):
     round-trip has not yet confirmed (the discipline `CLAUDE.md` calls out
     repeatedly: a defensible negative, not a fitted claim of "done").
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False    # off-canvas parking has never been flashed; the
                                  # manifest flags it so the first flash knows to check
 
@@ -5930,6 +5978,10 @@ class AppendFilter(Op):
     Error codes:
       APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
 
     # COACH-VERIFIED 2026-09-22: var 298 appended for 0x1FEA0,
     # the panel booted with the 299-entry table, and the HOME readout followed injected payload[0]
