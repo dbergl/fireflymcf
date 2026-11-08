@@ -555,7 +555,7 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
           "capability gate: gained %s, ops declared %s" % (
               sorted(out_caps - stock_caps), sorted(gained_want)))
 
-    manifest = [o.verify(data, ctx) for o in ops]
+    manifest = [_verify(o, data, ctx) for o in ops]
     res, ch = patch.reseal(data)
     _gate(res == data, "NOT_SEALED", "image not sealed after verify: %s" % ch)
     fw = ctx.firmware
@@ -565,6 +565,30 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
     return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw)
+
+
+def _verify(o, data: bytes, ctx: Ctx) -> str:
+    """`o.verify`, with a per-tick hook or chain that no longer proves out (`followchannel`'s
+    `FollowChannelError`, e.g. `hooklocate.HookNotFound`) refused as HOOK_REFUSED. The hook is
+    whole-image state another op may have rewritten, so it is refused as a gate is: a failed
+    CompileResult in a build that holds a user op, raised otherwise (`_finish_or_refuse`)."""
+    try:
+        return o.verify(data, ctx)
+    except followchannel.FollowChannelError as e:
+        raise GateError("HOOK_REFUSED", "%s verify: the per-tick hook does not prove out: %s"
+                        % (o.spec.id, e), op_id=o.spec.id) from e
+
+
+def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
+    """`o.apply` plus the tick-chain check, with a per-tick hook that does not prove out
+    (`FollowChannelError` escaping an op) refused as DETOUR_REFUSED, naming the op."""
+    try:
+        out = o.apply(data, ctx)
+    except followchannel.FollowChannelError as e:
+        raise RecipeError("DETOUR_REFUSED", "%s: the per-tick hook does not prove out: %s"
+                          % (o.spec.id, e), op_id=o.spec.id) from e
+    _check_tick_chain(data, out, limit)
+    return out
 
 
 def _finish_or_refuse(project: Project, stock: bytes, data: bytes, ctx: Ctx,
@@ -627,9 +651,7 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
     limit = project.effective_tick_chain_limit
     for o in ops:
         try:
-            before = data
-            data = o.apply(data, ctx)
-            _check_tick_chain(before, data, limit)
+            data = _apply(o, data, ctx, limit)
         except RecipeError as e:
             e.op_id = e.op_id or o.spec.id
             return CompileResult(False, None, [e.to_json()], [], [], firmware=fw)
@@ -705,9 +727,7 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
     limit = project.effective_tick_chain_limit
     for i in range(start, len(enabled)):
         try:
-            before = data
-            data = ops[i].apply(data, ctx)
-            _check_tick_chain(before, data, limit)
+            data = _apply(ops[i], data, ctx, limit)
         except RecipeError as e:
             e.op_id = e.op_id or ops[i].spec.id
             return CompileResult(False, None, [e.to_json()], [], [], firmware=fw)

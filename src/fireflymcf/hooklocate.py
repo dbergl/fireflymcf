@@ -138,7 +138,7 @@ def _bl_callers(g: bytes, base: int, target: int) -> list[int]:
 
 @memo.content_cached(copy=None)
 def _locate(data: bytes, limit: int, lower: int | None, config_off: int, default_base: int,
-            entry1_window: int, callee_window: int, link_prologue: str,
+            entry1_vector: int, entry1_window: int, callee_window: int, link_prologue: str,
             link_epilogue: str) -> Hook:
     # Every module constant comes in as an argument: the cache is keyed on them (`memo`).
     g, base = _section(data, default_base)
@@ -146,8 +146,8 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int, default
     proof = []
 
     # 1. entry1 and its first bl.
-    e1 = _vector(g, base, ENTRY1_VECTOR, "GuiCode_entry1")
-    proof.append(f"GuiCode header +{ENTRY1_VECTOR:#x} = {e1 | 1:#x}: GuiCode_entry1, the LCD's "
+    e1 = _vector(g, base, entry1_vector, "GuiCode_entry1")
+    proof.append(f"GuiCode header +{entry1_vector:#x} = {e1 | 1:#x}: GuiCode_entry1, the LCD's "
                  "per-tick call")
     ins = _dis(g, base, e1, entry1_window)
     if not ins or not _PUSH_LR.fullmatch(ins[0][1]):
@@ -231,7 +231,7 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int, default
 
 def _locate_now(data: bytes, limit: int, lower: int | None) -> Hook:
     return _locate(data, limit, lower, config.CONFIG_BUFFER_OFFSET, theme.GUICODE_BASE_DEFAULT,
-                   ENTRY1_WINDOW, CALLEE_WINDOW, LINK_PROLOGUE, LINK_EPILOGUE)
+                   ENTRY1_VECTOR, ENTRY1_WINDOW, CALLEE_WINDOW, LINK_PROLOGUE, LINK_EPILOGUE)
 
 
 def locate_hook(data: bytes, *, stock: bytes | None = None, limit: int = 64) -> Hook:
@@ -263,9 +263,10 @@ def stock_append_point(stock: bytes) -> int:
 
 
 @memo.content_cached
-def _host_api_cells(data: bytes, window: int, default_base: int) -> dict[int, int]:
+def _host_api_cells(data: bytes, vector: int, window: int,
+                    default_base: int) -> dict[int, int]:
     g, base = _section(data, default_base)
-    e0 = _vector(g, base, ENTRY0_VECTOR, "GuiCode_entry0")
+    e0 = _vector(g, base, vector, "GuiCode_entry0")
     base_reg, cells, pend, regs = None, {}, {}, {}
     for a, t in _dis(g, base, e0, window):
         m = _MOV_FROM_R0.fullmatch(t)
@@ -298,4 +299,4 @@ def host_api_cells(data: bytes) -> dict[int, int]:
     """`{host API offset: SRAM cell}` from GuiCode_entry0's copies. `+0x04` is the
     group-variant setter's cell, `+0x08` the CAN-frame sender's."""
     _require_capstone()
-    return _host_api_cells(data, ENTRY0_WINDOW, theme.GUICODE_BASE_DEFAULT)
+    return _host_api_cells(data, ENTRY0_VECTOR, ENTRY0_WINDOW, theme.GUICODE_BASE_DEFAULT)
