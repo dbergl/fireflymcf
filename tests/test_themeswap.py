@@ -97,11 +97,11 @@ def test_a_second_swap_refuses(mcf_136):
         themeswap.plan(out, HARVEST)
 
 
-@pytest.mark.parametrize("build", ["1123", "147"])
-def test_other_builds_refuse(build, request):
-    data = request.getfixturevalue(f"mcf_{build}")
-    with pytest.raises(themeswap.ThemeSwapError):
-        themeswap.plan(data, HARVEST)
+def test_other_builds_refuse(mcf_1123):
+    """11.23 has no theme-init in either skeleton's shape (`plan` on 14.7 is
+    `test_colour_locate.test_plan_on_147_patches_the_located_sites`)."""
+    with pytest.raises(themeswap.ThemeSwapError, match="theme-init"):
+        themeswap.plan(mcf_1123, HARVEST)
 
 
 def test_unknown_role_refuses(mcf_136):

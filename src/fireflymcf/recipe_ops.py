@@ -11930,7 +11930,7 @@ class SetTheme(Op):
                 if themeswap.rgb_int(pair[0]) in themeswap.STOCK.values():
                     raise themeswap.ThemeSwapError("extra %r is a role's stock colour; set the "
                                                    "role in colours" % (pair[0],))
-            if self.tank_wells is not None and self.tank_wells not in themeswap.STATIC_INDEX:
+            if self.tank_wells is not None and self.tank_wells not in themeswap.TANK_WELL_ROLES:
                 raise themeswap.ThemeSwapError("tank_wells wants a role, got %r" % self.tank_wells)
         except themeswap.ThemeSwapError as e:
             raise RecipeError("BAD_PARAMS", str(e), op_id=self.spec.id)

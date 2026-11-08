@@ -283,3 +283,167 @@ def test_colour_decode_refuses_a_reader_of_another_shape(mcf_136):
     out[off:off + 4] = bytes.fromhex("00bf00bf")
     with pytest.raises(theme.ColourDecodeError, match="mode-3 reader 0x252140"):
         theme.colour_decode(bytes(out))
+
+
+# ------------------------------------------------------------------------ the theme-init block
+#
+# The theme-init (13.6 `FUN_00247BF8`) is 22 straight-line instructions, 13.6
+# `0x248316..0x24834C`, 14.7 `0x248386..0x2483BC` byte for byte; 11.23 has no match. The
+# expected values are measured from the corpus (2026-11-07) and appear only here:
+#
+# | | 13.6 | 14.7 |
+# |---|---|---|
+# | literals bg/panel/button | `0x2485CC/D8/DC` | `0x24863C/48/4C` |
+# | chains header/active/rail | `0x24831E/0x248336/0x248340` | `0x24838E/0x2483A6/0x2483B0` |
+# | indices bg/header/panel/rail/button/active/well | 3/4/8/10/161,15/35/161 | 8/9/1/15/146,31/30/146 |
+
+THEME_SITES = {
+    "13.6": {"lit_bg": 0x2485CC, "lit_panel": 0x2485D8, "lit_button": 0x2485DC,
+             "header_chain": 0x24831E, "active": 0x248336, "rail_chain": 0x248340},
+    "14.7": {"lit_bg": 0x24863C, "lit_panel": 0x248648, "lit_button": 0x24864C,
+             "header_chain": 0x24838E, "active": 0x2483A6, "rail_chain": 0x2483B0},
+}
+THEME_INDICES = {
+    "13.6": {"bg": (3,), "header": (4,), "panel": (8,), "rail": (10,), "button": (161, 15),
+             "active": (35,)},
+    "14.7": {"bg": (8,), "header": (9,), "panel": (1,), "rail": (15,), "button": (146, 31),
+             "active": (30,)},
+}
+THEME_WELL = {"13.6": 161, "14.7": 146}
+THEME_BLOCK = {"13.6": (0x248316, 0x24834C), "14.7": (0x248386, 0x2483BC)}
+STOCK_THEME = {"bg": 0x15183A, "panel": 0x272862, "button": 0x4151A3,
+               "header": 0xBE1E2D, "rail": 0x7C151D, "active": 0x00AEEF}
+
+
+@pytest.mark.parametrize("version", ["13.6", "14.7"])
+def test_theme_init_located(corpus, version):
+    ti = themeswap.locate_theme_init(corpus[version]["mcf"])
+    assert ti.sites == THEME_SITES[version]
+    assert ti.indices == THEME_INDICES[version]
+    assert ti.well_index == THEME_WELL[version]
+    assert ti.values == STOCK_THEME
+    assert ti.form == "stock"
+    proof = dict(ti.proof)
+    start, end = THEME_BLOCK[version]
+    assert proof["block start"] == start and proof["block end"] == end
+    addrs = [a for label, a in ti.proof if label.startswith("insn ")]
+    assert len(addrs) == 22 and addrs[0] == start and addrs[-1] < end
+    # every role cell is SRAM, and a type-10 entry of the code-cited variable table
+    gs, _ = guidata.guidata_extent(corpus[version]["mcf"])
+    dptr, toff = guidata.find_variable_tables(corpus[version]["mcf"])
+    data = corpus[version]["mcf"]
+    for role, cells in ti.cells.items():
+        for cell, idx in zip(cells, ti.indices[role]):
+            assert theme.SRAM_LOW <= cell < theme.SRAM_HIGH
+            assert struct.unpack_from("<I", data, gs + dptr + 4 * idx)[0] == cell
+            assert data[gs + toff + idx] == 10
+
+
+def test_theme_init_136_is_the_block_the_patch_was_traced_on(mcf_136):
+    """On 13.6 the located sites are where the removed constants pointed: the theme-init's
+    stock instruction bytes are at them."""
+    ti = themeswap.locate_theme_init(mcf_136)
+    assert _code_at(mcf_136, ti.sites["header_chain"], 8) == \
+        themeswap.enc_dp_imm(False, 2, 2, 0xA90000) + themeswap.enc_addw(2, 2, 0x5F3)
+    assert _code_at(mcf_136, ti.sites["rail_chain"], 8) == \
+        themeswap.enc_dp_imm(False, 3, 3, 0x3AC000) + themeswap.enc_addw(3, 3, 0x37A)
+    assert _code_at(mcf_136, ti.sites["active"], 4) == themeswap.enc_movw(1, 0xAEEF)
+
+
+def test_theme_init_147_is_136s_block(mcf_136, mcf_147):
+    a, b = THEME_BLOCK["13.6"], THEME_BLOCK["14.7"]
+    assert _code_at(mcf_136, a[0], a[1] - a[0]) == _code_at(mcf_147, b[0], b[1] - b[0])
+
+
+def test_theme_init_refuses_1123(mcf_1123):
+    with pytest.raises(themeswap.ThemeInitError, match="0 matches"):
+        themeswap.locate_theme_init(mcf_1123)
+
+
+def test_theme_init_refuses_a_mutated_chain(mcf_136):
+    """The header chain's `addw r2,r2,#0x5f3` (13.6 `0x248322`) gone: no skeleton matches."""
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    off = sec.offset + 0x248322 - theme.guicode_base(sec)
+    assert bytes(out[off:off + 4]) == themeswap.enc_addw(2, 2, 0x5F3)
+    out[off:off + 4] = bytes.fromhex("00bf00bf")                      # nop; nop
+    with pytest.raises(themeswap.ThemeInitError, match="0 matches"):
+        themeswap.locate_theme_init(bytes(out))
+    with pytest.raises(themeswap.ThemeSwapError, match="theme-init"):
+        themeswap.plan(bytes(out), {"bg": (1, 2, 3)})
+
+
+def test_theme_init_refuses_a_second_match(mcf_136):
+    """A copy of the block elsewhere (over the padding the literals follow) is ambiguous."""
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    base = theme.guicode_base(sec)
+    s, e = THEME_BLOCK["13.6"]
+    blk = bytes(out[sec.offset + s - base:sec.offset + e - base])
+    # a second copy right after the first: the PC-relative literals move by the copy's length,
+    # which the skeleton treats as a wildcard; the cells it then names are not checked first
+    dst = sec.offset + e - base
+    out[dst:dst + len(blk)] = blk
+    with pytest.raises(themeswap.ThemeInitError, match="2 matches"):
+        themeswap.locate_theme_init(bytes(out))
+
+
+def _rethemed(data):
+    p = themeswap.plan(data, {"bg": (33, 22, 17), "header": (176, 58, 28),
+                              "button": (166, 86, 38), "active": (200, 118, 22)})
+    from fireflymcf import patch
+    pt = patch.McfPatcher(data)
+    for off, old, new, note in p.edits:
+        pt.set_bytes(off, old, new, note)
+    return pt.build()[0], p
+
+
+def test_theme_init_rethemed_form(mcf_136):
+    """A re-themed image (chains rewritten as movw/movt, active as add.w/sub.w from the button)
+    is located by the second skeleton and replays the applied colours."""
+    out, p = _rethemed(mcf_136)
+    ti = themeswap.locate_theme_init(out)
+    assert ti.form == "rethemed"
+    assert ti.sites == THEME_SITES["13.6"]
+    assert ti.indices == THEME_INDICES["13.6"]
+    assert ti.values == p.applied
+    with pytest.raises(themeswap.ThemeSwapError, match="already re-themed"):
+        themeswap.plan(out, {"bg": (1, 2, 3)})
+
+
+@pytest.mark.skipif(not _GROWN_BUILDS, reason="research builds/ not linked")
+def test_theme_init_on_the_reference_builds():
+    """Every reference build is located; the ones that ran `set_theme` are in the re-themed
+    form and refuse a second theme with today's message, the rest are stock."""
+    forms = {}
+    for path in _GROWN_BUILDS:
+        data = path.read_bytes()
+        ti = themeswap.locate_theme_init(data)
+        assert ti.sites == THEME_SITES["13.6"], path.name
+        forms[path.name] = ti.form
+        if ti.form == "rethemed":
+            with pytest.raises(themeswap.ThemeSwapError, match="already re-themed"):
+                themeswap.plan(data, {"bg": (1, 2, 3)})
+        else:
+            assert ti.form == "stock" and ti.values == STOCK_THEME, path.name
+    assert "rethemed" in forms.values() and "stock" in forms.values()
+
+
+def test_plan_on_147_patches_the_located_sites(mcf_147):
+    """`plan` runs on 14.7 when called directly (the op stays 13.6-only for now): its GuiCode
+    edits are the located sites, and the tank wells are the located well index's."""
+    sec = theme.guicode_section(mcf_147)
+    base = theme.guicode_base(sec)
+    p = themeswap.plan(mcf_147, {"bg": (33, 22, 17), "panel": (61, 40, 29),
+                                 "button": (166, 86, 38), "header": (176, 58, 28),
+                                 "rail": (112, 40, 22), "active": (200, 118, 22)},
+                       tank_wells="panel")
+    code_edits = sorted(base + off - sec.offset for off, *_ in p.edits
+                        if sec.offset <= off < sec.offset + sec.length)
+    assert code_edits == sorted(THEME_SITES["14.7"].values())
+    assert p.wells == 5
+    assert themeswap._tank_fill_offsets(mcf_147)
+
+
+def test_tank_fill_offsets_136_unchanged(mcf_136):
+    assert len(themeswap._tank_fill_offsets(mcf_136)) == 3

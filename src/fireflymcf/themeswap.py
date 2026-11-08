@@ -28,8 +28,9 @@ stock colours show through:
    theme colours (the CLIMATE empty mode cells read entry 16). Its place and its 20 entries are
    read from the record decoder by `theme.colour_decode`; the words past it are not touched.
 
-Tank wells (wtype-32 fillB mode-7 idx 161) share the button colour's cell; `tank_wells`
-repoints them to another role's static index so an empty tank does not read as button-filled.
+Tank wells (wtype-32 fillB mode-7, 13.6 idx 161) share the button colour's first cell;
+`tank_wells` repoints them to another role's index so an empty tank does not read as
+button-filled. Both indices are read from the located block (`ThemeInit.indices`, `.well_index`).
 
 `extra` remaps stand-alone colours that only live inline or in the mode-6 palette (not in the
 theme-init): stock's own (`(27, 117, 188)`, the old Firefly blue, in palette entry 5) and the
@@ -38,15 +39,18 @@ SETUP body).
 
 Not touched: white (text and icons), the alarm red, the tank fill colours, bitmap images.
 
-Pinned to 13.6's GuiCode: every patched instruction and literal is asserted to hold its stock
-bytes first, and anything else refuses (`ThemeSwapError`).
+Located, not pinned (2026-11-07): `locate_theme_init` finds the block by its 22-instruction
+skeleton and reads the sites, cells and indices from it. 13.6 and 14.7 match (14.7
+`0x248386..0x2483BC`, the same bytes); 11.23 has none and refuses. The block must replay the
+six stock colours; an image `plan` has already re-themed matches the second skeleton
+(`movw`/`movt` chains) and refuses as already re-themed (`ThemeSwapError`).
 """
 from __future__ import annotations
 
 import struct
 from dataclasses import dataclass
 
-from . import guidata, records, theme
+from . import guidata, memo, records, theme
 
 RGB = tuple  # (r, g, b)
 
@@ -57,13 +61,8 @@ STOCK = {
 }
 ROLES = tuple(STOCK)
 
-# role -> the static mode-7 index whose cell holds that colour (tank_wells targets)
-STATIC_INDEX = {"bg": 3, "header": 4, "panel": 8, "rail": 10, "button": 161}
-TANK_WELL_INDEX = 161
-
-# Runtime addresses in the GuiCode section (mapped at 0x240000 on every build).
-_LIT_BG, _LIT_PANEL, _LIT_BUTTON = 0x2485CC, 0x2485D8, 0x2485DC
-_HEADER_CHAIN, _ACTIVE_MOVW, _RAIL_CHAIN = 0x24831E, 0x248336, 0x248340
+# The roles `tank_wells` may repoint the wells to (each the first cell of a theme-init store).
+TANK_WELL_ROLES = ("bg", "header", "panel", "rail", "button")
 
 # The mode-6 palette's offset and length come from the code (`theme.colour_decode`): 13.6
 # `0x90010010`, 20 entries, bounded by the next structure's literal `0x90010060` (2026-11-07).
@@ -71,6 +70,11 @@ _HEADER_CHAIN, _ACTIVE_MOVW, _RAIL_CHAIN = 0x24831E, 0x248336, 0x248340
 
 class ThemeSwapError(ValueError):
     pass
+
+
+class ThemeInitError(ThemeSwapError):
+    """The theme-init block was not found in either skeleton's shape, was found more than
+    once, or a store it makes is not to a type-10 colour cell."""
 
 
 # ----------------------------------------------------------------------- Thumb-2 encoders
@@ -117,12 +121,6 @@ def enc_movw(rd: int, imm16: int, top: bool = False) -> bytes:
 def enc_const(rd: int, value: int) -> bytes:
     """`movw rd, #lo; movt rd, #hi` -- any 32-bit constant in 8 bytes."""
     return enc_movw(rd, value & 0xFFFF) + enc_movw(rd, value >> 16, top=True)
-
-
-# The stock bytes each patch site must hold (encoded with the same encoders: a self-check).
-_STOCK_HEADER_CHAIN = enc_dp_imm(False, 2, 2, 0xA90000) + enc_addw(2, 2, 0x5F3)
-_STOCK_RAIL_CHAIN = enc_dp_imm(False, 3, 3, 0x3AC000) + enc_addw(3, 3, 0x37A)
-_STOCK_ACTIVE = enc_movw(1, 0xAEEF)
 
 
 def _dist(a: int, b: int) -> int:
@@ -173,6 +171,220 @@ def _guicode(data: bytes):
     sec = theme.guicode_section(data)
     base = theme.guicode_base(sec)
     return sec, base, (lambda addr: sec.offset + (addr - base))
+
+
+# ------------------------------------------------------------------- locating the theme-init
+
+# The theme-init's 22 instructions, as `(label, shapes)` per position: a shape is
+# `(mnemonic, operands)` with `L` a PC-relative literal load and `I` any immediate, so literal
+# displacements and immediates are wildcards and only mnemonics and registers are matched.
+# The stock form, 13.6 `0x248316..0x24834C` (`GUICODE.md` Finding 18):
+_SKELETON_STOCK = (
+    ("bg cell", (("ldr", "r3,L"),)), ("bg literal", (("ldr", "r2,L"),)),
+    ("bg store", (("str", "r2,[r3]"),)),
+    ("header cell", (("ldr", "r3,L"),)), ("header chain", (("add.w", "r2,r2,I"),)),
+    ("header chain 2", (("addw", "r2,r2,I"),)), ("header store", (("str", "r2,[r3]"),)),
+    ("panel cell", (("ldr", "r3,L"),)), ("panel literal", (("ldr", "r2,L"),)),
+    ("panel store", (("str", "r2,[r3]"),)),
+    ("button literal", (("ldr", "r3,L"),)), ("button cell", (("ldr", "r2,L"),)),
+    ("button store", (("str", "r3,[r2]"),)),
+    ("active cell", (("ldr", "r2,L"),)), ("active", (("movw", "r1,I"),)),
+    ("active store", (("str", "r1,[r2]"),)),
+    ("button cell 2", (("ldr", "r2,L"),)), ("button store 2", (("str", "r3,[r2]"),)),
+    ("rail chain", (("add.w", "r3,r3,I"),)), ("rail chain 2", (("addw", "r3,r3,I"),)),
+    ("rail cell", (("ldr", "r2,L"),)), ("rail store", (("str", "r3,[r2]"),)),
+)
+# The form `plan` leaves: each 8-byte chain a `movw`/`movt` constant, and `active` a `movw` or
+# an `add.w`/`sub.w r1, r3, #modimm` from the button value in r3.
+_SKELETON_RETHEMED = tuple(
+    (label, {"header chain": (("movw", "r2,I"),), "header chain 2": (("movt", "r2,I"),),
+             "active": (("movw", "r1,I"), ("add.w", "r1,r3,I"), ("sub.w", "r1,r3,I")),
+             "rail chain": (("movw", "r3,I"),), "rail chain 2": (("movt", "r3,I"),)
+             }.get(label, shapes))
+    for label, shapes in _SKELETON_STOCK)
+_SKELETONS = (("stock", _SKELETON_STOCK), ("rethemed", _SKELETON_RETHEMED))
+
+# Skeleton positions: where each role's colour is formed, and each role's cell stores.
+_POS = {label: k for k, (label, _s) in enumerate(_SKELETON_STOCK)}
+_CELL_POS = {"bg": ("bg cell",), "header": ("header cell",), "panel": ("panel cell",),
+             "button": ("button cell", "button cell 2"), "active": ("active cell",),
+             "rail": ("rail cell",)}
+
+
+@dataclass(frozen=True)
+class ThemeInit:
+    """The theme-init block as `locate_theme_init` reads it.
+
+    `sites` are runtime GuiCode addresses: the literal words `lit_bg`, `lit_panel`,
+    `lit_button`, the 8-byte chains `header_chain` and `rail_chain`, and the 4-byte `active`
+    instruction. `cells` is `{role: (SRAM cell, ...)}` in store order (button stores two),
+    `indices` the mode-7 index of each, parallel. `values` is `{role: rgb888}` as the block
+    forms them. `well_index` is the button's first cell's index, the one the wtype-32 tank
+    wells read. `form` is `"stock"` or `"rethemed"` (the form `plan` leaves). `proof` is
+    `((label, value), ...)`: the block's bounds and the address of each of its 22
+    instructions (`"insn <label>"`)."""
+    sites: dict
+    cells: dict
+    values: dict
+    indices: dict
+    well_index: int
+    form: str
+    proof: tuple
+
+
+def locate_theme_init(data: bytes) -> ThemeInit:
+    """The theme-init block (13.6 `FUN_00247BF8`'s straight-line block at
+    `0x248316..0x24834C`, GUICODE Finding 18), located from the code.
+
+    The method (measured 2026-11-07):
+
+      1. Decode GuiCode linearly, resyncing (`theme.detail_runs`).
+      2. Match the 22-instruction skeleton on mnemonic and register operands, with PC-literal
+         displacements and immediates as wildcards, over contiguous instructions. Two forms are
+         tried: the stock one (`add.w`/`addw` chains, `movw r1` for active) and the one `plan`
+         leaves (`movw`/`movt` chains). Exactly one match over both is required.
+      3. Roles by position: bg is the position-1 literal; header the chain at positions 4-5
+         on bg's r2; panel the position-8 literal; button the position-10 literal (r3, not
+         written again until the rail chain reads it); active the position-14 instruction;
+         rail the chain at positions 18-19 on the button's r3.
+      4. Cells are the store targets' literals; each must be SRAM and a type-10 entry of the
+         variable table the code loads (`guidata.find_variable_tables`), its index the lowest
+         such entry.
+      5. The values are replayed from the instructions.
+
+    13.6 and 14.7 match (14.7 `0x248386..0x2483BC`, the same bytes); 11.23 has no match and
+    refuses. Raises `ThemeInitError` on zero or several matches, or a store target that is
+    not a colour cell. Needs capstone (`theme.CapstoneUnavailable`)."""
+    try:
+        import capstone  # noqa: F401 -- before the cache, so a bare install fails the same way
+    except ImportError as e:                                    # pragma: no cover
+        raise theme.CapstoneUnavailable(str(e)) from e
+    return _locate_theme_init(data, _SKELETONS, theme.SRAM_LOW, theme.SRAM_HIGH,
+                              theme.COLOUR_CELL_TYPE)
+
+
+def _insn_shape(ins) -> tuple:
+    from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_OP_REG, ARM_REG_PC
+    ops = []
+    for o in ins.operands:
+        if o.type == ARM_OP_REG:
+            ops.append(ins.reg_name(o.reg))
+        elif o.type == ARM_OP_IMM:
+            ops.append("I")
+        elif o.type == ARM_OP_MEM:
+            if o.mem.base == ARM_REG_PC and o.mem.index == 0:
+                ops.append("L")
+            elif o.mem.index == 0 and o.mem.disp == 0:
+                ops.append("[%s]" % ins.reg_name(o.mem.base))
+            else:
+                ops.append("?")
+        else:
+            ops.append("?")
+    return ins.mnemonic, ",".join(ops)
+
+
+@memo.content_cached(copy=None)
+def _locate_theme_init(data: bytes, skeletons: tuple, sram_low: int, sram_high: int,
+                       colour_type: int) -> ThemeInit:
+    sec = theme.guicode_section(data)
+    base = theme.guicode_base(sec)
+    code = data[sec.offset:sec.offset + sec.length]
+    flat = [i for _s, _e, run in theme.detail_runs(code, base) for i in run]
+    n = len(skeletons[0][1])
+    firsts = {s for _form, sk in skeletons for s in sk[0][1]}
+
+    hits = []
+    for k in range(len(flat) - n + 1):
+        if _insn_shape(flat[k]) not in firsts:
+            continue
+        if any(flat[k + m + 1].address != flat[k + m].address + flat[k + m].size
+               for m in range(n - 1)):
+            continue
+        shapes = [_insn_shape(i) for i in flat[k:k + n]]
+        for form, sk in skeletons:
+            if all(shp in allowed for shp, (_l, allowed) in zip(shapes, sk)):
+                hits.append((k, form))
+    if len(hits) != 1:
+        raise ThemeInitError(
+            "theme-init skeleton: %d matches%s; set_theme locates the block by exactly one "
+            "(22 instructions, 13.6 FUN_00247BF8's straight-line block)" % (
+                len(hits), (" at " + ", ".join("%#x (%s)" % (flat[k].address, f)
+                                              for k, f in hits)) if hits else ""))
+    k, form = hits[0]
+    block = flat[k:k + n]
+    at = {label: block[m] for label, m in _POS.items()}
+
+    def literal(label):
+        ins = at[label]
+        la = (ins.address & ~3) + 4 + ins.operands[1].mem.disp
+        off = la - base
+        if not 0 <= off <= len(code) - 4:
+            raise ThemeInitError("the %s literal %#x (loaded at %#x) lies outside GuiCode"
+                                 % (label, la, ins.address))
+        return la, struct.unpack_from("<I", code, off)[0]
+
+    def imm(label, j):
+        return at[label].operands[j].imm & 0xFFFFFFFF
+
+    bg, panel, button = literal("bg literal")[1], literal("panel literal")[1], \
+        literal("button literal")[1]
+    if form == "stock":
+        header = bg + imm("header chain", 2) + imm("header chain 2", 2)
+        rail = button + imm("rail chain", 2) + imm("rail chain 2", 2)
+        active = imm("active", 1)
+    else:
+        header = imm("header chain", 1) | imm("header chain 2", 1) << 16
+        rail = imm("rail chain", 1) | imm("rail chain 2", 1) << 16
+        act = at["active"]
+        if act.mnemonic == "movw":
+            active = imm("active", 1)
+        elif act.mnemonic == "add.w":
+            active = button + imm("active", 2)
+        else:
+            active = button - imm("active", 2)
+    values = {r: v & 0xFFFFFFFF for r, v in (("bg", bg), ("panel", panel), ("button", button),
+                                             ("header", header), ("rail", rail),
+                                             ("active", active))}
+
+    # the cells, and their mode-7 indices in the code-cited variable table
+    gs, ge = guidata.guidata_extent(data)
+    try:
+        dptr_off, type_off = guidata.find_variable_tables(data)
+    except guidata.VariableTableNotFound as e:
+        raise ThemeInitError("the theme-init's cells cannot be typed: %s" % e) from e
+    by_cell: dict = {}
+    index = 0
+    while gs + dptr_off + 4 * index + 4 <= ge and gs + type_off + index < ge:
+        addr = struct.unpack_from("<I", data, gs + dptr_off + 4 * index)[0]
+        if not (addr == 0 or sram_low <= addr < sram_high):
+            break
+        if addr and data[gs + type_off + index] == colour_type:
+            by_cell.setdefault(addr, index)
+        index += 1
+    cells: dict = {}
+    indices: dict = {}
+    for role in ROLES:
+        cs, ix = [], []
+        for label in _CELL_POS[role]:
+            la, cell = literal(label)
+            if not sram_low <= cell < sram_high:
+                raise ThemeInitError("the theme-init %s store at %#x targets %#x (literal %#x), "
+                                     "not SRAM" % (role, at[label].address, cell, la))
+            if cell not in by_cell:
+                raise ThemeInitError("the theme-init %s store at %#x targets %#x, which no "
+                                     "type-%d (colour) variable-table entry names"
+                                     % (role, at[label].address, cell, colour_type))
+            cs.append(cell)
+            ix.append(by_cell[cell])
+        cells[role], indices[role] = tuple(cs), tuple(ix)
+
+    sites = {"lit_bg": literal("bg literal")[0], "lit_panel": literal("panel literal")[0],
+             "lit_button": literal("button literal")[0],
+             "header_chain": at["header chain"].address, "active": at["active"].address,
+             "rail_chain": at["rail chain"].address}
+    proof = (("block start", block[0].address), ("block end", block[-1].address + block[-1].size)) \
+        + tuple(("insn " + label, at[label].address) for label in _POS)
+    return ThemeInit(sites, cells, values, indices, indices["button"][0], form, proof)
 
 
 def inline_fields(data: bytes) -> list[tuple[int, int, int]]:
@@ -285,10 +497,13 @@ def stored_colour_literals(data: bytes) -> dict:
     return {la: word(la) for la, n in loads.items() if stored.get(la) == n}
 
 
-def _tank_fill_offsets(data: bytes) -> dict:
+def _tank_fill_offsets(data: bytes, well_index: int | None = None) -> dict:
     """`{file offset: rgb888}` of the inline (mode-3) fill of every HOME tank: the wtype-33 record
-    straight after a wtype-32 well whose fillB is mode-7 idx 161 (objects 719-726 on 13.6;
-    `GUICODE.md` Finding 18's tank addendum)."""
+    straight after a wtype-32 well whose fillB is mode-7 `well_index` (`GUICODE.md` Finding 18's
+    tank addendum). `well_index` defaults to the located theme-init's (`ThemeInit.well_index`:
+    13.6 161, 14.7 146)."""
+    if well_index is None:
+        well_index = locate_theme_init(data).well_index
     gs, _ = guidata.guidata_extent(data)
     out = {}
     for rel in guidata.object_tables(data)[1]:
@@ -300,7 +515,7 @@ def _tank_fill_offsets(data: bytes) -> dict:
             continue
         for well, fill in zip(recs, recs[1:]):
             is_well = well.wtype == 32 and any(
-                c[0] == "fillB" and c[1] == 7 and c[2] == TANK_WELL_INDEX for c in well.colors)
+                c[0] == "fillB" and c[1] == 7 and c[2] == well_index for c in well.colors)
             if is_well and fill.wtype == 33:
                 for (role, mode, val), off in zip(fill.colors, fill.color_off):
                     if role == "fillA" and mode == 3 and off is not None:
@@ -326,9 +541,9 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
     if unknown:
         raise ThemeSwapError("unknown theme role(s) %s; the roles are %s"
                              % (sorted(unknown), ", ".join(ROLES)))
-    if tank_wells is not None and tank_wells not in STATIC_INDEX:
+    if tank_wells is not None and tank_wells not in TANK_WELL_ROLES:
         raise ThemeSwapError("tank_wells wants one of %s, got %r"
-                             % (", ".join(STATIC_INDEX), tank_wells))
+                             % (", ".join(TANK_WELL_ROLES), tank_wells))
     want = {r: rgb_int(colours[r]) if r in colours else STOCK[r] for r in ROLES}
     extra_map: dict = {}
     for pair in extra or ():
@@ -346,34 +561,23 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
         if len(pair) != 2:
             raise ThemeSwapError("tank_fills wants [from, to] pairs, got %r" % (pair,))
         tank_map[rgb_int(pair[0])] = rgb_int(pair[1])
-    tank_offs = _tank_fill_offsets(data) if tank_map else {}
+    ti = locate_theme_init(data)
+    if ti.form != "stock":
+        raise ThemeSwapError(
+            "GuiCode theme-init at %#x is in the form set_theme leaves (movw/movt chains): "
+            "already re-themed (set_theme runs once, on a stock theme)"
+            % dict(ti.proof)["block start"])
+    for role in ROLES:
+        if ti.values[role] != STOCK[role]:
+            raise ThemeSwapError(
+                "GuiCode theme-init at %#x forms %s %#08x, not the stock %#08x (already "
+                "re-themed? set_theme runs once, on a stock theme)"
+                % (dict(ti.proof)["block start"], role, ti.values[role], STOCK[role]))
+    tank_offs = _tank_fill_offsets(data, ti.well_index) if tank_map else {}
     sec, base, fo = _guicode(data)
-
-    def u32(addr):
-        return struct.unpack_from("<I", data, fo(addr))[0]
 
     def at(addr, n):
         return bytes(data[fo(addr):fo(addr) + n])
-
-    checks = [(at(_HEADER_CHAIN, 8), _STOCK_HEADER_CHAIN, "header add-chain"),
-              (at(_RAIL_CHAIN, 8), _STOCK_RAIL_CHAIN, "rail add-chain"),
-              (at(_ACTIVE_MOVW, 4), _STOCK_ACTIVE, "active movw")]
-    lits = [(_LIT_BG, "bg"), (_LIT_PANEL, "panel"), (_LIT_BUTTON, "button")]
-    for got, exp, what in checks:
-        if got != exp:
-            hw1 = struct.unpack_from("<H", got)[0]
-            # our own rewrite: movw (the chains) or add.w/sub.w (active) in place of stock
-            raised = (hw1 & 0xFBF0) == 0xF240 or (hw1 & 0xFBE0) in (0xF100, 0xF1A0)
-            raise ThemeSwapError(
-                "GuiCode %s holds %s, not 13.6's %s: %s" % (
-                    what, got.hex(), exp.hex(),
-                    "already re-themed (set_theme runs once, on a stock theme)" if raised
-                    else "this build's theme-init is not the one this op was traced on"))
-    for addr, role in lits:
-        if u32(addr) != STOCK[role]:
-            raise ThemeSwapError("GuiCode literal %#x holds %#08x, not 13.6's %s %#08x (already "
-                                 "re-themed? set_theme runs once, on a stock theme)"
-                                 % (addr, u32(addr), role, STOCK[role]))
 
     edits = []
 
@@ -381,12 +585,16 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
         if old != new:
             edits.append((off, bytes(old), bytes(new), note))
 
+    lits = [(ti.sites["lit_bg"], "bg"), (ti.sites["lit_panel"], "panel"),
+            (ti.sites["lit_button"], "button")]
     for addr, role in lits:
         put(fo(addr), struct.pack("<I", STOCK[role]), struct.pack("<I", want[role]),
             "theme %s literal %#x" % (role, addr))
-    put(fo(_HEADER_CHAIN), _STOCK_HEADER_CHAIN, enc_const(2, want["header"]),
+    header_at, rail_at, active_at = (ti.sites["header_chain"], ti.sites["rail_chain"],
+                                     ti.sites["active"])
+    put(fo(header_at), at(header_at, 8), enc_const(2, want["header"]),
         "theme header: add-chain -> movw/movt %#08x" % want["header"])
-    put(fo(_RAIL_CHAIN), _STOCK_RAIL_CHAIN, enc_const(3, want["rail"]),
+    put(fo(rail_at), at(rail_at, 8), enc_const(3, want["rail"]),
         "theme rail: add-chain -> movw/movt %#08x" % want["rail"])
     applied = dict(want)
     if want["active"] != STOCK["active"] or want["button"] != STOCK["button"]:
@@ -399,7 +607,7 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
             active_bytes = enc_dp_imm(sub, 1, 3, m)
             applied["active"] = got
             how = "button %s %#x" % ("-" if sub else "+", m)
-        put(fo(_ACTIVE_MOVW), _STOCK_ACTIVE, active_bytes,
+        put(fo(active_at), at(active_at, 4), active_bytes,
             "theme active %#08x (%s; asked %#08x)" % (applied["active"], how, want["active"]))
 
     remap = {STOCK[r]: applied[r] for r in ROLES if applied[r] != STOCK[r]}
@@ -423,7 +631,7 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
     try:
         decode = theme.colour_decode(data)
     except theme.ColourDecodeError as e:
-        raise ThemeSwapError("the mode-6 palette is not located: %s" % e)
+        raise ThemeSwapError("the mode-6 palette is not located: %s" % e) from e
     pb = gs + decode.palette_offset
     pal = 0
     for i in range(decode.palette_len):
@@ -434,8 +642,8 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
             pal += 1
 
     wells = 0
-    if tank_wells is not None and STATIC_INDEX[tank_wells] != TANK_WELL_INDEX:
-        to = STATIC_INDEX[tank_wells]
+    if tank_wells is not None and ti.indices[tank_wells][0] != ti.well_index:
+        to = ti.indices[tank_wells][0]
         for idx, rel in enumerate(guidata.object_tables(data)[1]):
             if not rel:
                 continue
@@ -447,7 +655,7 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
                 if rec.wtype != 32:
                     continue
                 for (role, mode, val), off in zip(rec.colors, rec.color_off):
-                    if role.startswith("fillB") and mode == 7 and val == TANK_WELL_INDEX:
+                    if role.startswith("fillB") and mode == 7 and val == ti.well_index:
                         put(off, struct.pack("<H", val), struct.pack("<H", to),
                             "tank well object %d %s idx %d -> %d (%s)"
                             % (idx, role, val, to, tank_wells))
@@ -466,11 +674,13 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
 def decoded_theme(data: bytes) -> dict:
     """`{role: rgb888}` as the GuiCode now forms them, read back by `theme.mode7_palette`
     (header, rail via their cells) and the literals. For verification."""
+    ti = locate_theme_init(data)
     pal = theme.mode7_palette(data)
     out = {}
-    for role, idx in (("bg", 3), ("header", 4), ("panel", 8), ("rail", 10)):
+    for role in ("bg", "header", "panel", "rail"):
+        idx = ti.indices[role][0]
         if idx in pal:
             out[role] = rgb_int(pal[idx])
     sec, base, fo = _guicode(data)
-    out["button"] = struct.unpack_from("<I", data, fo(_LIT_BUTTON))[0]
+    out["button"] = struct.unpack_from("<I", data, fo(ti.sites["lit_button"]))[0]
     return out
