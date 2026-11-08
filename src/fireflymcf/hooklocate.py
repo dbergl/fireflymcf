@@ -78,12 +78,16 @@ def _require_capstone() -> None:
         raise theme.CapstoneUnavailable(str(e)) from e
 
 
-def _section(data: bytes) -> tuple[bytes, int]:
+def _section(data: bytes, default_base: int) -> tuple[bytes, int]:
+    """The GuiCode section and its runtime base (`theme.guicode_base`, with its fallback
+    passed in so a cached caller never reads a module constant)."""
     try:
         sec = theme.guicode_section(data)
     except ValueError as e:
         raise HookNotFound(str(e)) from e
-    return bytes(data[sec.offset:sec.offset + sec.length]), theme.guicode_base(sec)
+    base = theme.flash_destination(sec)
+    return (bytes(data[sec.offset:sec.offset + sec.length]),
+            default_base if base is None else base)
 
 
 def _dis(g: bytes, base: int, addr: int, n: int) -> list:
@@ -133,8 +137,11 @@ def _bl_callers(g: bytes, base: int, target: int) -> list[int]:
 
 
 @memo.content_cached(copy=None)
-def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook:
-    g, base = _section(data)
+def _locate(data: bytes, limit: int, lower: int | None, config_off: int, default_base: int,
+            entry1_window: int, callee_window: int, link_prologue: str,
+            link_epilogue: str) -> Hook:
+    # Every module constant comes in as an argument: the cache is keyed on them (`memo`).
+    g, base = _section(data, default_base)
     end = base + len(g) - 4                    # the current append point (the checksum word)
     proof = []
 
@@ -142,7 +149,7 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
     e1 = _vector(g, base, ENTRY1_VECTOR, "GuiCode_entry1")
     proof.append(f"GuiCode header +{ENTRY1_VECTOR:#x} = {e1 | 1:#x}: GuiCode_entry1, the LCD's "
                  "per-tick call")
-    ins = _dis(g, base, e1, ENTRY1_WINDOW)
+    ins = _dis(g, base, e1, entry1_window)
     if not ins or not _PUSH_LR.fullmatch(ins[0][1]):
         raise HookNotFound(f"entry1 {e1:#x} does not open with push {{..., lr}}")
     kept, hook = None, None
@@ -159,7 +166,7 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
         elif _writes_r0(t):
             raise HookNotFound(f"entry1 overwrites r0 at {a:#x} ({t}) before its first bl")
     if hook is None:
-        raise HookNotFound(f"no bl within {ENTRY1_WINDOW:#x} bytes of entry1 {e1:#x}")
+        raise HookNotFound(f"no bl within {entry1_window:#x} bytes of entry1 {e1:#x}")
     hook_addr, target = hook
     proof.append(f"{hook_addr:#x} bl #{target:#x}: entry1's first call, r0 = entry1's r0"
                  + (f" (also kept in {kept})" if kept else ""))
@@ -171,7 +178,7 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
             raise HookNotFound(f"chain target {target:#x} is outside the section "
                                f"[{base:#x},{end:#x})")
         first = _dis(g, base, target, 2)
-        if not first or first[0][1] != LINK_PROLOGUE:
+        if not first or first[0][1] != link_prologue:
             break
         if target in links:
             raise HookNotFound(f"per-tick chain loops back to {target:#x}: "
@@ -182,16 +189,16 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
             raise HookNotFound(f"link {target:#x} is below the stock append point {lower:#x}")
         body = _dis(g, base, target, end - target)
         idx = next((i for i, (_, t) in enumerate(body) if t.startswith("b.w #")), None)
-        if idx is None or idx == 0 or body[idx - 1][1] != LINK_EPILOGUE:
-            raise HookNotFound(f"link {target:#x}: no `{LINK_EPILOGUE}; b.w` tail")
+        if idx is None or idx == 0 or body[idx - 1][1] != link_epilogue:
+            raise HookNotFound(f"link {target:#x}: no `{link_epilogue}; b.w` tail")
         links.append(target)
-        proof.append(f"{target:#x} {LINK_PROLOGUE} ... {body[idx - 1][0]:#x} {LINK_EPILOGUE}; "
+        proof.append(f"{target:#x} {link_prologue} ... {body[idx - 1][0]:#x} {link_epilogue}; "
                      f"{body[idx][0]:#x} {body[idx][1]}: an appended link")
         target = int(body[idx][1][5:], 16)
     callee = target
 
     # 3. Prove F: prologue, r0 copy, the config-buffer load, and its bl-callers.
-    fins = _dis(g, base, callee, CALLEE_WINDOW)
+    fins = _dis(g, base, callee, callee_window)
     if not fins or not _PUSH_LR.fullmatch(fins[0][1]):
         raise HookNotFound(f"callee {callee:#x} does not open with push {{..., lr}}: "
                            f"{fins[0][1] if fins else 'undecodable'}")
@@ -208,7 +215,7 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
             break
     if deref is None:
         raise HookNotFound(f"callee {callee:#x}: no `ldr rY, [r0 or its copy, #{config_off:#x}]` "
-                           f"config-buffer load within {CALLEE_WINDOW:#x} bytes")
+                           f"config-buffer load within {callee_window:#x} bytes")
     proof.append(f"{callee:#x} {fins[0][1]}; {base_reg or 'r0'} = r0; {deref[0]:#x} {deref[1]}: "
                  "the config-buffer load")
     callers = _bl_callers(g, base, callee)
@@ -222,29 +229,42 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int) -> Hook
     return Hook(e1, hook_addr, off, g[off:off + 4], tuple(links), callee, tuple(proof))
 
 
+def _locate_now(data: bytes, limit: int, lower: int | None) -> Hook:
+    return _locate(data, limit, lower, config.CONFIG_BUFFER_OFFSET, theme.GUICODE_BASE_DEFAULT,
+                   ENTRY1_WINDOW, CALLEE_WINDOW, LINK_PROLOGUE, LINK_EPILOGUE)
+
+
 def locate_hook(data: bytes, *, stock: bytes | None = None, limit: int = 64) -> Hook:
     """The per-tick hook of `data`. With `stock` (the image `data` was grown from), every link
-    must also lie at or above `stock_append_point(stock)`."""
+    must also lie at or above `stock_append_point(stock)`, and the chain must end in stock's
+    own callee."""
     _require_capstone()
-    lower = stock_append_point(stock) if stock is not None else None
-    return _locate(data, limit, lower, config.CONFIG_BUFFER_OFFSET)
+    if stock is None:
+        return _locate_now(data, limit, None)
+    h = _locate_now(data, limit, stock_append_point(stock))
+    want = _locate_now(stock, 64, None).stock_callee
+    if h.stock_callee != want:
+        raise HookNotFound(f"the chain ends in {h.stock_callee:#x}, not the stock callee "
+                           f"{want:#x}")
+    return h
 
 
 def stock_append_point(stock: bytes) -> int:
     """`base + len(GuiCode) - 4` of a stock image: where the first appended routine goes.
     Refuses an image whose hook already reaches a link: on a built image the stock end is not
     recoverable from the image alone."""
-    h = locate_hook(stock)
+    _require_capstone()
+    h = _locate_now(stock, 64, None)
     if h.links:
         raise HookNotFound(f"not a stock image: the hook already reaches appended routines "
                            f"{[hex(x) for x in h.links]}")
-    g, base = _section(stock)
+    g, base = _section(stock, theme.GUICODE_BASE_DEFAULT)
     return base + len(g) - 4
 
 
 @memo.content_cached
-def _host_api_cells(data: bytes, window: int) -> dict[int, int]:
-    g, base = _section(data)
+def _host_api_cells(data: bytes, window: int, default_base: int) -> dict[int, int]:
+    g, base = _section(data, default_base)
     e0 = _vector(g, base, ENTRY0_VECTOR, "GuiCode_entry0")
     base_reg, cells, pend, regs = None, {}, {}, {}
     for a, t in _dis(g, base, e0, window):
@@ -278,4 +298,4 @@ def host_api_cells(data: bytes) -> dict[int, int]:
     """`{host API offset: SRAM cell}` from GuiCode_entry0's copies. `+0x04` is the
     group-variant setter's cell, `+0x08` the CAN-frame sender's."""
     _require_capstone()
-    return _host_api_cells(data, ENTRY0_WINDOW)
+    return _host_api_cells(data, ENTRY0_WINDOW, theme.GUICODE_BASE_DEFAULT)

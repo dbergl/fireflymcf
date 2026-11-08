@@ -60,7 +60,8 @@ class CombinePlan:
     tail_target: int
 
 
-def resolve(data: bytes, *, sources, cell: readout.DisplayCell) -> CombinePlan:
+def resolve(data: bytes, *, sources, cell: readout.DisplayCell,
+            stock: bytes | None = None) -> CombinePlan:
     """Validate `sources` against `cell` and read the current detour state off `data`.
 
     Like `readout.resolve`, the hook is re-read from the image being built, so a routine resolved
@@ -89,8 +90,8 @@ def resolve(data: bytes, *, sources, cell: readout.DisplayCell) -> CombinePlan:
         total += src.weight
     if total > MAX_TOTAL:
         raise BitCombineError(f"weights total {total:#x}, over MAX_TOTAL {MAX_TOTAL:#x}")
-    hook_old, tail = followchannel.hook_state(data)
-    return CombinePlan(sources, cell, followchannel.HOOK_OFF, hook_old, tail)
+    hook_at, hook_old, tail = followchannel.hook_site(data, stock=stock)
+    return CombinePlan(sources, cell, hook_at, hook_old, tail)
 
 
 def build(plan: CombinePlan, code_load_addr: int) -> tuple[bytes, list]:

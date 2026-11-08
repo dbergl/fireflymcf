@@ -273,7 +273,8 @@ class ReadoutPlan:
 
 
 def resolve(data: bytes, *, register: Register, cell: DisplayCell, mask: int = 0xFFFF,
-            add: int = 0, shift: int = 0, sub: int = 0, mul: int = 1) -> ReadoutPlan:
+            add: int = 0, shift: int = 0, sub: int = 0, mul: int = 1,
+            stock: bytes | None = None) -> ReadoutPlan:
     if not 1 <= mask <= 0xFFFF:
         raise ReadoutError(f"mask must be 1..0xFFFF, got {mask:#x}")
     if not 0 <= add <= 0xFFFF:
@@ -285,9 +286,9 @@ def resolve(data: bytes, *, register: Register, cell: DisplayCell, mask: int = 0
         raise ReadoutError(f"shift must be 0..15, got {shift}")
     if not 0 <= sub <= 0xFFFF:
         raise ReadoutError(f"sub must fit `movw` (0..0xFFFF), got {sub}")
-    hook_old, tail = followchannel.hook_state(data)
+    hook_at, hook_old, tail = followchannel.hook_site(data, stock=stock)
     return ReadoutPlan(register.slot_addr, mask, add, shift, cell,
-                       followchannel.HOOK_OFF, hook_old, tail, sub, mul)
+                       hook_at, hook_old, tail, sub, mul)
 
 
 def build(plan: ReadoutPlan, code_load_addr: int) -> tuple[bytes, list]:

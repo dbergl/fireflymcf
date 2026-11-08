@@ -16,7 +16,7 @@ import dataclasses
 import struct
 
 from fireflymcf import (aescompact, celltables, cli, container, followchannel, gestures,
-                             glyphenc, navicon,
+                             glyphenc, hooklocate, navicon,
                               glyphs, growsection, guidata, holdregion, insert, interlocks,
                               labels, layout, mastergroup, metrics, newbutton, optionrow,
                               options, patch,
@@ -2685,10 +2685,10 @@ class AddVoltageBattery(Op):
         # them), so no config-byte silencing is needed: the chain runs before FUN_00247BF8 and that
         # block never touches these addresses.
         slot_addr = self._resolve_48v_slot(out)
-        hook_old, tail = followchannel.hook_state(out)
+        hook_at, hook_old, tail = followchannel.hook_site(out, stock=ctx.stock)
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob = voltagebattery.build_routine(
                 slot_addr=slot_addr, color_cell=color_cell,
@@ -2704,7 +2704,6 @@ class AddVoltageBattery(Op):
             gcs.offset + load_off, b"", blob, "GuiCode",
             "add_voltage_battery: %d-byte per-tick routine (48V slot %#x -> colour %#x / "
             "level %#x; value reads live cell 209)" % (len(blob), slot_addr, color_cell, level_cell)))
-        hook_at = followchannel.HOOK_OFF
         hook_runtime = theme.GUICODE_BASE_DEFAULT + hook_at
         hook_new = thumb.bl(hook_runtime, code_load_addr + voltagebattery.ENTRY_OFF)
         file_off = gcs.offset + hook_at
@@ -4105,14 +4104,14 @@ def _append_statusfold(out, items, ctx, op_id, *, refused, what, describe):
     DETOUR_REFUSED; a routine that cannot be built or appended raises `refused`. Shared by
     `add_button_status` and `add_enum_label`."""
     try:
-        plan = statusfold.resolve(out, items)
+        plan = statusfold.resolve(out, items, stock=ctx.stock)
     except followchannel.FollowChannelError as err:
         raise RecipeError("DETOUR_REFUSED", str(err), op_id=op_id)
     except statusfold.StatusFoldError as err:
         raise RecipeError(refused, str(err), op_id=op_id)
     gc = theme.guicode_section(out)
     code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-    _check_append_point(code_load_addr, op_id)
+    _check_append_point(code_load_addr, op_id, ctx.stock)
     try:
         blob, _ = statusfold.build(plan, code_load_addr)
         grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
@@ -5472,13 +5471,13 @@ class FollowChannel(Op):
         # append the routine.
         try:
             plan = followchannel.resolve(data, self.watch_channel, self.target_channel,
-                                         self.on_level, self.gate_option)
+                                         self.on_level, self.gate_option, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
 
         gc = theme.guicode_section(data_after_rename)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -5540,15 +5539,15 @@ class FollowChannel(Op):
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
         detour = data[file_off:file_off + 4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour was not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # A later GuiCode-growing op may have chained ANOTHER routine in front of this one
         # (`followchannel.hook_state`), so the entry must be reachable through the chain --
         # not necessarily the hook's direct target -- and the chain must end at the paint fn.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("follow_channel: watch=%d -> target=%d (on_level=%d), gated by %r (object "
                 "%d row); detour GuiCode+%#x -> %#x"
@@ -5557,18 +5556,30 @@ class FollowChannel(Op):
 
 
 
-def _check_append_point(code_load_addr: int, op_id: str) -> None:
-    """The GuiCode append point must be stock 13.6's (0x00259BB4) or beyond it by earlier appends,
-    and word-aligned. Used to be pinned to exactly 0x00259BB4, which made any two GuiCode-growing
-    ops refuse each other; the routines chain instead (`followchannel.hook_state`), so a grown
-    section is expected, and a SHRUNK or misaligned one is what is refused."""
-    if code_load_addr < followchannel.STOCK_APPEND_POINT or code_load_addr % 4:
+def _check_append_point(code_load_addr: int, op_id: str, stock: bytes) -> None:
+    """The GuiCode append point must be the stock image's (`hooklocate.stock_append_point`, 13.6:
+    0x00259BB4) or beyond it by earlier appends, and word-aligned. Used to be pinned to exactly
+    the stock point, which made any two GuiCode-growing ops refuse each other; the routines chain
+    instead (`followchannel.hook_site`), so a grown section is expected, and a SHRUNK or
+    misaligned one is what is refused."""
+    try:
+        stock_point = hooklocate.stock_append_point(stock)
+    except followchannel.FollowChannelError as e:
+        raise RecipeError("UNEXPECTED_APPEND_POINT", "the stock image's append point is not "
+                          "located: %s" % e, op_id=op_id)
+    if code_load_addr < stock_point or code_load_addr % 4:
         raise RecipeError(
             "UNEXPECTED_APPEND_POINT",
-            "GuiCode append point is %#x; expected stock 13.6's %#x or a 4-aligned point beyond "
-            "it (a section grown only by earlier appends); refusing to build a routine against "
-            "an image this op was not proven on" % (code_load_addr, followchannel.STOCK_APPEND_POINT),
+            "GuiCode append point is %#x; expected the stock image's %#x or a 4-aligned point "
+            "beyond it (a section grown only by earlier appends); refusing to build a routine "
+            "against an image this op was not proven on" % (code_load_addr, stock_point),
             op_id=op_id)
+
+
+def _stock_hook(ctx):
+    """The stock image's located per-tick hook (`hooklocate.Hook`): its bytes and callee are
+    what a verify compares the built image's hook and chain against."""
+    return hooklocate.locate_hook(ctx.stock)
 
 @op("add_option_follower")
 class AddOptionFollower(Op):
@@ -5727,7 +5738,7 @@ class AddOptionFollower(Op):
                 tog.grown, self.watch_channel, self.target_channel, self.on_level,
                 gate_slot_selector=self.selector, gate_mask=self.gate_mask,
                 gate_on_value=self.gate_on_value, variant_group=tog.new_group_index,
-                alloc_display=True)
+                alloc_display=True, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
 
@@ -5748,7 +5759,7 @@ class AddOptionFollower(Op):
         # follow_channel does (an earlier op's append moves it, and the routine chains).
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -5847,15 +5858,15 @@ class AddOptionFollower(Op):
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
         detour = data[file_off:file_off + 4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour was not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # A later GuiCode-growing op may have chained ANOTHER routine in front of this one
         # (`followchannel.hook_state`), so the entry must be reachable through the chain --
         # not necessarily the hook's direct target -- and the chain must end at the paint fn.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("add_option_follower: %r row (object %d, touch id %d -> group %d, config "
                 "%#04x toggle) gates watch=%d -> target=%d (on_level=%d); display cell %d "
@@ -6229,13 +6240,13 @@ class FollowRegister(Op):
             gates = [self._condition(data, ctx, g, default_mask=0xFFFF) for g in self.gates]
             plan = followchannel.plan_from_registers(
                 data, watch=watch, target_channel=self.target_channel,
-                on_level=self.on_level, gates=gates)
+                on_level=self.on_level, gates=gates, stock=ctx.stock)
         except (register.RegisterError, followchannel.FollowChannelError) as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
         # --- the add_option_follower step-4 sequence: build @ pinned append point, grow, detour.
         gc = theme.guicode_section(data)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _ = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -6271,7 +6282,7 @@ class FollowRegister(Op):
         h = ctx.handles[self.spec.id]
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, "detour not applied"
+        assert detour != _stock_hook(ctx).hook_bytes, "detour not applied"
         text = thumb.disassemble(detour, theme.GUICODE_BASE_DEFAULT + h["hook_at"])[0][1]
         assert text == "bl #%#x" % h["entry"], "detour decodes to %r" % text
         return "follow_register: detour GuiCode+%#x -> %#x" % (h["hook_at"], h["entry"])
@@ -6449,7 +6460,7 @@ class AddRegisterReadout(Op):
                 out, cell, cell_edits = readout.allocate_display_cell(data, self.width_bytes)
             plan = readout.resolve(out, register=reg, cell=cell, mask=self.mask,
                                    add=self.add, shift=self.shift, sub=self.sub,
-                                   mul=self.mul)
+                                   mul=self.mul, stock=ctx.stock)
         except readout.ReadoutError as e:
             code = "NO_DISPLAY_CELL" if "NO_DISPLAY_CELL" in str(e) else "READOUT_REFUSED"
             raise RecipeError(code, str(e), op_id=self.spec.id)
@@ -6466,7 +6477,7 @@ class AddRegisterReadout(Op):
         # the routine: build at the current append point, grow, detour (the follower sequence)
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _ = readout.build(plan, code_load_addr)
         except readout.ReadoutError as e:
@@ -6551,14 +6562,14 @@ class AddRegisterReadout(Op):
     def capability_delta(self, ctx):
         return set(), set()
 
-    def _verify_existing_cell(self, data, h):
+    def _verify_existing_cell(self, data, ctx, h):
         """The fed cell keeps its stock type, our routine is on the chain and reaches the cell,
         every silenced site now disassembles to `nop` and is no longer a writer, and the
         writers that remain are exactly the ones the recipe chose to leave."""
         gs, _ = guidata.guidata_extent(data)
         assert (data[gs + celltables.type_table_off(data) + h["display_slot"]]
                == readout._TYPE_FOR_WIDTH[h["width"]])
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "the copy routine is not on the hook chain"
         cell = readout.DisplayCell(h["display_slot"], h["display_addr"], h["width"], 0, False)
         writers = readout.stock_writers(data, cell)
@@ -6586,7 +6597,7 @@ class AddRegisterReadout(Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         if self.cell_slot is not None:
-            return self._verify_existing_cell(data, h)
+            return self._verify_existing_cell(data, ctx, h)
         for root in h["roots"]:
             events = readout.directive_in_force(data, root)
             mine = [e for e in events if e[0] == "readout" and e[1] == h["object_index"]]
@@ -6605,7 +6616,7 @@ class AddRegisterReadout(Op):
         gs, _ = guidata.guidata_extent(data)
         assert (data[gs + celltables.type_table_off(data) + h["display_slot"]]
                == readout._TYPE_FOR_WIDTH[h["width"]])
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "the copy routine is not on the hook chain"
         forms = sramreach.reaching_forms(data, h["display_addr"], h["width"])
         assert not forms["state_struct"]
@@ -7108,8 +7119,6 @@ class AddAesLowVoltsTrigger(Op):
         "required": [],
     }
 
-    APPEND_POINT = followchannel.STOCK_APPEND_POINT   # the FIRST routine lands here; later ones chain
-
     def validate(self):
         self.x = self._param("x", 120, kind=int)
         self.y = self._param("y", 300, kind=int)
@@ -7133,10 +7142,10 @@ class AddAesLowVoltsTrigger(Op):
         # routine -- in which case this bridge lands after it and chains onto it.
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             plan = followchannel.resolve_display_bridge(
-                out, gate_addr=reg.slot_addr, gate_on_value=1)
+                out, gate_addr=reg.slot_addr, gate_on_value=1, stock=ctx.stock)
             blob, _disasm = followchannel.build_display_bridge(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
             raise RecipeError("BRIDGE_REFUSED", str(e), op_id=self.spec.id)
@@ -7217,14 +7226,14 @@ class AddAesLowVoltsTrigger(Op):
         # The un-gated display bridge is appended and the stock hook detoured to its entry.
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # Reachable THROUGH the per-tick chain (a later op may have chained in front), ending
         # at the displaced paint fn -- `followchannel.hook_state` / `chain_from_hook`.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "bridge entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("add_aes_low_volts_trigger: AGS-style Low Volts control (object(s) %s, wtype-5 "
                 "recolor container on slot %d / cell %#x, touch id %d -> group 129) driven by an "
@@ -7702,10 +7711,11 @@ class AddAesBattHeatStatus(Op):
                                         aescompact.BATT_HEAT_CONTACTOR_ON_MASK,
                                         aescompact.BATT_HEAT_CONTACTOR_WEIGHT))
         try:
-            plan = bitcombine.resolve(out, sources=sources, cell=cell_state)
+            plan = bitcombine.resolve(out, sources=sources, cell=cell_state,
+                                         stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = bitcombine.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (bitcombine.BitCombineError, followchannel.FollowChannelError,
@@ -8171,10 +8181,10 @@ class AddAesBmsButtonStatus(Op):
         (cell,) = cells
         source = bitcombine.BitSource(register.status_slot_addr(sh["var_heat"]), self.mask, 1)
         try:
-            plan = bitcombine.resolve(out, sources=(source,), cell=cell)
+            plan = bitcombine.resolve(out, sources=(source,), cell=cell, stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = bitcombine.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (bitcombine.BitCombineError, followchannel.FollowChannelError,
@@ -8498,7 +8508,7 @@ class AddButtonStatus(Op):
                 if b["glyph"] is not None:
                     assert [(r.font, r.label) for r in arm if r.wtype == 0] == [b["glyph"]], \
                         "button %r: arm %d lacks the glyph" % (b["ref"], obj)
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         # The routine, decoded back to its entries: rebuild it from each button's recorded
         # fields (source address, mask, shift, compare, valid_max, cell, group) at the recorded
@@ -8808,7 +8818,7 @@ class AddEnumLabel(_LabelBox, Op):
         assert len(blob) == h["blob_len"] and data[at:at + len(blob)] == blob, \
             "the routine at %#x is not the one its source and %d keys build" % (
                 h["code_load_addr"], n)
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
@@ -9485,7 +9495,7 @@ class AddButtonStates(Op):
                          % (b["ref"], len(b["item"].rules), b["vars"], b["slot"],
                             "" if b["form"] != "cycle"
                             else ", cycling group %d" % b["group"]))
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         plan = h["plan"]
         items = tuple(b["item"] for b in h["buttons"])
@@ -10425,13 +10435,13 @@ class AddPumpAutoOff(Op):
         try:
             plan = pumpauto.resolve(out, config=config_reg, pump=pump_reg,
                                     minutes_min=0 if self.allow_disable
-                                    else pumpauto.MINUTES_MIN)
+                                    else pumpauto.MINUTES_MIN, stock=ctx.stock)
         except pumpauto.PumpAutoError as e:
             raise RecipeError("SECTION_REFUSED", str(e), op_id=self.spec.id)
 
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = pumpauto.build(plan, code_load_addr)
         except pumpauto.PumpAutoError as e:
@@ -10576,12 +10586,12 @@ class AddPumpAutoOff(Op):
         # --- the per-tick routine is appended and the stock hook detoured to it.
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         toggle_branch = "CREATED fresh (+%d bindings)" % optionrow.DONOR_COUNT \
             if h["toggle_created"] else "ADOPTED a pre-existing group (no growth)"
@@ -11718,10 +11728,10 @@ class AddLevelPage(Op):
 
         # (3) ROUTINE, then the detour (AddAesBattHeatStatus's sequence).
         try:
-            plan = levelfeed.resolve(out, slots=slots, cells=cells)
+            plan = levelfeed.resolve(out, slots=slots, cells=cells, stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = levelfeed.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (levelfeed.LevelFeedError, bitcombine.BitCombineError,
@@ -11814,7 +11824,7 @@ class AddLevelPage(Op):
             a = register.status_slot_addr(v)
             assert struct.pack("<I", a) in code, "no routine carries var %d's slot %#x" % (v, a)
         try:
-            chain = followchannel.chain_from_hook(data)
+            chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise AssertionError("per-tick chain broken: %s" % e)
         assert h["routine_addr"] in chain, \

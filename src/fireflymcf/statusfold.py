@@ -184,12 +184,12 @@ def _validate_states(it: States) -> None:
                                   f"cell value {sorted(set(values))}")
 
 
-def resolve(data: bytes, items) -> FoldPlan:
+def resolve(data: bytes, items, *, stock: bytes | None = None) -> FoldPlan:
     """Validate `items`, then read the current detour state off `data` (chaining ahead of any
     routine already on the hook, as `readout.resolve` does)."""
     items = validate(items)
-    hook_old, tail = followchannel.hook_state(data)
-    return FoldPlan(items, followchannel.HOOK_OFF, hook_old, tail)
+    hook_at, hook_old, tail = followchannel.hook_site(data, stock=stock)
+    return FoldPlan(items, hook_at, hook_old, tail)
 
 
 def _imm(v: int) -> str:

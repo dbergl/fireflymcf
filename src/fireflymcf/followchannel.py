@@ -41,16 +41,15 @@ from dataclasses import dataclass, field
 
 from . import celltables, config, guidata, register, statusbind, statusjoin, theme, thumb
 
-# The per-tick paint function the detoured `bl` originally called; our routine tail-branches to it.
+# DEPRECATED 13.6 values, kept for tests and for the 13.6-only display bridge. Nothing here
+# locates with them: the hook, its chain, the stock callee and the append point are located from
+# the image's own bytes (`hooklocate`, 2026-11-07; `hook_site`, `chain_from_hook`).
+# 13.6's per-tick paint function the hook calls (`hooklocate.Hook.stock_callee`).
 TAIL_TARGET = 0x00247BF8
-
-# The single caller: GuiCode-section offset of the `bl 0x00247BF8` we retarget, and its stock bytes.
+# 13.6's hook: GuiCode-section offset of entry1's first `bl`, and its stock bytes.
 HOOK_OFF = 0xEE3C
 HOOK_STOCK = bytes.fromhex("f8f7dcfe")
-
-# Stock 13.6's GuiCode append point (base + length - 4, the checksum word). Every routine this
-# module authors is appended at or beyond it; a hook that already reaches into [here, append)
-# is a PREVIOUS appended routine, and a new one CHAINS onto it (see `hook_state`).
+# 13.6's GuiCode append point (`hooklocate.stock_append_point`).
 STOCK_APPEND_POINT = 0x00259BB4
 
 # Host CAN-frame sender: SRAM holds a function pointer at this address (host API +0x08). The
@@ -201,8 +200,8 @@ class FollowPlan:
     off_template: bytes   # 12-byte CAN frame that turns it off
     hook_at: int          # GuiCode-section offset of the detoured `bl`
     hook_old: bytes       # its current 4 bytes (stock, or a bl into an earlier appended routine)
-    tail_target: int = TAIL_TARGET   # what our routine tail-branches to: the paint fn, or the
-                                     # previous appended routine's entry (`hook_state`)
+    tail_target: int      # what our routine tail-branches to: the stock callee, or the
+                          # previous appended routine's entry (`hook_site`)
     display_addr: int | None = None    # &(spare display cell): strb'd the gate's on/off flag byte
     display_slot: int | None = None    # its +0x44BC8 cell index (for a later wtype-6 widget)
     variant_group: int | None = None   # group id `build` hands to the setVariant bridge each tick
@@ -355,38 +354,40 @@ def _scan_latch_cell(data: bytes) -> int:
         "unreferenced; refusing to latch into firmware-live working memory")
 
 
-def hook_state(data: bytes) -> tuple[bytes, int]:
-    """`(hook_bytes, tail_target)` for the detour site -- the 4 bytes at GuiCode+HOOK_OFF and
-    the address the routine we append must tail-branch to.
+# How far the walk follows a chain before it calls it runaway. Not a budget (that is the
+# caller's `limit`, `DEFAULT_TICK_CHAIN_LIMIT`): the walk refuses a loop on its own.
+CHAIN_WALK_LIMIT = 1024
 
-    Two states are accepted, everything else is refused (cross-coach safety):
-      * the stock `bl 0x00247BF8` (HOOK_STOCK) -> tail_target is the paint fn itself;
-      * a `bl` into the APPENDED region [STOCK_APPEND_POINT, current append point) -> a routine
-        an earlier op appended. The new routine tail-branches to THAT entry and the hook is
-        retargeted to the new one, so the per-tick chain becomes hook -> new -> old -> paint fn.
-        Every routine here saves/restores r0-r3+lr, never touches r4-r7 and ends in a
-        tail-branch, so each link is transparent to the next (the AAPCS argument that licensed
-        the single detour licenses the chain).
 
-    Factored out of `resolve()` so `plan_from_registers()` and `resolve_display_bridge()`
-    share the exact same discipline.
-    """
-    sec = theme.guicode_section(data)
-    section = data[sec.offset:sec.offset + sec.length]
-    hook_old = bytes(section[HOOK_OFF:HOOK_OFF + 4])
-    if hook_old == HOOK_STOCK:
-        return hook_old, TAIL_TARGET
-    append_point = theme.GUICODE_BASE_DEFAULT + sec.length - 4
-    insns = thumb.disassemble(hook_old, theme.GUICODE_BASE_DEFAULT + HOOK_OFF)
-    text = insns[0][1] if insns else ""
-    if text.startswith("bl #"):
-        target = int(text[4:], 16)
-        if STOCK_APPEND_POINT <= target < append_point and target % 2 == 0:
-            return hook_old, target
-    raise FollowChannelError(
-        f"hook at GuiCode+{HOOK_OFF:#x} is {hook_old.hex()} ({text or 'undecodable'}), neither "
-        f"the stock {HOOK_STOCK.hex()} nor a bl into the appended region "
-        f"[{STOCK_APPEND_POINT:#x},{append_point:#x}); refusing to detour")
+def locate(data: bytes, *, stock: bytes | None = None):
+    """`hooklocate.locate_hook(data, stock=stock)`: the per-tick hook, its links and the stock
+    callee, from the image's own bytes. With `stock`, every link must lie at or above stock's
+    append point and the chain must end in stock's callee. Refuses (`hooklocate.HookNotFound`, a
+    `FollowChannelError`) anything that does not prove out."""
+    from . import hooklocate   # here, not at the top: hooklocate imports FollowChannelError
+    try:
+        return hooklocate.locate_hook(data, stock=stock, limit=CHAIN_WALK_LIMIT)
+    except hooklocate.HookNotFound as e:
+        raise hooklocate.HookNotFound(f"per-tick hook: {e}; refusing to detour") from e
+
+
+def hook_site(data: bytes, *, stock: bytes | None = None) -> tuple[int, bytes, int]:
+    """`(hook_off, hook_bytes, tail_target)` for the detour site: the hook's GuiCode-section
+    offset, its current 4 bytes, and the address the routine we append must tail-branch to.
+
+    The hook is entry1's first `bl` (`hooklocate`). It calls either the stock callee directly
+    (tail_target is that callee) or the newest routine an earlier op appended (tail_target is
+    that routine's entry; the new routine chains in front of it, hook -> new -> old -> callee).
+    Every routine here saves/restores r0-r3+lr, never touches r4-r7 and ends in a tail-branch,
+    so each link is transparent to the next (the AAPCS argument that licensed the single detour
+    licenses the chain). Anything else is refused."""
+    h = locate(data, stock=stock)
+    return h.hook_off, h.hook_bytes, (h.links[0] if h.links else h.stock_callee)
+
+
+def hook_state(data: bytes, *, stock: bytes | None = None) -> tuple[bytes, int]:
+    """`(hook_bytes, tail_target)`: `hook_site` without the offset."""
+    return hook_site(data, stock=stock)[1:]
 
 
 # How many authored per-tick routines a project may chain before compile refuses it
@@ -405,50 +406,27 @@ class TickChainFull(FollowChannelError):
         self.limit = limit
 
 
-def chain_from_hook(data: bytes, limit: int | None = None) -> list[int]:
+def chain_from_hook(data: bytes, limit: int | None = None, *,
+                    stock: bytes | None = None) -> list[int]:
     """The per-tick call chain the hook reaches, as runtime addresses: each appended routine's
-    entry in call order, ending with TAIL_TARGET (the displaced paint fn). On stock this is just
-    `[TAIL_TARGET]`. Each link is found by disassembling linearly from its entry to its first
-    `b.w` -- the only wide unconditional branch a routine here emits is its tail-branch, and the
-    literal pool sits after it. Refuses a link that leaves the appended region and a link seen
-    before (a loop). Any length is walked; `limit`, when given, raises `TickChainFull` once the
-    chain holds more than `limit` routines."""
-    sec = theme.guicode_section(data)
-    section = data[sec.offset:sec.offset + sec.length]
-    base = theme.GUICODE_BASE_DEFAULT
-    append_point = base + sec.length - 4
-    _, target = hook_state(data)
-    chain = []
-    seen = set()
-    while target != TAIL_TARGET:
-        if not (STOCK_APPEND_POINT <= target < append_point):
-            raise FollowChannelError(f"chain link {target:#x} is outside the appended region")
-        if target in seen:
-            raise FollowChannelError(f"per-tick chain loops back to {target:#x}: "
-                                     f"{[hex(c) for c in chain]}")
-        seen.add(target)
-        chain.append(target)
-        code = section[target - base:append_point - base]
-        tail = next((t for _, t in thumb.disassemble(code, target) if t.startswith("b.w #")), None)
-        if tail is None:
-            raise FollowChannelError(f"routine at {target:#x} has no b.w tail-branch")
-        target = int(tail[5:], 16)
-    if limit is not None and len(chain) > limit:
-        raise TickChainFull(len(chain), limit)
-    chain.append(TAIL_TARGET)
-    return chain
+    entry in call order, ending with the stock callee (the displaced paint fn). On stock this is
+    just `[callee]`. The links are walked by `hooklocate` (each opens `push {r0-r3, lr}` and
+    tail-branches through `pop.w {r0-r3, lr}; b.w`), which refuses a loop and, with `stock`, a
+    link below stock's append point. `limit`, when given, raises `TickChainFull` once the chain
+    holds more than `limit` routines."""
+    h = locate(data, stock=stock)
+    if limit is not None and len(h.links) > limit:
+        raise TickChainFull(len(h.links), limit)
+    return list(h.links) + [h.stock_callee]
 
 
 def hook_bytes(data: bytes) -> bytes | None:
-    """The 4 raw bytes at GuiCode+HOOK_OFF, unvalidated, or None when the image has no GuiCode
-    that long. A cheap test of whether an edit touched the per-tick hook."""
+    """The located hook's 4 bytes, or None when the image has no hook that proves out. A test
+    of whether an edit touched the per-tick hook."""
     try:
-        sec = theme.guicode_section(data)
-    except ValueError:
+        return locate(data).hook_bytes
+    except (FollowChannelError, ValueError):
         return None
-    if sec.length < HOOK_OFF + 4:
-        return None
-    return bytes(data[sec.offset + HOOK_OFF:sec.offset + HOOK_OFF + 4])
 
 
 def _check_hook(data: bytes) -> bytes:
@@ -460,7 +438,8 @@ def resolve(data: bytes, watch_channel: int, target_channel: int, on_level: int,
             gate_option: str | None = None, on_mask: int = 0x1C, on_value: int = 0x04,
             gate_slot_selector: int | None = None, gate_on_value: int = 1,
             gate_mask: int = 0xFFFF,
-            variant_group: int | None = None, alloc_display: bool = False) -> FollowPlan:
+            variant_group: int | None = None, alloc_display: bool = False, *,
+            stock: bytes | None = None) -> FollowPlan:
     """Derive every address the follower needs from `data`, or raise `FollowChannelError`.
 
     `data` is the full MCF container. `watch_channel`/`target_channel` are G12 output instances;
@@ -564,8 +543,8 @@ def resolve(data: bytes, watch_channel: int, target_channel: int, on_level: int,
         gate_addr = _gate_register(data, gate_option)
         gate_is_slot = False
 
-    # The stock hook: factored into _check_hook, shared with plan_from_registers.
-    hook_old, tail_target = hook_state(data)
+    # The located hook (`hook_site`), shared with plan_from_registers.
+    hook_at, hook_old, tail_target = hook_site(data, stock=stock)
 
     return FollowPlan(
         watch_addr=watch_addr,
@@ -578,7 +557,7 @@ def resolve(data: bytes, watch_channel: int, target_channel: int, on_level: int,
         gate_mask=gate_mask,
         on_template=_template(target_channel, on_level, 1),
         off_template=_template(target_channel, 0, 3),
-        hook_at=HOOK_OFF,
+        hook_at=hook_at,
         hook_old=hook_old,
         tail_target=tail_target,
         display_addr=display_addr,
@@ -588,7 +567,8 @@ def resolve(data: bytes, watch_channel: int, target_channel: int, on_level: int,
 
 
 def plan_from_registers(data: bytes, *, watch: Condition, target_channel: int,
-                        on_level: int = 200, gates: list) -> FollowPlan:
+                        on_level: int = 200, gates: list,
+                        stock: bytes | None = None) -> FollowPlan:
     """Build a FollowPlan from already-resolved registers (Task 2). No display cell, no
     variant group, no bridge block -- control logic only. `watch` is the edge source (tested
     (slot & mask) == value each tick); `gates` are all-must-hold conditions on the transmit,
@@ -609,13 +589,13 @@ def plan_from_registers(data: bytes, *, watch: Condition, target_channel: int,
     for gi, cond in enumerate(gates):
         _check_gate_test(cond.mask, cond.value, f"gate {gi} value", allow_wide_value=True)
     latch_addr = _scan_latch_cell(data)          # factored from resolve(), same discipline
-    hook_old, tail_target = hook_state(data)     # factored: stock `bl`, or chain onto a prior routine
+    hook_at, hook_old, tail_target = hook_site(data, stock=stock)   # stock `bl`, or a chain
     return FollowPlan(
         watch_addr=watch.register.slot_addr, on_mask=watch.mask & 0xFF, on_value=watch.value,
         latch_addr=latch_addr, gate_addr=0, gate_is_slot=False, gate_on_value=1,
         on_template=_template(target_channel, on_level, 1),
         off_template=_template(target_channel, 0, 3),
-        hook_at=HOOK_OFF, hook_old=hook_old, tail_target=tail_target, gates=list(gates),
+        hook_at=hook_at, hook_old=hook_old, tail_target=tail_target, gates=list(gates),
         use_gate_list=True)
 
 
@@ -925,14 +905,12 @@ def build(plan: FollowPlan, code_load_addr: int) -> tuple[bytes, list]:
 
 
 def _check_plan_hook(plan) -> None:
-    """The plan's hook bytes must be the stock `bl` (tail = paint fn) or a `bl` to exactly the
-    plan's tail target (a previous appended routine); anything else is not a plan from
-    `hook_state` and is refused."""
-    if plan.hook_old == HOOK_STOCK and plan.tail_target == TAIL_TARGET:
-        return
+    """The plan's hook bytes must decode, at the hook's runtime address, to a `bl` to exactly
+    the plan's tail target: the stock callee or a previous appended routine, as `hook_site`
+    located it. Anything else is not a plan from `hook_site` and is refused."""
     insns = thumb.disassemble(plan.hook_old, theme.GUICODE_BASE_DEFAULT + plan.hook_at)
     text = insns[0][1] if insns else ""
-    if (text == f"bl #{plan.tail_target:#x}" and plan.tail_target >= STOCK_APPEND_POINT):
+    if len(plan.hook_old) == 4 and text == f"bl #{plan.tail_target:#x}":
         return
     raise FollowChannelError(
         f"plan hook bytes {plan.hook_old.hex()} ({text or 'undecodable'}) are neither the stock "
@@ -1025,9 +1003,9 @@ class DisplayBridgePlan:
     on_master_addr: int     # &(ON master colour word); armed -> cell 45 = [this]
     off_master_addr: int    # &(OFF master colour word); disarmed -> cell 45 = [this]
     cell_addr: int          # &(cell 45), the wtype-5 Low Volts container's value_slot 45
-    hook_at: int            # GuiCode-section offset of the detoured `bl` (== HOOK_OFF)
+    hook_at: int            # GuiCode-section offset of the detoured `bl` (`hook_site`)
     hook_old: bytes         # its current 4 bytes (stock, or a bl into an earlier appended routine)
-    tail_target: int = TAIL_TARGET   # the paint fn, or the previous routine's entry (`hook_state`)
+    tail_target: int        # the stock callee, or the previous routine's entry (`hook_site`)
     setter_addr: int = VARIANT_SETTER          # &(fn-ptr to setVariant); `ldr r3,[this]; ldr
                                                # r3,[r3]; blx r3` -- the firmware's own updater
     armflag_addr: int = ARM_FLAG_ADDR          # &(armed-flag byte); stock strb'd armed here
@@ -1078,7 +1056,8 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
                            cell_addr: int = RECOLOR_CELL_ADDR,
                            setter_addr: int = VARIANT_SETTER,
                            armflag_addr: int = ARM_FLAG_ADDR,
-                           variant_group: int = VARIANT_GROUP_LOW_VOLTS) -> DisplayBridgePlan:
+                           variant_group: int = VARIANT_GROUP_LOW_VOLTS,
+                           stock: bytes | None = None) -> DisplayBridgePlan:
     """Validate the gate slot, the stock cell-45 recolor addresses and the detour site, then
     return a `DisplayBridgePlan`. `gate_addr` is the DGN_CONFIG receive slot (0x2000801C for
     selector 0x2F, from `register.resolve_register`); the rest default to the stock block's own
@@ -1092,7 +1071,16 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
     to 0xFFFF -- the whole-halfword test the coach-verified Low Volts bridge emits, byte for byte.
     Selector 0xEE now carries the auto-off minutes in its low byte and the Pump Link flag in its
     high byte, so a bridge that highlights that button must pass `gate_mask=0xFF00,
-    gate_on_value=0x0100`; the unmasked test can never hold on such a word."""
+    gate_on_value=0x0100`; the unmasked test can never hold on such a word.
+
+    13.6 only: every default address is 13.6's stock cell-45 block, so any other firmware
+    (`firmware.identify`) is refused before anything is read."""
+    from . import firmware
+    fw = firmware.identify(data)
+    if fw != "13.6":
+        raise FollowChannelError(
+            f"the display bridge mirrors 13.6's stock cell-45 block at its pinned addresses; "
+            f"this image is {fw or 'unidentified'} ({firmware.describe(data)}), refusing")
     # gate_addr/counter_addr live in the receive/var-state window (0x2000xxxx); the masters,
     # cell 45, setter fn-ptr and armed flag in the colour/config window (0x2003xxxx) -- validate
     # all against the full SRAM window (theme.SRAM_LOW/HIGH), not the narrower SRAM_LOW/HIGH used
@@ -1116,12 +1104,12 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
     if not (0 <= variant_group <= 0xFF):
         raise FollowChannelError(
             f"variant_group {variant_group:#x} must fit `movs r0,#imm8` (0..0xFF)")
-    hook_old, tail_target = hook_state(data)
+    hook_at, hook_old, tail_target = hook_site(data, stock=stock)
     return DisplayBridgePlan(gate_addr=gate_addr, gate_on_value=gate_on_value,
                              gate_mask=gate_mask,
                              counter_addr=counter_addr, on_master_addr=on_master_addr,
                              off_master_addr=off_master_addr, cell_addr=cell_addr,
-                             hook_at=HOOK_OFF, hook_old=hook_old, tail_target=tail_target,
+                             hook_at=hook_at, hook_old=hook_old, tail_target=tail_target,
                              setter_addr=setter_addr,
                              armflag_addr=armflag_addr, variant_group=variant_group)
 

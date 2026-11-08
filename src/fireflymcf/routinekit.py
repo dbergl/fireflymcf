@@ -1,8 +1,9 @@
 """The primitive surface user ops build on: per-tick routines, slots, SRAM, registers, frames.
 
 Every routine-authoring op in the library does the same handful of things: chain a per-tick
-routine onto the one hook at GuiCode+0xEE3C, find the receive slot a register lands in, find
-SRAM nothing else reaches, build an OPTIONS config-write frame and hand it to the host sender.
+routine onto the one per-tick hook (`hooklocate`; 13.6: GuiCode+0xEE3C), find the receive slot
+a register lands in, find SRAM nothing else reaches, build an OPTIONS config-write frame and
+hand it to the host sender.
 This module exposes those steps, wrapping the library's own functions (no built-in op calls
 through here, so their bytes are unchanged) so a user op can do them without reaching into
 library internals. `plugin/skills/write-new-op/USER-OPS.md` ("Primitives") is the reference;
@@ -81,7 +82,7 @@ class TickPlan:
     """Where the next tick routine loads and what it must tail-branch to."""
     code_load_addr: int     # runtime address of the blob's first byte (the GuiCode append point)
     tail_target: int        # the routine's `b.w` target: the hook's current callee
-    hook_at: int            # GuiCode-section offset of the hook `bl` (0xEE3C)
+    hook_at: int            # GuiCode-section offset of the hook `bl` (13.6: 0xEE3C)
     hook_old: bytes         # its current 4 bytes
 
 
@@ -101,16 +102,15 @@ def _plan(data: bytes) -> TickPlan:
             "BAD_HOOK", f"GuiCode maps at {theme.guicode_base(sec):#x}, not "
             f"{theme.GUICODE_BASE_DEFAULT:#x}; the hook chain is proven only at the default base")
     try:
-        hook_old, tail = followchannel.hook_state(data)
+        hook_at, hook_old, tail = followchannel.hook_site(data)
     except followchannel.FollowChannelError as e:
         raise RoutineKitError("BAD_HOOK", str(e)) from e
     load = theme.GUICODE_BASE_DEFAULT + sec.length - 4
-    # `recipe_ops._check_append_point`'s rule: stock 13.6's append point or 4-aligned beyond it.
-    if load < followchannel.STOCK_APPEND_POINT or load % 4:
-        raise RoutineKitError(
-            "BAD_HOOK", f"GuiCode append point is {load:#x}; expected stock 13.6's "
-            f"{followchannel.STOCK_APPEND_POINT:#x} or a 4-aligned point beyond it")
-    return TickPlan(load, tail, followchannel.HOOK_OFF, hook_old)
+    # The located hook proves the chain; the image alone cannot say where stock's GuiCode ended
+    # (`hooklocate.stock_append_point` needs the stock image), so only the alignment is checked.
+    if load % 4:
+        raise RoutineKitError("BAD_HOOK", f"GuiCode append point {load:#x} is not 4-aligned")
+    return TickPlan(load, tail, hook_at, hook_old)
 
 
 # --------------------------------------------------------------------------------------------
@@ -207,7 +207,7 @@ def _check_link(data: bytes, entry: int, tail_target: int) -> None:
 
 def install_tick_routine(data: bytes, blob: bytes, entry_offset: int, note: str, *,
                          code_load_addr: int, tail_target: int) -> tuple[bytes, TickInstall]:
-    """Append `blob` to GuiCode and retarget the per-tick hook at GuiCode+0xEE3C to
+    """Append `blob` to GuiCode and retarget the located per-tick hook (13.6: GuiCode+0xEE3C) to
     `code_load_addr + entry_offset`.
 
     `code_load_addr`/`tail_target` are the `tick_install_plan` values `blob` was assembled

@@ -271,3 +271,22 @@ def test_memo_keys_on_bytes(mcf_136, mcf_147):
     cells = hooklocate.host_api_cells(mcf_136)
     cells[4] = 0
     assert hooklocate.host_api_cells(mcf_136)[4] == STOCK["13.6"]["setter"]
+
+
+def test_stock_callee_must_match(mcf_136, mcf_147):
+    """With `stock`, the chain must end in stock's own callee: 14.7's hook (no links, so the
+    append-point bound never applies) against 13.6 as its stock is refused."""
+    assert hooklocate.locate_hook(mcf_147).links == ()
+    with pytest.raises(hooklocate.HookNotFound, match="not the stock callee"):
+        hooklocate.locate_hook(mcf_147, stock=mcf_136)
+
+
+def test_memo_does_not_read_module_constants(mcf_136, monkeypatch):
+    """The cache takes every constant as an argument: a monkeypatched window answers from the
+    patched value, not from a result cached under the old one."""
+    hooklocate.locate_hook(mcf_136)
+    monkeypatch.setattr(hooklocate, "ENTRY1_WINDOW", 0x10)
+    with pytest.raises(hooklocate.HookNotFound, match="no bl within 0x10"):
+        hooklocate.locate_hook(mcf_136)
+    monkeypatch.undo()
+    assert hooklocate.locate_hook(mcf_136).hook_off == STOCK["13.6"]["hook_off"]

@@ -138,7 +138,8 @@ def _check_names(slots: dict, cells: dict) -> None:
             raise LevelFeedError(f"{name!r} address {a:#x} is not halfword-aligned")
 
 
-def resolve(data: bytes, *, slots: dict, cells: dict) -> LevelFeedPlan:
+def resolve(data: bytes, *, slots: dict, cells: dict,
+            stock: bytes | None = None) -> LevelFeedPlan:
     """Validate `slots`/`cells` and read the current detour state off `data`.
 
     The hook is resolved by `bitcombine.resolve` itself (with a dummy source), so both routines
@@ -147,7 +148,7 @@ def resolve(data: bytes, *, slots: dict, cells: dict) -> LevelFeedPlan:
     _check_names(slots, cells)
     probe = bitcombine.resolve(
         data, sources=(bitcombine.BitSource(slots[VARS[0][0]], 1, 1),),
-        cell=cells[CELLS[0][0]])
+        cell=cells[CELLS[0][0]], stock=stock)
     return LevelFeedPlan(dict(slots), dict(cells), probe.hook_at, probe.hook_old,
                          probe.tail_target)
 
