@@ -44,7 +44,10 @@ class CellTableError(guidata.VariableTableNotFound):
     CELL_TABLE_CANDIDATES (not exactly one SRAM-pointer table), CELL_TABLE_BOUND_AMBIGUOUS
     (more than one distinct bound gates it), TYPE_TABLE_CANDIDATES (not exactly one table
     shares its bound), CELL_TABLE_ADJACENCY (the type table does not end where the cell table
-    starts) or TYPE_TABLE_DISAGREES (the GuiCode literal pair names another pair)."""
+    starts) or TYPE_TABLE_DISAGREES (the GuiCode literal pair names another pair). Growing the
+    table adds CELL_TABLE_BOUND_FORM (a bound compare in a form the grow cannot rebump, 11.23's
+    `movw+cmp`) and CELL_TABLE_BOUND_SITES (the rebump surface misses a bound compare), both
+    from `tablegrow.cell_table_bound_sites`."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)

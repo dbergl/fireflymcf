@@ -139,35 +139,30 @@ _CELL_BOUND_SITE_COUNT = 14  # 13.6: cmp.w index-bound sites
 
 
 def resolve_cell_tables(data: bytes) -> "tuple[int, int, int]":
-    """`(cell_base, type_base, old_len)` for the `+0x44BC8` display-cell table and its parallel
-    `+0x4492C` type table, discovered structurally with NO pinned GuiCode literal address.
+    """`(cell_base, type_base, rows)` for the display-cell table and its parallel type table,
+    located from GuiCode's bound compares (`celltables.locate`) with NO pinned literal address:
+    it follows a prior `tablegrow` relocation, and reads the row count from the bound compare in
+    whichever form the build uses (`cmp.w` on 13.6/14.7, `movw+cmp` on 11.23). On 13.6 this
+    returns exactly the values the reference constants above name: `(0x90044BC8, 0x9004492C,
+    665)`.
 
-    The two base runtime addresses come from `guidata.find_variable_tables` (a per-build scan
-    that also follows a prior `tablegrow` relocation, so this stays correct after an earlier op
-    has grown the table); the shared row-count bound comes from `tablegrow.find_index_bound`,
-    which reads the gating `cmp.w` immediate. On 13.6 this returns exactly the values the
-    reference constants above name: `(0x90044BC8, 0x9004492C, 665)`.
-
-    Raises `ReadoutError` if the tables cannot be located, or if the build gates them with a
-    bound encoding `find_index_bound` does not recognise (e.g. 11.23's movw-materialised
-    register compare) -- a clean refusal, never a guess.
+    Raises `ReadoutError` (NO_DISPLAY_CELL) if the tables cannot be located -- a clean refusal,
+    never a guess. Whether the table can be GROWN is `allocate_fresh_cells`'s question.
     """
-    from . import tablegrow  # local import: tablegrow -> theme/xref only, avoid an import cycle
+    from . import celltables
     try:
-        dptr_off, type_off = guidata.find_variable_tables(data)
-        cell_base = 0x90000000 + dptr_off
-        type_base = 0x90000000 + type_off
-        old_len = tablegrow.find_index_bound(data, cell_base)
-    except (tablegrow.TableGrowError, guidata.VariableTableNotFound) as e:
+        ct = celltables.locate(data)
+    except guidata.VariableTableNotFound as e:
         raise ReadoutError(
             "NO_DISPLAY_CELL: cannot locate the cell table structurally (unsupported build?): %s" % e)
-    return cell_base, type_base, old_len
+    return ct.cell_base, ct.type_base, ct.rows
 
 
 def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
                          ) -> "tuple[bytes, list[DisplayCell], list]":
     """Mint one genuinely-private display cell per `(width, vtype)` in `specs` by growing the
-    `+0x44BC8` cell table (and its parallel type table) with `tablegrow`.
+    display-cell table (13.6 `+0x44BC8`, 14.7 `+0x42B74`, wherever `celltables.locate` finds
+    it) and its parallel type table with `tablegrow`.
 
     Each new cell is a fresh, appended table INDEX (>= the table's current row count) backed by
     a fresh, 4-aligned SRAM address that no stock instruction names -- so nothing else in any of
@@ -193,14 +188,18 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
     if not specs:
         return data, [], []
 
+    from . import celltables
     cell_base, type_base, old_len = resolve_cell_tables(data)
 
     # Discover the GuiCode patch surfaces structurally too (base literals to repoint, bound sites
     # to rebump) and pass their counts to the grow as its self-consistency guard. Refuse if any is
-    # empty -- a table with no relocatable refs or no rebumpable bound cannot be grown safely.
-    cell_refs = tablegrow.find_base_refs(data, cell_base)
-    type_refs = tablegrow.find_base_refs(data, type_base)
-    bound_sites = tablegrow.find_bound_sites(data, old_len - 1)
+    # empty -- a table with no relocatable refs or no rebumpable bound cannot be grown safely. A
+    # bound in a form the grow cannot rebump (11.23's `movw+cmp`) refuses as
+    # `celltables.CellTableError` CELL_TABLE_BOUND_FORM (`tablegrow.cell_table_bound_sites`).
+    located = celltables.locate(data)
+    cell_refs = list(located.cell_refs)
+    type_refs = list(located.type_refs)
+    bound_sites = tablegrow.cell_table_bound_sites(data, located)
     if not (cell_refs and type_refs and bound_sites):
         raise ReadoutError(
             "NO_DISPLAY_CELL: cell table has no relocatable GuiCode surface "
@@ -238,7 +237,8 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
             data, tables, old_len=old_len, extra=len(specs),
             expect_base_refs={cell_base: len(cell_refs), type_base: len(type_refs)},
             expect_bound_sites=len(bound_sites),
-            new_entry_fill={cell_base: cell_fill, type_base: type_fill})
+            new_entry_fill={cell_base: cell_fill, type_base: type_fill},
+            bound_sites=bound_sites)
     except tablegrow.TableGrowError as e:
         raise ReadoutError("NO_DISPLAY_CELL: cannot grow the cell table: %s" % e)
 

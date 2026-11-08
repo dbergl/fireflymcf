@@ -359,6 +359,55 @@ def find_index_bound(data: bytes, base_addr: int) -> int:
     return next(iter(bounds)) + 1
 
 
+def cell_table_bound_sites(data: bytes, located) -> list[int]:
+    """Sorted GuiCode runtime addresses of every bound compare the display-cell table's grow
+    must rebump, for `located` (`celltables.locate(data)`).
+
+    The surface is `find_bound_sites(data, rows - 1)`: every `cmp.w rX, #bound` an indexed read
+    follows. That is wider than the sites `celltables.locate` credits to the table: GuiCode also
+    clamps an index to the bound as it stores it (`cmp.w r0,#bound ; bls.w`, then `strh` 0 on
+    the out-of-range path), and the read that index later feeds is not within the locator's two
+    hops. 13.6 and 14.7 each have 8 located sites and 14 in all (measured 2026-11-08).
+
+    Refuses (`celltables.CellTableError`) rather than leave a gate at the old bound:
+      - CELL_TABLE_BOUND_FORM: a located site, or any unsigned bound compare at the table's
+        bound, is not `cmp.w rX, #imm` (11.23's `movw rB,#imm ; cmp rI,rB`, or a 16-bit
+        `cmp rI,#imm8`), a form the grow does not re-encode;
+      - CELL_TABLE_BOUND_SITES: a located site is missing from the surface, or an unsigned
+        bound compare at the bound (`celltables._bound_compares`, every form) is not in it.
+    The second check is the guarantee that nothing is missed: every compare of the bound's
+    value followed by an unsigned branch, in any of the three forms, is either rebumped or a
+    refusal. On 13.6 and 14.7 the two sets are equal."""
+    from . import celltables
+    bound = located.rows - 1
+    code, base = _guicode_slice(data)
+    code = bytes(code)
+    compares = [(base + off, form) for off, _after, _ri, imm, form
+                in celltables._bound_compares(code, base) if imm == bound]
+    # `located.bound_form` joins its sites' forms with "+", and "movw+cmp" is one form, so the
+    # located sites' forms are read from their compares, not split out of that string
+    forms = {a: form for a, form in compares}
+    odd = sorted({form for _a, form in compares if form != "cmp.w"}
+                 | {forms.get(a, "unrecognised") for a in located.bound_sites
+                    if forms.get(a) != "cmp.w"})
+    if odd:
+        raise celltables.CellTableError(
+            "CELL_TABLE_BOUND_FORM",
+            "the display-cell table's bound %#x is compared in the %s form, which the grow does "
+            "not rebump (only cmp.w rX,#imm); this build's table cannot be grown"
+            % (bound, " and ".join(odd)))
+    sites = find_bound_sites(data, bound)
+    missing = sorted(set(located.bound_sites) - set(sites))
+    unbumped = sorted({a for a, _f in compares} - set(sites))
+    if missing or unbumped:
+        raise celltables.CellTableError(
+            "CELL_TABLE_BOUND_SITES",
+            "the grow's bound surface for %#x (%d cmp.w sites) leaves out %s; refusing rather "
+            "than leave a gate at the old bound"
+            % (bound, len(sites), ", ".join("%#x" % a for a in missing + unbumped)))
+    return sites
+
+
 # --------------------------------------------------------------------------------------
 # Task 3: relocate, grow, repoint, rebump, reseal.
 # --------------------------------------------------------------------------------------
@@ -471,7 +520,8 @@ def _reencode_cmpw(orig4: bytes, new_bound: int) -> bytes:
 
 def grow_indexed_tables(data, tables: "list[IndexedTable]", old_len: int, extra: int, *,
                         expect_base_refs: "dict[int, int]", expect_bound_sites: int,
-                        new_entry_fill: "dict[int, bytes] | None" = None
+                        new_entry_fill: "dict[int, bytes] | None" = None,
+                        bound_sites: "list[int] | None" = None
                         ) -> "tuple[bytes, list[int], list[relocate.Edit]]":
     """Relocate the given parallel `tables` to the end of GuiData, grow each from `old_len`
     to a common `new_len`, repoint every GuiCode base literal to its table's new home, bump
@@ -487,6 +537,10 @@ def grow_indexed_tables(data, tables: "list[IndexedTable]", old_len: int, extra:
     edits plus one `Edit` per repointed literal and rebumped bound). Refuses (raises
     `TableGrowError`) if a discovered patch-surface count does not match `expect_base_refs` /
     `expect_bound_sites`.
+
+    `bound_sites`, when given, is the bound surface to rebump (the display-cell table's comes
+    from `cell_table_bound_sites`, checked against the located table); otherwise every
+    `find_bound_sites(data, old_len - 1)` site is. Each must carry a `cmp.w rX, #imm`.
     """
     data = bytes(data)
     new_entry_fill = new_entry_fill or {}
@@ -506,7 +560,8 @@ def grow_indexed_tables(data, tables: "list[IndexedTable]", old_len: int, extra:
         base_refs[table.base_addr] = refs
 
     old_bound = old_len - 1
-    bound_sites = find_bound_sites(data, old_bound)
+    bound_sites = (find_bound_sites(data, old_bound) if bound_sites is None
+                   else sorted(bound_sites))
     if len(bound_sites) != expect_bound_sites:
         raise TableGrowError(
             f"found {len(bound_sites)} bound sites for #{old_bound:#x}, "

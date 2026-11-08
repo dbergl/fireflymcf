@@ -390,8 +390,8 @@ def _assert_authored_cells_fresh(ctx: Ctx) -> None:
     background bars. Enforcing "authored cells are freshly grown, never reused" is the invariant
     that makes that class impossible, and it is what would have failed the original coach-48V
     build. Reads the stock row count structurally (`readout.resolve_cell_tables`); a build whose
-    cell table cannot be located or uses an unsupported bound encoding is left ungated -- the ops
-    that grow support only the 13.6 `cmp.w #imm` bound form."""
+    cell table cannot be located is left ungated. The grow itself rebumps only a `cmp.w #imm`
+    bound (13.6, 14.7) and refuses 11.23's `movw+cmp` (`tablegrow.cell_table_bound_sites`)."""
     if not ctx.authored_cells:
         return
     from fireflymcf import readout

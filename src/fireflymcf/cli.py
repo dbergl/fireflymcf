@@ -1521,9 +1521,18 @@ def _cmd_pins(args: argparse.Namespace) -> int:
                 for c in captions.get(p, [])],
         })
 
+    # A built image's cell table was grown, so which rows are stock spares is unknown
+    # (SPARE_ROWS_UNKNOWN); that is reported, and the pins are still listed.
+    try:
+        spares, spares_unknown = statusbind.spare_cell_indices(data), None
+    except statusbind.SpareRowsUnknown as e:
+        spares, spares_unknown = None, (str(e) if str(e).startswith(e.code)
+                                        else f"{e.code}: {e}")
     if args.json:
-        print(json.dumps({"pins": rows,
-                          "spare_cell_indices": statusbind.spare_cell_indices(data)}, indent=2))
+        out = {"pins": rows, "spare_cell_indices": spares}
+        if spares_unknown is not None:
+            out["spare_cell_indices_unknown"] = spares_unknown
+        print(json.dumps(out, indent=2))
         return 0
 
     print(f"{'pin':>4} {'var':>4} {'use':>7} {'bool':>5} {'off colour':>15} "
@@ -1543,7 +1552,8 @@ def _cmd_pins(args: argparse.Namespace) -> int:
             for c in r["captions"]:
                 print(f"{'':>10}caption  {c['text']!r} ({'+'.join(c['via'])}, objects "
                       f"{', '.join(map(str, c['objects']))}): {c['when']}")
-    print(f"\nspare +0x44BC8 indices: {statusbind.spare_cell_indices(data)}")
+    print(f"\nspare +0x44BC8 indices: "
+          f"{spares if spares_unknown is None else f'unknown ({spares_unknown})'}")
     print("OUTPUTS-page name: the G12 OUTPUTS row's names; + = shown only under some floorplan "
           "or option (--names lists the conditions and the control captions)")
     if args.all:
