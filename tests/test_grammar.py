@@ -3,7 +3,7 @@ any image's GuiCode by their normalised instruction lists (2026-11-08)."""
 from __future__ import annotations
 
 import importlib.util
-import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -20,6 +20,7 @@ TWINS = {"13.6": (0x252CB0, 0x257BFC, 0x256C54), "14.7": (0x255578, 0x25A4B8, 0x
 # The renderer's wtype arms that differ on 14.7 (state offsets moved, 2026-11-08).
 ARMS_DIFFERING_147 = {10, 14, 18}
 ARMS_TEMPLATES = {2, 3, 4, 6, 8, 11, 12, 0x20, 0x21}
+DEFAULT_ARM = frozenset({9, 15, *range(20, 32), *range(36, 46)})
 # `cmp.w R, #0x298` sites over the decoder's exact Ghidra extent (the research's 11 was a window).
 BOUND_SITES = 13
 
@@ -47,6 +48,7 @@ def test_136_proves_itself(stocks):
     assert (p.decoder, p.layout, p.renderer) == TWINS["13.6"]
     assert p.bounds == {}
     assert p.renderer_wtypes == frozenset(range(48))
+    assert p.renderer_default_wtypes == DEFAULT_ARM
     assert not any("not proven" in line for line in p.proof)
 
 
@@ -57,6 +59,9 @@ def test_147_twins_and_bound(stocks):
     assert ARMS_DIFFERING_147.isdisjoint(p.renderer_wtypes)
     assert ARMS_TEMPLATES <= p.renderer_wtypes
     assert p.renderer_wtypes == frozenset(range(48)) - ARMS_DIFFERING_147
+    # wtypes whose table entry is the default arm (the dispatch's `bhi.w`) draw nothing
+    assert p.renderer_default_wtypes == DEFAULT_ARM
+    assert ARMS_TEMPLATES.isdisjoint(p.renderer_default_wtypes)
     text = "\n".join(p.proof)
     assert "0x255578" in text and "0x25a4b8" in text and "0x259514" in text
     # the arms that differ are named, with the first differing instruction
@@ -95,6 +100,53 @@ def test_retargeted_decoder_branch_refuses(stocks):
     with pytest.raises(grammar.GrammarError) as e:
         grammar.prove(_patch(data, 0x255660, bytes.fromhex("33b9")))   # cbnz r3, #0x255670
     assert "0x255660" in str(e.value)
+
+
+def test_swapped_register_refuses(stocks):
+    """Registers follow one bijection: `r2` -> `r3` at one site is not a renaming."""
+    data = stocks["14.7"]
+    assert _read(data, 0x255C0E, 4) == bytes.fromhex("47f22f02")      # movw r2, #0x702f
+    with pytest.raises(grammar.GrammarError) as e:
+        grammar.prove(_patch(data, 0x255C0E, bytes.fromhex("47f22f03")))   # movw r3, #0x702f
+    assert e.value.code == "GRAMMAR"
+    assert "0x255c0e" in str(e.value) and "register" in str(e.value)
+
+
+def test_changed_pool_word_refuses(stocks):
+    """Pool words are compared: an SRAM address maps one-to-one, so one changed word refuses."""
+    data = stocks["14.7"]
+    assert _read(data, 0x2558C0, 4) == struct.pack("<I", 0x200301B4)
+    with pytest.raises(grammar.GrammarError) as e:
+        grammar.prove(_patch(data, 0x2558C0, struct.pack("<I", 0x200301B4 ^ 0x10)))
+    assert e.value.code == "GRAMMAR" and "SRAM" in str(e.value)
+
+
+def test_retargeted_call_refuses(stocks):
+    """Callees map one-to-one: one `bl` to another helper refuses."""
+    data = stocks["14.7"]
+    assert _dis(data, 0x25558C, 4) == [(0x25558C, "bl #0x2549e4")]
+    bad = _patch(data, 0x25558C, bytes.fromhex("fff730fa"))
+    assert _dis(bad, 0x25558C, 4) == [(0x25558C, "bl #0x2549f0")]
+    with pytest.raises(grammar.GrammarError) as e:
+        grammar.prove(bad)
+    assert "0x25558c" in str(e.value) and "callee" in str(e.value)
+
+
+def test_two_addresses_onto_one_refuses(stocks):
+    """The mapping is injective: 13.6's once-used SRAM word 0x20036DB0 (14.7 pool `0x2562E4`)
+    made equal to the image of another 13.6 address (0x20036D54 -> 0x20036D58) refuses, though
+    no 13.6 value maps two ways."""
+    data = stocks["14.7"]
+    assert _read(data, 0x2562E4, 4) == struct.pack("<I", 0x20036DB4)
+    with pytest.raises(grammar.GrammarError) as e:
+        grammar.prove(_patch(data, 0x2562E4, struct.pack("<I", 0x20036D58)))
+    assert "0x20036d58 is 13.6's 0x20036d54" in str(e.value)
+
+
+def test_pool_shifts_are_reported(stocks):
+    text = "\n".join(grammar.prove(stocks["14.7"]).proof)
+    assert "decoder: SRAM pool values (5 distinct) shifted +0x0 x2, +0x4 x3" in text
+    assert "distinct callees, mapped one-to-one" in text
 
 
 def test_inconsistent_bound_refuses(stocks):

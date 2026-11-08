@@ -3,42 +3,67 @@ by locating twins of 13.6's record decoder, layout engine and shape renderer in 
 (2026-11-08).
 
 **What is compared.** 13.6's decoder `FUN_00252CB0`, layout engine `FUN_00257BFC` and renderer
-`FUN_00256C54` ship as normalised instruction lists (`data/grammar136.json`), generated from 13.6
-stock by `scripts/gen_grammar_fingerprints.py` over their exact Ghidra extents (project
-`guicode136`). No address of any other firmware appears here. Each list is a linear sweep that:
+`FUN_00256C54` ship as instruction lists (`data/grammar136.json`), generated from 13.6 stock by
+`scripts/gen_grammar_fingerprints.py` over their exact Ghidra extents (project `guicode136`). No
+address of any other firmware appears here. Each list is a linear sweep of the function, and each
+item is compared as follows.
 
-* abstracts the registers `r0`-`r12`/`sb`/`sl`/`fp`/`ip` to `R`, so a re-allocated compile matches;
-* replaces every PC-relative operand (branch, `cbz`, literal `ldr`, `adr`) with `<rel>`, then
-  checks the target separately as a position (`@segment:item`) when it lies inside the function,
-  or as `ext` when it does not;
-* skips data and emits it as an item that carries only its size: literal-pool words (the targets
-  of `ldr Rt, [pc, #]`, `<data:N>`), the halfword pad before an aligned pool (`<pad>`), absolute
-  jump tables after `ldr.w pc, [Rn, Rm, lsl #2]`, and the inline `tbb`/`tbh` tables
-  (`<table:N>`). Table entries are counted from the preceding `cmp`. Over 13.6's three functions
-  this code/data split equals Ghidra's function bodies byte for byte (the generator asserts it).
+* **Instructions** must have the same mnemonic and operands once registers are abstracted.
+  Immediates and state offsets are compared exactly. The registers themselves must follow one
+  consistent **bijection** from 13.6's registers to the image's: per function for the decoder and
+  layout engine, per segment for the renderer. A renaming passes. Swapping one register for
+  another does not (`r0`-`r12`, `sb`/`sl`/`fp`/`ip`; `sp`/`lr`/`pc` are compared literally).
+* **PC-relative operands** (branch, `cbz`, literal `ldr`, `adr`) are masked in the text and their
+  targets compared separately:
+  * a code target inside the function is compared by position (`@segment:item`);
+  * a pool word inside the function is compared by position from its segment's end
+    (`@segment:-k`);
+  * a call (`bl` and any other branch out of the function) must follow one consistent injective
+    mapping from 13.6 callee to image callee: the same callee maps the same everywhere, and
+    distinct callees map to distinct ones. The callee's own code is not compared;
+  * a literal load from outside the function is compared by its value, as pool words are.
+* **Data** is skipped as code and compared as values:
+  * **Pool words** (the targets of `ldr Rt, [pc, #]`) are classified as SRAM (`0x2xxxxxxx`),
+    GuiData (`0x9xxxxxxx`), GuiCode (inside the section) or constant. A constant must be equal.
+    An address must stay in its class and follow one consistent injective mapping per function
+    (per segment in the renderer). `proof` reports the shifts, e.g. "SRAM pool values shifted
+    +0x4".
+  * **Pads**: the `nop`/zero halfword before an aligned pool.
+  * **Tables**: the absolute jump tables after `ldr.w pc, [Rn, Rm, lsl #2]` and the inline
+    `tbb`/`tbh` tables. Their entries are counted from the preceding `cmp` and compared by the
+    position they jump to.
 
-Every other operand, immediates and state offsets included, must be equal. The one exception is a
-**named bound**: a `cmp.w R, #imm` site the fingerprint declares. Its immediate may differ, but it
-must be one value across all its sites, and that value is reported. The decoder's
-`mode7_index` is `cmp.w r0, #0x298` (664) at 13 sites over its exact extent. The research of
-2026-11-07 counted 11 sites over a window.
+  Over 13.6's three functions this code/data split equals Ghidra's function bodies byte for byte
+  (the generator asserts it).
 
-**Search.** The sweep starts at every halfword in GuiCode that encodes a `push` and matches the
-fingerprint's first item. It stops at the first difference that is not a declared bound.
+The one other allowed difference is a **named bound**: a `cmp.w R, #imm` site the fingerprint
+declares. Its immediate may differ, but it must be one value across all its sites, and that value
+is reported. The decoder's `mode7_index` is `cmp.w r0, #0x298` (664) at 13 sites over its exact
+extent. The research of 2026-11-07 counted 11 sites over a window.
 
-**The renderer is a switch.** Its dispatch (entry through `tbh [pc, r3, lsl #1]` and its table)
-must be a twin. Each segment that follows is fingerprinted separately: the code after the table,
-and each switch arm (its start read from the table, its end at the next arm start). The arm
-partition (which wtypes share an arm) must be 13.6's. A wtype is proven when its arm and every
-segment it, or the dispatch, can reach by branch or fall-through are twins (pool loads are not
-transfers of control). `GrammarProof.renderer_wtypes` holds the
-proven wtypes. A template whose wtype is not in it must be refused by its consumer (`donors`,
-Plan 4 Task 2). On 14.7 the arms for wt 10/18 and wt 14 differ (moved state offsets and a
-re-laid record array). They are named in `proof` as not proven, with the first differing
-instruction.
+**Search.** Every halfword in GuiCode that encodes a `push` matching the fingerprint's first item
+is a candidate. At each candidate the sweep reads as many items as the fingerprint has and
+compares them all. A twin has no unexplained difference. When no candidate is a twin, the refusal
+names the candidate with the longest matching prefix and its first difference.
 
-**What is not proven.** The callees (`bl` targets outside the function) are not compared; a twin
-that calls a changed helper still passes. Fingerprinted code is compared, not executed.
+**The renderer is a switch.**
+- **Dispatch.** Its entry through `tbh [pc, r3, lsl #1]` and its table must be a twin.
+- **Segments.** Each segment after the dispatch is fingerprinted separately: the code after the
+  table, then each switch arm, from its start in the table to the next arm start. The arm
+  partition (which wtypes share an arm) must be 13.6's.
+- **Proven wtypes.** A wtype is proven when its arm, and every segment that it or the dispatch can
+  reach by branch or fall-through, are twins. Pool loads are not transfers of control.
+  `GrammarProof.renderer_wtypes` holds the proven wtypes.
+- **Default arm.** `renderer_default_wtypes` is the subset whose table entry is the default arm
+  (the dispatch's out-of-range target). Those wtypes draw nothing of their own, so they are proven
+  only in the sense that they reach that arm.
+- **For consumers.** A consumer (`donors`, Plan 4 Task 2) must refuse a template whose wtype is
+  not in `renderer_wtypes - renderer_default_wtypes`.
+- **On 14.7** the arms for wt 10/18 and wt 14 differ (moved state offsets and a re-laid record
+  array). `proof` names them as not proven, with the first differing instruction.
+
+**What is not proven.** A callee's own code: the mapping proves only that the twin calls
+corresponding helpers in the same pattern. Fingerprinted code is compared, not executed.
 
 **Refusals** (`GrammarError`, code `GRAMMAR`): no GuiCode; the decoder, layout engine or renderer
 dispatch has no twin or more than one; a bound with inconsistent sites; no renderer arm proven.
@@ -50,6 +75,7 @@ import dataclasses
 import json
 import re
 import struct
+from collections import Counter
 from dataclasses import dataclass
 from importlib import resources
 from typing import Iterator
@@ -72,6 +98,8 @@ class GrammarProof:
     bounds: dict[str, tuple[int, int]]  # name -> (13.6 value, this image's), only where they differ
     proof: tuple[str, ...]
     renderer_wtypes: frozenset[int]     # wtypes whose renderer arm (and all it reaches) is a twin
+    # the subset whose arm is the default (out-of-range) arm: they draw nothing of their own
+    renderer_default_wtypes: frozenset[int] = frozenset()
 
 
 # ---------------------------------------------------------------------------------------------
@@ -82,11 +110,12 @@ class GrammarProof:
 class Item:
     addr: int
     size: int
-    text: str                    # normalised, PC-relative operands as `<rel>`
+    text: str                    # concrete registers, PC-relative operands as `<rel>`
     raw: str                     # capstone's text, for messages
     target: int | None = None    # a PC-relative operand's absolute target
-    entries: tuple[int, ...] = ()  # a tbb/tbh table's targets
+    entries: tuple[int, ...] = ()  # a table's jump targets
     exit: bool = False           # an unconditional transfer: control never falls past it
+    value: bytes = b""           # a data item's bytes
 
 
 _REG = re.compile(r"\b(?:r\d{1,2}|sb|sl|fp|ip)\b")
@@ -107,6 +136,11 @@ def _cs():
         import capstone
         _MD = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
     return _MD
+
+
+def abstract(text: str) -> str:
+    """`text` with its registers abstracted to `R`."""
+    return _REG.sub("R", text)
 
 
 def _literal_size(mnem: str, ops: str) -> int:
@@ -139,7 +173,7 @@ def _instruction(code: bytes, base: int, pc: int) -> Item | None:
     elif _PCMEM.search(ops):
         target = ((pc + 4) & ~3) + int(_PCMEM.search(ops).group(1), 0)
         ops = _PCMEM.sub("[pc, <rel>]", ops)
-    text = f"{mnem} {_REG.sub('R', ops)}".strip()
+    text = f"{mnem} {ops}".strip()
     exit_ = bool(mnem in ("b", "b.w", "b.n", "bx", "tbb", "tbh") or _PC_WRITE.match(raw))
     return Item(pc, size, text, raw, target, (), exit_)
 
@@ -155,7 +189,8 @@ def sweep(code: bytes, base: int, start: int, *, end: int | None = None,
     while end is None or pc < end:
         if pc in data:
             n = data[pc]
-            yield Item(pc, n, f"<data:{n}>", f"<data:{n}>")
+            yield Item(pc, n, f"<data:{n}>", f"<data:{n}>",
+                       value=bytes(code[pc - base:pc - base + n]))
             pc += n
             continue
         if pc % 4 == 2 and pc + 2 in data and code[pc - base:pc - base + 2] in _PADS:
@@ -186,13 +221,15 @@ def sweep(code: bytes, base: int, start: int, *, end: int | None = None,
         table = None
         if mnem.startswith("ldr") and ins.raw.split(" ", 1)[1].startswith("pc, [") \
                 and "lsl #2" in ins.raw:
-            if last_cmp is None:
+            n = (last_cmp or 0) + 1
+            if last_cmp is None or pc - base + 2 + 4 * n > len(code):
                 yield Item(pc, 2, "<bad>", "<bad>", exit=True)
                 return
             if pc % 4 == 2:
                 yield Item(pc, 2, "<pad>", "<pad>")
                 pc += 2
-            table = Item(pc, 4 * (last_cmp + 1), "", "")
+            words = struct.unpack_from(f"<{n}I", code, pc - base)
+            table = Item(pc, 4 * n, "", "", entries=tuple(w & ~1 for w in words))
         elif mnem in ("tbb", "tbh"):
             if last_cmp is None or pc - base + (last_cmp + 1) * 2 > len(code):
                 yield Item(pc, 2, "<bad>", "<bad>", exit=True)
@@ -211,24 +248,49 @@ def sweep(code: bytes, base: int, start: int, *, end: int | None = None,
             pc += table.size
 
 
-def encode(segments: list[list[Item]]) -> list[list[str]]:
-    """Each item's comparison string: its text, plus `|@s:i` (a code target inside the swept
-    segments, item `i` of segment `s`), `|@s:-k` (a pool word, `k` items from the end of its
-    segment, so a pool after an arm that changed length still lines up), or `|ext` (a target
-    outside them)."""
+def _words(value: bytes) -> str:
+    if len(value) in (4, 8):
+        return ",".join(f"{w:#x}" for w in struct.unpack(f"<{len(value) // 4}I", value))
+    return f"{int.from_bytes(value, 'little'):#x}"
+
+
+def encode(segments: list[list[Item]], code: bytes, base: int) -> list[list[str]]:
+    """Each item's comparison string: its text, then `|` and a token for what it refers to:
+    - `@s:i`: a code target inside the swept segments, item `i` of segment `s`;
+    - `@s:-k`: a pool word, `k` items from its segment's end;
+    - `call=0x…`: a code target outside them;
+    - `lit=…`: a literal load from outside them, by value;
+    - `=…`: a data item's value (words, comma-separated);
+    - `T=…`: a table's jump targets, by position.
+    """
     where = {}
     for s, items in enumerate(segments):
         for i, it in enumerate(items):
             where[it.addr] = (s, i - len(items) if it.text.startswith("<data") else i)
+
+    def pos(addr: int) -> str:
+        p = where.get(addr)
+        return f"@{p[0]}:{p[1]}" if p else f"call={addr:#x}"
+
     out = []
     for items in segments:
         row = []
         for it in items:
-            if it.target is None:
+            if it.value:
+                row.append(f"{it.text}|={_words(it.value)}")
+            elif it.entries:
+                row.append(f"{it.text}|T=" + ",".join(pos(e) for e in it.entries))
+            elif it.target is None:
                 row.append(it.text)
+            elif it.target in where:
+                row.append(f"{it.text}|{pos(it.target)}")
+            elif "[pc, <rel>]" in it.text:
+                n = _literal_size(it.raw.split(" ")[0], it.raw.split(" ", 1)[1])
+                lo = it.target - base
+                row.append(f"{it.text}|lit={_words(code[lo:lo + n])}"
+                           if 0 <= lo and lo + n <= len(code) else f"{it.text}|ext")
             else:
-                pos = where.get(it.target)
-                row.append(f"{it.text}|@{pos[0]}:{pos[1]}" if pos else f"{it.text}|ext")
+                row.append(f"{it.text}|call={it.target:#x}")
         out.append(row)
     return out
 
@@ -237,14 +299,20 @@ def text_part(enc: str) -> str:
     return enc.split("|", 1)[0]
 
 
+def _token(enc: str) -> str | None:
+    return enc.split("|", 1)[1] if "|" in enc else None
+
+
 def reaches(enc_items: list[str], next_segment: int | None, exits: list[int]) -> set[int]:
     """Segments an encoded segment can transfer to: its in-function targets, and the next
     segment when its last code item (`exits` lists the unconditional exits by index) is not an
-    unconditional exit. Data items are not code; a `<table>` follows its `tbb`/`tbh`."""
+    unconditional exit. Data items are not code. A table's entries (`T=…`) are not counted: the
+    only table in a renderer segment list is the dispatch's tbh, whose arms are the wtypes."""
     out = set()
     for e in enc_items:
-        if "|@" in e:
-            seg, idx = e.split("|@", 1)[1].split(":")
+        tok = _token(e)
+        if tok and tok.startswith("@"):
+            seg, idx = tok[1:].split(":")
             if not idx.startswith("-"):          # a pool load is not a transfer of control
                 out.add(int(seg))
     code = [i for i, e in enumerate(enc_items)
@@ -290,9 +358,58 @@ def _prologue_candidates(code: bytes, base: int, first: str) -> list[int]:
         if (hw & 0xFE00) != 0xB400 and hw != 0xE92D:
             continue
         ins = _instruction(code, base, base + off)
-        if ins is not None and ins.text == first:
+        if ins is not None and abstract(ins.text) == abstract(first):
             out.append(base + off)
     return out
+
+
+def _value_class(v: int, region: tuple[int, int]) -> str:
+    if region[0] <= (v & ~1) < region[1]:
+        return "GuiCode"
+    if v >> 28 == 0x2:
+        return "SRAM"
+    if v >> 28 == 0x9:
+        return "GuiData"
+    return "constant"
+
+
+class _Maps:
+    """One consistent injective mapping per kind (registers, callees, each address class),
+    13.6 -> image, over one scope (a function, or a renderer segment)."""
+
+    def __init__(self, ref_region: tuple[int, int], img_region: tuple[int, int]):
+        self.fwd: dict[tuple[str, object], object] = {}
+        self.inv: dict[tuple[str, object], object] = {}
+        self.where: dict[tuple[str, object], int] = {}    # where each binding was first made
+        self.ref_region, self.img_region = ref_region, img_region
+
+    def bind(self, kind: str, a, b, at: int) -> str | None:
+        f, r = self.fwd.get((kind, a)), self.inv.get((kind, b))
+        fmt = (lambda x: f"{x:#x}") if isinstance(a, int) else str
+        if f is not None and f != b:
+            return (f"13.6 {kind} {fmt(a)} maps to {fmt(f)} as at "
+                    f"{self.where[(kind, a)]:#x}, {fmt(b)} here")
+        if r is not None and r != a:
+            return (f"{kind} {fmt(b)} is 13.6's {fmt(r)} as at "
+                    f"{self.where[(kind, r)]:#x}, {fmt(a)} here")
+        if f is None:
+            self.fwd[(kind, a)], self.inv[(kind, b)], self.where[(kind, a)] = b, a, at
+        return None
+
+    def bind_value(self, a: int, b: int, at: int) -> str | None:
+        ca, cb = _value_class(a, self.ref_region), _value_class(b, self.img_region)
+        if ca == "constant":
+            return None if a == b else f"constant {a:#x} is {b:#x} here"
+        if ca != cb:
+            return f"13.6 {ca} address {a:#x} is {cb} {b:#x} here"
+        return self.bind(f"{ca} value", a, b, at)
+
+    def shifts(self) -> dict[str, Counter]:
+        out: dict[str, Counter] = {}
+        for (kind, a), b in self.fwd.items():
+            if kind.endswith(" value"):
+                out.setdefault(kind[:-6], Counter())[b - a] += 1
+        return out
 
 
 @dataclass
@@ -301,48 +418,70 @@ class _Diff:
     at: int
     want: str
     have: str
+    why: str = ""
 
     def describe(self) -> str:
-        return f"differs at {self.at:#x}: 13.6 has `{self.want}`, this image `{self.have}`"
+        why = f" ({self.why})" if self.why else ""
+        return f"differs at {self.at:#x}: 13.6 has `{self.want}`, this image `{self.have}`{why}"
 
 
-def _compare(want: list[str], items: list[Item], enc: list[str] | None,
+def _values(tok: str) -> list[int]:
+    return [int(x, 16) for x in tok.split("=", 1)[1].split(",")]
+
+
+def _compare(want: list[str], items: list[Item], enc: list[str], maps: _Maps,
              bound_sites: dict[int, str], bound_seen: dict[str, tuple[int, list[int]]]
              ) -> _Diff | None:
-    """Item by item; `enc` None compares text only. Bound sites record their value."""
+    """Item by item: abstracted text, the register bijection, tokens (positions, callee and
+    value mappings) and the declared bounds."""
     for i, w in enumerate(want):
         if i >= len(items):
             last = items[-1].addr + items[-1].size if items else 0
             return _Diff(i, last, text_part(w), "<end of segment>")
-        it = items[i]
-        have = enc[i] if enc is not None else it.text
-        w_cmp = w if enc is not None else text_part(w)
-        if have == w_cmp:
-            if i in bound_sites:
-                _record_bound(bound_seen, bound_sites[i], it)
-            continue
-        if i in bound_sites and _BOUND.match(it.text):
-            prior = bound_seen.get(bound_sites[i])
-            value = int(_BOUND.match(it.text).group(1), 0)
+        it, have = items[i], enc[i]
+        wt, ht = text_part(w), text_part(have)
+        diff = lambda why="": _Diff(i, it.addr, w.replace("|", " -> "),  # noqa: E731
+                                    f"{it.raw} -> {_token(have)}" if _token(have) else it.raw,
+                                    why)
+        if abstract(wt) != abstract(ht):
+            if not (i in bound_sites and _BOUND.match(abstract(wt))
+                    and _BOUND.match(abstract(ht))):
+                return _Diff(i, it.addr, wt, it.raw)
+            name = bound_sites[i]
+            value = int(_BOUND.match(abstract(ht)).group(1), 0)
+            prior = bound_seen.get(name)
             if prior is not None and prior[0] != value:
-                return _Diff(i, it.addr, f"cmp.w R, #{prior[0]:#x} (bound {bound_sites[i]} "
-                             f"as at {prior[1][0]:#x})", it.raw)
-            _record_bound(bound_seen, bound_sites[i], it)
+                return _Diff(i, it.addr, f"cmp.w R, #{prior[0]:#x} (bound {name} as at "
+                             f"{prior[1][0]:#x})", it.raw)
+        if i in bound_sites:
+            value = int(_BOUND.match(abstract(ht)).group(1), 0)
+            bound_seen.setdefault(bound_sites[i], (value, []))[1].append(it.addr)
+        for a, b in zip(_REG.findall(wt), _REG.findall(ht)):
+            why = maps.bind("register", a, b, it.addr)
+            if why:
+                return diff(why)
+        wtok, htok = _token(w), _token(have)
+        if wtok is None or htok is None:
+            if wtok != htok:
+                return diff()
             continue
-        if text_part(have) != text_part(w):
-            return _Diff(i, it.addr, text_part(w), it.raw)
-        return _Diff(i, it.addr, w.replace("|", " -> "), f"{it.raw} -> {have.split('|', 1)[1]}")
+        if wtok.startswith(("=", "lit=")) and htok.startswith(wtok.split("=")[0] + "="):
+            wv, hv = _values(wtok), _values(htok)
+            if len(wv) != len(hv):
+                return diff()
+            for a, b in zip(wv, hv):
+                why = maps.bind_value(a, b, it.addr)   # a byte or halfword is a constant
+                if why:
+                    return diff(why)
+        elif wtok.startswith("call=") and htok.startswith("call="):
+            why = maps.bind("callee", int(wtok[5:], 16), int(htok[5:], 16), it.addr)
+            if why:
+                return diff(why)
+        elif wtok != htok:
+            return diff()
     if len(items) > len(want):
         return _Diff(len(want), items[len(want)].addr, "<end of segment>", items[len(want)].raw)
     return None
-
-
-def _record_bound(seen: dict, name: str, it: Item) -> None:
-    value = int(_BOUND.match(it.text).group(1), 0)
-    v, sites = seen.setdefault(name, (value, []))
-    if v != value:
-        raise AssertionError("bound recorded with two values")       # pragma: no cover
-    sites.append(it.addr)
 
 
 def _bound_index(fn: dict) -> dict[int, dict[int, str]]:
@@ -362,7 +501,20 @@ def _take(gen: Iterator[Item], n: int) -> list[Item]:
     return out
 
 
-def _whole(code: bytes, base: int, name: str, fn: dict
+def _shift_lines(name: str, maps: list[_Maps]) -> list[str]:
+    total: dict[str, Counter] = {}
+    for m in maps:
+        for cls, c in m.shifts().items():
+            total.setdefault(cls, Counter()).update(c)
+    callees = sum(1 for m in maps for (kind, _a) in m.fwd if kind == "callee")
+    out = [f"{name}: {callees} distinct callees, mapped one-to-one"] if callees else []
+    for cls, c in sorted(total.items()):
+        shifts = ", ".join(f"{d:+#x} x{n}" for d, n in sorted(c.items()))
+        out.append(f"{name}: {cls} pool values ({sum(c.values())} distinct) shifted {shifts}")
+    return out
+
+
+def _whole(code: bytes, base: int, name: str, fn: dict, regions: tuple
            ) -> tuple[int, dict[str, tuple[int, int, list[int]]], list[str]]:
     """Locate the one twin of a whole-function fingerprint."""
     want = fn["segments"][0]["items"]
@@ -372,12 +524,10 @@ def _whole(code: bytes, base: int, name: str, fn: dict
     for c in cands:
         items = _take(sweep(code, base, c), len(want))
         seen: dict = {}
-        d = _compare(want, items, None, bidx, seen)
+        maps = _Maps(*regions)
+        d = _compare(want, items, encode([items], code, base)[0], maps, bidx, seen)
         if d is None:
-            seen2: dict = {}
-            d = _compare(want, items, encode([items])[0], bidx, seen2)
-        if d is None:
-            twins.append((c, seen))
+            twins.append((c, seen, maps))
         elif best is None or d.matched > best[1].matched:
             best = (c, d)
     label = f"13.6's {name} {fn['ghidra']}"
@@ -392,9 +542,10 @@ def _whole(code: bytes, base: int, name: str, fn: dict
         raise GrammarError(f"GRAMMAR: no twin of {label} ({len(want)} items): of "
                            f"{len(cands)} prologue candidates the closest, {c:#x}, matches "
                            f"{d.matched} items and {d.describe()}")
-    addr, seen = twins[0]
+    addr, seen, maps = twins[0]
     proof = [f"{name}: {label} ({len(want)} items) has one twin, at {addr:#x}, among "
              f"{len(cands)} prologue candidates"]
+    proof += _shift_lines(name, [maps])
     bounds = {}
     for bname, (value, sites) in seen.items():
         want_value = fn["bound_values"][bname]
@@ -405,7 +556,21 @@ def _whole(code: bytes, base: int, name: str, fn: dict
     return addr, bounds, proof
 
 
-def _renderer(code: bytes, base: int, fn: dict) -> tuple[int, frozenset[int], list[str]]:
+def default_segment(fn: dict) -> int | None:
+    """The renderer segment the dispatch sends an out-of-range wtype to: the target of the last
+    branch before its tbh, when that target starts a segment."""
+    disp = fn["segments"][0]["items"]
+    tbh = next(i for i, e in enumerate(disp) if text_part(e).startswith("tbh"))
+    for e in reversed(disp[:tbh]):
+        tok = _token(e)
+        if text_part(e).startswith("b") and tok and tok.startswith("@"):
+            seg, idx = tok[1:].split(":")
+            return int(seg) if idx == "0" else None
+    return None
+
+
+def _renderer(code: bytes, base: int, fn: dict, regions: tuple
+              ) -> tuple[int, frozenset[int], frozenset[int], list[str]]:
     segs = fn["segments"]
     disp_want = segs[0]["items"]
     cands = _prologue_candidates(code, base, text_part(disp_want[0]))
@@ -414,11 +579,11 @@ def _renderer(code: bytes, base: int, fn: dict) -> tuple[int, frozenset[int], li
     for c in cands:
         data: dict[int, int] = {}
         items = _take(sweep(code, base, c, data=data), len(disp_want))
-        d = _compare(disp_want, items, None, {}, {})
-        if d is None and not items[-1].entries:
+        d = None
+        if len(items) != len(disp_want) or not items[-1].entries:
             d = _Diff(len(items) - 1, items[-1].addr, "<tbh table>", items[-1].raw)
         if d is None:
-            got = _arms(code, base, c, items, data, segs)
+            got = _arms(code, base, c, items, data, fn, regions)
             if isinstance(got, _Diff):
                 d = got
             else:
@@ -433,7 +598,7 @@ def _renderer(code: bytes, base: int, fn: dict) -> tuple[int, frozenset[int], li
                                f"({', '.join(f'{p[0]:#x}' for p in proven)}); refusing to choose")
         if passed:
             raise GrammarError(f"GRAMMAR: {label}: the dispatch at {passed[0][0]:#x} is a twin "
-                               f"but no wtype arm is; " + "; ".join(passed[0][1][1]))
+                               f"but no wtype arm is; " + "; ".join(passed[0][1][2]))
         if best is None:
             raise GrammarError(f"GRAMMAR: no twin of {label}: no prologue "
                                f"`{text_part(disp_want[0])}` in this GuiCode")
@@ -441,16 +606,20 @@ def _renderer(code: bytes, base: int, fn: dict) -> tuple[int, frozenset[int], li
         raise GrammarError(f"GRAMMAR: no twin of {label}'s dispatch: of {len(cands)} prologue "
                            f"candidates the closest, {c:#x}, matches {d.matched} items and "
                            f"{d.describe()}")
-    addr, (wtypes, notes) = proven[0]
+    addr, (wtypes, defaults, notes) = proven[0]
     proof = [f"renderer: {label} dispatch ({len(disp_want)} items, through its tbh) has one twin, "
              f"at {addr:#x}; {len(segs) - 1} segments after it; proven wtypes "
-             f"{_ranges(sorted(wtypes))}"] + notes
-    return addr, frozenset(wtypes), proof
+             f"{_ranges(sorted(wtypes))}, of which {_ranges(sorted(defaults))} only reach the "
+             f"default arm"] + notes
+    return addr, frozenset(wtypes), frozenset(defaults), proof
 
 
-def _arms(code: bytes, base: int, entry: int, disp: list[Item], data: dict, segs: list[dict]):
-    """Sweep and compare every segment after the dispatch. Returns (proven wtypes, notes), or a
-    _Diff when the arm structure itself is not 13.6's."""
+def _arms(code: bytes, base: int, entry: int, disp: list[Item], data: dict, fn: dict,
+          regions: tuple):
+    """Sweep and compare the dispatch and every segment after it. Returns (proven wtypes,
+    default-arm wtypes, notes), or a _Diff when the dispatch or the arm structure is not
+    13.6's."""
+    segs = fn["segments"]
     table = disp[-1]
     table_end = table.addr + table.size
     starts = sorted({table_end, *table.entries})
@@ -473,16 +642,19 @@ def _arms(code: bytes, base: int, entry: int, disp: list[Item], data: dict, segs
         else:
             items = _take(sweep(code, base, s, data=data), len(segs[k]["items"]))
         swept.append(items)
-    enc = encode(swept)
-    ok, notes = {}, []
+    enc = encode(swept, code, base)
+    ok, maps = {}, {}
     for k in range(len(segs)):
-        d = _compare(segs[k]["items"], swept[k], enc[k], {}, {})
+        maps[k] = _Maps(*regions)
+        d = _compare(segs[k]["items"], swept[k], enc[k], maps[k], {}, {})
         if 0 < k < len(starts):
             last = swept[k][-1]
             if last.addr + last.size != starts[k]:
                 d = d or _Diff(len(swept[k]) - 1, last.addr, "an item ending at the next arm",
                                f"{last.raw} running past {starts[k]:#x}")
         ok[k] = d
+    if ok[0] is not None:
+        return ok[0]
     # reachability over 13.6's encoded fingerprint
     edges = {k: reaches(segs[k]["items"], k + 1 if k + 1 < len(segs) else None,
                         segs[k]["exits"]) for k in range(len(segs))}
@@ -498,6 +670,9 @@ def _arms(code: bytes, base: int, entry: int, disp: list[Item], data: dict, segs
                 todo.extend(edges[x])
             if all(ok[x] is None for x in seen):
                 wtypes.add(w)
+    dseg = default_segment(fn)
+    defaults = {w for w in wtypes if dseg is not None and w in segs[dseg]["wtypes"]}
+    notes = _shift_lines("renderer", [maps[k] for k in ok if ok[k] is None])
     for k in range(1, len(segs)):
         if ok[k] is not None:
             who = f"wt {', '.join(str(w) for w in segs[k]['wtypes'])}" if segs[k]["wtypes"] \
@@ -509,7 +684,7 @@ def _arms(code: bytes, base: int, entry: int, disp: list[Item], data: dict, segs
     if unreached:
         notes.append(f"renderer wtypes {_ranges(sorted(unreached))} not proven: their arms are "
                      f"twins but reach an arm that is not")
-    return wtypes, notes
+    return wtypes, defaults, notes
 
 
 def _ranges(ws: list[int]) -> str:
@@ -529,13 +704,15 @@ def _copy(p: GrammarProof) -> GrammarProof:
 
 @memo.content_cached(copy=_copy)
 def _prove(data: bytes, fp_text: str) -> GrammarProof:
-    fp = json.loads(fp_text)["functions"]
+    whole = json.loads(fp_text)
+    fp = whole["functions"]
     code, base = section(data)
-    dec, dec_bounds, proof = _whole(code, base, "decoder", fp["decoder"])
-    lay, lay_bounds, p2 = _whole(code, base, "layout", fp["layout"])
-    ren, wtypes, p3 = _renderer(code, base, fp["renderer"])
+    regions = (tuple(whole["guicode_region"]), (base, base + len(code)))
+    dec, dec_bounds, proof = _whole(code, base, "decoder", fp["decoder"], regions)
+    lay, lay_bounds, p2 = _whole(code, base, "layout", fp["layout"], regions)
+    ren, wtypes, defaults, p3 = _renderer(code, base, fp["renderer"], regions)
     bounds = {n: (a, b) for n, (a, b, _s) in {**dec_bounds, **lay_bounds}.items() if a != b}
-    return GrammarProof(dec, lay, ren, bounds, tuple(proof + p2 + p3), wtypes)
+    return GrammarProof(dec, lay, ren, bounds, tuple(proof + p2 + p3), wtypes, defaults)
 
 
 def prove(data: bytes) -> GrammarProof:

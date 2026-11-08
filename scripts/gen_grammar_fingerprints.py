@@ -29,6 +29,11 @@ Pads may fall either way, because Ghidra puts some inside its ranges and some ou
 Each segment records its wtypes (the table entries that select it) and the indices of its
 unconditional exits (for fall-through).
 
+**What an item holds.** Each item keeps its concrete registers, for the search's register
+bijection. Data items hold their values (pool words, compared under the search's address
+mappings). Code targets hold their position, or a callee's 13.6 address. `guicode_region` is
+13.6's GuiCode span, used to classify GuiCode pointers.
+
 **Bounds.** `BOUNDS` names the `cmp.w R, #imm` sites whose immediate may differ: the decoder's
 `mode7_index`, every `cmp.w R, #0x298` in it, 13 sites (`BOUND_SITES`).
 """
@@ -101,7 +106,7 @@ def build(data: bytes) -> dict:
         if name != "renderer":
             items = list(grammar.sweep(code, base, entry, end=end, data=data_map))
             _check_against_ghidra(name, items, ranges)
-            enc = grammar.encode([items])
+            enc = grammar.encode([items], code, base)
             segments = [_segment(entry, [], items, enc[0])]
             swept = [items]
         else:
@@ -128,7 +133,7 @@ def build(data: bytes) -> dict:
                     _fail(f"renderer: the segment at {s:#x} runs past {stop:#x}")
                 swept.append(seg)
             _check_against_ghidra(name, [it for seg in swept for it in seg], ranges)
-            enc = grammar.encode(swept)
+            enc = grammar.encode(swept, code, base)
             segments = [_segment(entry, [], disp, enc[0])]
             segments += [_segment(s, sorted(by_start.get(s, [])), swept[k + 1], enc[k + 1])
                          for k, s in enumerate(starts)]
@@ -137,14 +142,14 @@ def build(data: bytes) -> dict:
             fn["bounds"], fn["bound_values"] = {}, {}
             for bname, text in BOUNDS[name].items():
                 sites = [[s, i] for s, seg in enumerate(segments)
-                         for i, e in enumerate(seg["items"]) if grammar.text_part(e) == text]
+                         for i, e in enumerate(seg["items"]) if grammar.abstract(grammar.text_part(e)) == text]
                 if len(sites) != BOUND_SITES[bname]:
                     _fail(f"{name}: {len(sites)} `{text}` sites, expected {BOUND_SITES[bname]}")
                 fn["bounds"][bname] = sites
                 fn["bound_values"][bname] = int(text.rsplit("#", 1)[1], 0)
         functions[name] = fn
     return {"_generated_by": "scripts/gen_grammar_fingerprints.py from 13.6 stock; do not edit",
-            "functions": functions}
+            "guicode_region": [base, base + len(code)], "functions": functions}
 
 
 def main(argv: list[str]) -> int:
