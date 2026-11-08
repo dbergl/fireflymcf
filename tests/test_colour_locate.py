@@ -182,6 +182,8 @@ def test_colour_decode_136(mcf_136):
     assert p["mode 7 cmp.w"] == 0x25355C
     assert p["mode 7 table literal"] == 0x2535B4
     assert p["next structure"] == 0x90010060
+    assert p["next structure literal"] == 0x255FBC
+    assert p["next structure ldr"] == 0x255F92                      # ldr r4, [pc, #0x28]
 
 
 def test_colour_decode_147(mcf_147):
@@ -197,6 +199,8 @@ def test_colour_decode_147(mcf_147):
     assert p["mode 6 palette literal"] == 0x255E78
     assert p["mode 7 table literal"] == 0x255E7C
     assert p["next structure"] == 0x90010064
+    assert p["next structure literal"] == 0x25887C
+    assert p["next structure ldr"] == 0x258852                      # ldr r4, [pc, #0x28]
 
 
 def test_colour_decode_147_reader_is_136s(mcf_136, mcf_147):

@@ -617,8 +617,10 @@ class ColourDecode:
 
     Addresses are runtime addresses: `mode3_reader` in GuiCode, `palette_base` and
     `mode7_table` in mapped GuiData (`0x90000000 + offset`). `proof` is `((label, value), ...)`:
-    the instruction and literal addresses each value was read from, and the literal that bounds
-    the palette (`"next structure"`, a mapped GuiData address)."""
+    the instruction and literal addresses each value was read from, and what bounds the palette:
+    `"next structure"` (a mapped GuiData address), the lowest GuiCode literal word holding it
+    (`"next structure literal"`) and the first `ldr` that loads that word
+    (`"next structure ldr"`)."""
     mode3_reader: int
     palette_base: int
     palette_len: int
@@ -815,6 +817,15 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
         raise ColourDecodeError("no GuiCode literal bounds the mode-6 palette %#x in whole words"
                                 % pal[1])
     nxt = above[0]
+    # the literal word(s) holding it, and the PC-relative `ldr`s that load the lowest one
+    nxt_lits = sorted(base + o - section.offset for o, rel in guicode_guidata_pointers(data)
+                      if rel == nxt)
+    sweep = LinearSweep.of(code, base, detail=False)
+    nxt_ldrs = sorted(base + off for off, lit in zip(sweep.offs, sweep.items)
+                      if lit is not None and base + lit == nxt_lits[0])
+    if not nxt_ldrs:                                            # pragma: no cover
+        raise ColourDecodeError("no ldr loads the literal %#x that bounds the mode-6 palette"
+                                % nxt_lits[0])
 
     proof = (("switch tbb", tbb), ("mode 2 mvn", mode2),
              ("mode 3 arm", arms[3]), ("mode 3 bl", a3[1].address),
@@ -823,7 +834,8 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
              ("mode 6 palette literal", pal[0]), ("mode 6 indexed load", a6[3].address),
              ("mode 7 arm", arms[7]), ("mode 7 cmp.w", a7[3].address),
              ("mode 7 table ldr", a7[6].address), ("mode 7 table literal", tab[0]),
-             ("next structure", nxt + gd_base))
+             ("next structure", nxt + gd_base),
+             ("next structure literal", nxt_lits[0]), ("next structure ldr", nxt_ldrs[0]))
     return ColourDecode(mode3_reader=reader, palette_base=pal[1],
                         palette_len=(nxt - pal_off) // 4, mode7_table=tab[1],
                         mode7_bound=bound, proof=proof)
