@@ -440,15 +440,11 @@ def test_bad_donor_param_refused(stocks):
         assert e.value.code == "NO_DONOR", donor
 
 
-def test_default_donor_comes_from_the_stock_not_the_working_image(stocks):
-    """Review focus: the search is on ctx.stock. A working image whose donor was edited
-    does not change the choice; a stock with a second shaped object refuses."""
+def test_second_shaped_object_in_stock_refuses(stocks):
     d = stocks["13.6"]
-    op_ = recipe._lookup("add_glyph_button")(recipe.OpSpec("g", "add_glyph_button", {
-        "page": 0, "x": 0, "y": 0, "w": 10, "h": 10, "fill_cell": 3}))
+    op_ = recipe._lookup("add_glyph_button")(_spec())
     op_.validate()
     assert op_.donor is None
-    # a stock with a second shaped object: the predicate refuses
     two = _second_glyph_shape(d)
     with pytest.raises(donors.DonorError) as e:
         donors.glyph_button(two)
@@ -500,3 +496,75 @@ def test_predicate_clauses_each_refuse(stocks):
     }
     for name, rs in cases.items():
         assert donors._glyph_clause(rs) is not None, name
+
+
+def _spec(**kw):
+    p = {"page": 0, "x": 0, "y": 0, "w": 10, "h": 10, "fill_cell": 3}
+    p.update(kw)
+    return recipe.OpSpec("g", "add_glyph_button", p)
+
+
+def test_edited_donor_in_working_image_refuses_not_indexerror(stocks):
+    """The stock is unchanged, so the default resolves to 247 from it; an earlier change to
+    the donor's records in the working image makes apply refuse NO_DONOR (guard on the working
+    image) rather than raise IndexError from the clone's record reads."""
+    d = stocks["13.6"]
+    gs, _ = guidata.guidata_extent(d)
+    recs = records.object_records(d, gs + guidata.object_tables(d)[1][247])
+    buf = bytearray(d)
+    off = records.value_slot_offset(d, recs[2])        # caption's value_slot no longer shared
+    buf[off:off + 2] = (int.from_bytes(buf[off:off + 2], "little") + 1).to_bytes(2, "little")
+    edited = bytes(buf)
+    assert donors.glyph_button(d)[0] == 247
+    op_ = recipe._lookup("add_glyph_button")(_spec())
+    op_.validate()
+    ctx = recipe.Ctx(stock=d, edits=[], insertions=[], handles={})
+    with pytest.raises(recipe.RecipeError) as e:
+        recipe._apply(op_, edited, ctx, 8)
+    assert e.value.code == "NO_DONOR" and "no longer" in str(e.value)
+
+
+def test_built_image_with_wired_shell_needs_explicit_donor(stocks):
+    """A wired shell is a faithful clone of the shape, so a built image used as stock has two
+    matches. The default refuses (kept: excluding wired shells would be a fit) and the message
+    says to pass `donor`; an explicit donor works."""
+    d = stocks["13.6"]
+    built = recipe.compile_project(recipe.Project(
+        base_sha256=recipe.sha256_hex(d) if hasattr(recipe, "sha256_hex") else __import__("hashlib").sha256(d).hexdigest(),
+        build_name=None,
+        ops=[recipe.OpSpec(id="shell", type="add_glyph_button",
+                           params={"page": "home", "donor": 247, "x": 630, "y": 388,
+                                   "w": 120, "h": 60, "fill_cell": 164}),
+             recipe.OpSpec(id="wire", type="wire_button",
+                           params={"target": {"ref": "shell"}, "channel": 29,
+                                   "off_colour": [65, 81, 163],
+                                   "allow_commanded_channel": True})]), d)
+    assert built.ok, built.errors
+    shell = len(guidata.object_tables(built.data)[1]) - 1
+    with pytest.raises(donors.DonorError) as e:
+        donors.glyph_button(built.data)
+    assert e.value.code == "NO_DONOR"
+    assert str([247, shell]) in str(e.value) and "pass `donor` explicitly" in str(e.value)
+    # through a recipe on the built image: default refuses, explicit donor builds
+    h = __import__("hashlib").sha256(built.data).hexdigest()
+    def build(**kw):
+        return recipe.compile_project(recipe.Project(base_sha256=h, build_name=None, ops=[
+            recipe.OpSpec(id="s2", type="add_glyph_button",
+                          params={"page": "home", "x": 400, "y": 300, "w": 100, "h": 50,
+                                  "fill_cell": 165, **kw}),
+            recipe.OpSpec(id="w2", type="wire_button",
+                          params={"target": {"ref": "s2"}, "channel": 30,
+                                  "off_colour": [65, 81, 163],
+                                  "allow_commanded_channel": True})]), built.data)
+    r = build()
+    assert not r.ok and r.errors[0]["code"] == "NO_DONOR"
+    assert build(donor=247).ok
+
+
+def test_bool_donor_refused(stocks):
+    with pytest.raises(donors.DonorError) as e:
+        donors.glyph_button(stocks["13.6"], True)
+    assert e.value.code == "NO_DONOR"
+    with pytest.raises(recipe.RecipeError) as e:
+        recipe._lookup("add_glyph_button")(_spec(donor=True)).validate()
+    assert e.value.code == "BAD_PARAMS"

@@ -1951,8 +1951,8 @@ class AddGlyphButton(Op):
             "page": {"type": ["string", "integer"],
                      "description": "page name (resolved via cli._resolve_page_root) or object index"},
             "donor": {"type": "integer",
-                      "description": "object index to clone (default: the stock image's one "
-                                     "glyph-button-shaped object, 247 on 13.6)"},
+                      "description": "object index to clone (default: located, 247 on 13.6 "
+                                     "stock; pass it when the stock has several)"},
             "x": {"type": "integer", "description": "absolute attach x-position"},
             "y": {"type": "integer", "description": "absolute attach y-position"},
             "w": {"type": "integer", "description": "width written to every box/icon/caption/touch geometry field"},
@@ -1966,6 +1966,9 @@ class AddGlyphButton(Op):
     def validate(self):
         self.page = self._param("page")
         self.donor = self._param("donor", None, kind=int)
+        if isinstance(self.donor, bool):
+            raise RecipeError("BAD_PARAMS", "add_glyph_button: param 'donor' wants an integer, "
+                              "got %r" % self.donor, op_id=self.spec.id)
         self.x = self._param("x", kind=int)
         self.y = self._param("y", kind=int)
         self.w = self._param("w", kind=int)
@@ -1981,8 +1984,14 @@ class AddGlyphButton(Op):
             except Exception as e:
                 raise RecipeError("NO_SUCH_PAGE", "cannot resolve page %r: %s"
                                   % (self.page, e))
-        self.donor, _proof = donors.glyph_button(ctx.stock, self.donor)
-        clone = insert.clone_object(data, self.donor)
+        donor, _proof = donors.glyph_button(ctx.stock, self.donor)
+        recs = donors._object_records(data, donor)
+        why = None if recs is None else donors._glyph_clause(recs)
+        if recs is None or why is not None:
+            raise donors.DonorError(
+                "NO_DONOR", "donor %d no longer has the glyph-button shape in the working "
+                "image (an earlier op changed it): %s" % (donor, why or "does not decode"))
+        clone = insert.clone_object(data, donor)
         try:
             data, e = insert.insert_object(data, clone, root,
                                            position=(self.x, self.y))
@@ -2010,7 +2019,7 @@ class AddGlyphButton(Op):
         fillA_off = records.color_offset(data, w33, "fillA")
         if fillA_off is None:
             raise RecipeError("NO_FIELD", "donor %d box has no fillA colour field"
-                              % self.donor)
+                              % donor)
         _put16(buf, fillA_off, self.fill_cell, ctx, "fillA -> %d" % self.fill_cell)
         for rec, what in ((w33, "box"), (icon, "icon"), (cap, "caption")):
             o = records.value_slot_offset(data, rec)
@@ -2019,7 +2028,7 @@ class AddGlyphButton(Op):
                        "%s value_slot -> %d" % (what, self.fill_cell))
         data, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": idx, "cell": self.fill_cell,
-                                     "group": None}
+                                     "group": None, "donor": donor}
         return data
 
     def verify(self, data, ctx):
@@ -2027,7 +2036,7 @@ class AddGlyphButton(Op):
         idx = h["object"]
         assert h["group"] is not None, \
             ("shell (object %d) was never wired -- it still carries donor %d's "
-             "inherited command group" % (idx, self.donor))
+             "inherited command group" % (idx, h["donor"]))
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[idx])
         for r in recs:

@@ -801,7 +801,7 @@ Clone a donor control into a bare button shell on a page, sized w x h, unwired.
 | parameter | type | required | default | meaning |
 |---|---|---|---|---|
 | `page` | string\|integer | yes |  | page name (resolved via cli._resolve_page_root) or object index |
-| `donor` | integer |  |  | object index to clone (default: the stock image's one glyph-button-shaped object, 247 on 13.6) |
+| `donor` | integer |  |  | object index to clone (default: located, 247 on 13.6 stock; pass it when the stock has several) |
 | `x` | integer | yes |  | absolute attach x-position |
 | `y` | integer | yes |  | absolute attach y-position |
 | `w` | integer | yes |  | width written to every box/icon/caption/touch geometry field |

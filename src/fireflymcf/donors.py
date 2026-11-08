@@ -579,7 +579,8 @@ def glyph_button(data: bytes, donor: int | None = None) -> tuple[int, ContentPro
     object that does not decode, included). No grammar proof is required: this reads the data
     shape only. Measured 2026-11-07: 13.6 object 247, 14.7 object 214, 11.23 object 178."""
     if donor is not None:
-        recs = _object_records(data, donor) if isinstance(donor, int) else None
+        recs = (_object_records(data, donor)
+                if isinstance(donor, int) and not isinstance(donor, bool) else None)
         if recs is None:
             raise DonorError("NO_DONOR", f"donor {donor} is not a decodable object of this image")
         why = _glyph_clause(recs)
@@ -589,5 +590,7 @@ def glyph_button(data: bytes, donor: int | None = None) -> tuple[int, ContentPro
     hits = _glyph_hits(data)
     if len(hits) != 1:
         raise DonorError("NO_DONOR", f"{len(hits)} glyph-button donors on this image "
-                         f"(want exactly one): {[h.object for h in hits]}")
+                         f"(want exactly one): {[h.object for h in hits]}"
+                         + ("; pass `donor` explicitly with one of these indices (a wired "
+                            "shell from an earlier build has the same shape)" if hits else ""))
     return hits[0].object, hits[0]
