@@ -16,7 +16,8 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import coverage, firmware, followchannel, guidata, patch, relocate, theme
+from fireflymcf import (coverage, donors, firmware, followchannel, grammar, guidata, patch,
+                        relocate, theme)
 
 SCHEMA = 1
 
@@ -567,6 +568,12 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw)
 
 
+# Coded refusals from the locators an op builds on (a template or donor this image does not
+# prove, `donors`; a record grammar that is not 13.6's, `grammar`), surfaced under their own
+# code as the op's refusal, as FollowChannelError is above.
+_CODED = (donors.DonorError, grammar.GrammarError)
+
+
 def _verify(o, data: bytes, ctx: Ctx) -> str:
     """`o.verify`, with a per-tick hook or chain that no longer proves out (`followchannel`'s
     `FollowChannelError`, e.g. `hooklocate.HookNotFound`) refused as HOOK_REFUSED. The hook is
@@ -577,6 +584,8 @@ def _verify(o, data: bytes, ctx: Ctx) -> str:
     except followchannel.FollowChannelError as e:
         raise GateError("HOOK_REFUSED", "%s verify: the per-tick hook does not prove out: %s"
                         % (o.spec.id, e), op_id=o.spec.id) from e
+    except _CODED as e:
+        raise GateError(e.code, "%s verify: %s" % (o.spec.id, e), op_id=o.spec.id) from e
 
 
 def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
@@ -587,6 +596,8 @@ def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
     except followchannel.FollowChannelError as e:
         raise RecipeError("DETOUR_REFUSED", "%s: the per-tick hook does not prove out: %s"
                           % (o.spec.id, e), op_id=o.spec.id) from e
+    except _CODED as e:
+        raise RecipeError(e.code, "%s: %s" % (o.spec.id, e), op_id=o.spec.id) from e
     _check_tick_chain(data, out, limit)
     return out
 

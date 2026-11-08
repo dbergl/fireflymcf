@@ -10,8 +10,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from . import (celltables, followchannel, guidata, layout, records, sramreach, statusbind,
-              status_map, theme, thumb)
+from . import (celltables, donors, followchannel, guidata, layout, records, sramreach,
+               statusbind, status_map, theme, thumb)
 from .register import Register
 
 
@@ -400,7 +400,10 @@ def detour_edit(plan: ReadoutPlan, code_load_addr: int) -> tuple[int, bytes, byt
     return plan.hook_at, plan.hook_old, thumb.bl(hook_runtime, code_load_addr + ENTRY_OFF)
 
 
-DONOR_OBJECT = 793          # the Time at Stop Volts stepper (the pump section's proven donor)
+# The 13.6 source of the `readout.directive`/`readout.wt8` templates (`donors`): the Time at Stop
+# Volts stepper, the pump section's proven donor. The default `donor` names the templates; any
+# other (object, record) is read from the image.
+DONOR_OBJECT = 793
 DONOR_READOUT_REC = 5       # wtype-8; record 4 before it is the (0, 0x18, 3, 0) directive
 
 
@@ -422,31 +425,51 @@ def directive_bytes(width: int, places: int, zero_pad: bool = False,
     return bytes([0, 0x10 | JUSTIFY[justify] << 2 | (0x02 if zero_pad else 0), width, places])
 
 
+def _donor_pair(data: bytes, donor: tuple[int, int]) -> tuple[bytes, bytes]:
+    """`(directive record, wt-8 readout record)`: the frozen templates for the default donor
+    (`donors.template`, the readout's background cell the theme's panel), else the image's
+    records `donor[1] - 1` and `donor[1]` of object `donor[0]`, refused NO_DONOR when they do
+    not exist or are not a (directive, readout) pair."""
+    if tuple(donor) == (DONOR_OBJECT, DONOR_READOUT_REC):
+        d, _ = donors.template(data, "readout.directive")
+        r, _ = donors.template(data, "readout.wt8")
+        return d, r
+    obj, j = donor
+    try:
+        gs, _ = guidata.guidata_extent(data)
+        tbl = guidata.object_tables(data)[1]
+        recs = records.object_records(data, gs + tbl[obj])
+        if j < 1:
+            raise IndexError(f"record {j} has no directive before it")
+        d, r = recs[j - 1], recs[j]
+    except (IndexError, ValueError, TypeError) as e:
+        raise donors.DonorError("NO_DONOR", f"readout donor {donor}: {e}") from e
+    if (r.wtype != 8 or r.value_slot is None or d.wtype != 9 or d.fmt is None):
+        raise donors.DonorError(
+            "NO_DONOR", f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 "
+                        f"readout) pair")
+    return bytes(data[d.offset:d.end]), bytes(data[r.offset:r.end])
+
+
 def author_readout_object(data: bytes, *, x: int, y: int, display_slot: int, directive: bytes,
                           donor: tuple[int, int] = (DONOR_OBJECT, DONOR_READOUT_REC)) -> bytes:
-    """`<count=2><directive><readout>`: the donor's own directive record with its four tail
-    bytes replaced, then the donor readout made absolute at (x, y) reading `display_slot`."""
+    """`<count=2><directive><readout>`: the donor directive record with its four tail bytes
+    replaced, then the donor readout made absolute at (x, y) reading `display_slot`. The donor
+    is the frozen template pair by default (`_donor_pair`)."""
     if len(directive) != 4 or directive[0] != 0:
         raise ReadoutError("directive must be 4 bytes with mode 0 (see directive_bytes)")
-    obj, j = donor
-    gs, _ = guidata.guidata_extent(data)
-    tbl = guidata.object_tables(data)[1]
-    recs = records.object_records(data, gs + tbl[obj])
-    if (j < 1 or recs[j].wtype != 8 or recs[j].value_slot is None
-            or recs[j - 1].wtype != 9 or recs[j - 1].fmt is None):
-        raise ReadoutError(
-            f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 readout) pair")
-    d, r = recs[j - 1], recs[j]
-    dfrag = bytearray(data[d.offset:d.offset + d.size])
-    dfrag[d.fmt_off - d.offset:d.fmt_off - d.offset + 4] = directive
-    rfrag = bytearray(data[r.offset:r.offset + r.size])
+    draw, rraw = _donor_pair(data, donor)
+    d, r = records.decode_record(draw, 0), records.decode_record(rraw, 0)
+    dfrag = bytearray(draw)
+    dfrag[d.fmt_off:d.fmt_off + 4] = directive
+    rfrag = bytearray(rraw)
     rfrag[1] = rfrag[1] & 0xF0                      # coords 0/1 -> base mode 0 (absolute)
     for slot, value in ((0, x), (1, y)):
-        off = records.geom_offset(data, r, slot)
+        off = records.geom_offset(rraw, r, slot)
         if off is None:
             raise ReadoutError(f"donor readout carries no geom[{slot}]")
-        struct.pack_into("<H", rfrag, off - r.offset, value)
-    struct.pack_into("<H", rfrag, records.value_slot_offset(data, r) - r.offset, display_slot)
+        struct.pack_into("<H", rfrag, off, value)
+    struct.pack_into("<H", rfrag, records.value_slot_offset(rraw, r), display_slot)
     payload = bytes([2]) + bytes(dfrag) + bytes(rfrag)
     payload += b"\x00" * (-len(payload) % 4)
     chk = records.object_records(payload, 0)
