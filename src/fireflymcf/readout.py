@@ -235,11 +235,11 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
     type_fill = bytes((vt if vt is not None else 0) for _, vt in specs)
 
     # Append in stock physical order -- the u8 TYPE table immediately before the u32 CELL table --
-    # so `guidata.find_variable_tables`' structural scan (a maximal SRAM-pointer run, with a
-    # backward scan for the adjacent type array) locates the RELOCATED pair the same way it locates
-    # the stock pair. Appending the cell table first instead lets a preceding pointer-looking word
-    # bleed into the run and mislocates the base by a few bytes, which mis-resolves every mode-7
-    # colour in the render (24 stock fills fell into the coach-battery branch).
+    # so the relocated pair has the stock shape `guidata.variable_table_literals` locates: the
+    # repointed cell-base literal names a data-pointer run, and the type-base literal after it is
+    # a lower GuiData pointer. (Appending the cell table first once let a preceding pointer-looking
+    # word bleed into the structural run and mislocated the base by a few bytes, which mis-resolved
+    # every mode-7 colour in the render: 24 stock fills fell into the coach-battery branch.)
     tables = [tablegrow.IndexedTable(type_base, 1), tablegrow.IndexedTable(cell_base, 4)]
     try:
         image, new_indices, edits = tablegrow.grow_indexed_tables(

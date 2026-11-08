@@ -51,7 +51,8 @@ STAR_LINK = 240                 # 'Star\nLink', group 17: one 1FEDB instance 17 
 STARLINK_POWER_SELECTOR = 0xE4  # `config.option_selector(cfg 0x1B)` on 14.7 (inferred-from-code)
 STAR_LINK_OUTPUT = 17
 LIGHT_MASTER_ON = {22, 24, 25, 32, 34, 35}   # bus-map group 1 on 14.7
-GREEN = (43, 182, 115)          # one of 14.7's six palette colours
+GREEN = (43, 182, 115)          # 14.7's static palette: mode-7 index 194 (and 503)
+NAVY = (39, 40, 98)             # 14.7's static palette: mode-7 index 1, the card body
 YELLOW = (255, 255, 0)
 CLOCK = time.struct_time((2026, 11, 7, 11, 0, 0, 5, 311, 0))
 
@@ -229,6 +230,20 @@ def test_recolor(mcf_147, stock, tmp_path):
     area = (box[2] - box[0]) * (box[3] - box[1])
     assert _near(_crop(stock["home"], box), GREEN) == 0
     assert _near(_crop(shot, box), GREEN) > area // 2, "the Water Pump box is not green"
+    assert _inside(_diff_bbox(stock["home"], shot), box)
+
+
+def test_recolor_index1(mcf_147, stock, tmp_path):
+    """Index 1, the navy body 628 of 14.7's fields use, recolours once the type table is read
+    from the code (`guidata.variable_table_literals`); under the old scan it was type 0 and
+    `recolor` refused it as NO_SUCH_COLOR (2026-11-07)."""
+    img = _build(mcf_147, [("c", "recolor", {"object": WATER_PUMP, "color": {"index": 1}})])
+    s = _settled(img)
+    box = s.control_box("Water Pump")
+    shot = _shot(s, tmp_path, "b")
+    area = (box[2] - box[0]) * (box[3] - box[1])
+    assert _near(_crop(stock["home"], box), NAVY, tol=0) < area // 4
+    assert _near(_crop(shot, box), NAVY, tol=0) > area // 2, "the Water Pump box is not navy"
     assert _inside(_diff_bbox(stock["home"], shot), box)
 
 

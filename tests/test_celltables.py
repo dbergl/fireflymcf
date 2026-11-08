@@ -61,10 +61,6 @@ _ALLOW = {
     ("src/fireflymcf/statusbind.py", 50):
         "CELL_TABLE_OFF re-exports status_map.CELL_TABLE_OFF -- kept, per the task brief, because "
         "tests/docs cite it as the stock value; not used to index a table",
-    ("src/fireflymcf/guidata.py", 1935):
-        "genuine identity check in _relocated_variable_tables: is the live GuiCode literal STILL "
-        "the stock cell base (i.e. the table has NOT been grown) -- a comparison, not an offset "
-        "used to read or write the table",
 }
 
 
@@ -85,8 +81,8 @@ def _flagged_lines(path: Path) -> list:
 def test_no_module_indexes_the_fixed_cell_table_offset():
     """Guard: any expression outside celltables.py naming `CELL_TABLE_OFF`, `VAR_TYPE_TABLE_OFF`,
     `VAR_DPTR_TABLE_136`, `VAR_TYPE_TABLE_136`, or the raw `0x44BC8`/`0x4492C` literals reads or
-    writes the dead copy on a relocated image, unless it is one of the two allow-listed shapes
-    (a constant's own definition, or `guidata._relocated_variable_tables`'s identity check)."""
+    writes the dead copy on a relocated image, unless it is allow-listed (a constant's own
+    definition or re-export)."""
     root = Path("src/fireflymcf")
     hits = []
     for p in sorted(root.glob("*.py")):
