@@ -38,28 +38,28 @@ def test_op_defaults():
 
 
 def test_compile_refuses_an_op_not_listed_for_the_firmware(mcf_147):
-    # set_theme lists only 13.6
-    res = _compile(mcf_147, [("t", "set_theme", THEME_PARAMS)])
+    # set_gesture lists only 13.6 (its 14.7 emulator test fails: tests/emu/test_ops147.py)
+    res = _compile(mcf_147, [("t", "set_gesture", GESTURE_147)])
     assert not res.ok and res.data is None
     assert [(e["code"], e["op_id"]) for e in res.errors] == [("UNSUPPORTED_FIRMWARE", "t")]
     assert "14.7" in res.errors[0]["message"] and "13.6" in res.errors[0]["message"]
     assert res.errors[0]["message"].startswith(
-        "set_theme is not supported on firmware 14.7 (Lyra SW20 14v7 GuiCode + LCD cbed1028d988)")
+        "set_gesture is not supported on firmware 14.7 (Lyra SW20 14v7 GuiCode + LCD cbed1028d988)")
 
 
 def test_an_unsupported_op_reaches_no_op_code(mcf_147, monkeypatch):
-    cls = recipe.REGISTRY["set_theme"]
+    cls = recipe.REGISTRY["set_gesture"]
 
     def boom(self, *a, **k):
         raise AssertionError("op code ran")
     monkeypatch.setattr(cls, "validate", boom)
     monkeypatch.setattr(cls, "apply", boom)
-    res = _compile(mcf_147, [("t", "set_theme", THEME_PARAMS)])
+    res = _compile(mcf_147, [("t", "set_gesture", GESTURE_147)])
     assert [e["code"] for e in res.errors] == ["UNSUPPORTED_FIRMWARE"]
 
 
 def test_every_refusal_is_reported_before_any_apply(mcf_147):
-    res = _compile(mcf_147, [("a", "set_theme", THEME_PARAMS), ("b", "tank_heater_names", {})])
+    res = _compile(mcf_147, [("a", "set_gesture", GESTURE_147), ("b", "tank_heater_names", {})])
     assert [e["op_id"] for e in res.errors] == ["a", "b"]
     assert {e["code"] for e in res.errors} == {"UNSUPPORTED_FIRMWARE"}
 
@@ -107,8 +107,10 @@ def test_emulated_on_does_not_verify(mcf_147, monkeypatch):
 
 def test_cached_compile_refuses_the_same_way(mcf_147):
     cache = {}
-    a = recipe.compile_cached(_project(mcf_147, [("t", "set_theme", THEME_PARAMS)]), mcf_147, cache)
-    b = recipe.compile_cached(_project(mcf_147, [("t", "set_theme", THEME_PARAMS)]), mcf_147, cache)
+    a = recipe.compile_cached(_project(mcf_147, [("t", "set_gesture", GESTURE_147)]), mcf_147,
+                              cache)
+    b = recipe.compile_cached(_project(mcf_147, [("t", "set_gesture", GESTURE_147)]), mcf_147,
+                              cache)
     assert a.errors == b.errors and a.errors[0]["code"] == "UNSUPPORTED_FIRMWARE"
 
 

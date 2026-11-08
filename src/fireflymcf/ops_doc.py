@@ -80,9 +80,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot "
         "(bg, panel, button, header, rail, active), every GuiData inline field and mode-6 "
         "palette entry that holds them, and optionally the tank wells' colour. Runs after every "
-        "op that names a colour by RGB, before a header rename. 13.6 only.",
+        "op that names a colour by RGB, before a header rename.",
         "Flashed and verified on the reference coach 2026-11-02 (owner): palette change "
-        "confirmed.",
+        "confirmed. On 14.7, emulated 2026-11-07: no stock role colour on any rail page.",
         "`docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`"),
     "recolor": ("same-size",
         "Repoint a button box's fill index to another colour in the firmware palette. A "

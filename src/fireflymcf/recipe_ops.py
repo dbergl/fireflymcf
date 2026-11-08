@@ -11874,15 +11874,20 @@ class SetTheme(Op):
     Error codes:
       BAD_PARAMS — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is
                    not a role with a static index
-      WRONG_BUILD — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or
-                    a theme already applied)
+      WRONG_BUILD — the GuiCode theme-init is not located in its stock form
+                    (`themeswap.locate_theme_init`: another build, or a theme already applied)
 
     Hardware status: verified on the coach 2026-11-02 (owner): a reference build with the six
     roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.
     First run in the emulator the same day (a re-themed reference build: no stock theme pixel
-    on any nav-rail page).
+    on any nav-rail page). On 14.7, emulated only (2026-11-07, tests/emu/test_ops147.py): 6
+    GuiCode edits, 1 inline field, 7 mode-6 palette entries, 5 tank wells; every role cell
+    holds its colour and no rail page draws a stock role colour.
     """
     hardware_verified = True
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "colours": {"type": "object",
@@ -11974,7 +11979,9 @@ class SetTheme(Op):
             "first at %#x" % (len(stale), stale[0][0])
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
         return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
-                "entries, %d GuiCode colour literals, %d tank fills, %d tank wells "
-                "-- HARDWARE-VERIFIED (2026-11-02)"
+                "entries, %d GuiCode colour literals, %d tank fills, %d tank wells -- %s"
                 % (applied, len(h.get("extra", {})), h["inline"], h["palette"],
-                   h.get("literals", 0), h.get("tank_fills", 0), h["wells"]))
+                   h.get("literals", 0), h.get("tank_fills", 0), h["wells"],
+                   "emulated on %s (2026-11-07), not run on a coach" % ctx.firmware
+                   if ctx.firmware not in self.verified_on and ctx.firmware in self.emulated_on
+                   else "HARDWARE-VERIFIED (2026-11-02)"))

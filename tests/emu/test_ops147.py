@@ -28,7 +28,8 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from fireflymcf import followchannel, glyphs, guidata, recipe  # noqa: E402
+from fireflymcf import (buildcheck, container, coverage, followchannel, glyphs,  # noqa: E402
+                        guidata, patch, recipe, themeswap)
 from fireflymcf.emu import g12, peers  # noqa: E402
 from fireflymcf.emu.canbus import Peer  # noqa: E402
 from fireflymcf.emu.scenario import PANEL_SA, Scenario  # noqa: E402
@@ -61,7 +62,7 @@ CLOCK = time.struct_time((2026, 11, 7, 11, 0, 0, 5, 311, 0))
 TESTED_147 = frozenset({
     "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
-    "install_glyph", "append_filter", "drop_from_master"})
+    "install_glyph", "append_filter", "drop_from_master", "set_theme"})
 
 
 class _PinnedTime:
@@ -416,6 +417,91 @@ def test_every_147_op_is_tested_here():
     for n in TESTED_147:
         cls = recipe.REGISTRY[n]
         assert "14.7" in cls.emulated_on and "14.7" not in cls.verified_on, n
+
+
+# --- the theme ----------------------------------------------------------------------------------
+
+# Six distinct role colours (tests/test_themeswap.py's HARVEST, the 13.6 test's).
+THEME = {"bg": (33, 22, 17), "panel": (61, 40, 29), "button": (166, 86, 38),
+         "header": (176, 58, 28), "rail": (112, 40, 22), "active": (200, 118, 22)}
+RAIL_PAGES = ("HOME", "ELECTRICAL", "LIGHTS", "CLIMATE", "SETTINGS")
+# Each edit `themeswap.plan` makes, by its note, and the region `coverage` claims it in.
+_THEME_KINDS = (("theme inline fill", "inline", "GuiData object"),
+                ("tank well", "wells", "GuiData object"),
+                ("theme mode-6 palette", "palette", "image-container-header"))
+
+
+def _rail_shots(s: Scenario, tmp_path, tag: str) -> dict:
+    out = {}
+    for page in RAIL_PAGES:
+        s.goto(page)
+        s.run(2.0)
+        out[page] = _shot(s, tmp_path, f"{tag}-{page}")
+    return out
+
+
+def _exact(img: np.ndarray, rgb) -> int:
+    return int((img == np.array(rgb)).all(axis=2).sum())
+
+
+def test_set_theme(mcf_147, tmp_path):
+    """The six chrome roles re-themed on 14.7: the edits land where `themeswap` locates them (6
+    in GuiCode; in GuiData 1 inline field, 7 mode-6 palette entries, 5 tank wells), each role's
+    SRAM cell holds its colour after boot, and no rail page draws a pixel of a stock role colour
+    (2026-11-07)."""
+    params = {"colours": {r: list(c) for r, c in THEME.items()}, "tank_wells": "panel"}
+    img = _build(mcf_147, [("t", "set_theme", params)])
+
+    # 1-2. The compiled image is `plan`'s edits, resealed; every differing run (checksums
+    # aside) lies in one edit, classified by section and by the region coverage claims it in.
+    p = themeswap.plan(mcf_147, THEME, "panel")
+    pt = patch.McfPatcher(mcf_147)
+    for e in p.edits:
+        pt.set_bytes(*e)
+    assert pt.build()[0] == img
+    sections = container.parse_container(img).sections
+    runs = buildcheck._runs(mcf_147, img, coverage.analyse(img, deep=True).spans)
+    hit = {}
+    for r in runs:
+        if "checksum" in r.region:
+            continue
+        [k] = [k for k, (off, old, _n, _note) in enumerate(p.edits)
+               if off <= r.offset and r.offset + r.length <= off + len(old)]
+        [sec] = [x.name for x in sections if x.offset <= r.offset < x.offset + x.length]
+        hit.setdefault(k, set()).add((sec.split()[-1], r.region))
+    assert set(hit) == set(range(len(p.edits))), "an edit changed no byte"
+    by = {}
+    for k, where in hit.items():
+        [(sec, region)] = where
+        note = p.edits[k][3]
+        kind = next((name for prefix, name, _r in _THEME_KINDS if note.startswith(prefix)), sec)
+        assert kind == "GuiCode" or (sec, region) == (
+            "GuiData", dict((n, rg) for _p, n, rg in _THEME_KINDS)[kind]), (note, sec, region)
+        by[kind] = by.get(kind, 0) + 1
+    assert by == {"GuiCode": 6, "inline": 1, "palette": 7, "wells": 5}, by
+    assert (p.inline, p.palette, p.wells) == (1, 7, 5)
+
+    # 3. Each role cell, as the build's own theme-init is located, holds its applied colour.
+    ti = themeswap.locate_theme_init(img)
+    assert ti.form == "rethemed"
+    s = _settled(img)
+    for role, cells in ti.cells.items():
+        for cell in cells:
+            got = int.from_bytes(s.read_mem(cell, 4), "little")
+            assert got == p.applied[role], (role, hex(cell), hex(got))
+
+    # 4. Stock draws every stock role colour on the rail pages; the build draws none of them.
+    stock = _rail_shots(_settled(mcf_147), tmp_path, "stock")
+    for role, v in themeswap.STOCK.items():
+        assert sum(_exact(a, themeswap.int_rgb(v)) for a in stock.values()) > 0, role
+    for page, a in stock.items():
+        for role in ("bg", "panel", "button", "header", "rail"):
+            assert _exact(a, themeswap.int_rgb(themeswap.STOCK[role])) > 0, (page, role)
+    shots = _rail_shots(s, tmp_path, "build")
+    left = {(page, role): n for page, a in shots.items()
+            for role, v in themeswap.STOCK.items()
+            if (n := _exact(a, themeswap.int_rgb(v)))}
+    assert left == {}, f"stock role colours still drawn: {left}"
 
 
 # --- the bus -------------------------------------------------------------------------------------

@@ -84,8 +84,9 @@ def test_ops_refuses_an_unknown_name(capsys):
 
 def test_entries_carry_firmware_support():
     e = {x["name"]: x for x in ops_doc.entries(recipe.REGISTRY)}
-    assert e["set_theme"]["firmwares"] == ["13.6"]
-    assert e["set_theme"]["verified_on"] == ["13.6"] and e["set_theme"]["emulated_on"] == []
+    assert e["set_theme"]["firmwares"] == ["13.6", "14.7"]
+    assert e["set_theme"]["verified_on"] == ["13.6"] and e["set_theme"]["emulated_on"] == ["14.7"]
+    assert e["set_gesture"]["firmwares"] == ["13.6"] and e["set_gesture"]["emulated_on"] == []
     assert "| Firmware |" in ops_doc.render(recipe.REGISTRY)
 
 
