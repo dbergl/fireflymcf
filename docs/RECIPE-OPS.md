@@ -174,7 +174,7 @@ Move where a page attaches a child object (its wtype-5 attach record).
 
 Error codes:
 
-- `BAD_PARAMS` — x and y are both None (at least one coordinate is required)
+- `BAD_PARAMS` — x and y are both None (at least one coordinate is required), or a coordinate is not an int in -32768..65535
 - `NO_SUCH_PAGE` — page name cannot be resolved to an object index
 - `NO_SUCH_RECORD` — page has no wtype-5 attach records with matching child_index
 - `NO_FIELD` — a requested coordinate (x or y) exists on no matching attach record. This is an error by design: a GUI move that cannot happen is reported, not silently skipped. If an attach record doesn't have the field, the operation fails rather than partially moving only existing coordinates.

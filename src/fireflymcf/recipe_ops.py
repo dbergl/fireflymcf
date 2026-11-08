@@ -50,6 +50,15 @@ def _gs_tab(data):
     return gs, guidata.object_tables(data)[1]
 
 
+def _require_object(data, obj, op_id=None):
+    """Refuse (NO_SUCH_OBJECT) an object index outside the image's object table, instead of
+    letting the IndexError or InsertError of the lookup reach the user."""
+    n = len(guidata.object_tables(data)[1])
+    if not isinstance(obj, int) or isinstance(obj, bool) or not 0 <= obj < n:
+        raise RecipeError("NO_SUCH_OBJECT", "object %r is not an object index in [0, %d)"
+                          % (obj, n), op_id=op_id)
+
+
 def _put16(buf, off, value, ctx, note):
     old = bytes(buf[off:off + 2])
     struct.pack_into("<H", buf, off, value)
@@ -123,6 +132,7 @@ class RenameLabel(Op):
         self.allow_grow = self._param("allow_grow", False, kind=bool)
 
     def apply(self, data, ctx):
+        _require_object(data, self.object, self.spec.id)
         gs, _ = guidata.guidata_extent(data)
         lo, hi = insert._object_span(data, self.object)
         sites = [s for s in patch.find_label_sites(data, self.old)
@@ -184,6 +194,7 @@ def _select_record(data, gs, tab, obj, selector, op_id):
     wtype = selector.get("wtype")
     label = selector.get("label")
     nth = selector.get("nth", 0)
+    _require_object(data, obj, op_id)
     recs = records.object_records(data, gs + tab[obj])
     cand = [r for r in recs
             if (wtype is None or r.wtype == wtype)
@@ -666,9 +677,12 @@ class MoveAttach(Op):
              via resolve_target(ctx, child)
       x: int (optional) — new x-coordinate to write to matching attach record(s)
       y: int (optional) — new y-coordinate to write to matching attach record(s)
+      A coordinate is -32768..65535: the layout engine reads geometry signed (`layout._s16`),
+      so a negative offset is stored as its two's complement, as `move_element` does.
 
     Error codes:
-      BAD_PARAMS — x and y are both None (at least one coordinate is required)
+      BAD_PARAMS — x and y are both None (at least one coordinate is required), or a
+                   coordinate is not an int in -32768..65535
       NO_SUCH_PAGE — page name cannot be resolved to an object index
       NO_SUCH_RECORD — page has no wtype-5 attach records with matching child_index
       NO_FIELD — a requested coordinate (x or y) exists on no matching attach record.
@@ -704,6 +718,17 @@ class MoveAttach(Op):
         if self.x is None and self.y is None:
             raise RecipeError("BAD_PARAMS", "move_attach wants x and/or y",
                               op_id=self.spec.id)
+        for name in ("x", "y"):
+            v = getattr(self, name)
+            if v is None:
+                continue
+            if not isinstance(v, int) or isinstance(v, bool) or not -0x8000 <= v <= 0xFFFF:
+                raise RecipeError("BAD_PARAMS", "move_attach %s = %r is not an int in "
+                                  "-32768..65535" % (name, v), op_id=self.spec.id)
+        self.written = {"x": self.x, "y": self.y}       # for messages
+        # signed -> stored u16, as move_element: the layout engine reads geometry signed
+        self.x = None if self.x is None else self.x & 0xFFFF
+        self.y = None if self.y is None else self.y & 0xFFFF
 
     def _root(self, data):
         if isinstance(self.page, int):
@@ -716,6 +741,7 @@ class MoveAttach(Op):
 
     def apply(self, data, ctx):
         root = self._root(data)
+        _require_object(data, root, self.spec.id)
         child = resolve_target(ctx, self.child)
         gs, tab = _gs_tab(data)
         buf = bytearray(data)
@@ -732,7 +758,8 @@ class MoveAttach(Op):
                 if off is not None:
                     moved.add(key)
                     _put16(buf, off, val, ctx,
-                           "attach of obj %d on page %d: %s -> %d" % (child, root, key, val))
+                           "attach of obj %d on page %d: %s -> %d" % (child, root, key,
+                                                                layout._s16(val)))
         if hit == 0:
             raise RecipeError("NO_SUCH_RECORD", "page %d has no attach record for "
                               "object %d" % (root, child))
@@ -762,7 +789,7 @@ class MoveAttach(Op):
         assert hit > 0, "verify: page %d attach record for object %d was removed" % (
             root_idx, child)
         return "attach: object %d on page %d -> (%s, %s)" % (
-            child, root_idx, self.x, self.y)
+            child, root_idx, self.written["x"], self.written["y"])
 
 
 @op("set_font")
@@ -3252,6 +3279,7 @@ def _remove_records(data, ctx, obj, entries, op_id):
     shrunk stream in with `relocate.replace_object_records`, refusing POINTER_INSIDE for a
     GuiCode or LCD literal between the first removed record and the object's end. Returns the
     new image and the removed records (as decoded from `data`, entry order)."""
+    _require_object(data, obj, op_id)
     gs, tab = _gs_tab(data)
     recs = records.object_records(data, gs + tab[obj])
     doomed = _select_entries(data, obj, entries, op_id)
@@ -3366,6 +3394,14 @@ class RemoveRecords(Op):
             "obj": obj, "count": len(records.object_records(out, gs + tab[obj])),
             "gone": [(d.wtype, d.child_index, _touch_id(data, d)) for d in doomed]}
         recs = records.object_records(data, gs_before + tab_before[obj])
+        # An object may attach one child more than once, and removing one attach is a
+        # legitimate edit: verify wants the stock count minus the removed ones, not zero.
+        gone = {(d.wtype, d.child_index) for d in doomed
+                if d.child_index is not None and not (d.wtype == 12 and _touch_id(data, d) is not None)}
+        ctx.handles[self.spec.id]["attach_left"] = {
+            k: sum(1 for r in recs if (r.wtype, r.child_index) == k)
+               - sum(1 for d in doomed if (d.wtype, d.child_index) == k)
+            for k in gone}
         removed = {i for i, r in enumerate(recs) if r.offset in {d.offset for d in doomed}}
         _report_shifts(ctx, self.spec.id, data, out, obj, removed=removed)
         return out
@@ -3374,15 +3410,20 @@ class RemoveRecords(Op):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[h["obj"]])
-        assert len(recs) == h["count"], "object %d has %d records, wanted %d" % (
-            h["obj"], len(recs), h["count"])
+        if len(recs) != h["count"]:
+            raise RecipeError("VERIFY_FAILED", "object %d has %d records, wanted %d"
+                              % (h["obj"], len(recs), h["count"]), op_id=self.spec.id)
         for wtype, child, tid in h["gone"]:
             if wtype == 12 and tid is not None:
-                assert tid not in gestures.touch_ids(data, h["obj"], tab), \
-                    "touch id %d still registered by object %d" % (tid, h["obj"])
-            elif child is not None:
-                assert not any(r.wtype == wtype and r.child_index == child for r in recs), \
-                    "object %d still attaches child %d" % (h["obj"], child)
+                if tid in gestures.touch_ids(data, h["obj"], tab):
+                    raise RecipeError("VERIFY_FAILED", "touch id %d still registered by "
+                                      "object %d" % (tid, h["obj"]), op_id=self.spec.id)
+        for (wtype, child), want in sorted(h["attach_left"].items()):
+            have = sum(1 for r in recs if r.wtype == wtype and r.child_index == child)
+            if have != want:
+                raise RecipeError("VERIFY_FAILED", "object %d attaches child %d %d time(s) "
+                                  "(wtype %d), wanted %d" % (h["obj"], child, have, wtype, want),
+                                  op_id=self.spec.id)
         return "remove_records: object %d lost %d record(s) %s, now %d" % (
             h["obj"], len(h["gone"]),
             ", ".join("wtype %d%s" % (w, " touch %d" % t if t is not None else
