@@ -29,13 +29,18 @@ KNOWN: dict[str, FirmwareId] = {
 
 
 def _read(image: bytes) -> tuple[str, str]:
-    """(GuiCode section name, LCD section sha256); ValueError when absent or unparseable."""
+    """(GuiCode section name, LCD section sha256); ValueError when absent, ambiguous or
+    unparseable. Exactly one GuiCode, one GuiData and one LCD Firmware section: with two, the
+    name pair cannot say which one the panel runs, so the image is not identified."""
     sections = container.parse_container(image).sections
-    guicode = next((s for s in sections if s.name.endswith("GuiCode")), None)
-    lcd = next((s for s in sections if s.name == "LCD Firmware"), None)
-    if guicode is None or lcd is None:
-        raise ValueError("no GuiCode or LCD Firmware section")
-    return guicode.name, hashlib.sha256(image[lcd.offset:lcd.offset + lcd.length]).hexdigest()
+    guicode = [s for s in sections if s.name.endswith("GuiCode")]
+    guidata = [s for s in sections if s.name.endswith("GuiData")]
+    lcd = [s for s in sections if s.name == "LCD Firmware"]
+    if len(guicode) != 1 or len(guidata) != 1 or len(lcd) != 1:
+        raise ValueError(f"{len(guicode)} GuiCode, {len(guidata)} GuiData and {len(lcd)} LCD "
+                         f"Firmware sections, not one each")
+    lcd = lcd[0]
+    return guicode[0].name, hashlib.sha256(image[lcd.offset:lcd.offset + lcd.length]).hexdigest()
 
 
 def identify(image: bytes) -> str | None:

@@ -989,7 +989,7 @@ Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table
 
 Error codes:
 
-- `APPEND_REFUSED` — appendfilter refused (bad entry, registry cap, no arena room, a gate).
+- `APPEND_REFUSED` — appendfilter refused (bad entry, registry cap, no arena room, a gate, or an LCD firmware without the instructions `appendfilter.LCD_FACTS` cites).
 
 ### fill_to_capsule
 

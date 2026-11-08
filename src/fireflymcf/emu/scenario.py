@@ -93,7 +93,9 @@ _VAR_READ = {0: (1, False), 1: (1, False), 2: (1, True), 3: (2, False), 4: (2, T
 RAIL_SCREENS = {"home": 0, "electrical": 1, "lights": 2, "climate": 3, "climate control": 3,
                 "settings": 4}
 OPTIONS_NAMES = {"options"}
-# Touch ids the GuiCode ACTION dispatcher acts on (13.6), label-independent:
+# Touch ids the GuiCode ACTION dispatcher acts on, label-independent. Read on 13.6; the same ids
+# reach the same screens on 14.7 (tests/emu/test_scenario147.py `test_goto_options`). Adding a
+# firmware to `EMULATED` must re-prove them there:
 MAIN_OPTIONS_ID = 0x7FF      # FLOORPLAN SELECTION's "Main Options" tab; navmap: -> screen 47
 PROCEED_ID = 0x7E0           # ADDITIONAL OPTIONS' "Proceed" (-> screen 16, seen in emulation;
                              # its store is not one `navmap` resolves)
@@ -661,11 +663,15 @@ class Scenario:
             g12.sel[selector] = value
 
     def set_g12_output(self, instance: int, level: int) -> None:
-        """Switch the emulated G12's output `instance` to `level` (0 off, 1-200) by itself, as
-        a wall switch wired to the G12 would: the G12 reports it the way it reports any change
-        (1FEDA at once, then on its own cadence; `g12out.py`), and the panel learns it only
-        from that report. Nothing is sent from the panel. Needs the G12 that runs the image's
-        own logic (`demo_network` builds it whenever the image carries a G12 section)."""
+        """Force the emulated G12's output `instance` to `level` (0 off, 1-200), as a test
+        stimulus. This is not a wall switch: it bypasses the G12's input pins and its rule
+        tables (interlocks included; only an output's lock, in `g12out`, still holds), and it
+        puts no command on the bus, so the G12 acknowledges nothing. The G12 reports the
+        change the way it reports any (1FEDA at once, then on its own cadence; `g12out.py`),
+        and the panel learns it only from that report. Nothing is sent from the panel. Needs
+        the G12 that runs the image's own logic (`demo_network` builds it whenever the image
+        carries a G12 section). A wall switch is a G12 input pin (`G12.set_input`, `g12.py`),
+        which runs the rules."""
         from .g12out import FULL, SET
 
         if not self._booted:
@@ -678,9 +684,9 @@ class Scenario:
         if not outputs.owns(instance):
             raise ScenarioError(f"G12 output {instance} does not exist (the G12 drives "
                                 f"{min(outputs.out)}-{max(outputs.out)})")
-        # A DC_DIMMER_COMMAND_2 that only the G12 sees (not put on the bus): set level.
+        # A DC_DIMMER_COMMAND_2 only the G12 sees (not on the bus, so no ACK): set level.
         outputs.command(bytes([instance, 0xFF, level, SET, 0xFF, 0xFF, 0xFF, 0xFF]),
-                        external=False)
+                        external=False, ack=False)
 
     def frames(self, *, dgn: int | None = None, sa: int | None = PANEL_SA,
                since: float = 0.0) -> list[Frame]:

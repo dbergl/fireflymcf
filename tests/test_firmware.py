@@ -1,7 +1,7 @@
 """Firmware identity: an image is known by its GuiCode name and LCD firmware together."""
 from __future__ import annotations
 
-from tests.firmware_helpers import _rename_guicode
+from tests.firmware_helpers import _rename_guicode, _rename_section
 
 from fireflymcf import firmware, patch
 
@@ -24,6 +24,17 @@ def test_a_built_image_keeps_its_identity(mcf_136):
 
 def test_mixed_pair_is_not_identified(mcf_136):
     assert firmware.identify(_rename_guicode(mcf_136, b"Lyra SW20 14v7 GuiCode")) is None
+
+
+def test_a_second_guicode_or_guidata_section_is_not_identified(mcf_136):
+    """Which of two GuiCode (or GuiData) sections runs is not something the name pair says, so
+    an image carrying two is unidentified rather than named by the first."""
+    from fireflymcf import container
+    g12 = next(s for s in container.parse_container(mcf_136).sections if s.name == "G12")
+    for extra in (b"Lyra 13v6 GuiCode", b"Other GuiCode", b"Lyra 13v6 GuiData"):
+        image = _rename_section(mcf_136, g12.index, extra)
+        assert firmware.identify(image) is None, extra
+        assert "unreadable" in firmware.describe(image)
 
 
 def test_unknown_and_garbage_are_none(mcf_147):

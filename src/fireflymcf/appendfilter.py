@@ -37,6 +37,11 @@ against the 13.6 bytes on 2026-09-21 (`proven-from-code`):
   nibble reads past the payload -- the same gate `statusbind.retarget_filter`/`pin_filter_instance`
   apply when repointing an existing entry.
 
+* **Another LCD firmware.** Every instruction and literal above is a fact of 13.6's LCD
+  firmware. `append_filters` confirms each in the image's own LCD section (`LCD_FACTS`) and
+  refuses when one is not there; 14.7's LCD firmware (cbed1028...) carries all of them at the
+  same addresses (`tests/test_append_filter.py`, checked 2026-11-07).
+
 What this does NOT make true: a widget naming the new var index as its `value_slot` does NOT read
 the var -- `value_slot` indexes the display-cell table. Show a new var through a routine that
 copies its slot into a cell (`add_register_readout`, which takes this module's handle as a ref).
@@ -52,6 +57,57 @@ from .relocate import Edit
 # The GuiCode header u16 FUN_0021BE50 requires to equal the variable-table count.
 GUICODE_VAR_COUNT_FIELD = 0x20
 GUICODE_VAR_COUNT_MAX = 0x3E8                     # `cmp.w r6,#0x3e8; bhi fail` @0x0021BFE6
+
+# The LCD-firmware instructions the facts above rest on, proven on 13.6's LCD firmware (a55344...)
+# and confirmed in the image's own LCD section before every append (`lcd_facts_problem`), since
+# the image may run another LCD firmware (14.7 and 11.23 run cbed1028...). Addresses are the raw-
+# loader addresses every LCD citation uses (LCD section offset 0 = `LCD_BASE`); each is checked,
+# never searched for, so nothing here locates anything.
+LCD_BASE = 0x00210000
+
+
+@dataclass(frozen=True)
+class LcdFact:
+    address: int
+    expect: bytes
+    what: str
+
+
+_STATE_LITERAL = struct.pack("<I", 0x20007EBC)
+LCD_FACTS: tuple[LcdFact, ...] = (
+    LcdFact(0x0021A62A, bytes([statusbind.REGISTRY_CAP, 0x2A]),
+            "`cmp r2,#0x53` in FUN_0021A618: the DGN registry cap (statusbind.REGISTRY_CAP)"),
+    LcdFact(0x0021BFE6, bytes.fromhex("b6f57a7f"),
+            "`cmp.w r6,#0x3e8` in FUN_0021BE50: the GuiCode var-count limit"),
+    LcdFact(0x0021C9BE, bytes.fromhex("94bfa1f80c21a1f84421"),
+            "`ite ls; strhls.w r2,[r1,#0x10c]; strhhi.w r2,[r1,#0x144]` in FUN_0021C760: "
+            "the index-split slot store"),
+    LcdFact(0x0021C9DA, bytes.fromhex("c3f81429"),
+            "`str.w r2,[r3,#0x914]` in FUN_0021C760: the per-var deadline store"),
+    *(LcdFact(a, _STATE_LITERAL, "literal 0x20007EBC (the receive state base)")
+      for a in (0x0021BE4C, 0x0021C00C, 0x0021C36C, 0x0021C548, 0x0021C750, 0x0021CA28,
+                0x0021CBAC, 0x0021CC34, 0x0021CC60)),
+    LcdFact(0x0021CC3C, struct.pack("<I", register.STATUS_SLOT_BASE),
+            "literal 0x20007FC8 (register.STATUS_SLOT_BASE, the low slot array)"),
+)
+
+
+def lcd_facts_problem(data: bytes) -> str | None:
+    """None when every `LCD_FACTS` instruction is in the image's LCD section, else what is not."""
+    lcd = next((s for s in container.parse_container(data).sections
+                if s.name == "LCD Firmware"), None)
+    if lcd is None:
+        return "the image has no LCD Firmware section"
+    body = data[lcd.offset:lcd.offset + lcd.length]
+    for f in LCD_FACTS:
+        at = f.address - LCD_BASE
+        got = body[at:at + len(f.expect)]
+        if got != f.expect:
+            return (f"LCD Firmware {f.address:#010x} holds {got.hex() or 'nothing'}, not "
+                    f"{f.expect.hex()} ({f.what}); this LCD firmware is not the one "
+                    f"append_filter was proven on")
+    return None
+
 
 # The count's high bits live in the descriptor's tag word (desc[1] bits 0-1), which the tooling
 # also checks as the tag (`guidata.DESCRIPTOR_TAGS` = 0x0141). Keep the high bits fixed rather
@@ -108,13 +164,17 @@ def _guicode_section(data: bytes):
 def append_filters(data: bytes, filters: list[NewFilter]) -> tuple[bytes, list[Edit], list[int]]:
     """Append `filters` to the variable table. Returns `(image, edits, new var indices)`.
 
-    Refuses (AppendFilterError) unless: the GuiCode count mirrors the table; the new count stays
+    Refuses (AppendFilterError) unless: the image's LCD firmware carries every `LCD_FACTS`
+    instruction; the GuiCode count mirrors the table; the new count stays
     within the tag's high bits and the firmware's 1000; the registry stays under its cap; the
     padding arena can absorb the growth; no declared table straddles the window; and nothing
     points into the window. The finished image must pass every relocate gate.
     """
     if not filters:
         raise AppendFilterError("nothing to append")
+    problem = lcd_facts_problem(data)
+    if problem:
+        raise AppendFilterError(problem)
     payload = b"".join(f.raw() for f in filters)
     delta = len(payload)
     gs, ge = guidata.guidata_extent(data)

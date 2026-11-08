@@ -90,6 +90,19 @@ def test_status_repaints(booted, tmp_path):
     assert np.array_equal(before, off), "Main Ceiling did not repaint back to off"
 
 
+def test_set_g12_output_solicits_no_ack(booted):
+    """`set_g12_output` is not a command on the bus, so the G12 acknowledges nothing: the only
+    frame it causes is the output's 1FEDA status."""
+    from fireflymcf.emu import g12out
+    booted.run(2.0)
+    t = booted.now
+    booted.set_g12_output(MAIN_CEILING, 200)
+    booted.run(1.0)
+    assert [f for f in booted.frames(sa=None, since=t) if f.data == g12out.ACK] == []
+    assert any(f.dgn == 0x1FEDA and f.data[0] == MAIN_CEILING
+               for f in booted.frames(sa=None, since=t))
+
+
 def test_set_g12_output_refuses_an_unknown_output(booted):
     with pytest.raises(ScenarioError, match="output"):
         booted.set_g12_output(0x7F, 200)

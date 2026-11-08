@@ -8,6 +8,14 @@ def _rename_guicode(image: bytes, name: bytes) -> bytes:
     """Overwrite the GuiCode section's name field with `name` (zero padded); does not reseal."""
     c = container.parse_container(image)
     section = next(s for s in c.sections if s.name.endswith("GuiCode"))
+    return _rename_section(image, section.index, name)
+
+
+def _rename_section(image: bytes, index: int, name: bytes) -> bytes:
+    """Overwrite section `index`'s name field with `name` (zero padded); does not reseal."""
+    c = container.parse_container(image)
+    section = c.sections[index]
+    assert section.index == index
     desc_off = int.from_bytes(image[c.header_word_20 + 4 * section.index:
                                     c.header_word_20 + 4 * section.index + 4], "little")
     at = desc_off + container.DESC_NAME_OFFSET

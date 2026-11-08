@@ -98,9 +98,11 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.
-- **Map each request to an op** with `$F ops`. `verified: NO`, or a status of built-not-flashed,
-  means no coach has run it: use it only if the owner agrees to be first. An op this coach already
-  runs in its current build carries no new risk; say so instead of asking again.
+- **Map each request to an op** with `$F ops`. `$F ops NAME`'s `verified:` lists the firmwares a
+  coach has run it on; `none`, a list without the coach's firmware, or a status of
+  built-not-flashed means no coach on this firmware has run it: use it only if the owner agrees
+  to be first. An op this coach already runs in its current build carries no new risk; say so
+  instead of asking again.
 
 **When no op or combination of ops does it**, say which part of the request is missing and
 hand off to the `write-new-op` skill: it checks composition once more, then writes a user op

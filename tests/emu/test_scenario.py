@@ -185,6 +185,20 @@ def test_unsupported_build_not_emulated(mcf_1123):
     assert not ok and "not emulated" in reason
 
 
+def test_mixed_image_not_emulated(mcf_136):
+    """14.7's GuiCode name over 13.6's LCD firmware (the 2026-08-30 mixed setup's shape) is
+    neither firmware: the emulator refuses it rather than running it as either."""
+    from tests.firmware_helpers import _rename_guicode
+
+    from fireflymcf.emu.scenario import supported
+    mixed = _rename_guicode(mcf_136, b"Lyra SW20 14v7 GuiCode")
+    ok, reason = supported(mixed)
+    assert not ok
+    assert reason == ("not emulated: Lyra SW20 14v7 GuiCode + LCD a55344f9b224 (13.6, 14.7)")
+    with pytest.raises(ScenarioError, match="not emulated"):
+        Scenario(mixed)
+
+
 # --- navigation on owners' builds ------------------------------------------------------------
 
 def _compile(stock, ops):

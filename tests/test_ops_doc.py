@@ -58,6 +58,18 @@ def test_ops_name_prints_params_and_error_codes(capsys):
     assert "allow_grow" in out and "LABEL_TOO_LONG" in out and "(required)" in out
 
 
+def test_ops_name_header_says_verified_per_firmware(capsys):
+    """The header follows `verified_on` (empty when hardware_verified is False), not the class
+    default: an op enabled on 14.7 by the emulator alone is verified on 13.6 only."""
+    for name, want in [("rename_label", "verified: 13.6"), ("remove_control", "verified: none")]:
+        assert cli.main(["ops", name]) == 0
+        head = capsys.readouterr().out.splitlines()[0]
+        assert head == f"{name}  ({ops_doc.OP_NOTES[name][0]}; {want})"
+    assert "14.7" in recipe.REGISTRY["append_filter"].firmwares
+    assert cli.main(["ops", "append_filter"]) == 0
+    assert "verified: 13.6)" in capsys.readouterr().out.splitlines()[0]
+
+
 def test_ops_json_is_the_entries(capsys):
     assert cli.main(["ops", "--json", "remove_control"]) == 0
     [entry] = json.loads(capsys.readouterr().out)
@@ -83,3 +95,34 @@ def test_an_unverified_op_is_verified_on_no_firmware():
     assert unverified
     for n in unverified:
         assert e[n]["verified_on"] == [], n
+
+
+def _firmware_set_problems(registry):
+    """Every op's verification and emulation lie inside the firmwares it may compile on. An op
+    whose class default is unverified is verified nowhere (`Op.is_verified`), so its effective
+    verified set is empty; its `verified_on` must still name only listed firmwares."""
+    out = []
+    for name, cls in sorted(registry.items()):
+        verified = set(cls.verified_on) if getattr(cls, "hardware_verified", True) else set()
+        for label, have in (("verified_on", set(cls.verified_on)), ("verified", verified),
+                            ("emulated_on", set(cls.emulated_on))):
+            if not have <= set(cls.firmwares):
+                out.append(f"{name}: {label} {sorted(have)} not within "
+                           f"firmwares {sorted(cls.firmwares)}")
+    return out
+
+
+def test_every_op_verifies_and_emulates_only_where_it_compiles():
+    assert _firmware_set_problems(recipe.REGISTRY) == []
+
+
+def test_the_firmware_set_check_can_fail():
+    class Stray(recipe.Op):
+        firmwares = frozenset({"13.6"})
+        emulated_on = frozenset({"14.7"})
+
+    class StrayVerified(recipe.Op):
+        verified_on = frozenset({"13.6", "14.7"})
+    assert _firmware_set_problems({"stray": Stray}) == [
+        "stray: emulated_on ['14.7'] not within firmwares ['13.6']"]
+    assert len(_firmware_set_problems({"sv": StrayVerified})) == 2

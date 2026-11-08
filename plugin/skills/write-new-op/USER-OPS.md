@@ -171,7 +171,9 @@ image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page
 `s.set_g12_selector(selector, value)`, `s.set_g12_output(instance, level)`,
 `s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
 `s.screen`, `s.page`, `s.control_box(control)`, `s.screenshot(path)` and `s.image` are its
-surface (a name starting with `_` is not); its docstrings are the reference. Anything that raises fails the test with its line.
+surface (a name starting with `_` is not); its docstrings are the reference. `set_g12_output`
+forces an output as a test stimulus, not as a wall switch would: it sends no command, solicits no
+ACK and runs none of the G12's rules. Anything that raises fails the test with its line.
 Write it first and run it on the image without the op: it must fail there. Assert only what the op
 changes: stock 13.6 itself sends a D1 config write on selector `0x9B` at boot (*emulator*: observed
 in the emulator, not checked against a capture), so "the panel sent nothing" is false without any

@@ -99,7 +99,7 @@ def test_compile_refuses_an_unverified_op_by_default(tmp_path, mcf_136, capsys):
     assert not out.exists()
     err = capsys.readouterr().err
     assert "UNVERIFIED" in err and "gone" in err and "--allow-unverified" in err
-    assert "unverified on hardware for firmware 13.6" in err
+    assert "op(s) gone have never run on a coach on firmware 13.6" in err
 
 
 def test_allow_unverified_builds_and_records_it(tmp_path, mcf_136):

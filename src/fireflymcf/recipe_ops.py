@@ -5976,7 +5976,8 @@ class AppendFilter(Op):
     class-2 temperature readouts on the same page went back to their no-data text.
 
     Error codes:
-      APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
+      APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate,
+        or an LCD firmware without the instructions `appendfilter.LCD_FACTS` cites).
     """
     # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
     firmwares = frozenset({"13.6", "14.7"})

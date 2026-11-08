@@ -55,6 +55,13 @@ GREEN = (43, 182, 115)          # one of 14.7's six palette colours
 YELLOW = (255, 255, 0)
 CLOCK = time.struct_time((2026, 11, 7, 11, 0, 0, 5, 311, 0))
 
+# Every op whose `firmwares` lists 14.7, each with its `test_<name>` below. An op joins 14.7 with
+# a test here and an entry in this set; `test_every_147_op_is_tested_here` holds both in step.
+TESTED_147 = frozenset({
+    "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
+    "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
+    "install_glyph", "append_filter", "drop_from_master"})
+
 
 class _PinnedTime:
     """`peers`' view of the `time` module: a fixed local time."""
@@ -384,6 +391,16 @@ def test_install_glyph(mcf_147, stock, tmp_path):
     rows = [[int(c, 16) for c in r] for r in MARK]
     assert not _draws_glyph(_crop(stock["home"], box), rows)
     assert _draws_glyph(_crop(_shot(s, tmp_path, "b"), box), rows), "the new glyph is not drawn"
+
+
+def test_every_147_op_is_tested_here():
+    enabled = {n for n, cls in recipe.REGISTRY.items() if "14.7" in cls.firmwares}
+    assert enabled == TESTED_147
+    assert {n for n in TESTED_147 if not callable(globals().get(f"test_{n}"))} == set()
+    # The emulator is the only 14.7 evidence: each is emulated there and verified nowhere.
+    for n in TESTED_147:
+        cls = recipe.REGISTRY[n]
+        assert "14.7" in cls.emulated_on and "14.7" not in cls.verified_on, n
 
 
 # --- the bus -------------------------------------------------------------------------------------

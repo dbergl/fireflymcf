@@ -123,3 +123,48 @@ def test_manifest_line_names_the_refresh_class_not_a_date(refresh, timeout):
     line = res.manifest[0]
     assert "refresh %d (%s)" % (refresh, timeout) in line, line
     assert "COACH-VERIFIED" not in line and "2026" not in line, line
+
+
+# --- The LCD-firmware facts this module relies on, checked in the image's own LCD section ----
+# The registry cap, the GuiCode var-count limit, the slot/timer stores and the state literals
+# were proven on 13.6's LCD firmware (a55344...). 14.7 runs another LCD firmware (cbed1028...),
+# so `append_filters` confirms each instruction in the image it is given and refuses otherwise.
+
+STOCK_147 = "firefly-14.7 (Terrain)/mcf.bin"
+
+
+def _lcd(data):
+    return next(s for s in container.parse_container(data).sections if s.name == "LCD Firmware")
+
+
+@pytest.mark.parametrize("path", [STOCK, STOCK_147])
+def test_lcd_facts_hold_in_13_6_and_14_7(path):
+    assert appendfilter.lcd_facts_problem(open(path, "rb").read()) is None
+
+
+def test_lcd_fact_bytes_encode_the_constants():
+    """The expected bytes ARE the constants: decode each cited instruction and read its operand."""
+    from capstone import CS_ARCH_ARM, CS_MODE_THUMB, Cs
+    md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
+    facts = {f.address: f for f in appendfilter.LCD_FACTS}
+
+    def one(addr):
+        f = facts[addr]
+        return [(i.mnemonic, i.op_str) for i in md.disasm(f.expect, addr)]
+    assert one(0x0021A62A) == [("cmp", "r2, #%#x" % statusbind.REGISTRY_CAP)]
+    assert one(0x0021BFE6) == [("cmp.w", "r6, #%#x" % appendfilter.GUICODE_VAR_COUNT_MAX)]
+    assert one(0x0021C9BE) == [("ite", "ls"), ("strhls.w", "r2, [r1, #0x10c]"),
+                               ("strhhi.w", "r2, [r1, #0x144]")]
+    assert one(0x0021C9DA) == [("str.w", "r2, [r3, #0x914]")]
+    assert facts[0x0021CC3C].expect == struct.pack("<I", register.STATUS_SLOT_BASE)
+    state = [f for f in appendfilter.LCD_FACTS if f.expect == struct.pack("<I", 0x20007EBC)]
+    assert len(state) == 9
+
+
+@pytest.mark.parametrize("addr", [0x0021A62A, 0x0021BFE6, 0x0021CC3C])
+def test_append_refuses_when_a_cited_instruction_is_absent(addr):
+    stock = bytearray(_stock())
+    lcd = _lcd(bytes(stock))
+    stock[lcd.offset + addr - appendfilter.LCD_BASE] ^= 0x01
+    with pytest.raises(appendfilter.AppendFilterError, match="%#010x" % addr):
+        appendfilter.append_filters(bytes(stock), [PROBE])
