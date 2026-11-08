@@ -33,19 +33,21 @@ and `label(bg=rgb)` an opaque mode-3 box. A readout's `bg` is REQUIRED: its dono
 paints an opaque background (fillB mode 7 idx 8), which is what erases the previous digits when
 the live value redraws.
 
-**Donors.** Each primitive starts from a stock record whose bytes are pinned here and verified
-against the image before use; a drifted donor raises `PageDrawError("donor ... drifted")`.
+**Templates.** Each primitive starts from a frozen record template (`donors.TEMPLATES`, 13.6's
+record at the pin named below, byte for byte), accepted on the image only behind its grammar
+proof, and for the text records a stock witness (`donors.template`); a refusal is a
+`donors.DonorError` with its code. Nothing is read from the image by index.
 
-| primitive | donor | changed |
+| primitive | template (13.6 source) | changed |
 |---|---|---|
-| `fill` (wt-4) | object 32 record 2, the header bar | geom0/1 inserted; fillA mode 7 -> 3; fillA2 0 -> 3 |
-| `rbox` (wt-0x20) | object 368 record 1, the Status box | aux byte (out-regs 1) dropped; b1 0x55 -> 0x50; fillB 7 -> 3; A2/B2 0 -> 3 |
-| `capsule` (wt-0x21) | object 285 record 0 via `AddLowVoltsControl._box_record` | fillA 7 -> 3; fillA2 0 -> 3 |
-| `hline` (wt-2) | object 367 record 6 | fillA/fillA2 0 -> 3 (3 bytes each inserted) |
-| `frame` (wt-3) | object 947 record 3, the LIGHTS Interior frame | aux byte (in-regs 1) dropped; fillA 2 -> 3; A2 0 -> 3; B2 0 -> 5 |
-| `label`/`glyph` (wt-11) | object 285 record 1 via `AddLowVoltsControl._label_record` | fillA 2 -> 3; A2 0 -> 3; B/B2 5 or 3 |
-| `readout` (wt-9 + wt-8) | object 793 records 4/5 via `readout.author_readout_object` | font, align; A/A2 0 -> 3; B 7 -> 3; B2 0 -> 3 |
-| `touch` (wt-12) | object 186 record 1, an absolute touch region | geom; R50 touch id; align 0 -> 1 |
+| `fill` (wt-4) | `pd.fill` (object 32 record 2, the header bar) | geom0/1 inserted; fillA mode 7 -> 3; fillA2 0 -> 3 |
+| `rbox` (wt-0x20) | `pd.rbox` (object 368 record 1, the Status box) | aux byte (out-regs 1) dropped; b1 0x55 -> 0x50; fillB 7 -> 3; A2/B2 0 -> 3 |
+| `capsule` (wt-0x21) | `rvc.capsule` (object 285 record 0) via `AddLowVoltsControl._box_record` | fillA 7 -> 3; fillA2 0 -> 3 |
+| `hline` (wt-2) | `pd.hline` (object 367 record 6) | fillA/fillA2 0 -> 3 (3 bytes each inserted) |
+| `frame` (wt-3) | `pd.frame` (object 947 record 3, the LIGHTS Interior frame) | aux byte (in-regs 1) dropped; fillA 2 -> 3; A2 0 -> 3; B2 0 -> 5 |
+| `label`/`glyph` (wt-11) | `rvc.caption` (object 285 record 1) via `AddLowVoltsControl._label_record` | fillA 2 -> 3; A2 0 -> 3; B/B2 5 or 3 |
+| `readout` (wt-9 + wt-8) | `readout.directive`/`readout.wt8` (object 793 records 4/5) via `readout.author_readout_object` | font, align; A/A2 0 -> 3; B 7 -> 3; B2 0 -> 3 |
+| `touch` (wt-12) | `pd.touch` (object 186 record 1, an absolute touch region) | geom; R50 touch id; align 0 -> 1 |
 
 A mode change that alters a field's inline width (mode 7 u16 -> mode 3 u24; mode 0 none -> u24)
 is done by `_set_colour`: it computes the field's cursor position the way `FUN_00252CB0` reads it
@@ -57,39 +59,29 @@ from __future__ import annotations
 
 import struct
 
-from . import cornermark, guidata, metrics, readout as _readout, records
+from . import cornermark, donors, metrics, readout as _readout, records
 
 
 class PageDrawError(ValueError):
-    """A donor drifted, a request is out of range, or an authored record failed its self-check."""
+    """A request is out of range, or an authored record failed its self-check. (A template the
+    image does not prove is `donors.DonorError`.)"""
 
 
-# ---- pinned donors (identical in stock 13.6 and the heater-glyph build)
-# ------------------------------------------
+# ---- frozen templates (`donors.TEMPLATES`; the 13.6 source of each in the module docstring) ----
 
-FILL_DONOR = (32, 2)
-FILL_STOCK = bytes.fromhex("04500c070000000004001f032400")
-RBOX_DONOR = (368, 1)
-RBOX_STOCK = bytes.fromhex("60550f3b000010009e9e9e030044f6ff0500fa00aa000a00")
-CAPSULE_DONOR = (285, 0)
-CAPSULE_STOCK = bytes.fromhex("21550c07000010002d00690032000500")
-HLINE_DONOR = (367, 6)
-HLINE_STOCK = bytes.fromhex("02500f000000000058029a0050005000")
+FILL_STOCK = donors.TEMPLATES["pd.fill"].raw
+RBOX_STOCK = donors.TEMPLATES["pd.rbox"].raw
+CAPSULE_STOCK = donors.TEMPLATES["rvc.capsule"].raw
+HLINE_STOCK = donors.TEMPLATES["pd.hline"].raw
 # The LIGHTS Interior section frame (floorplan WD's lights body), a hollow wt-3 (header byte 0
 # bit 1): a 1 px square outline in fillA, interior not painted (`render.py`'s wt-3 case).
-FRAME_DONOR = (947, 3)
-FRAME_STOCK = bytes.fromhex("43500f6a00000000990c005f00ae01160100")
-LABEL_DONOR = (285, 1)
-LABEL_STOCK = bytes.fromhex("0b550c2a0000000069003200010eff020214"
-                            "00094c6f770a566f6c747300")
-DIRECTIVE_DONOR = (_readout.DONOR_OBJECT, _readout.DONOR_READOUT_REC - 1)
-DIRECTIVE_STOCK = bytes.fromhex("0950000000000000" "00180300")
-READOUT_DONOR = (_readout.DONOR_OBJECT, _readout.DONOR_READOUT_REC)
-READOUT_STOCK = bytes.fromhex("085503f8200008000800320000006900" "46000f1601")
+FRAME_STOCK = donors.TEMPLATES["pd.frame"].raw
+LABEL_STOCK = donors.TEMPLATES["rvc.caption"].raw
+DIRECTIVE_STOCK = donors.TEMPLATES["readout.directive"].raw
+READOUT_STOCK = donors.TEMPLATES["readout.wt8"].raw
 # An absolute stock touch region (x 609, y 280, 75x52, id 0x20), byte-for-byte the shape
 # `optionrow._author_touch` authors: header 0c 50 0f 00, four geom u16s, the R50 touch id.
-TOUCH_DONOR = (186, 1)
-TOUCH_STOCK = bytes.fromhex("0c500f0000000000610218014b0034002000")
+TOUCH_STOCK = donors.TEMPLATES["pd.touch"].raw
 
 # Header (byte, shift) of each colour field's 3-bit mode (records.decode_record).
 _MODE_BITS = {"fillA": (3, 0), "fillB": (3, 3), "fillA2": (5, 1), "fillB2": (5, 4)}
@@ -105,17 +97,10 @@ _LABEL_ADDS = 0x00
 MULTILINE_PITCH = (0x00, 0x01)
 
 
-def _donor(data: bytes, where: tuple[int, int], pinned: bytes) -> bytes:
-    obj, j = where
-    try:
-        gs, _ = guidata.guidata_extent(data)
-        r = records.object_records(data, gs + guidata.object_tables(data)[1][obj])[j]
-        got = bytes(data[r.offset:r.offset + r.size])
-    except (IndexError, ValueError, KeyError) as e:
-        raise PageDrawError(f"donor {obj}[{j}] drifted: it no longer decodes ({e})") from e
-    if got != pinned:
-        raise PageDrawError(f"donor {obj}[{j}] drifted: {got.hex()} != pinned {pinned.hex()}")
-    return got
+def _donor(data: bytes, name: str, *, font: int | None = None) -> bytes:
+    """Template `name`'s bytes, gated on `data` (`donors.template`)."""
+    raw, _proof = donors.template(data, name, font=font)
+    return raw
 
 
 def _rgb(rgb) -> tuple[int, int, int]:
@@ -323,7 +308,7 @@ def _expect(pairs: dict) -> dict:
 
 def fill(data: bytes, x: int, y: int, w: int, h: int, rgb) -> bytes:
     """A wt-4 filled rectangle `(x, y)-(x+w, y+h)` inclusive, in `rgb`."""
-    frag = _absolute(_donor(data, FILL_DONOR, FILL_STOCK))
+    frag = _absolute(_donor(data, "pd.fill"))
     for i, v in enumerate((x, y, w, h)):
         frag = _set_geom(frag, i, v)
     pairs = {"fillA": rgb, "fillA2": rgb}
@@ -334,7 +319,7 @@ def fill(data: bytes, x: int, y: int, w: int, h: int, rgb) -> bytes:
 def rbox(data: bytes, x: int, y: int, w: int, h: int, radius: int, border_rgb, fill_rgb) -> bytes:
     """A wt-0x20 rounded box: `border_rgb` outline (fillA) around a `fill_rgb` interior (fillB),
     corner radius `radius` (geom[4], `WRecord.corner_radius`)."""
-    frag = _absolute(_drop_aux18(_donor(data, RBOX_DONOR, RBOX_STOCK)))
+    frag = _absolute(_drop_aux18(_donor(data, "pd.rbox")))
     for i, v in enumerate((x, y, w, h, radius)):
         frag = _set_geom(frag, i, v)
     pairs = {"fillA": border_rgb, "fillA2": border_rgb, "fillB": fill_rgb, "fillB2": fill_rgb}
@@ -344,8 +329,7 @@ def rbox(data: bytes, x: int, y: int, w: int, h: int, radius: int, border_rgb, f
 
 def capsule(data: bytes, x: int, y: int, w: int, h: int, radius: int, rgb) -> bytes:
     """A wt-0x21 solid rounded rectangle in `rgb` (the 0x21 case draws entirely in fillA)."""
-    _donor(data, CAPSULE_DONOR, CAPSULE_STOCK)
-    stock = records.decode_record(CAPSULE_STOCK, 0)
+    stock = records.decode_record(_donor(data, "rvc.capsule"), 0)
     from .recipe_ops import AddLowVoltsControl       # lazy: recipe_ops will import the page op
     frag = AddLowVoltsControl._box_record(
         _u16("x", x), _u16("y", y), _u16("w", w), _u16("h", h),
@@ -358,7 +342,7 @@ def capsule(data: bytes, x: int, y: int, w: int, h: int, radius: int, rgb) -> by
 def hline(data: bytes, x: int, y: int, w: int, rgb) -> bytes:
     """A wt-2 horizontal 1 px line from `(x, y)` to `(x+w, y)` inclusive (`FUN_00254064`'s
     `y0 == y1` span; Finding 72)."""
-    frag = _absolute(_donor(data, HLINE_DONOR, HLINE_STOCK))
+    frag = _absolute(_donor(data, "pd.hline"))
     for i, v in enumerate((x, y, w, 0)):
         frag = _set_geom(frag, i, v)
     pairs = {"fillA": rgb, "fillA2": rgb}
@@ -370,7 +354,7 @@ def frame(data: bytes, x: int, y: int, w: int, h: int, rgb) -> bytes:
     """A wt-3 section frame: a 1 px square outline `(x, y)-(x+w, y+h)` inclusive in `rgb`, its
     interior transparent (fillB/fillB2 mode 5), as the stock LIGHTS Interior/Exterior frames
     draw (`FUN_00255E90`'s four straight borders, width `state+0x6C10` = 1; `render.py`)."""
-    frag = _absolute(_drop_aux18(_donor(data, FRAME_DONOR, FRAME_STOCK)))
+    frag = _absolute(_drop_aux18(_donor(data, "pd.frame")))
     for i, v in enumerate((x, y, w, h)):
         frag = _set_geom(frag, i, v)
     pairs = {"fillA": rgb, "fillA2": rgb, "fillB": None, "fillB2": None}
@@ -412,7 +396,6 @@ def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, 
     'Go Power!\nSettings'); a one-line text keeps the default pitch byte for byte. Refuses a box
     the text would not fit (`label_misfit`). The header align is 1 (`ALIGN_NO_SHIFT`): the
     text's own placement is the R49 `h_align`/`v_align`."""
-    _donor(data, LABEL_DONOR, LABEL_STOCK)
     if w <= 0 or h <= 0:
         raise PageDrawError(f"a visible wtype-11 label needs a box, got {w}x{h}")
     for name, v in (("h_align", h_align), ("v_align", v_align)):
@@ -428,6 +411,7 @@ def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, 
     if many and not multiline:
         raise PageDrawError(f"multi-line labels are not supported (fixed 20 px pitch): {text!r}")
     _check_font(font)
+    _donor(data, "rvc.caption", font=font)
     if any(metrics.text_width(data, font, line) is None for line in text.split("\n")):
         raise PageDrawError(f"font {font} cannot draw {text!r} (missing glyph)")
     misfit = label_misfit(data, text, font, w, h)
@@ -444,6 +428,7 @@ def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, 
     out = _finish(_set_align(_paint(frag, pairs), ALIGN_NO_SHIFT), 11, [x, y, w, h],
                    _expect(pairs))
     r = _decode(out)
+    donors.check_text_record(data, out, f"label {text!r}")
     if not (r.label == text and r.font == font and r.h_align == h_align
             and r.v_align == v_align and r.align == ALIGN_NO_SHIFT):
         raise PageDrawError(f"authored label {text!r} failed its self-decode: {out.hex()}")
@@ -485,8 +470,6 @@ def readout(data: bytes, x: int, y: int, w: int, h: int, *, value_slot: int, wid
     if w <= 0 or h <= 0:
         raise PageDrawError(f"readout needs a box, got {w}x{h}")
     _u16("value_slot", value_slot)
-    _donor(data, DIRECTIVE_DONOR, DIRECTIVE_STOCK)
-    _donor(data, READOUT_DONOR, READOUT_STOCK)
     fm = metrics.font_metrics(data, _check_font(font))
     if fm.height > h + 1:
         raise PageDrawError(f"font {font} is {fm.height} px tall; box {h} would not hold it")
@@ -496,7 +479,7 @@ def readout(data: bytes, x: int, y: int, w: int, h: int, *, value_slot: int, wid
         directive = _readout.directive_bytes(width, places, justify=justify)
         obj = _readout.author_readout_object(data, x=_u16("pen_x", pen_x),
                                              y=_u16("pen_y", pen_y), display_slot=value_slot,
-                                             directive=directive, donor=READOUT_DONOR)
+                                             directive=directive, font=font)
     except _readout.ReadoutError as e:
         raise PageDrawError(str(e)) from e
     d_rec, r_rec = records.object_records(obj, 0)
@@ -506,6 +489,7 @@ def readout(data: bytes, x: int, y: int, w: int, h: int, *, value_slot: int, wid
     pairs = {"fillA": rgb, "fillA2": rgb, "fillB": _rgb(bg), "fillB2": bg}
     rfrag = _finish(_paint(rfrag, pairs), 8, [pen_x, pen_y], _expect(pairs), align=align)
     d, r = _decode(dfrag), _decode(rfrag)
+    donors.check_text_record(data, rfrag, f"readout of slot {value_slot}")
     if not (d.wtype == 9 and d.fmt == tuple(directive) and d.header[1] == 0x50
             and r.value_slot == value_slot and r.font == font and r.align == align
             and r.header[4] & 0x20):
@@ -522,7 +506,7 @@ def touch(data: bytes, x: int, y: int, w: int, h: int, touch_id: int) -> bytes:
     The donor's header align is 0, but wt-12 is a path-1 wtype (`layout._align_path1`, mask
     `0x600C7C9C`), so align 0 would inherit `state+9` and a preceding align-2/3 record (a
     centred or right-aligned readout) would shift the hit box; the primitive writes 1."""
-    frag = _donor(data, TOUCH_DONOR, TOUCH_STOCK)
+    frag = _donor(data, "pd.touch")
     if w <= 0 or h <= 0:
         raise PageDrawError(f"a touch region needs a box, got {w}x{h}")
     for i, v in enumerate((x, y, w, h)):

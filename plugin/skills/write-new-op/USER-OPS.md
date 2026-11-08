@@ -134,9 +134,9 @@ class MyOp(UserOp):
   when the op changes what the panel can send: a non-empty `capability_delta`, or a
   `(channel, command)` pair of the group and binding tables that its own build added or removed,
   or a tick routine that sends frames of its own. A routine's frames are found in the blob of
-  each `install_tick_routine` call: the host sender's pointer (`SENDER_PTR_ADDR`, the pool word
-  `emit_send_frame` adds) or a `config_frame` template (CAN id, then `FF 96 <selector> 0F`, with
-  D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
+  each `install_tick_routine` call: the host sender's pointer (the image's own cell, host API
+  +0x08; 13.6's is `0x2003986C`; the pool word `emit_send_frame` adds) or a `config_frame`
+  template (CAN id, then `FF 96 <selector> 0F`, with D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
   the folder hash, so any edit to the folder voids it.
 - **What that detection cannot see.** It is a disclosure prompt, not a sandbox: a routine that
   computes the sender's address in code (`movw`/`movt`) and builds its frame on the stack carries
@@ -146,7 +146,7 @@ class MyOp(UserOp):
   Give any op whose effect reaches the G12 the `--g12` acceptance whatever the engine asks.
 - `verify --emulate --project` runs each op's `emu_test.py` and records the result in the
   build's sidecar under the op's type: `passed`, `failed` with its reason, or `not emulated` with
-  its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 only). It
+  its reason (no `emu_test.py`, or a build the emulator does not model: it models 13.6 and 14.7). It
   needs `--allow-user-ops`, because the test is the author's code, but not the G12 acceptance:
   emulation touches no hardware. A failing test is reported; it never stops the image being
   written. A gate failure (expected bytes, replay, touches, `verify`) does.
@@ -168,9 +168,12 @@ class MyOp(UserOp):
 `emu_test.py` defines `scenario(s)`; `s` is a `fireflymcf.emu.scenario.Scenario` on the built
 image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page=)`,
 `s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`,
-`s.set_g12_selector(selector, value)`, `s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
+`s.set_g12_selector(selector, value)`, `s.set_g12_output(instance, level)`,
+`s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
 `s.screen`, `s.page`, `s.control_box(control)`, `s.screenshot(path)` and `s.image` are its
-surface (a name starting with `_` is not); its docstrings are the reference. Anything that raises fails the test with its line.
+surface (a name starting with `_` is not); its docstrings are the reference. `set_g12_output`
+forces an output as a test stimulus, not as a wall switch would: it sends no command, solicits no
+ACK and runs none of the G12's rules. Anything that raises fails the test with its line.
 Write it first and run it on the image without the op: it must fail there. Assert only what the op
 changes: stock 13.6 itself sends a D1 config write on selector `0x9B` at boot (*emulator*: observed
 in the emulator, not checked against a capture), so "the panel sent nothing" is false without any
@@ -199,9 +202,11 @@ compile reports it as the op's failure.
 ### Per-tick routines
 
 Every routine-authoring op in the library runs from the same place (*proven-from-code*, the hook;
-*hardware*, the chain). GuiCode calls the per-tick paint function `FUN_00247BF8` from one `bl` at GuiCode+`0xEE3C`. An appended routine takes over
+*hardware*, the chain). The LCD's paint tick calls `GuiCode_entry1`, and entry1's first `bl` calls
+the per-tick builder: on 13.6 the `bl` at GuiCode+`0xEE3C` into `FUN_00247BF8`, on 14.7 the `bl` at
+GuiCode+`0xF288` into `0x247CAC`. An appended routine takes over
 that `bl` and tail-branches to whatever the `bl` reached before, so routines chain: hook → newest
-→ … → `FUN_00247BF8`. Every link obeys one contract. It starts with `push {r0, r1, r2, r3, lr}`,
+→ … → the builder. Every link obeys one contract. It starts with `push {r0, r1, r2, r3, lr}`,
 never writes r4-r7, and leaves through `pop.w {r0, r1, r2, r3, lr}` followed by `b.w` to the
 previous callee. That `b.w` is the first `b.w` in the routine, because
 `followchannel.chain_from_hook` follows it.
@@ -211,19 +216,44 @@ first grown GuiCode on the coach (2026-08-31). Two chained routines ran on 2026-
 and the AES Low Volts bridge). Every coach build since then carries four or more links. The
 library does not check r4-r7 for you.
 
+**User tick ops run on 13.6 and 14.7.** No step takes a firmware address as input: the hook, the
+chain, the builder it ends in and the host CAN sender are found in each image (`hooklocate`,
+*proven-from-code* on 13.6, 14.7 and 11.23), and the chain limit (`tick_chain_limit`) counts the
+links that walk finds. The append point is not found in a user op's image: it needs the stock image,
+so `routinekit._plan` checks only its alignment. 11.23 is located and compile-only: its hook is
+located and a tick install is accepted, but it was never emulated and never run on a coach, and the
+`+0x08` sender meaning carries over from 14.7's emulator proof by inference only (11.23 and 14.7
+share one LCD firmware, per the spec). On 14.7 (*emulator*, 2026-11-07,
+`tests/emu/test_hook147.py`): one link and two chained links each run once per tick, in step with
+the builder's own tick counter, and HOME draws as stock; a link that calls host API `+0x08`'s cell
+(`0x20039558`) puts its frame on the bus once, with the template's CAN id intact (the source address
+comes from the template), which settles that `+0x08` is the frame sender on 14.7's LCD firmware too;
+the `send_frame` test op compiles on 14.7 and sends. No 14.7 tick routine has run on a coach. Two
+gaps on 14.7: `fresh_sram` refuses (`NO_SRAM`), because `sramreach` bounds 13.6's render-state and
+digit-buffer bases by hand and 14.7's sit 4 bytes higher (`0x200301B4`, `0x200371D5`), so everything
+from `0x200301B4` to `0x20040000` reads as reachable. On 14.7 a tick op cannot get scratch SRAM from
+`fresh_sram` yet: it refuses `NO_SRAM` until the display-cell-table work locates the render state,
+and a hand-picked cell is unchecked. The other gap: the variant setter (host API `+0x04`) is located
+but unproven there.
+
 **`tick_install_plan(data) -> (data, TickPlan)`** (read-only). Returns where the next routine
 loads and what it must tail-branch to. `TickPlan` has these fields:
 
 - `code_load_addr`: the GuiCode append point, as a runtime address.
 - `tail_target`: the hook's current callee.
-- `hook_at`: the hook's GuiCode offset, `0xEE3C`.
+- `hook_at`: the hook's GuiCode offset, located in the image (13.6 `0xEE3C`, 14.7 `0xF288`).
 - `hook_old`: the hook's current 4 bytes.
+- `sender_addr`: the host CAN sender's SRAM cell, located in this image (host API +0x08; 13.6
+  `0x2003986C`, 14.7 `0x20039558`). Pass it to `emit_send_frame` when you call it outside
+  `install_tick`.
 
 It refuses (`BAD_HOOK`) in any of these cases:
 
-- the hook is neither the stock `bl` nor a `bl` into the appended region (`followchannel.hook_state`);
-- the append point is below stock 13.6's `0x00259BB4` or not 4-aligned (the rule
-  `_check_append_point` applies to every built-in op);
+- the hook does not prove out (`hooklocate.locate_hook`: entry1's first `bl`, every link's
+  prologue and `pop.w; b.w` tail, and a builder that loads the config buffer and has that one
+  caller), or the host-API cells cannot be read from `GuiCode_entry0`;
+- the append point is not 4-aligned. The image alone cannot say where stock's GuiCode ended;
+  the built-in ops also check the append point against the stock image (`_check_append_point`);
 - the GuiCode descriptor maps the section anywhere but `0x00240000`. Every address here uses
   that one base.
 
@@ -245,13 +275,14 @@ because an editor call cannot carry a callable:
 
 ```python
 plan = ed.call("tick_install_plan")
-blob, entry = build(plan.code_load_addr, plan.tail_target)
+blob, entry = build(plan.code_load_addr, plan.tail_target)   # emit_send_frame(..., sender_addr=plan.sender_addr)
 ed.call("install_tick_routine", blob, entry, note,
         code_load_addr=plan.code_load_addr, tail_target=plan.tail_target)
 ```
 
 `build(code_load_addr, tail_target)` returns `(blob, entry_offset)`. Only the two calls are
-recorded, so replay never runs `build` again.
+recorded, so replay never runs `build` again. Inside `install_tick`'s `build`, `emit_send_frame`
+finds the sender cell itself; in the manual two-phase form you pass `sender_addr=plan.sender_addr`.
 
 **Routine helpers** (pure, on a `thumb.Routine`):
 
@@ -293,7 +324,9 @@ OPTIONS config frame in the template pool's wire order: the u32 little-endian CA
 `pumpauto.config_frame`. The D1 payload on selector `0xEE` is *hardware* (`FF96EE0F0100D1EA`,
 PC.47). 13.6's own pool carries D2 and D3 records of this shape (*proven-from-code*, Finding 7).
 
-**`emit_send_frame(r, template_addr, *, value_in_r3=False)`** (pure). Emits the host CAN sender
+**`emit_send_frame(r, template_addr, *, value_in_r3=False, sender_addr=None)`** (pure given the
+sender cell: inside `install_tick`'s `build` it is the plan's; outside, pass
+`sender_addr=plan.sender_addr`, or it refuses `BAD_ROUTINE`; there is no 13.6 fallback). Emits the host CAN sender
 call for the 12-byte frame at `template_addr`. It is the send sequence from `add_pump_auto_off`
 (*hardware*: flashed and verified 2026-09-04), instruction for instruction, and a test pins it against the
 built routine:
@@ -304,7 +337,7 @@ ldr r0, =template
 ldr r1, [r0]; ldr r2, [r0, #4]; str r1, [sp]; str r2, [sp, #4]
 ldr r1, [r0, #8]; str r1, [sp, #8]
 mov r0, sp
-ldr r2, =0x2003986C; ldr r2, [r2]
+ldr r2, =<sender cell>; ldr r2, [r2]        ; 13.6: 0x2003986C, 14.7: 0x20039558
 blx r2
 add sp, #0x14
 ```

@@ -92,7 +92,7 @@ def cell_table(data: bytes) -> list[int]:
 
     A widget's `value_slot` indexes this table (GUICODE Finding 17), so getting the base wrong
     does not fail — it returns a neighbouring cell, which is still a plausible-looking SRAM
-    address. `guidata.find_variable_tables` finds the base structurally: 13.6 `0x44BC8`, 11.23
+    address. `guidata.variable_table_literals` reads the base from the literal pairs GuiCode loads: 13.6 `0x44BC8`, 11.23
     `0x44B60`, 14.7 `0x42B74`.
 
     The length is derived rather than assumed (13.6's 665 is not universal): entries are SRAM

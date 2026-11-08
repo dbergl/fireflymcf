@@ -6403,6 +6403,63 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 88 — 14.7 decodes, lays out and draws records as 13.6 does, except one decoder bound, two renderer arms and both text drawers; 11.23 does not — `proven-from-code` (instruction-for-instruction twins), 2026-11-08
+
+**The question.** Every authoring op copies record bytes shaped for 13.6's record decoder
+(`FUN_00252CB0`), layout engine (`FUN_00257BFC`) and renderer (`FUN_00256C54`, Findings 10-12).
+Before those bytes go into another firmware, does its GuiCode read them the same way? Until now
+the ops answered by reading donor records at 13.6 object indices, an index read that says
+nothing about the code that consumes them.
+
+**Method.** `grammar.prove` (module docstring) sweeps each function of 13.6 into an instruction
+list (`data/grammar136.json`, generated from 13.6 stock over the exact Ghidra extents) and
+searches the other image's GuiCode for a twin at every `push` prologue: the same instructions
+with registers under one consistent renaming, in-function branch targets and pool words compared
+by position, calls under one consistent injective callee mapping, pool addresses under one
+consistent injective mapping per class (SRAM, GuiData, GuiCode), constants equal. The renderer
+is compared as its `tbh` dispatch plus 23 segments, one per arm group. Every address below comes
+from `grammar.prove`'s `proof` lines on stock 14.7 and 11.23.
+
+**14.7.**
+
+| function (13.6) | 14.7 twin | what differs |
+|---|---|---|
+| decoder `FUN_00252CB0` (1592 items) | `0x255578`, the only twin of 7 prologue candidates | one immediate: the mode-7 index bound `cmp.w #0x298` (664; 13.6 `0x2533BA`, then `bls`) is `cmp.w #0x1f8` (504), one value at all 13 sites (`0x255C82`, `0x255D44`, `0x255E24`, …). 5 callees map one-to-one; GuiData pool values shift `-0x12C40`, `-0x2054`, `-0x1FB4`, `+0x0`; SRAM `+0x0` ×2, `+0x4` ×3 |
+| layout `FUN_00257BFC` (679 items) | `0x25A4B8`, the only twin of 7 candidates | nothing: 4 callees map one-to-one; GuiData `-0x2054`, `-0x1FB4`; SRAM `-0x3AC`, `+0x4` |
+| renderer dispatch `FUN_00256C54` (51 items, `tbh`) | `0x259514`, the only twin | 64 callees one-to-one; wtypes 0-9, 11-13, 15-17, 19-47 proven, of which 9, 15, 20-31, 36-45 reach only the default arm |
+| renderer arm wt 10, 18 | `0x25A1CE`, **not a twin** | first difference `0x25A1F8`: 13.6 `movw r3, #0x96b4`, 14.7 `movw r3, #0x9390` |
+| renderer arm wt 14 | `0x25A260`, **not a twin** | first difference `0x25A2E6`: 13.6 `movw r6, #0x8652`, 14.7 `movw r6, #0x832e` |
+| wt-11 text drawer `FUN_002559A0` (488 items) | **no twin**; closest `0x258264` matches 220 items | first difference `0x2584A2`: 13.6 `bne.w` to item 335, 14.7 to item 333 |
+| wt-8 text drawer `FUN_002557C0` (185 items) | **no twin**; closest `0x258088` matches 9 items | first difference `0x2580A4`: 13.6 `ldr r2` of the literal `0x200301B0`, 14.7 a load from the function's own last pool word |
+
+So a 13.6-shaped record of any proven, drawing wtype decodes, lays out and dispatches on 14.7 as on
+13.6. Two consequences are now enforced (`donors`): a mode-7 colour index must be below 504 on
+14.7 (the decoder clamps a larger one to cell 0; `check_mode7_index`, refusal MODE7_INDEX, also
+applied by `set_record_color` and `enumlabel`), and because the text drawers are not twins, a
+wt-11 or wt-8 record's font, alignment and line pitch are accepted only when a stock record of the
+same wtype already carries each value (the witness gate, `donors.check_text_record`). A template of
+wtype 10, 14 or 18 would be refused on 14.7 (GRAMMAR).
+
+**11.23.** Refused: no twin of the decoder. Of 4 prologue candidates the closest, `0x24F6F4`,
+matches 2 items and differs at `0x24F6FA` (13.6 `ldr r4, [pc, …]`, 11.23 `movw r3, #0x6860`).
+Every template-using op refuses there with GRAMMAR.
+
+**Limits of the method.** These bound what "twin" proves; none is a gap found on 14.7.
+- **Callee bodies are not compared.** The callee mapping proves the twin calls corresponding
+  helpers in the same pattern, not that the helpers behave the same. A helper that changed
+  behind an unchanged call site passes.
+- **Constant versus address is decided by the top nibble** (`0x2…` SRAM, `0x9…` GuiData, inside
+  the section GuiCode, else constant). A constant that happens to lie in one of those ranges is
+  mapped as an address rather than required equal.
+- **The renderer's mappings are per segment.** The register bijection and the pool mappings are
+  consistent within each arm group, not across the whole renderer.
+- **A pool value used once is mapped, not equated.** Injectivity constrains only a value used more
+  than once; a single-use address may map to any value of its class.
+
+Tests: `tests/test_grammar.py` (the twins and bounds above as expectations, 11.23's refusal),
+`tests/test_donors.py` (the 504/664 limits, the witness gate). The 14.7 addresses are test
+expectations; `grammar` and `donors` locate everything from 13.6's fingerprints.
+
 ## Finding 87 — the live redraw re-checks every enrolled widget's mode-7 colour rows each tick, so a colour cell can repaint its control — `proven-from-code`, checked `observed-in-emulation`, 2026-11-03
 
 **The question.** `own_colour_cell` gives a control a private mode-7 colour row a tick routine

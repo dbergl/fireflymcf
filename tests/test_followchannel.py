@@ -640,6 +640,15 @@ def test_masked_gate_refuses_a_test_the_unset_sentinel_satisfies(mcf_136):
                                              gate_mask=FLAG_MASK, gate_on_value=0xFF00)
 
 
+def test_display_bridge_refuses_other_firmware(mcf_136, mcf_147, mcf_1123):
+    """The bridge mirrors 13.6's stock cell-45 block at its pinned addresses: 14.7 and 11.23
+    are refused by name, before their hook or any address is read; 13.6 is accepted."""
+    assert followchannel.resolve_display_bridge(mcf_136, gate_addr=0x2000801C).hook_at == 0xEE3C
+    for data, name in ((mcf_147, "14.7"), (mcf_1123, "11.23")):
+        with pytest.raises(followchannel.FollowChannelError, match=f"13.6.*this image is {name}"):
+            followchannel.resolve_display_bridge(data, gate_addr=0x2000801C)
+
+
 def test_masked_gate_refuses_an_empty_mask(mcf_136):
     with pytest.raises(followchannel.FollowChannelError):
         _bridge_plan(mcf_136, gate_mask=0, gate_on_value=0)

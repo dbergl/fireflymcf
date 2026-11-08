@@ -98,9 +98,11 @@ the `--root` that `pages` printed for stock. The hit map's `placements` list giv
 - **Check the target is the control, not its container.** An object index can be a whole card
   of controls. `recolor` refuses one (`CONTAINER`); other ops may not, so compare the record's
   `box` in the hit map with the control you mean, and diff the render.
-- **Map each request to an op** with `$F ops`. `verified: NO`, or a status of built-not-flashed,
-  means no coach has run it: use it only if the owner agrees to be first. An op this coach already
-  runs in its current build carries no new risk; say so instead of asking again.
+- **Map each request to an op** with `$F ops`. `$F ops NAME`'s `verified:` lists the firmwares a
+  coach has run it on; `none`, a list without the coach's firmware, or a status of
+  built-not-flashed means no coach on this firmware has run it: use it only if the owner agrees
+  to be first. An op this coach already runs in its current build carries no new risk; say so
+  instead of asking again.
 
 **When no op or combination of ops does it**, say which part of the request is missing and
 hand off to the `write-new-op` skill: it checks composition once more, then writes a user op
@@ -203,6 +205,13 @@ $F compile  pump.ffproj.json $M -o build/mcf-pump-rename.bin
 A failure names the op id and an error code (`$F ops NAME` explains it), sometimes with an `offer`.
 `compile` refuses a project with an unverified op; add `--allow-unverified` only after the owner
 has agreed to be first.
+
+Each op lists the firmware it has been tested on (`$F ops NAME` shows `firmware:`, marking any
+that no coach has run). An owner on 14.x has a stock image fireflymcf identifies, and a build for
+it uses only the ops that list 14.7. `UNSUPPORTED_FIRMWARE` means "not yet on this firmware": tell
+the owner, and never work around it by editing another build's addresses or switching the base
+image. `--allow-unverified` is per firmware: it covers an op unverified on the owner's firmware,
+not one that is simply unsupported there.
 
 Ops that show live status add a routine that runs on every screen refresh. A project may chain 16;
 the 17th refuses with `TICK_CHAIN_FULL`. The panel has no such limit; it is a budget on per-refresh

@@ -9,10 +9,12 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
 
 **Gestures** (`gesture_group`, `bindings`), each a coach-proven shape:
 
-- ``tap``: group prefix `10 00 00 00` (the LEVEL stepper's: stock group 103 `10 00 04 80` with
-  byte 2 and byte 3 bit 7 cleared, `levelcontrols.group_entry`), one binding on mask `0x06`.
-- ``tap_hold``: Batt Heat's group-17 clone (`10 00 0c 00` on 13.6), the hold nibble (byte 0 bits
-  4-7) set to the seconds; the hold binding on mask `0x04` FIRST, then the tap on `0x02`.
+- ``tap``: group prefix `10 00 00 00` (the frozen `donors.GROUP_PREFIXES["group.tap"]`, 13.6's
+  stock group 103 `10 00 04 80`, with byte 2 and byte 3 bit 7 cleared,
+  `levelcontrols.group_entry`), one binding on mask `0x06`.
+- ``tap_hold``: the frozen `group.hold` prefix (Batt Heat's group 17, `10 00 0c 00` on 13.6),
+  the hold nibble (byte 0 bits 4-7) set to the seconds; the hold binding on mask `0x04` FIRST,
+  then the tap on `0x02`.
 - ``hold``: the same clone with byte 2's held-phase repeat index (bits 2-3) cleared, one binding
   on `0x04` (`altreboot.group_entry`'s shape).
 - ``toggle``: the tap prefix with byte 1 `0x80` (no variant cycle on release) and byte 0's low
@@ -29,21 +31,25 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
 - ``display``: no gesture and no group. The records carry no touch region, so the button only
   draws (a status tile for `add_button_states` or `add_button_status`).
 
-**Records** (`button_records`), from the stock donors `aescompact` names, in flow order:
+**Records** (`button_records`), from the frozen `donors` templates (13.6's records at the
+pins named here; `donors.template` gates them on the image's grammar proof), in flow order:
 
-  [0] 829[7], an absolute (base-mode 0) filled box at `(x, y)` `w` x `h`, align 1;
+  [0] `rvc.box` (13.6 829[7]), an absolute (base-mode 0) filled box at `(x, y)` `w` x `h`,
+      align 1;
   [1] a flow anchor insetting the origin by `PUMP_OUTLINE_INSET`;
-  [2] the Low Volts capsule 285[0], inner size, its mode-7 fillA set to `fill_index`;
+  [2] the Low Volts capsule `rvc.capsule` (285[0]), inner size, its mode-7 fillA set to
+      `fill_index` (below the image's `donors.mode7_index_limit`);
   [3] with a glyph AND a caption, an empty record dropping the origin to the caption strip;
-  [4] the caption 285[1] relabelled (inner width; the strip's height under a glyph);
+  [4] the caption `rvc.caption` (285[1]) relabelled (inner width; the strip's height under a
+      glyph);
   [5] the glyph, a wtype-0 single character (`glyph_record`), and an empty record cancelling
       its offset so the touch region lands on the inner box again. The pen is placed so the
       bitmap is centred in the area above the caption: the panel draws it `font.top - y` rows
       above the pen (`metrics.wt0_ink_offset`, GUICODE Finding 84). Across, the pen is the
       bitmap's left edge in measuring class 2 (proven given class 2; a page's class is not
       checked, so `add_rvc_button` names a glyph's nonzero x bearing in its manifest);
-  [6] the touch region 315[9], inner size, carrying the group id (none when `touch_id` is
-      None: a display tile).
+  [6] the touch region `rvc.touch` (315[9]), inner size, carrying the group id (none when
+      `touch_id` is None: a display tile).
 
 `text`, `glyph`, `font` None and `fill_index` None give exactly the Batt Heat body.
 
@@ -58,8 +64,11 @@ preset uses it.
 """
 from __future__ import annotations
 
+import struct
+
 from . import (aescompact, cornermark, enumlabel, glyphs, guidata, insert, layout, levelcontrols,
                metrics, newbutton, optionrow, pagewalk, records, relocate)
+from . import donors as _donors
 
 FORMS = ("tap", "hold", "tap_hold", "toggle", "cycle")
 MAX_CYCLE_STATES = 16            # the variant is a nibble
@@ -69,9 +78,9 @@ TAP_MASK = 0x06                  # short-tap release + held: one frame per press
 TAP_WITH_HOLD_MASK = 0x02        # short-tap release only, beside a hold
 HOLD_MASK = 0x04                 # held, past the threshold; repeat clear, so it fires once
 
-TAP_DONOR_GROUP = levelcontrols.STEPPER_DONOR_GROUP          # stock 103, `10 00 04 80`
-TAP_DONOR_PREFIX = bytes.fromhex("10000480")
-HOLD_DONOR_GROUP = aescompact.BATT_HEAT_HOLD_DONOR_GROUP      # stock 17, `10 00 0c 00`
+# The gesture prefixes are frozen (`donors.GROUP_PREFIXES`): 13.6's groups 103 and 17.
+TAP_PREFIX = "group.tap"         # `10 00 04 80`
+HOLD_PREFIX = "group.hold"       # `10 00 0c 00`
 NO_CYCLE = 0x80                  # group byte 1: the variant is not cycled on release
 TOGGLE_VARIANT_MAX = 1           # group byte 0 low nibble: the highest variant the setter takes
 HELD_REPEAT_INDEX = 0x0C         # group byte 2 bits 2-3: the held-phase repeat-rate index
@@ -87,16 +96,16 @@ class RvcButtonError(ValueError):
 def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
                   binding_start: int, count: int) -> bytes:
     """The group-table entry (`guidata.GROUP_ENTRY_SIZE` bytes) for `form` whose slice is
-    `count` bindings from `binding_start`. The prefix is the named stock donor's, edited
-    (`optionrow._clone_group_entry`: a prefix is not a generic constant); the donor's bytes are
-    asserted so another base image cannot silently give another gesture. `hold_seconds` None
-    keeps the donor's 1-s hold nibble (Batt Heat's, byte for byte)."""
-    gt = guidata.group_table(data)
+    `count` bindings from `binding_start`. The prefix is a frozen 13.6 group prefix
+    (`donors.group_prefix`, gated on the image's grammar proof), edited and cloned with a zero pad
+    byte (`optionrow._clone_group_entry`). `hold_seconds` None keeps the prefix's 1-s hold nibble
+    (Batt Heat's, byte for byte)."""
+    def prefix(name: str) -> bytearray:
+        pre, _proof = _donors.group_prefix(data, name)
+        return bytearray(pre + bytes(guidata.GROUP_ENTRY_SIZE - len(pre)))
+
     if form in ("tap", "toggle", "cycle"):
-        raw = bytearray(gt[TAP_DONOR_GROUP].raw)
-        if bytes(raw[:4]) != TAP_DONOR_PREFIX:
-            raise RvcButtonError(f"tap donor group {TAP_DONOR_GROUP} prefix "
-                                 f"{bytes(raw[:4]).hex(' ')} is not the stock 10 00 04 80")
+        raw = prefix(TAP_PREFIX)
         raw[2] = 0x00
         raw[3] &= 0x7F
         if form == "toggle":
@@ -108,10 +117,7 @@ def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
             raw[0] = (raw[0] & 0xF0) | (count - 1)
             raw[1] = NO_CYCLE
     elif form in ("tap_hold", "hold"):
-        raw = bytearray(gt[HOLD_DONOR_GROUP].raw)
-        if raw[0] >> 4 < 1:
-            raise RvcButtonError(f"hold-donor group {HOLD_DONOR_GROUP} has a 0-second hold "
-                                 f"nibble; a hold could not register")
+        raw = prefix(HOLD_PREFIX)
         if hold_seconds is not None:
             if not (isinstance(hold_seconds, int) and 1 <= hold_seconds <= MAX_HOLD_SECONDS):
                 raise RvcButtonError(f"hold seconds {hold_seconds!r} is not 1..{MAX_HOLD_SECONDS}")
@@ -251,34 +257,78 @@ def glyph_record(dx: int, dy: int, slot: int, char: str) -> bytes:
     return rec
 
 
+def _with_geom(raw: bytes, edits: dict) -> bytearray:
+    """Template `raw` (one standalone record) with `{geom slot: value}` written in place, each a
+    signed u16 on a slot the record already carries (`aescompact._clone_with_geom`'s rule)."""
+    rec = records.decode_record(raw, 0)
+    frag = bytearray(raw)
+    for slot, value in edits.items():
+        off = records.geom_offset(raw, rec, slot)
+        if off is None:
+            raise RvcButtonError(f"template wtype {rec.wtype} has no geom[{slot}] to set")
+        if not -0x8000 <= value <= 0x7FFF:
+            raise RvcButtonError(f"geom[{slot}] value {value} does not fit a signed u16")
+        struct.pack_into("<h", frag, off, value)
+    return frag
+
+
+def _relabel(raw: bytes, text: str) -> bytes:
+    """Template `raw` with its final label field rebuilt at `text`'s length
+    (`aescompact._relabel`'s rule), self-decoded."""
+    rec = records.decode_record(raw, 0)
+    if rec.label_offset is None or rec.end != rec.label_offset + len(rec.label) + 1:
+        raise RvcButtonError("the caption template's label is not its final field")
+    if len(text) > 0xFE:
+        raise RvcButtonError(f"label {text!r} is too long for a one-byte length prefix")
+    out = bytes(raw[:rec.label_offset - 1]) + bytes([len(text)]) + text.encode("ascii") + b"\x00"
+    dec = records.decode_record(out, 0)
+    if not (dec.wtype == rec.wtype and dec.label == text and dec.size == len(out)):
+        raise RvcButtonError(f"rebuilt label record for {text!r} failed its self-decode")
+    return out
+
+
+def capsule_record(donors: bytes, *, fill_index: int, iw: int, ih: int) -> bytes:
+    """The `rvc.capsule` template at inner size `iw` x `ih`, its mode-7 fillA `fill_index`
+    (refused at or above `donors.mode7_index_limit`)."""
+    _donors.check_mode7_index(donors, fill_index, "the button capsule's fillA")
+    raw, _proof = _donors.template(donors, "rvc.capsule")
+    btn = _with_geom(raw, {2: iw, 3: ih})
+    off = records.decode_record(raw, 0).color_off[0]
+    if off is None:
+        raise RvcButtonError("the capsule template has no inline fillA colour to repoint")
+    struct.pack_into("<H", btn, off, fill_index)
+    return bytes(btn)
+
+
 def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text: str | None,
                    glyph: tuple[int, str] | None, font: int | None,
                    fill_index: int | None, x: int = 0, y: int = 0,
                    glyph_image: bytes | None = None) -> list[bytes]:
-    """The button's record fragments, in flow order (module docstring), cloned from the stock
-    donors in `donors`. `x, y` place the absolute box; `fill_index` None keeps Batt Heat's
-    static colour (`aescompact.BATT_HEAT_FILL_INDEX`). `glyph` is `(font slot, char)`, its
-    metrics read from `glyph_image` (the image it is installed in; default `donors`)."""
+    """The button's record fragments, in flow order (module docstring), from the frozen
+    `donors` templates, gated on the image `donors`. `x, y` place the absolute box;
+    `fill_index` None keeps Batt Heat's static colour (`aescompact.BATT_HEAT_FILL_INDEX`).
+    `glyph` is `(font slot, char)`, its metrics read from `glyph_image` (the image it is
+    installed in; default `donors`)."""
     a = aescompact
     inset = a.PUMP_OUTLINE_INSET
     iw, ih = w - 2 * inset, h - 2 * inset
     if iw <= 0 or ih <= 0:
         raise RvcButtonError(f"a {w} x {h} button has no inner box inside its {inset}-px inset")
-    box = a._clone_with_geom(donors, a.PUMP_FRAME_DONOR, a.PUMP_BOX_REC,
-                             {0: x, 1: y, 2: w, 3: h})
+    box_raw, _proof = _donors.template(donors, "rvc.box")
+    box = _with_geom(box_raw, {0: x, 1: y, 2: w, 3: h})
     a._set_align(box, 1)
     anchor = a._flow_anchor(inset, inset)
-    btn = a._clone_with_geom(donors, a.PUMP_BUTTON_BODY_DONOR, a.PUMP_BUTTON_BOX_REC, {2: iw, 3: ih})
-    box_rec = a._object_records(donors, a.PUMP_BUTTON_BODY_DONOR)[a.PUMP_BUTTON_BOX_REC]
-    fill_off = box_rec.color_off[0]
-    if fill_off is None:
-        raise ValueError("Low Volts box donor 285[0] has no inline fillA colour to repoint")
-    btn[fill_off - box_rec.offset:fill_off - box_rec.offset + 2] = (
-        a.BATT_HEAT_FILL_INDEX if fill_index is None else fill_index).to_bytes(2, "little")
-    frags = [bytes(box), anchor, bytes(btn)]
+    btn = capsule_record(donors, fill_index=a.BATT_HEAT_FILL_INDEX if fill_index is None
+                         else fill_index, iw=iw, ih=ih)
+    frags = [bytes(box), anchor, btn]
 
-    label_rec = a._object_records(donors, a.PUMP_BUTTON_BODY_DONOR)[a.PUMP_BUTTON_LABEL_REC]
-    cap_font = label_rec.font if font is None else font
+    label_raw = cap_font = None
+    if text is not None:
+        label_raw, _proof = _donors.template(donors, "rvc.caption", font=font)
+        cap_font = records.decode_record(label_raw, 0).font if font is None else font
+        if cap_font is None:
+            raise _donors.DonorError("NO_TEMPLATE", "the caption template carries no font")
+        _donors.check_text(donors, cap_font, text, "the button caption")
     strip = 0                                # the caption's y inside the inner box
     if glyph is not None:
         slot, char = glyph
@@ -286,8 +336,6 @@ def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text:
         g = glyphs.decode_glyph(img, glyphs.font_for_slot(img, slot).glyph_index(ord(char)))
         area = ih
         if text is not None:
-            if cap_font is None:
-                raise RvcButtonError("the caption donor carries no font to measure")
             cap_h = metrics.font_metrics(donors, cap_font).height * (text.count("\n") + 1)
             area = ih - cap_h
             strip = area
@@ -303,14 +351,11 @@ def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text:
     if text is not None:
         if strip:
             frags.append(cornermark.build_empty_record(0, strip))
-        label = a._clone_with_geom(donors, a.PUMP_BUTTON_BODY_DONOR, a.PUMP_BUTTON_LABEL_REC,
-                                   {2: iw, 3: ih - strip})
-        label = bytearray(a._relabel(donors, a.PUMP_BUTTON_BODY_DONOR, a.PUMP_BUTTON_LABEL_REC,
-                                     text, label))
+        label = bytearray(_relabel(bytes(_with_geom(label_raw, {2: iw, 3: ih - strip})), text))
         if font is not None:
             off = records.font_offset(bytes(label), records.decode_record(bytes(label), 0))
             if off is None:
-                raise RvcButtonError("the caption donor carries no font field to set")
+                raise RvcButtonError("the caption template carries no font field to set")
             label[off] = font
         frags.append(bytes(label))
     if glyph is not None:
@@ -318,8 +363,8 @@ def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text:
         frags.append(cornermark.build_empty_record(-gx, -gy))
     if touch_id is None:                     # a display tile: nothing to touch
         return frags
-    touch = a._clone_with_geom(donors, a.CLUSTER_DONOR_OBJECT, a.PUMP_BUTTON_TOUCH_REC,
-                               {2: iw, 3: ih})
+    touch_raw, _proof = _donors.template(donors, "rvc.touch")
+    touch = _with_geom(touch_raw, {2: iw, 3: ih})
     a._set_touch_id(touch, touch_id)
     frags.append(bytes(touch))
     return frags

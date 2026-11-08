@@ -17,9 +17,10 @@ arm's capsule over it. The opaque capsule goes first and covers whatever the out
 **The body moves into the arms byte for byte.** Everything between the capsule and the touch
 region is copied verbatim into every arm, so the flow origin, font and align the arm commits are
 the ones the stream records used to commit, and the touch region after the switch does not move
-(`foreign_deltas` checks it on every page). Only the capsule is rebuilt: the Low Volts donor
-285[0] at the inner size with its mode-7 fillA set to the arm's index, as the button builder
-(`rvcbutton.button_records`) made it. A wtype-33 capsule is not in the layout flow gate.
+(`foreign_deltas` checks it on every page). Only the capsule is rebuilt: the frozen
+`rvc.capsule` template (13.6's Low Volts 285[0], `donors`) at the inner size with its mode-7
+fillA set to the arm's index, as the button builder (`rvcbutton.button_records`) made it. A
+wtype-33 capsule is not in the layout flow gate.
 
 **Finding the body.** With `touch_id`, the button is the one wtype-12 record carrying that id
 (the touch id equals the button's group), and its capsule is the last wtype-33 before it; every
@@ -43,8 +44,6 @@ character, and so its ink, differs (`foreign_deltas` lets a wtype-0 glyph's box 
 arm, the one record whose box follows its character).
 """
 from __future__ import annotations
-
-import struct
 
 from . import (aescompact, cornermark, guidata, insert, pagewalk, records, relocate,
                rvcbutton, switchbuild)
@@ -101,17 +100,15 @@ def body_span(data: bytes, recs: list, *, object_index: int, w: int, h: int,
 
 
 def capsule(donors: bytes, *, fill_index: int, w: int, h: int) -> bytes:
-    """The button's capsule at the inner size, in static fill `fill_index` (donor 285[0])."""
-    a = aescompact
-    inset = a.PUMP_OUTLINE_INSET
-    btn = a._clone_with_geom(donors, a.PUMP_BUTTON_BODY_DONOR, a.PUMP_BUTTON_BOX_REC,
-                             {2: w - 2 * inset, 3: h - 2 * inset})
-    box_rec = a._object_records(donors, a.PUMP_BUTTON_BODY_DONOR)[a.PUMP_BUTTON_BOX_REC]
-    fill_off = box_rec.color_off[0]
-    if fill_off is None:
-        raise StateLightsError("Low Volts box donor 285[0] has no inline fillA colour to repoint")
-    struct.pack_into("<H", btn, fill_off - box_rec.offset, fill_index)
-    return bytes(btn)
+    """The button's capsule at the inner size, in static fill `fill_index`: the frozen
+    `rvc.capsule` template (13.6's 285[0]) gated on `donors`, the index below its
+    `donors.mode7_index_limit` (`rvcbutton.capsule_record`)."""
+    inset = aescompact.PUMP_OUTLINE_INSET
+    try:
+        return rvcbutton.capsule_record(donors, fill_index=fill_index, iw=w - 2 * inset,
+                                        ih=h - 2 * inset)
+    except rvcbutton.RvcButtonError as e:
+        raise StateLightsError(str(e)) from e
 
 
 def contactor_records(w: int) -> list[bytes]:

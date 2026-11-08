@@ -50,7 +50,7 @@ Documentation = "https://github.com/dbergl/fireflymcf"
 where = ["src"]
 
 [tool.setuptools.package-data]
-fireflymcf = ["py.typed", "data/*.txt", "emu/native/*.c", "emu/symbols/*.sym"]
+fireflymcf = ["py.typed", "data/*.txt", "data/*.json", "emu/native/*.c", "emu/symbols/*.sym"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

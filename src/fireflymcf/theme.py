@@ -56,6 +56,7 @@ import collections
 import functools
 import re
 import struct
+from dataclasses import dataclass
 from typing import Dict, Tuple
 
 from . import container, guidata, memo
@@ -603,9 +604,270 @@ def guicode_base(section: container.Section) -> int:
 _guicode_base = guicode_base
 
 
+# ----------------------------------------------------------------------- the colour decode
+
+class ColourDecodeError(ValueError):
+    """The record decoder's colour-mode switch was not found in the shape `colour_decode`
+    proves, or was found more than once."""
+
+
+@dataclass(frozen=True)
+class ColourDecode:
+    """The record decoder's colour-mode switch, as `colour_decode` reads it from the code.
+
+    Addresses are runtime addresses: `mode3_reader` in GuiCode, `palette_base` and
+    `mode7_table` in mapped GuiData (`0x90000000 + offset`). `proof` is `((label, value), ...)`:
+    the instruction and literal addresses each value was read from, and what bounds the palette:
+    `"next structure"` (a mapped GuiData address), the lowest GuiCode literal word holding it
+    (`"next structure literal"`) and the first `ldr` that loads that word
+    (`"next structure ldr"`)."""
+    mode3_reader: int
+    palette_base: int
+    palette_len: int
+    mode7_table: int
+    mode7_bound: int
+    proof: tuple
+
+    @property
+    def palette_offset(self) -> int:
+        """The mode-6 palette's GuiData offset."""
+        return self.palette_base - _GUIDATA_MAP_BASE
+
+    @property
+    def mode7_table_offset(self) -> int:
+        """The mode-7 table's GuiData offset (the variable data-pointer table)."""
+        return self.mode7_table - _GUIDATA_MAP_BASE
+
+
+# The sub-container the mode-6 palette is the payload of (MCF-FORMAT §5.5): magic at `+0x00`,
+# palette at `+0x10`.
+_SUBCONTAINER_MAGIC = 0x8F7E6D5C
+_SUBCONTAINER_HEADER = 0x10
+_READER_MAX = 16          # instructions a 3-byte reader may take before its `bx lr`
+
+
+def colour_decode(data: bytes) -> ColourDecode:
+    """The colour-mode switch of the record decoder (13.6 `FUN_00252CB0`, 14.7 `0x255578`),
+    located from the code: where mode 3's inline colour is read, where the mode-6 palette is
+    and how long it is, and where the mode-7 table is and its index bound.
+
+    The method (`GUICODE.md` Finding 18; measured 2026-11-07):
+
+      1. The anchor is the unique `mvn r2,#0xff000000; str r2,[r3,#0x68]` in the resyncing
+         linear decode of GuiCode: mode 2 stores white into render-state `+0x68` (13.6
+         `0x2534F8`, 14.7 `0x255DC0`). None, or more than one, refuses.
+      2. The switch that holds it is the nearest `tbb [pc, r3]` before it, entered by
+         `ubfx r3,r3,#3,#3; subs r3,#1; cmp r3,#6; bhi`: the mode is three bits and the table
+         has seven byte entries, arm `m` at `tbb + 4 + 2 * table[m - 1]` (13.6 `0x2534DA`, 14.7
+         `0x255DA2`). The anchor must lie in arm 2.
+      3. Arm 3 is `ldr r0,=..; bl X; ldr r3,=..; str r0,[r3,#0x68]`, and X is three `ldrb`
+         merged little-endian (`add.w ..,lsl #8`, `add.w r0,..,lsl #16`, `bx lr`): an inline
+         24-bit colour, read from the record (13.6 X = `0x252140`, 14.7 X = `0x254A08`, the
+         same 32 bytes). `proven-from-code`.
+      4. Arm 6 is `ldr r0,=..; bl ..; ldr r3,=PAL; ldr.w r2,[r3,r0,lsl #2]`: the palette is
+         indexed with no bound check.
+      5. Arm 7 is `ldr r0,=..; bl ..; uxth r0,r0; cmp.w r0,#BOUND; bls; movs r0,#0;
+         ldr r3,=TAB; ldr.w r3,[r3,r0,lsl #2]`: an index above BOUND reads entry 0.
+
+    `palette_len` is *inference*: the decoder does not bound the mode-6 index, so the length is
+    the distance from PAL to the lowest other GuiData literal GuiCode loads above it, in words
+    (13.6 `0x90010060`, 20 entries; 14.7 `0x90010064`, 21). That literal is taken to mark the
+    next structure in the same sub-container, so the words past it are not palette entries.
+    PAL must be the payload of a `0x8F7E6D5C` sub-container (`PAL - 0x10` holds the magic). The
+    sub-container header carries no length, so the bound is a ceiling of 64 entries: a longer
+    reading refuses. The mode-7 table must equal `guidata.variable_table_literals`' data-pointer
+    table, or it refuses naming both.
+
+    11.23 refuses: its arm 3 builds its argument with `movw r0,#0x67e4; add r0,r6` and stores
+    through r6, a shape this locator does not prove. Raises `ColourDecodeError` with the
+    instruction addresses on any mismatch. Needs capstone (`CapstoneUnavailable`).
+    """
+    try:
+        import capstone  # noqa: F401 -- before the cache, so a bare install fails the same way
+    except ImportError as e:                                    # pragma: no cover
+        raise CapstoneUnavailable(str(e)) from e
+    return _colour_decode(data, _GUIDATA_MAP_BASE)
+
+
+def _arm_insns(md, code: bytes, base: int, addr: int, n: int) -> list:
+    off = addr - base
+    if not 0 <= off < len(code):
+        raise ColourDecodeError("switch arm %#x lies outside GuiCode" % addr)
+    return list(md.disasm(code[off:off + 4 * n], addr, n))
+
+
+def _shape(ins, mnemonic: str, op_str: str | None = None, prefix: str | None = None) -> bool:
+    if ins.mnemonic != mnemonic:
+        return False
+    if op_str is not None and ins.op_str != op_str:
+        return False
+    return prefix is None or ins.op_str.startswith(prefix)
+
+
+# No stock palette is near this; a longer reading means the "next structure" literal is not one.
+_PALETTE_MAX_ENTRIES = 64
+
+
+@memo.content_cached(copy=None)
+def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
+    import capstone
+    from capstone.arm import ARM_OP_IMM, ARM_OP_MEM, ARM_REG_PC
+    flow = (capstone.CS_GRP_JUMP, capstone.CS_GRP_CALL, capstone.CS_GRP_RET,
+                    capstone.CS_GRP_BRANCH_RELATIVE)
+
+    section = guicode_section(data)
+    base = guicode_base(section)
+    code = data[section.offset:section.offset + section.length]
+
+    def word(addr):
+        off = addr - base
+        if not 0 <= off <= len(code) - 4:
+            raise ColourDecodeError("literal %#x lies outside GuiCode" % addr)
+        return struct.unpack_from("<I", code, off)[0]
+
+    def literal(ins):
+        """`(literal address, word)` of a PC-relative `ldr`, else None."""
+        if ins.mnemonic not in ("ldr", "ldr.w") or len(ins.operands) != 2:
+            return None
+        mem = ins.operands[1]
+        if mem.type != ARM_OP_MEM or mem.mem.base != ARM_REG_PC:
+            return None
+        la = (ins.address & ~3) + 4 + mem.mem.disp
+        return la, word(la)
+
+    # 1. the mode-2 anchor
+    flat = [i for _s, _e, run in detail_runs(code, base) for i in run]
+    hits = [k for k in range(len(flat) - 1)
+            if _shape(flat[k], "mvn", "r2, #0xff000000")
+            and _shape(flat[k + 1], "str", "r2, [r3, #0x68]")]
+    if len(hits) != 1:
+        raise ColourDecodeError(
+            "%d mode-2 stores (`mvn r2,#0xff000000; str r2,[r3,#0x68]`) in GuiCode%s; the colour "
+            "decode is located by exactly one" % (
+                len(hits), (" at " + ", ".join("%#x" % flat[k].address for k in hits))
+                if hits else ""))
+    k = hits[0]
+    mode2 = flat[k].address
+
+    # 2. the switch that holds it
+    t = next((j for j in range(k - 1, max(k - 24, 0) - 1, -1)
+              if _shape(flat[j], "tbb", "[pc, r3]")), None)
+    if t is None or t < 4 or not (
+            _shape(flat[t - 4], "ubfx", "r3, r3, #3, #3") and _shape(flat[t - 3], "subs", "r3, #1")
+            and _shape(flat[t - 2], "cmp", "r3, #6") and flat[t - 1].mnemonic.startswith("bhi")):
+        raise ColourDecodeError(
+            "the mode-2 store at %#x is not in a `ubfx r3,r3,#3,#3; subs r3,#1; cmp r3,#6; bhi; "
+            "tbb [pc,r3]` switch" % mode2)
+    tbb = flat[t].address
+    table = code[tbb + 4 - base:tbb + 4 - base + 7]
+    arms = {m: tbb + 4 + 2 * table[m - 1] for m in range(1, 8)}
+    higher = [a for a in arms.values() if a > arms[2]]
+    if not higher or not arms[2] <= mode2 < min(higher):
+        raise ColourDecodeError("the mode-2 store at %#x is not in arm 2 (%#x) of the switch at "
+                                "%#x" % (mode2, arms[2], tbb))
+
+    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+    md.detail = True
+
+    # 3. mode 3: an inline 24-bit colour
+    a3 = _arm_insns(md, code, base, arms[3], 4)
+    if not (len(a3) == 4 and literal(a3[0]) and a3[0].op_str.startswith("r0,")
+            and a3[1].mnemonic == "bl" and literal(a3[2]) and a3[2].op_str.startswith("r3,")
+            and _shape(a3[3], "str", "r0, [r3, #0x68]")):
+        raise ColourDecodeError(
+            "the mode-3 arm at %#x is not `ldr r0,=..; bl X; ldr r3,=..; str r0,[r3,#0x68]`: %s"
+            % (arms[3], "; ".join("%s %s" % (i.mnemonic, i.op_str) for i in a3)))
+    reader = a3[1].operands[0].imm
+    body = _arm_insns(md, code, base, reader, _READER_MAX)
+    end = next((j for j, i in enumerate(body) if _shape(i, "bx", "lr")), None)
+    body = body[:end] if end is not None else None
+    if not (body and sum(i.mnemonic == "ldrb" for i in body) == 3
+            and any(_shape(i, "add.w") and i.op_str.endswith("lsl #8") for i in body)
+            and _shape(body[-1], "add.w", prefix="r0, ") and body[-1].op_str.endswith("lsl #16")
+            and not any(i.group(g) for i in body for g in flow)
+            and not any(i.mnemonic in ("pop", "push") for i in body)):
+        raise ColourDecodeError("the mode-3 reader %#x (called at %#x) is not three `ldrb` merged "
+                                "little-endian ending in `bx lr`" % (reader, a3[1].address))
+    reader_bx = reader + sum(i.size for i in body)
+
+    # 4. mode 6: the palette
+    a6 = _arm_insns(md, code, base, arms[6], 4)
+    pal = literal(a6[2]) if len(a6) == 4 else None
+    if not (pal and literal(a6[0]) and a6[1].mnemonic == "bl" and a6[2].op_str.startswith("r3,")
+            and _shape(a6[3], "ldr.w", "r2, [r3, r0, lsl #2]")):
+        raise ColourDecodeError(
+            "the mode-6 arm at %#x is not `ldr r0,=..; bl ..; ldr r3,=PAL; "
+            "ldr.w r2,[r3,r0,lsl #2]`" % arms[6])
+
+    # 5. mode 7: the variable table and its bound
+    a7 = _arm_insns(md, code, base, arms[7], 8)
+    tab = literal(a7[6]) if len(a7) == 8 else None
+    if not (tab and literal(a7[0]) and a7[1].mnemonic == "bl" and _shape(a7[2], "uxth", "r0, r0")
+            and _shape(a7[3], "cmp.w", prefix="r0, #") and a7[3].operands[1].type == ARM_OP_IMM
+            and a7[4].mnemonic == "bls" and _shape(a7[5], "movs", "r0, #0")
+            and a7[6].op_str.startswith("r3,")
+            and _shape(a7[7], "ldr.w", "r3, [r3, r0, lsl #2]")):
+        raise ColourDecodeError(
+            "the mode-7 arm at %#x is not `ldr r0,=..; bl ..; uxth r0,r0; cmp.w r0,#BOUND; bls; "
+            "movs r0,#0; ldr r3,=TAB; ldr.w r3,[r3,r0,lsl #2]`" % arms[7])
+    bound = a7[3].operands[1].imm
+    # the mode-7 table is the variable data-pointer table: two readings of the code must agree
+    try:
+        dptr_off = guidata.variable_table_literals(data).dptr_off
+    except guidata.VariableTableNotFound as e:
+        raise ColourDecodeError("the variable-table literals cannot cross-check the mode-7 "
+                                "table %#x: %s" % (tab[1], e)) from e
+    if tab[1] != gd_base + dptr_off:
+        raise ColourDecodeError(
+            "the mode-7 table %#x (literal %#x) is not the variable data-pointer table %#x "
+            "(guidata.variable_table_literals)" % (tab[1], tab[0], gd_base + dptr_off))
+
+    # the palette's length (inference: the next structure's literal bounds it)
+    gs, ge = guidata.guidata_extent(data)
+    pal_off = pal[1] - gd_base
+    if not (_SUBCONTAINER_HEADER <= pal_off < ge - gs
+            and struct.unpack_from("<I", data, gs + pal_off - _SUBCONTAINER_HEADER)[0]
+            == _SUBCONTAINER_MAGIC):
+        raise ColourDecodeError("the mode-6 palette %#x (literal %#x) is not the payload of a "
+                                "%#x sub-container" % (pal[1], pal[0], _SUBCONTAINER_MAGIC))
+    above = sorted(rel for _o, rel in guicode_guidata_pointers(data) if rel > pal_off)
+    if not above or (above[0] - pal_off) % 4:
+        raise ColourDecodeError("no GuiCode literal bounds the mode-6 palette %#x in whole words"
+                                % pal[1])
+    nxt = above[0]
+    if (nxt - pal_off) // 4 > _PALETTE_MAX_ENTRIES:
+        raise ColourDecodeError(
+            "the lowest GuiData literal above the mode-6 palette %#x is %#x, %d entries on: over "
+            "the %d-entry ceiling, so it is not the next structure after the palette"
+            % (pal[1], nxt + gd_base, (nxt - pal_off) // 4, _PALETTE_MAX_ENTRIES))
+    # the literal word(s) holding it, and the PC-relative `ldr`s that load the lowest one
+    nxt_lits = sorted(base + o - section.offset for o, rel in guicode_guidata_pointers(data)
+                      if rel == nxt)
+    sweep = LinearSweep.of(code, base, detail=False)
+    nxt_ldrs = sorted(base + off for off, lit in zip(sweep.offs, sweep.items)
+                      if lit is not None and base + lit == nxt_lits[0])
+    if not nxt_ldrs:                                            # pragma: no cover
+        raise ColourDecodeError("no ldr loads the literal %#x that bounds the mode-6 palette"
+                                % nxt_lits[0])
+
+    proof = (("switch tbb", tbb), ("mode 2 mvn", mode2),
+             ("mode 3 arm", arms[3]), ("mode 3 bl", a3[1].address),
+             ("mode 3 store", a3[3].address), ("mode 3 reader bx", reader_bx),
+             ("mode 6 arm", arms[6]), ("mode 6 palette ldr", a6[2].address),
+             ("mode 6 palette literal", pal[0]), ("mode 6 indexed load", a6[3].address),
+             ("mode 7 arm", arms[7]), ("mode 7 cmp.w", a7[3].address),
+             ("mode 7 table ldr", a7[6].address), ("mode 7 table literal", tab[0]),
+             ("next structure", nxt + gd_base),
+             ("next structure literal", nxt_lits[0]), ("next structure ldr", nxt_ldrs[0]))
+    return ColourDecode(mode3_reader=reader, palette_base=pal[1],
+                        palette_len=(nxt - pal_off) // 4, mode7_table=tab[1],
+                        mode7_bound=bound, proof=proof)
+
+
 def _colour_cells(data: bytes) -> Dict[int, int]:
     """`{SRAM cell address: mode-7 index}` for every type-10 (colour) entry of the variable
-    table. Located structurally via `guidata.find_variable_tables`, not by a hardcoded offset.
+    table. The tables are the literal pairs GuiCode loads (`guidata.variable_table_literals`), not a
+    hardcoded offset.
     """
     gs, ge = guidata.guidata_extent(data)
     dptr_off, type_off = guidata.find_variable_tables(data)

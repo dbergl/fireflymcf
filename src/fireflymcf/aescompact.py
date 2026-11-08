@@ -277,7 +277,9 @@ PUMP_BUTTON_H = 44                  # 326..370
 PUMP_STEPPER_DY = 50                # stepper top, from the button's origin -> 376
 PUMP_STEPPER_H = 80                 # the donor chrome (object 393) is a fixed 220 x 80 -> ..456
 
-# Donors. All read from stock, all cloned.
+# Donors. All read from stock, all cloned, by the coach ops here (the compact frame's pump
+# section). The general builders (`rvcbutton`, `statelights`) no longer read 829[7], 285[0],
+# 285[1] or 315[9]: they use the frozen `donors` templates taken from them (2026-11-08).
 PUMP_FRAME_DONOR = ELECTRICAL_AES_BODY      # 829: the all-in-one body, read BEFORE the swap
 PUMP_BOX_REC = 7                            # 829[7]: wtype-32 filled box  (301,272,220,80)
 PUMP_OUTLINE_REC = 8                        # 829[8]: wtype-32 inset box   (-2,274,216,76)

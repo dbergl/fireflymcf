@@ -308,7 +308,8 @@ _config_frame = config_frame      # the pre-routinekit name, kept for existing c
 
 def resolve(data: bytes, *, config: "_register.Register",
             pump: "_register.Register",
-            minutes_min: int = MINUTES_MIN) -> PumpAutoPlan:
+            minutes_min: int = MINUTES_MIN,
+            stock: bytes | None = None) -> PumpAutoPlan:
     """Derive the plan from `data` (the image the routine will be appended to), or refuse.
 
     `config` is the `0xEE` DGN_CONFIG register and `pump` the channel-44 DC_DIMMER_STATUS_3
@@ -355,7 +356,7 @@ def resolve(data: bytes, *, config: "_register.Register",
             f"the scratch spans overlap: display {display_addr:#x}+2, countdown "
             f"{countdown_addr:#x}+2")
 
-    hook_old, tail_target = followchannel.hook_state(data)
+    hook_at, hook_old, tail_target = followchannel.hook_site(data, stock=stock)
 
     return PumpAutoPlan(
         config_slot=config.slot_addr,
@@ -363,10 +364,10 @@ def resolve(data: bytes, *, config: "_register.Register",
         display_addr=display_addr,
         tick_anchor_addr=tick_anchor_addr,
         countdown_addr=countdown_addr,
-        hook_at=followchannel.HOOK_OFF,
+        hook_at=hook_at,
         hook_old=hook_old,
         tail_target=tail_target,
-        sender_ptr=followchannel.SENDER_PTR_ADDR,
+        sender_ptr=followchannel.host_sender_addr(data),
         off_template=followchannel._template(pump.value, 0, 3),
         default_word=pack(MINUTES_DEFAULT, False),
         write_template=config_frame(config.value, 0, FUNCTION_WRITE, WRITE_TRAILER),

@@ -1118,8 +1118,11 @@ def _cmd_ops(args: argparse.Namespace) -> int:
                 print(textwrap.indent(e["readme"].rstrip(), "    "))
             print()
             continue
-        print(f"{e['name']}  ({e['class']}; verified: {'yes' if e['verified'] else 'NO'})")
+        # Per firmware, as ops_doc's `verified_on` (empty when hardware_verified is False).
+        print(f"{e['name']}  ({e['class']}; verified: "
+              f"{', '.join(e['verified_on']) or 'none'})")
         print(textwrap.fill(e["purpose"], 96, initial_indent="  ", subsequent_indent="  "))
+        print("  firmware: " + ops_doc._firmware_cell(e))
         print(textwrap.fill("status: " + e["status"], 96, initial_indent="  ",
                             subsequent_indent="    "))
         props = e["params"].get("properties", {})
@@ -1269,9 +1272,10 @@ def _cmd_compile(args: argparse.Namespace) -> int:
                           if next((s.type for s in project.ops if s.id == i), None)
                           not in user_types]
     if builtin_unverified and not args.allow_unverified:
-        msg = ("UNVERIFIED: op(s) %s have never run on a coach. Nothing written. If the owner "
-               "agrees to be the first, rebuild with --allow-unverified and tell them which "
-               "(`fireflymcf ops NAME` has each op's status)." % ", ".join(builtin_unverified))
+        msg = ("UNVERIFIED: op(s) %s have never run on a coach on firmware %s. Nothing "
+               "written. If the owner agrees to be the first, rebuild with --allow-unverified "
+               "and tell them which (`fireflymcf ops NAME` has each op's status)."
+               % (", ".join(builtin_unverified), result.firmware))
         if args.json:
             print(json.dumps({"ok": False, "unverified": builtin_unverified,
                               "errors": [{"op_id": None, "code": "UNVERIFIED_OPS",

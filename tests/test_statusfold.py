@@ -23,7 +23,8 @@ def _light(kind="eq", value=1, mask=0x0F, shift=0, valid_max=None, cell=CELL, sl
 def _plan(*items):
     return statusfold.FoldPlan(items=tuple(items), hook_at=followchannel.HOOK_OFF,
                                hook_old=followchannel.HOOK_STOCK,
-                               tail_target=followchannel.TAIL_TARGET)
+                               tail_target=followchannel.TAIL_TARGET,
+                               setter_addr=followchannel.VARIANT_SETTER)
 
 
 def _run(plan, slots, regs=None):

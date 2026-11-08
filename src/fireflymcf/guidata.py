@@ -1815,145 +1815,178 @@ SRAM_LOW = 0x20000000
 SRAM_HIGH = 0x20100000
 VARIABLE_TABLE_MIN_RUN = 20
 # A type byte is a small enum (0..10 observed across all three files: bool, u8, etc.).
-# Used only to find where the preceding type array starts, scanning backward from the
-# data-pointer table; generous relative to the observed max so as not to be fitted to
-# it.
+# `coverage` and the tests bound a type entry by it; generous relative to the observed max
+# so as not to be fitted to it.
 VARIABLE_TYPE_MAX = 32
-# How far back to look for the type array's leading edge. The real type arrays are
-# 516-668 bytes on the corpus; this bounds the backward scan so a pathological run of
-# small bytes elsewhere cannot make it unbounded.
-VARIABLE_TYPE_SCAN_WINDOW = 8192
+
+# GuiData is mapped at this runtime address: a GuiCode literal naming a GuiData table holds
+# `_GUIDATA_MAP_BASE + offset`.
+_GUIDATA_MAP_BASE = 0x90000000
 
 
-def find_variable_tables(data: bytes) -> tuple[int, int]:
-    """`(data_ptr_off, type_off)`: GuiData-relative offsets of the variable register
-    tables `layout.variable_register` reads.
+@dataclass(frozen=True)
+class VariableTableLiterals:
+    """The variable tables as the panel's code names them, with the proof.
 
-    `data_ptr_off` is the u32 SRAM-pointer array: the maximal run of GuiData words that
-    are each either 0 or an address in `[SRAM_LOW, SRAM_HIGH)`, scored by how many are
-    real (nonzero) SRAM pointers rather than by raw length -- otherwise a stretch of
-    zero padding elsewhere would out-run the real table. On the corpus this is not a
-    close call: 13.6 scores 664, 11.23 scores 561, 14.7 scores 504, and nothing else
-    in any of the three files scores above 3.
-
-    `type_off` is the adjacent u8 type array, found by scanning backward from
-    `data_ptr_off` while bytes stay under `VARIABLE_TYPE_MAX`, then rounding forward to
-    the next 4-byte boundary. The rounding matters: the type array's own leading bytes
-    are small too (13.6 starts `00 00 01 0a ...`), so the raw backward scan overruns
-    into a few bytes of unrelated alignment padding before it (measured: 3 bytes in
-    13.6, landing on 0x44929 instead of 0x4492C) -- alignment is what recovers the exact
-    boundary, since every table in this format starts on a 4-byte edge.
-
-    On 13.6 this returns exactly `(layout.VAR_DPTR_TABLE_136, layout.VAR_TYPE_TABLE_136)`
-    = `(0x44BC8, 0x4492C)` -- checked in `tests/test_guidata.py` after locating, not
-    fitted to it. Raises `VariableTableNotFound` if no run scores at least
-    `VARIABLE_TABLE_MIN_RUN`.
+    `dptr_off` / `type_off` are the GuiData-relative offsets of the u32 data-pointer table and
+    its parallel u8 type table. `pairs` is every GuiCode literal pair that names them, as
+    `(cell_literal_addr, type_literal_addr, type_value, ldr_sites)`: two adjacent 4-aligned
+    literal words, the data-pointer table's base then the type table's, and `ldr_sites` the
+    runtime addresses of the PC-relative `ldr`s that load the type word.
     """
+    dptr_off: int
+    type_off: int
+    pairs: tuple
+
+
+def _pointer_runs(data: bytes, min_run: int) -> tuple:
+    """`(span, runs)`: GuiData's length, and every maximal run of GuiData words that are each 0
+    or an address in `[SRAM_LOW, SRAM_HIGH)` holding at least `min_run` real (nonzero)
+    pointers, as `((start, end), ...)` GuiData-relative byte offsets, best-scoring first."""
     gs, ge = guidata_extent(data)
     n_words = (ge - gs) // 4
     if n_words == 0:
         raise VariableTableNotFound("GuiData is too short to hold this table")
     import numpy as np
     words = np.frombuffer(data[gs:gs + 4 * n_words], dtype="<u4").astype(np.int64)
-
     is_sram = (words >= SRAM_LOW) & (words < SRAM_HIGH)
-    is_zero = words == 0
-    valid = is_sram | is_zero
-
-    # Score every maximal run of `valid` words by its count of real SRAM pointers, and
-    # keep the best. A vectorised run-length pass: label each run, then bin the
-    # per-word "is real" flag by label.
+    valid = is_sram | (words == 0)
+    in_run = np.nonzero(valid)[0]
+    if not in_run.size:
+        return ge - gs, ()
+    # Label each maximal run (labels ascend with position), then bin the per-word "is real"
+    # flag by label. A run's extent is the first and last position carrying its label.
     boundary = np.zeros(n_words, dtype=bool)
     boundary[0] = valid[0]
     boundary[1:] = valid[1:] & ~valid[:-1]
-    run_id = np.cumsum(boundary) - 1   # -1 outside any run
+    ids = (np.cumsum(boundary) - 1)[in_run]
+    totals = np.bincount(ids, weights=is_sram[in_run].astype(np.int64))
+    labels = np.arange(totals.size)
+    starts = in_run[np.searchsorted(ids, labels, "left")]
+    ends = in_run[np.searchsorted(ids, labels, "right") - 1] + 1
+    order = sorted((r for r in range(totals.size) if totals[r] >= min_run),
+                   key=lambda r: (-totals[r], r))
+    return ge - gs, tuple((int(starts[r]) * 4, int(ends[r]) * 4) for r in order)
 
-    best_start = -1
-    best_real = 0
-    in_run = np.nonzero(valid)[0]
-    if in_run.size:
-        ids = run_id[in_run]
-        real_flags = is_sram[in_run].astype(np.int64)
-        totals = np.bincount(ids, weights=real_flags)
-        best_id = int(np.argmax(totals))
-        best_real = int(totals[best_id])
-        best_start = int(in_run[ids == best_id][0])
 
-    if best_start < 0 or best_real < VARIABLE_TABLE_MIN_RUN:
+@memo.content_cached(copy=None)
+def _variable_table_literals(data: bytes, min_run: int) -> VariableTableLiterals:
+    """`variable_table_literals` with the run threshold as an argument, so a test that
+    monkeypatches `VARIABLE_TABLE_MIN_RUN` cannot poison the cache."""
+    import numpy as np
+    from . import theme
+
+    span, runs = _pointer_runs(data, min_run)
+    if not runs:
         raise VariableTableNotFound(
             "no run of this GuiData has the shape of the variable data-pointer table")
-    dptr_off = best_start * 4
 
-    lo = max(0, dptr_off - VARIABLE_TYPE_SCAN_WINDOW)
-    segment = np.frombuffer(data[gs + lo:gs + dptr_off], dtype=np.uint8)
-    bad = np.nonzero(segment > VARIABLE_TYPE_MAX)[0]
-    pos = lo + (int(bad[-1]) + 1 if bad.size else 0)
-    type_off = (pos + 3) & ~3
+    section = theme.guicode_section(data)
+    base = theme.guicode_base(section)
+    code = data[section.offset:section.offset + section.length]
+    # Literal words sit on 4-byte runtime boundaries; `lead` aligns the section to them.
+    lead = (-base) % 4
+    n = (len(code) - lead) // 4
+    words = np.frombuffer(code[lead:lead + 4 * n], dtype="<u4").astype(np.int64)
 
-    # A `tablegrow` relocation moves these tables to appended GuiData and repoints the GuiCode
-    # base literals that index them; the panel then reads via those literals, so they are
-    # authoritative. The structural scan above can pick the stale pre-grow copy or the relocated
-    # one inconsistently once two copies exist, so if a 13.6 cell-base literal points at a
-    # DIFFERENT, still-valid variable table, trust it. Guarded to leave non-13.6 and ungrown
-    # images on the structural result (see `_relocated_variable_tables`).
-    override = _relocated_variable_tables(data, gs, ge)
-    if override is not None:
-        return override
-    return dptr_off, type_off
+    def names_a_run(word: int) -> bool:
+        off = word - _GUIDATA_MAP_BASE
+        return off % 4 == 0 and any(lo <= off < hi for lo, hi in runs)
+
+    in_gd = (words >= _GUIDATA_MAP_BASE) & (words < _GUIDATA_MAP_BASE + span)
+    candidates = [int(k) for k in np.nonzero(in_gd[:-1] & in_gd[1:])[0]
+                  if names_a_run(int(words[k])) and words[k + 1] < words[k]]
+    if not candidates:
+        raise VariableTableNotFound(
+            "no GuiCode literal pair names the variable tables: no 4-aligned literal word "
+            "points into a data-pointer run (%s) with a lower GuiData pointer after it"
+            % ", ".join("%#x..%#x" % r for r in runs))
+
+    # The PC-relative `ldr`s, by the literal word they load (section-relative offset).
+    sweep = theme.LinearSweep.of(code, base, detail=False)
+    loads: dict = {}
+    for off, lit in zip(sweep.offs, sweep.items):
+        if lit is not None:
+            loads.setdefault(lit, []).append(base + off)
+
+    pairs = []
+    for k in candidates:
+        type_lit = lead + 4 * (k + 1)
+        if type_lit in loads:
+            pairs.append((base + lead + 4 * k, base + type_lit, int(words[k + 1]),
+                          tuple(loads[type_lit]), int(words[k])))
+    if not pairs:
+        raise VariableTableNotFound(
+            "no GuiCode literal pair names the variable tables: no PC-relative ldr loads the "
+            "type word of any candidate pair (%s)"
+            % ", ".join("%#x" % (base + lead + 4 * k) for k in candidates))
+    named = {(cell, typ) for _c, _t, typ, _l, cell in pairs}
+    if len(named) != 1:
+        raise VariableTableNotFound(
+            "the GuiCode literal pairs that name the variable tables disagree: "
+            + "; ".join("%#x/%#x -> %#x/%#x" % (c, t, cell, typ)
+                        for c, t, typ, _l, cell in pairs))
+    cell, typ = named.pop()
+    return VariableTableLiterals(
+        dptr_off=cell - _GUIDATA_MAP_BASE, type_off=typ - _GUIDATA_MAP_BASE,
+        pairs=tuple((c, t, v, l) for c, t, v, l, _cell in pairs))
 
 
-# 13.6 GuiCode literals that load the two variable-table bases (see `readout._CELL_BASE_REF` /
-# `_TYPE_BASE_REF`); a relocation repoints them to the tables' new home.
-_VARTAB_CELL_LIT = 0x2535B4
-_VARTAB_TYPE_LIT = 0x253D08
-_GUIDATA_MAP_BASE = 0x90000000
+def variable_table_literals(data: bytes) -> VariableTableLiterals:
+    """The variable data-pointer and type tables as the panel's code loads them, with the
+    literal pairs that prove it.
+
+    The value-slot reader loads both bases from an adjacent pair of literal words: on 13.6 the
+    pair at `0x253D04/0x253D08` (`0x90044BC8`, `0x9004492C`), its type word loaded by the `ldr`s
+    at `0x253A8E`, `0x253ADE` and `0x253BF8`; on 14.7 the pair at `0x2565CC/0x2565D0`
+    (`0x90042B74`, `0x90042978`), loaded at `0x256356`, `0x2563A6` and `0x2564C0`. Each image
+    has three or four such pairs, and they agree (measured 2026-11-07).
+
+    The method:
+      1. Find the data-pointer runs structurally: every maximal run of GuiData words that are
+         each 0 or an SRAM pointer, holding at least `VARIABLE_TABLE_MIN_RUN` real pointers.
+         On the corpus one run qualifies (664 on 13.6, 561 on 11.23, 504 on 14.7; nothing else
+         scores above 3). A grown image also keeps every stale pre-grow copy, so several do.
+      2. Collect every pair of adjacent 4-aligned GuiCode words whose first word points into
+         one of those runs, whose second is a GuiData pointer below it, and whose second word
+         a PC-relative `ldr` loads.
+      3. Every pair must name the same two tables.
+
+    The code, not the bytes around the tables, says where they start. The backward byte scan
+    this replaces overran 14.7's eight zero bytes before its type table and returned `0x42970`,
+    eight entries early. On a grown image the structural run starts one zero word early and
+    the stale copies stay in GuiData, while `tablegrow` repoints every literal, so the literal
+    pair is the authority there too (checked on every grown reference build, 2026-11-07).
+
+    Raises `VariableTableNotFound` when no run qualifies, when no pair names one, or when the
+    pairs disagree; the message names the literal addresses. Needs the `[full]` extra
+    (numpy and capstone), with a warm cache too, so a command that reaches it behaves the same
+    on every call.
+    """
+    import capstone  # noqa: F401
+    import numpy  # noqa: F401
+    return _variable_table_literals(data, VARIABLE_TABLE_MIN_RUN)
 
 
-def _relocated_variable_tables(data: bytes, gs: int, ge: int):
-    """`(dptr_off, type_off)` from the GuiCode base literals if a grow relocated the tables, else
-    `None`. Trusted only when the cell-base literal is no longer the stock 0x44BC8, both literals
-    are in-GuiData pointers, the type table precedes the cell table (stock layout), and the cell
-    base actually points at a run of SRAM pointers -- so a non-13.6 image (whose literal at this
-    address is unrelated bytes) and an ungrown image both fall through to the structural scan."""
-    from . import theme
-    try:
-        sec = theme.guicode_section(data)
-        base = theme.guicode_base(sec)
-    except Exception:
-        return None
+def variable_type_table(data: bytes) -> int:
+    """GuiData offset of the u8 variable type table, as the panel's code loads it
+    (`variable_table_literals`). 13.6 and 11.23: `0x4492C`; 14.7: `0x42978`."""
+    return variable_table_literals(data).type_off
 
-    def _rd(runtime):
-        off = sec.offset + (runtime - base)
-        if off < 0 or off + 4 > len(data):
-            return None
-        return struct.unpack_from("<I", data, off)[0]
 
-    cell_lit = _rd(_VARTAB_CELL_LIT)
-    type_lit = _rd(_VARTAB_TYPE_LIT)
-    if cell_lit is None or type_lit is None:
-        return None
-    if cell_lit == _GUIDATA_MAP_BASE + 0x44BC8:      # stock cell base: not grown
-        return None
-    span = ge - gs
-    if not (_GUIDATA_MAP_BASE <= cell_lit < _GUIDATA_MAP_BASE + span):
-        return None
-    if not (_GUIDATA_MAP_BASE <= type_lit < _GUIDATA_MAP_BASE + span):
-        return None
-    new_dptr = cell_lit - _GUIDATA_MAP_BASE
-    new_type = type_lit - _GUIDATA_MAP_BASE
-    if new_type >= new_dptr or new_dptr % 4:         # type before cell; cell base 4-aligned
-        return None
-    real = 0
-    for i in range(16):
-        off = gs + new_dptr + i * 4
-        if off + 4 > len(data):
-            break
-        w = struct.unpack_from("<I", data, off)[0]
-        if SRAM_LOW <= w < SRAM_HIGH:
-            real += 1
-    if real < 8:                                     # a real relocated cell table, not a coincidence
-        return None
-    return new_dptr, new_type
+def find_variable_tables(data: bytes) -> tuple[int, int]:
+    """`(data_ptr_off, type_off)`: GuiData-relative offsets of the variable register
+    tables `layout.variable_register` reads, located by `variable_table_literals` (the
+    GuiCode literal pairs that load them, checked against the structural pointer run).
+
+    On 13.6 this returns exactly `(layout.VAR_DPTR_TABLE_136, layout.VAR_TYPE_TABLE_136)`
+    = `(0x44BC8, 0x4492C)` -- checked in `tests/test_guidata.py` after locating, not
+    fitted to it -- and on a grown image the relocated pair the code now loads. Raises
+    `VariableTableNotFound` if no run scores at least `VARIABLE_TABLE_MIN_RUN`, or the code
+    names no table or disagrees with itself.
+    """
+    found = variable_table_literals(data)
+    return found.dptr_off, found.type_off
 
 
 def switch_candidates(data: bytes, rec, match_off: int | None = None) -> list[tuple[int, int]]:

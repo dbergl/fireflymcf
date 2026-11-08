@@ -10,8 +10,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass
 
-from . import (celltables, followchannel, guidata, layout, records, sramreach, statusbind,
-              status_map, theme, thumb)
+from . import (celltables, donors, followchannel, guidata, layout, records, sramreach,
+               statusbind, status_map, theme, thumb)
 from .register import Register
 
 
@@ -235,11 +235,11 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
     type_fill = bytes((vt if vt is not None else 0) for _, vt in specs)
 
     # Append in stock physical order -- the u8 TYPE table immediately before the u32 CELL table --
-    # so `guidata.find_variable_tables`' structural scan (a maximal SRAM-pointer run, with a
-    # backward scan for the adjacent type array) locates the RELOCATED pair the same way it locates
-    # the stock pair. Appending the cell table first instead lets a preceding pointer-looking word
-    # bleed into the run and mislocates the base by a few bytes, which mis-resolves every mode-7
-    # colour in the render (24 stock fills fell into the coach-battery branch).
+    # so the relocated pair has the stock shape `guidata.variable_table_literals` locates: the
+    # repointed cell-base literal names a data-pointer run, and the type-base literal after it is
+    # a lower GuiData pointer. (Appending the cell table first once let a preceding pointer-looking
+    # word bleed into the structural run and mislocated the base by a few bytes, which mis-resolved
+    # every mode-7 colour in the render: 24 stock fills fell into the coach-battery branch.)
     tables = [tablegrow.IndexedTable(type_base, 1), tablegrow.IndexedTable(cell_base, 4)]
     try:
         image, new_indices, edits = tablegrow.grow_indexed_tables(
@@ -273,7 +273,8 @@ class ReadoutPlan:
 
 
 def resolve(data: bytes, *, register: Register, cell: DisplayCell, mask: int = 0xFFFF,
-            add: int = 0, shift: int = 0, sub: int = 0, mul: int = 1) -> ReadoutPlan:
+            add: int = 0, shift: int = 0, sub: int = 0, mul: int = 1,
+            stock: bytes | None = None) -> ReadoutPlan:
     if not 1 <= mask <= 0xFFFF:
         raise ReadoutError(f"mask must be 1..0xFFFF, got {mask:#x}")
     if not 0 <= add <= 0xFFFF:
@@ -285,9 +286,9 @@ def resolve(data: bytes, *, register: Register, cell: DisplayCell, mask: int = 0
         raise ReadoutError(f"shift must be 0..15, got {shift}")
     if not 0 <= sub <= 0xFFFF:
         raise ReadoutError(f"sub must fit `movw` (0..0xFFFF), got {sub}")
-    hook_old, tail = followchannel.hook_state(data)
+    hook_at, hook_old, tail = followchannel.hook_site(data, stock=stock)
     return ReadoutPlan(register.slot_addr, mask, add, shift, cell,
-                       followchannel.HOOK_OFF, hook_old, tail, sub, mul)
+                       hook_at, hook_old, tail, sub, mul)
 
 
 def build(plan: ReadoutPlan, code_load_addr: int) -> tuple[bytes, list]:
@@ -399,7 +400,10 @@ def detour_edit(plan: ReadoutPlan, code_load_addr: int) -> tuple[int, bytes, byt
     return plan.hook_at, plan.hook_old, thumb.bl(hook_runtime, code_load_addr + ENTRY_OFF)
 
 
-DONOR_OBJECT = 793          # the Time at Stop Volts stepper (the pump section's proven donor)
+# The 13.6 source of the `readout.directive`/`readout.wt8` templates (`donors`): the Time at Stop
+# Volts stepper, the pump section's proven donor. The default `donor` names the templates; any
+# other (object, record) is read from the image.
+DONOR_OBJECT = 793
 DONOR_READOUT_REC = 5       # wtype-8; record 4 before it is the (0, 0x18, 3, 0) directive
 
 
@@ -421,31 +425,62 @@ def directive_bytes(width: int, places: int, zero_pad: bool = False,
     return bytes([0, 0x10 | JUSTIFY[justify] << 2 | (0x02 if zero_pad else 0), width, places])
 
 
+def _donor_pair(data: bytes, donor: tuple[int, int],
+                font: int | None) -> tuple[bytes, bytes]:
+    """`(directive record, wt-8 readout record)`: the frozen templates for the default donor
+    (`donors.template`, the readout's background cell the theme's panel), else the image's
+    records `donor[1] - 1` and `donor[1]` of object `donor[0]` behind the same grammar gate,
+    refused NO_DONOR when they do not exist or are not a (directive, readout) pair. The
+    effective value font (`font`, else the readout's own) must draw `donors.READOUT_CHARS`."""
+    if tuple(donor) == (DONOR_OBJECT, DONOR_READOUT_REC):
+        d, _ = donors.template(data, "readout.directive")
+        r, _ = donors.template(data, "readout.wt8", font=font)
+    else:
+        donors.require_grammar(data, f"readout donor {donor}")
+        obj, j = donor
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (obj, j)) \
+                or obj < 0 or j < 1:
+            raise donors.DonorError("NO_DONOR", f"readout donor {donor}: needs an object >= 0 "
+                                                f"and a record >= 1 (its directive before it)")
+        try:
+            gs, _ = guidata.guidata_extent(data)
+            tbl = guidata.object_tables(data)[1]
+            recs = records.object_records(data, gs + tbl[obj])
+            dr, rr = recs[j - 1], recs[j]
+        except (IndexError, ValueError, TypeError) as e:
+            raise donors.DonorError("NO_DONOR", f"readout donor {donor}: {e}") from e
+        if (rr.wtype != 8 or rr.value_slot is None or dr.wtype != 9 or dr.fmt is None):
+            raise donors.DonorError(
+                "NO_DONOR", f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 "
+                            f"readout) pair")
+        d, r = bytes(data[dr.offset:dr.end]), bytes(data[rr.offset:rr.end])
+    slot = records.decode_record(r, 0).font if font is None else font
+    if slot is not None:
+        donors.check_readout_font(data, slot, f"readout value font {slot}")
+    return d, r
+
+
 def author_readout_object(data: bytes, *, x: int, y: int, display_slot: int, directive: bytes,
-                          donor: tuple[int, int] = (DONOR_OBJECT, DONOR_READOUT_REC)) -> bytes:
-    """`<count=2><directive><readout>`: the donor's own directive record with its four tail
-    bytes replaced, then the donor readout made absolute at (x, y) reading `display_slot`."""
+                          donor: tuple[int, int] = (DONOR_OBJECT, DONOR_READOUT_REC),
+                          font: int | None = None) -> bytes:
+    """`<count=2><directive><readout>`: the donor directive record with its four tail bytes
+    replaced, then the donor readout made absolute at (x, y) reading `display_slot`. The donor
+    is the frozen template pair by default (`_donor_pair`). `font` is the value font the caller
+    will write into the readout (default: the readout's own); it is checked, not written."""
     if len(directive) != 4 or directive[0] != 0:
         raise ReadoutError("directive must be 4 bytes with mode 0 (see directive_bytes)")
-    obj, j = donor
-    gs, _ = guidata.guidata_extent(data)
-    tbl = guidata.object_tables(data)[1]
-    recs = records.object_records(data, gs + tbl[obj])
-    if (j < 1 or recs[j].wtype != 8 or recs[j].value_slot is None
-            or recs[j - 1].wtype != 9 or recs[j - 1].fmt is None):
-        raise ReadoutError(
-            f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 readout) pair")
-    d, r = recs[j - 1], recs[j]
-    dfrag = bytearray(data[d.offset:d.offset + d.size])
-    dfrag[d.fmt_off - d.offset:d.fmt_off - d.offset + 4] = directive
-    rfrag = bytearray(data[r.offset:r.offset + r.size])
+    draw, rraw = _donor_pair(data, donor, font)
+    d, r = records.decode_record(draw, 0), records.decode_record(rraw, 0)
+    dfrag = bytearray(draw)
+    dfrag[d.fmt_off:d.fmt_off + 4] = directive
+    rfrag = bytearray(rraw)
     rfrag[1] = rfrag[1] & 0xF0                      # coords 0/1 -> base mode 0 (absolute)
     for slot, value in ((0, x), (1, y)):
-        off = records.geom_offset(data, r, slot)
+        off = records.geom_offset(rraw, r, slot)
         if off is None:
             raise ReadoutError(f"donor readout carries no geom[{slot}]")
-        struct.pack_into("<H", rfrag, off - r.offset, value)
-    struct.pack_into("<H", rfrag, records.value_slot_offset(data, r) - r.offset, display_slot)
+        struct.pack_into("<H", rfrag, off, value)
+    struct.pack_into("<H", rfrag, records.value_slot_offset(rraw, r), display_slot)
     payload = bytes([2]) + bytes(dfrag) + bytes(rfrag)
     payload += b"\x00" * (-len(payload) % 4)
     chk = records.object_records(payload, 0)

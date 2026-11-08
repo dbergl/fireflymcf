@@ -47,7 +47,8 @@ def _gs_tab(data: bytes):
 def _value_records(data: bytes, x: int, y: int, slot: int, width: int, places: int) -> list[bytes]:
     """The (directive, readout) pair, the readout's font set to VALUE_FONT."""
     payload = readout.author_readout_object(data, x=x, y=y, display_slot=slot,
-                                            directive=readout.directive_bytes(width, places))
+                                            directive=readout.directive_bytes(width, places),
+                                            font=VALUE_FONT)
     d, r = records.object_records(payload, 0)
     rfrag = bytearray(payload[r.offset:r.end])
     off = records.font_offset(payload, r)

@@ -482,3 +482,63 @@ def test_grow_guidata_declared_compiles(tmp_path, mcf_136):
     gd = ed.section("GuiData")
     at = gd.offset + gd.length - 4 - 8
     assert res.data[at:at + 8] == b"FFMCtest"
+
+
+# A user op that nops whatever the located hook holds (stock `bl` or a chained one).
+_NOP_LOCATED_HOOK = '''
+from fireflymcf import hooklocate, recipe, theme
+from fireflymcf.userop import UserOp
+
+
+@recipe.op("user:hook-nop")
+class HookNop(UserOp):
+    def build(self, ed, ctx):
+        h = hooklocate.locate_hook(ed.data)
+        addr = theme.guicode_base(ed.section("GuiCode")) + h.hook_off
+        ed.patch_addr("GuiCode", addr, h.hook_bytes, bytes.fromhex("00bf00bf"), "nop the hook")
+
+    def check(self, data, ctx):
+        return "hook nopped"
+'''
+
+_READOUT = recipe.OpSpec(id="show", type="add_register_readout", params={
+    "register": {"ref": "probe"}, "mask": 255, "width_bytes": 1, "page": 4, "x": 300, "y": 357})
+_PROBE = recipe.OpSpec(id="probe", type="append_filter",
+                       params={"dgn": 0x1FEA0, "mode": 1, "payload_byte": 0})
+
+
+@pytest.mark.parametrize("order,code,op_id", [
+    ("user_last", "HOOK_REFUSED", "show"),       # the built-in tick op's verify walks a nopped hook
+    ("user_first", "READOUT_REFUSED", "show"),   # its apply finds no hook to chain onto
+])
+def test_a_user_op_that_breaks_the_hook_is_refused_not_raised(tmp_path, mcf_136, order, code,
+                                                              op_id):
+    pf = _setup(tmp_path, "hook_nop", op_py=_NOP_LOCATED_HOOK)
+    nop = recipe.OpSpec(id="nop", type="user:hook-nop", params={})
+    ops = [_PROBE, _READOUT, nop] if order == "user_last" else [nop, _PROBE, _READOUT]
+    proj = recipe.Project(base_sha256=hashlib.sha256(mcf_136).hexdigest(),
+                          build_name="Jayco B-Van V13 user op test", ops=ops)
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert not res.ok and res.data is None
+    assert [(e["code"], e["op_id"]) for e in res.errors] == [(code, op_id)], res.errors
+    assert "per-tick hook" in res.errors[0]["message"]
+
+
+def test_a_hook_refusal_escaping_an_apply_is_mapped(mcf_136):
+    """An op whose apply lets a `FollowChannelError` through (the hook did not prove out) is
+    refused as DETOUR_REFUSED naming it, not raised: the compile loop maps it."""
+    @recipe.op("test_raw_hook_error")
+    class Raw(recipe.Op):
+        def apply(self, data, ctx):
+            followchannel.hook_site(bytes(data[:0x100]))
+
+    try:
+        proj = recipe.Project(base_sha256=hashlib.sha256(mcf_136).hexdigest(), build_name="x",
+                              ops=[recipe.OpSpec(id="raw", type="test_raw_hook_error", params={})])
+        for res in (recipe.compile_project(proj, mcf_136),
+                    recipe.compile_cached(proj, mcf_136, {})):
+            assert not res.ok
+            assert [(e["code"], e["op_id"]) for e in res.errors] == [("DETOUR_REFUSED", "raw")]
+    finally:
+        del recipe.REGISTRY["test_raw_hook_error"]

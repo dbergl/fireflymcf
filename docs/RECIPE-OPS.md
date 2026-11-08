@@ -28,68 +28,68 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 
 `id` must be unique; later ops reference earlier ones as `{"ref": "<id>"}` where a parameter says so. `enabled: false` keeps an op in the file without applying it. `note` is free text and never affects the bytes. Object indices are build-specific: find them on the owner's own firmware with `pages`, `labels` and `render`, never from another build.
 
-**Hardware status** says whether the op's mechanism has run on the reference coach (Jayco B-Van, firmware 13.6). "Verified" is the op's default: `no` means the compile manifest lists it under `unverified` and the build needs a coach check with stock on the stick; some ops narrow it by parameter. `fireflymcf ops` prints this reference from the installed package.
+**Hardware status** says whether the op's mechanism has run on the reference coach (Jayco B-Van, firmware 13.6). "Verified" is the op's default: `no` means the compile manifest lists it under `unverified` and the build needs a coach check with stock on the stick; some ops narrow it by parameter. **Firmware** lists the firmware each op may compile on (`11.23`, `13.6`, `14.7`); compile refuses it on any other with `UNSUPPORTED_FIRMWARE`. A firmware marked `(unverified)` has not run the op on a coach, and `--allow-unverified` applies per firmware; `(emulated)` is information only and never verifies. `fireflymcf ops` prints this reference from the installed package.
 
 ## Summary
 
-| op | class | purpose | hardware status | verified |
-|---|---|---|---|---|
-| [`assert_layout`](#assert_layout) | same-size | Check, at its place in the recipe, that chosen records (by walk key, object and record, or label) sit at given absolute boxes, or that nothing on a page moved since an earlier snapshot. Changes no bytes. | Check-only: changes no bytes, so there is nothing to run on a coach. | yes |
-| [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14: the coach bath light (ch25) no longer follows Light Master. | yes |
-| [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes |
-| [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes |
-| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed. | yes |
-| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes |
-| [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes |
-| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. `role` (default `fillA`) picks the colour field: `fillB` is a label's or readout's background. | Flashed. With a `selector`, or a `role` other than `fillA`, UNVERIFIED (bench check: the selected field, and only it, repaints). | yes |
-| [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes |
-| [`remove_control`](#remove_control) | same-size | Park a control off the 480 px canvas by rewriting its attach records' y. Bindings stay. | UNVERIFIED. Never flashed. | **no** |
-| [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes |
-| [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes |
-| [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes |
-| [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** |
-| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, a restyled HOME). | **no** |
-| [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes |
-| [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes |
-| [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes |
-| [`set_theme`](#set_theme) | same-size | Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only. | Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed. | yes |
-| [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04. | yes |
-| [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes |
-| [`add_aes_batt_heat`](#add_aes_batt_heat) | structural | Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`). | Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged. | yes |
-| [`add_aes_batt_heat_status`](#add_aes_batt_heat_status) | structural | Show live BMS status on the "Batt Heat" button: blue/cyan body for the battery heater off/on, plus a red glyph for the battery's internal heater contactor (status DGN `0x18FF7070`), received on two APPENDED subscriptions folded per tick into one private display cell that drives one four-arm switch. | Flashed 2026-09-22: injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (the receive half was proven in an earlier build). | yes |
-| [`add_aes_bms_button_status`](#add_aes_bms_button_status) | structural | Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch. | Flashed 2026-10-15 (Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked. | **no** |
-| [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes |
-| [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes |
-| [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes |
-| [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. | **no** |
-| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** |
-| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to 829 is verified); it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes |
-| [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes |
-| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) after a blank 0xFFFF default arm at its base, attached under `parent`. A preview without slot values (Studio, `render`) draws that blank arm. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). | **no** |
-| [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes |
-| [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** |
-| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes |
-| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). | **no** |
-| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). | **no** |
-| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes |
-| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes |
-| [`fill_to_capsule`](#fill_to_capsule) | structural | Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding the radius slot. | UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02). | **no** |
-| [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes |
-| [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`). | yes |
-| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes |
-| [`set_record_color`](#set_record_color) | structural | Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object. | UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02). | **no** |
-| [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes |
-| [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes |
-| [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes |
-| [`add_aes_low_volts_trigger`](#add_aes_low_volts_trigger) | guicode | Add a live, recolouring Low Volts arm indicator to the compact AES frame. | Flashed 2026-09-01. | yes |
-| [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes |
-| [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes |
-| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. | yes |
-| [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes |
-| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes |
-| [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. | yes |
-| [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes |
-| [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes |
+| op | class | purpose | hardware status | verified | Firmware |
+|---|---|---|---|---|---|
+| [`assert_layout`](#assert_layout) | same-size | Check, at its place in the recipe, that chosen records (by walk key, object and record, or label) sit at given absolute boxes, or that nothing on a page moved since an earlier snapshot. Changes no bytes. | Check-only: changes no bytes, so there is nothing to run on a coach. | yes | 13.6 |
+| [`drop_from_master`](#drop_from_master) | same-size | Remove one channel from a master control (its ON+OFF group pair), so the master no longer commands that load. Each naming binding gets DGN -> 0xFFFF and phase mask -> 0. | Flashed 2026-09-14: the coach bath light (ch25) no longer follows Light Master. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`fix_variant_gate`](#fix_variant_gate) | same-size | Repair a control GuiCode disables every tick from a receive slot (13.6's `Shore Brkr Size` minus). Mode `selector` changes one GuiData byte. | Flashed 2026-09-07, mode `selector`. PC.62. Other modes unverified. | yes | 13.6 |
+| [`move_attach`](#move_attach) | same-size | Move where a page attaches a child object (its wtype-5 attach record). | Flashed. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`move_element`](#move_element) | same-size | Set one record's geometry fields (x, y, width, height) inside an object. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`pin_filter_instance`](#pin_filter_instance) | same-size | Narrow a receive-filter entry from any device to one RV-C instance (one byte). | Flashed (2026-09-04 onward). Motivated by PC.46. `from_instance` (re-pin an entry that already compares one instance to another) is UNVERIFIED and compiles as unverified. Bench check: the readouts follow instance N's frames and ignore instance 0's (injected pair). | yes | 13.6 |
+| [`pin_switch_arm`](#pin_switch_arm) | same-size | Pin a type-6 switch to one arm regardless of its value slot (three u16s). | Flashed 2026-09-05. PC.60. | yes | 13.6 |
+| [`recolor`](#recolor) | same-size | Repoint a button box's fill index to another colour in the firmware palette. A `selector` (`move_element`'s wtype/label/nth) names the record when an object holds more than one mode-7 box. `role` (default `fillA`) picks the colour field: `fillB` is a label's or readout's background. | Flashed. With a `selector`, or a `role` other than `fillA`, UNVERIFIED (bench check: the selected field, and only it, repaints). | yes | 13.6, 14.7 (unverified, emulated) |
+| [`remap_channel`](#remap_channel) | same-size | Make a labelled control command a different G12 output channel. | Flashed with `move_display_list` (PC.13-16). The default indicator retarget is UNVERIFIED. | yes | 13.6 |
+| [`remove_control`](#remove_control) | same-size | Park a control off the 480 px canvas by rewriting its attach records' y. Bindings stay. | UNVERIFIED. Never flashed. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`remove_option_interlocks`](#remove_option_interlocks) | same-size | Stop an OPTIONS row writing another row's selector (13.6: Progressive Inverter and the generator mode). Refuses on 14.7; no-op on 11.23. | Flashed. PC.21 shows the G12 does not re-impose it. | yes | 13.6 |
+| [`rename_label`](#rename_label) | same-size | Replace a label's text. Same-size by default (padded to the field); a longer text relocates when `allow_grow` is set. | Flashed. Grown label PC.18. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`retarget_inverter_gear`](#retarget_inverter_gear) | same-size | Send the Inverter capsule's gear to INVERTER / CHARGER SETTINGS (2-byte GuiCode edit). | Flashed 2026-09-02. | yes | 13.6 |
+| [`set_binding_bytes`](#set_binding_bytes) | same-size | Rewrite chosen wire payload bytes of a command group's existing bindings, asserting each old value. | UNVERIFIED. Bench check: the arrows send instance N in both variants (candump). | **no** | 13.6 (unverified) |
+| [`set_corner_radius`](#set_corner_radius) | same-size | Set a rounded widget's corner radius (its fifth geometry slot); `"pill"` sizes it to half the shorter side. An object shared by several pages changes on all of them. | UNVERIFIED on a coach. Emulator: firefly-emulator draws the pills on HOME (2026-11-02, a restyled HOME). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`set_font`](#set_font) | same-size | Change a record's font slot. The selector is persistent: later records inherit it. | Flashed. | yes | 13.6 |
+| [`set_gesture`](#set_gesture) | same-size | Convert a control's toggle group to hold-to-toggle: a single command-5 toggle, or every copy of a variant-selected two-state group (Low Volts, group 129). | Flashed 2026-08-19 (pins 28 and 29) for a single toggle; 2026-10-19 for Low Volts (group 129) on the compact AES ELECTRICAL page. AGS mode untested. | yes | 13.6 |
+| [`set_icon`](#set_icon) | same-size | Repoint an icon record's font slot and/or character; optionally blank the caption. | Flashed (the Starlink button). | yes | 13.6, 14.7 (unverified, emulated) |
+| [`set_theme`](#set_theme) | same-size | Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. | Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed. On 14.7, emulated 2026-11-07: no stock role colour on any rail page. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`show_nav_slides_icon`](#show_nav_slides_icon) | same-size | Reveal the nav rail's authored sixth icon and route it to a screen. | Flashed 2026-09-04. | yes | 13.6 |
+| [`tank_heater_names`](#tank_heater_names) | same-size | Widen the tank-heater diagnostic-name whitelists so floorplan WD names all four rows. Trade: SY loses Grey, WT loses Black. | Flashed. PC.18b. | yes | 13.6 |
+| [`add_aes_batt_heat`](#add_aes_batt_heat) | structural | Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-minute BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`). | Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged. | yes | 13.6 |
+| [`add_aes_batt_heat_status`](#add_aes_batt_heat_status) | structural | Show live BMS status on the "Batt Heat" button: blue/cyan body for the battery heater off/on, plus a red glyph for the battery's internal heater contactor (status DGN `0x18FF7070`), received on two APPENDED subscriptions folded per tick into one private display cell that drives one four-arm switch. | Flashed 2026-09-22: injected 18FF70C0 frames transitioned through every heater/contactor edge; caption and glyph repaint correctly (the receive half was proven in an earlier build). | yes | 13.6 |
+| [`add_aes_bms_button_status`](#add_aes_bms_button_status) | structural | Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch. | Flashed 2026-10-15 (Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked. | **no** | 13.6 (unverified) |
+| [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes | 13.6 |
+| [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes | 13.6 |
+| [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes | 13.6 |
+| [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. | **no** | 13.6 (unverified) |
+| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** | 13.6 (unverified) |
+| [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to 829 is verified); it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes | 13.6 |
+| [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes | 13.6 |
+| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) after a blank 0xFFFF default arm at its base, attached under `parent`. A preview without slot values (Studio, `render`) draws that blank arm. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). | **no** | 13.6 (unverified) |
+| [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes | 13.6 |
+| [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** | 13.6 (unverified) |
+| [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes | 13.6 |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). | **no** | 13.6 (unverified) |
+| [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). On 14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no pixel outside the box changed on any rail page. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes | 13.6 |
+| [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`fill_to_capsule`](#fill_to_capsule) | structural | Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding the radius slot. | UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes | 13.6, 14.7 (unverified, emulated) |
+| [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`). | yes | 13.6 |
+| [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`set_record_color`](#set_record_color) | structural | Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object. | UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes | 13.6 |
+| [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes | 13.6 |
+| [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes | 13.6 |
+| [`add_aes_low_volts_trigger`](#add_aes_low_volts_trigger) | guicode | Add a live, recolouring Low Volts arm indicator to the compact AES frame. | Flashed 2026-09-01. | yes | 13.6 |
+| [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes | 13.6 |
+| [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes | 13.6 |
+| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. | yes | 13.6 |
+| [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes | 13.6 |
+| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes | 13.6 |
+| [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. | yes | 13.6 |
+| [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes | 13.6 |
+| [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes | 13.6 |
 
 ## Same-size edits
 
@@ -174,7 +174,7 @@ Move where a page attaches a child object (its wtype-5 attach record).
 
 Error codes:
 
-- `BAD_PARAMS` — x and y are both None (at least one coordinate is required)
+- `BAD_PARAMS` — x and y are both None (at least one coordinate is required), or a coordinate is not an int in -32768..65535
 - `NO_SUCH_PAGE` — page name cannot be resolved to an object index
 - `NO_SUCH_RECORD` — page has no wtype-5 attach records with matching child_index
 - `NO_FIELD` — a requested coordinate (x or y) exists on no matching attach record. This is an error by design: a GUI move that cannot happen is reported, not silently skipped. If an attach record doesn't have the field, the operation fails rather than partially moving only existing coordinates.
@@ -472,9 +472,9 @@ Error codes:
 
 ### set_theme
 
-Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename. 13.6 only.
+Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot (bg, panel, button, header, rail, active), every GuiData inline field and mode-6 palette entry that holds them, and optionally the tank wells' colour. Runs after every op that names a colour by RGB, before a header rename.
 
-- **Hardware status:** Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed.
+- **Hardware status:** Flashed and verified on the reference coach 2026-11-02 (owner): palette change confirmed. On 14.7, emulated 2026-11-07: no stock role colour on any rail page.
 - **Proof:** `docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`
 - **Implementation:** `recipe_ops.SetTheme`
 
@@ -488,7 +488,7 @@ Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at 
 Error codes:
 
 - `BAD_PARAMS` — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is not a role with a static index
-- `WRONG_BUILD` — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or a theme already applied)
+- `WRONG_BUILD` — the GuiCode theme-init is not located in its stock form (`themeswap.locate_theme_init`: another build, or a theme already applied)
 
 ### show_nav_slides_icon
 
@@ -543,6 +543,9 @@ Error codes:
 
 - `NO_FREE_GROUP` — no empty group-table slot to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates). BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_aes_batt_heat_status
 
@@ -564,6 +567,9 @@ Error codes:
 - `INDICATOR_REFUSED` — the routine, switch or an arm could not be built or spliced onto 829.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
 - `BAD_REF` — `button` names an op with no handle (not run, later, or disabled).
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_aes_bms_button_status
 
@@ -586,6 +592,9 @@ Error codes:
 - `NO_BODY_COLOUR` — the blue/cyan pair is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or switch could not be built or spliced onto 829.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_alt_reboot
 
@@ -626,6 +635,9 @@ Error codes:
 - `BAD_REF` — `status` or a battery ref names no prior op of the right kind.
 - `NOT_A_BATTERY` — a named object is not a House battery (seven-record signature).
 - `WRAP_REFUSED` — the arms, the match table or the switch could not be built or spliced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_button
 
@@ -676,6 +688,9 @@ Error codes:
 - `NO_BODY_COLOUR` — a colour is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, a wrap changes any other record, or an arm draws out of place.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_button_status
 
@@ -700,6 +715,9 @@ Error codes:
 - `NO_BODY_COLOUR` — a colour is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, or a wrap changes any other record on a page reaching the button.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_card_readouts
 
@@ -727,6 +745,9 @@ Error codes:
 - `REPLACE_REFUSED` — 829 could not be relocated.
 - `BAD_PARAMS` — a row lacks caption, unit or value, or its caption or unit has a character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
 - `NO_GLYPH` — a non-ASCII caption or unit character the row's font has no glyph for (captions font 10, units font 12; both carry '°').
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_corner_mark
 
@@ -789,6 +810,9 @@ Error codes:
 - `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); the placement changes any other record on a page reaching `parent`; or a pasted record would inherit a value slot (e.g. under 899, whose attaches carry value_slot 0).
 - `OFF_CANVAS` — the box leaves the 800x480 canvas.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_glyph_button
 
@@ -801,7 +825,7 @@ Clone a donor control into a bare button shell on a page, sized w x h, unwired.
 | parameter | type | required | default | meaning |
 |---|---|---|---|---|
 | `page` | string\|integer | yes |  | page name (resolved via cli._resolve_page_root) or object index |
-| `donor` | integer |  | 247 | object index to clone |
+| `donor` | integer |  |  | object index to clone (default: located, 247 on 13.6 stock; pass it when the stock has several) |
 | `x` | integer | yes |  | absolute attach x-position |
 | `y` | integer | yes |  | absolute attach y-position |
 | `w` | integer | yes |  | width written to every box/icon/caption/touch geometry field |
@@ -813,6 +837,7 @@ Error codes:
 - `INSERT_REFUSED` — insert.insert_object refused (bad parent, no template, etc.)
 - `NO_FIELD` — a box/icon/caption/touch record lacks the w or h geometry field
 - `NO_SUCH_PAGE` — page name cannot be resolved to an object index (via cli)
+- `NO_DONOR` — the stock image has zero or several objects of the glyph-button shape, or `donor` is not one (out of range, or failing a named clause)
 
 ### add_level_page
 
@@ -852,6 +877,9 @@ Error codes:
 - `ROUTINE_REFUSED` — the routine could not be resolved, built or appended to GuiCode.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
 - `PAGE_REFUSED` — the body could not be drawn or object 367 could not be replaced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_low_volts_control
 
@@ -923,12 +951,15 @@ Error codes:
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 - `CYCLE_UNDRIVEN` — (compile) a cycle that no later enabled `add_button_states` drives.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_text_label
 
 Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change.
 
-- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock).
+- **Hardware status:** UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). On 14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no pixel outside the box changed on any rail page.
 - **Proof:** `enumlabel.py`, `pagedraw.py`
 - **Implementation:** `recipe_ops.AddTextLabel`
 
@@ -954,6 +985,9 @@ Error codes:
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
 - `OFF_CANVAS` — the box or the frame leaves the 800x480 canvas.
 - `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`). Where the text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font, alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of the recipe's stock image; one that does not is refused here.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### aes_card_layout
 
@@ -989,7 +1023,7 @@ Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table
 
 Error codes:
 
-- `APPEND_REFUSED` — appendfilter refused (bad entry, registry cap, no arena room, a gate).
+- `APPEND_REFUSED` — appendfilter refused (bad entry, registry cap, no arena room, a gate, or an LCD firmware without the instructions `appendfilter.LCD_FACTS` cites).
 
 ### fill_to_capsule
 
@@ -1122,6 +1156,8 @@ Error codes:
 - `NO_FIELD` — the record's type (or its colour-mode bytes) gives it no such field
 - `POINTER_INSIDE` — a GuiCode/LCD literal points into the object after the edited record
 - `RELOCATE_REFUSED` — the relocation gates refused the grown object
+- `MODE7_INDEX` — an `{"index": n}` colour at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7); the decoder would clamp it to cell 0.
+- `GRAMMAR` — an `{"index": n}` colour on an image whose record grammar is not proven 13.6's (`grammar.prove`), so its bound is unknown.
 
 ### split_hold_region
 
@@ -1169,6 +1205,9 @@ Error codes:
 - `SETTINGS_REFUSED` — `build_settings_screen` refused (the object-31 rebuild's own `relocate.replace_object_records` gate failed)
 - `WIRE_REFUSED` — `wire_settings_nav` refused: a DISPLAYED object OUTSIDE the AES page subtree already carries touch id 0x7DE (a hit-test collision), or the 0x7DE leaf's stock bytes at its GuiCode site do not match (a drifted build)
 - `BAD_REF` — `pump_section` or `link_indicator` names an op id with no handle yet (it has not run, ran after this op, or is disabled), or the handle is missing the field the ref needs (`pump_section_ids`' fields, or `display_slot`) -- refuses rather than wire the button to stale or absent ids.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### wire_button
 
@@ -1290,9 +1329,21 @@ Show any register as a live number on any page, or feed an existing readout's ce
 | `x` | integer |  |  |  |
 | `y` | integer |  |  |  |
 | `format` | object |  | {"width": 0, "places": 0, "zero_pad": false} |  |
-| `donor` | object |  | {"obj": 793, "rec": 5} |  |
+| `donor` | object |  | {"obj": 793, "rec": 5} | the default names the frozen readout templates (`donors`); another {obj, rec} is read from the image and refused NO_DONOR when it does not exist or is not a (directive, wtype-8) pair (ATTACH_REFUSED before 2026-11-08) |
 | `cell_slot` | integer |  |  | FEED AN EXISTING display cell (a stock readout's value_slot) instead of allocating one and authoring a widget; excludes page/x/y/format/donor |
 | `silence` | array |  |  | with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: drawing params with `draw` false or with `cell_slot`, a non-integer `cell_slot`, `silence` that is not a list of addresses or comes without `cell_slot`, a missing page/x/y, or a bad `format`.
+- `READOUT_REFUSED` — the register, the display cell or the copy routine could not be resolved or built.
+- `GROW_REFUSED` — GuiCode could not be grown for the routine.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
+- `ATTACH_REFUSED` — the readout object could not be attached to `page`.
+- `NO_DONOR` — a caller-named `donor` that does not exist or is not a (directive, wtype-8) pair.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_voltage_battery
 

@@ -274,13 +274,15 @@ class G12Outputs:
         return float(next((lv for c, lv in reversed(o.trail) if c <= then), o.trail[0][1]))
 
     # -- commands ----------------------------------------------------------------
-    def command(self, d, external=True):
-        """DC_DIMMER_COMMAND_2 ``d`` (from the bus, or the G12's own rules)."""
+    def command(self, d, external=True, ack=True):
+        """DC_DIMMER_COMMAND_2 ``d`` (from the bus, or the G12's own rules). ``ack=False`` is
+        for a command no one sent (`Scenario.set_g12_output`): nothing to acknowledge."""
         inst = d[0]
         o = self.out.get(inst)
         if o is None or len(d) < 4:
             return
-        self.g._emit(rvc.ACKNOWLEDGEMENT | 0xFF, ACK)
+        if ack:
+            self.g._emit(rvc.ACKNOWLEDGEMENT | 0xFF, ACK)
         self._quiet_uc = o.inst in HALF_BRIDGE   # its command statuses hide the bit (pc38)
         try:
             self._command(o, d)

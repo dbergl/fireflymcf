@@ -17,40 +17,28 @@ base modes `[0,0,1,1]`, geometry `(x, y)`). `append_arms` grows the match table 
 objects that make up the band, in one call, returning the base index `author_switch`'s `arms_base`
 argument expects.
 
-The donor (object 9, record 9 -- the AES enable-pill switch, first repurposed for the Pump Link
-button) and its stock bytes are pinned here; `aescompact` re-exports the names so existing
-imports keep working.
+The record is the frozen `switch` template (`donors.TEMPLATES`): 13.6's object 9 record 9, the
+AES enable-pill switch first repurposed for the Pump Link button, byte for byte, gated on the
+image's grammar proof (`donors.template`). `LINK_SWITCH_*` name its 13.6 source;
+`aescompact` re-exports them so existing imports keep working.
 """
 
 from __future__ import annotations
 
 import struct
 
-from . import guidata, insert, records, relocate
+from . import donors, insert, records, relocate
 
-# Object indices (object-table 1). The AES enable-pill switch -- stock donor for every authored
-# n-arm switch in this project (the Pump Link button onward).
+# The 13.6 source of the `switch` template (object-table 1): the AES enable-pill switch, the
+# shape of every authored n-arm switch in this project (the Pump Link button onward). Not read.
 LINK_SWITCH_DONOR = 9
 LINK_SWITCH_REC = 9                         # 9[9]: wtype-6, slot 11, band 173+6
-LINK_SWITCH_STOCK = bytes.fromhex("0650030020000000f4015e01ff0b000600ad00")
-
-
-def _object_records(data: bytes, index: int) -> list[records.WRecord]:
-    """Decode object `index`'s record stream via the standard accessor recipe."""
-    gs, _ = guidata.guidata_extent(data)
-    table = guidata.object_tables(data)[1]
-    return records.object_records(data, gs + table[index])
-
-
-def _record_bytes(data: bytes, index: int, j: int) -> bytes:
-    """The raw byte span of record `j` of object `index`."""
-    r = _object_records(data, index)[j]
-    return bytes(data[r.offset:r.offset + r.size])
+LINK_SWITCH_STOCK = donors.TEMPLATES["switch"].raw
 
 
 def author_switch(data: bytes, *, value_slot: int, arms_base: int, count: int,
                   at: "tuple[int, int] | None" = None) -> bytes:
-    """A `count`-arm type-6 state switch: the stock enable-pill switch (9[9]), reading
+    """A `count`-arm type-6 state switch: the `switch` template (13.6's 9[9]), reading
     `value_slot` and selecting the `count`-object band at `arms_base`. The record shape is
     identical for any arm count; only the R45 count field, and (for an absolute placement) the
     geometry, differ. The match-table values the arms were appended with live in the match table
@@ -66,19 +54,15 @@ def author_switch(data: bytes, *, value_slot: int, arms_base: int, count: int,
     `at=(x, y)`: absolute placement -- header byte 1 `0x50` (base modes `[0,0,1,1]`: x/y absolute,
     w/h relative, matching the donor's own w/h mode), geom[0..1] = x, y.
     """
-    rec = _object_records(data, LINK_SWITCH_DONOR)[LINK_SWITCH_REC]
-    raw = _record_bytes(data, LINK_SWITCH_DONOR, LINK_SWITCH_REC)
-    if raw != LINK_SWITCH_STOCK:
-        raise ValueError(
-            f"object {LINK_SWITCH_DONOR} record {LINK_SWITCH_REC} is {raw.hex()}, not the stock "
-            "enable-pill switch this route was derived against")
+    raw, _proof = donors.template(data, "switch")
+    rec = records.decode_record(raw, 0)
     frag = bytearray(raw)
     x, y = (0, 0) if at is None else at
     frag[1] = 0x55 if at is None else 0x50
-    struct.pack_into("<H", frag, records.geom_offset(data, rec, 0) - rec.offset, x)
-    struct.pack_into("<H", frag, records.geom_offset(data, rec, 1) - rec.offset, y)
-    struct.pack_into("<H", frag, records.value_slot_offset(data, rec) - rec.offset, value_slot)
-    ci = records.child_index_offset(data, rec) - rec.offset
+    struct.pack_into("<H", frag, records.geom_offset(raw, rec, 0), x)
+    struct.pack_into("<H", frag, records.geom_offset(raw, rec, 1), y)
+    struct.pack_into("<H", frag, records.value_slot_offset(raw, rec), value_slot)
+    ci = records.child_index_offset(raw, rec)
     struct.pack_into("<H", frag, ci, arms_base)
     struct.pack_into("<H", frag, ci - 2, count)            # R45 count precedes R48 child for wtype 6
     chk = records.decode_record(bytes(frag), 0)

@@ -80,9 +80,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Replace the colour scheme: the six chrome colours GuiCode's theme-init forms at boot "
         "(bg, panel, button, header, rail, active), every GuiData inline field and mode-6 "
         "palette entry that holds them, and optionally the tank wells' colour. Runs after every "
-        "op that names a colour by RGB, before a header rename. 13.6 only.",
+        "op that names a colour by RGB, before a header rename.",
         "Flashed and verified on the reference coach 2026-11-02 (owner): palette change "
-        "confirmed.",
+        "confirmed. On 14.7, emulated 2026-11-07: no stock role colour on any rail page.",
         "`docs/HARDWARE-VERIFIED.md`; firefly-firmware `docs/BUILD-LOG.md`"),
     "recolor": ("same-size",
         "Repoint a button box's fill index to another colour in the firmware palette. A "
@@ -303,7 +303,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
         "two-line label spaces its lines by the font's cell, and every other control on the "
         "page draws as before, its text in its own font, and a `frame` draws as the stock "
-        "section frames do, its edge masked behind a title's fill (photo against stock).",
+        "section frames do, its edge masked behind a title's fill (photo against stock). On "
+        "14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no "
+        "pixel outside the box changed on any rail page.",
         "`enumlabel.py`, `pagedraw.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "
@@ -412,6 +414,18 @@ def _params_table(cls) -> list[str]:
     return lines
 
 
+def _firmware_cell(e: dict) -> str:
+    """`13.6` where the op is verified on a coach, `14.7 (unverified)` where it may compile but
+    no coach has run it; `(emulated)` is information only and never verifies."""
+    parts = []
+    for fw in e["firmwares"]:
+        notes = [] if fw in e["verified_on"] else ["unverified"]
+        if fw in e["emulated_on"]:
+            notes.append("emulated")
+        parts.append(fw + (" (%s)" % ", ".join(notes) if notes else ""))
+    return ", ".join(parts)
+
+
 def entries(registry: dict | None = None) -> list[dict]:
     """Every op as data, in the document's order: what `fireflymcf ops` prints.
 
@@ -428,6 +442,12 @@ def entries(registry: dict | None = None) -> list[dict]:
         cls = registry[n]
         out.append({"name": n, "class": klass, "purpose": purpose, "status": status,
                     "proof": proof, "verified": bool(getattr(cls, "hardware_verified", True)),
+                    "firmwares": sorted(cls.firmwares),
+                    # Verified means `Op.is_verified(fw)`: an op whose class default is
+                    # unverified is verified on no firmware, whatever `verified_on` says.
+                    "verified_on": (sorted(cls.verified_on)
+                                    if getattr(cls, "hardware_verified", True) else []),
+                    "emulated_on": sorted(cls.emulated_on),
                     "params": cls.PARAMS,
                     "errors": [{"code": c, "meaning": t} for c, t in _error_codes(cls)]})
     return out
@@ -466,17 +486,21 @@ def render(registry: dict | None = None) -> str:
     out.append("**Hardware status** says whether the op's mechanism has run on the reference coach "
                "(Jayco B-Van, firmware 13.6). \"Verified\" is the op's default: `no` means "
                "the compile manifest lists it under `unverified` and the build needs a coach check "
-               "with stock on the stick; some ops narrow it by parameter. `fireflymcf ops` prints "
-               "this reference from the installed package.")
+               "with stock on the stick; some ops narrow it by parameter. **Firmware** lists the "
+               "firmware each op may compile on (`11.23`, `13.6`, `14.7`); compile refuses it on any "
+               "other with `UNSUPPORTED_FIRMWARE`. A firmware marked `(unverified)` has not run "
+               "the op on a coach, and `--allow-unverified` applies per firmware; `(emulated)` is "
+               "information only and never verifies. `fireflymcf ops` prints this reference from "
+               "the installed package.")
     out.append("")
     out.append("## Summary")
     out.append("")
-    out.append("| op | class | purpose | hardware status | verified |")
-    out.append("|---|---|---|---|---|")
+    out.append("| op | class | purpose | hardware status | verified | Firmware |")
+    out.append("|---|---|---|---|---|---|")
     for e in ops:
-        out.append("| [`%s`](#%s) | %s | %s | %s | %s |" % (
+        out.append("| [`%s`](#%s) | %s | %s | %s | %s | %s |" % (
             e["name"], e["name"], e["class"], _cell(e["purpose"]), _cell(e["status"]),
-            "yes" if e["verified"] else "**no**"))
+            "yes" if e["verified"] else "**no**", _firmware_cell(e)))
     out.append("")
     names = [e["name"] for e in ops]
     for key, title, blurb in CLASSES:

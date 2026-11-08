@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import struct
 
-from . import (cornermark, guidata, insert, pagedraw as pd, pagewalk, recordedit, records,
+from . import (cornermark, donors, guidata, insert, pagedraw as pd, pagewalk, recordedit, records,
                switchbuild)
 
 ALIGNS = {"left": 1, "centre": 2, "right": 3}     # R49 h_align (`pagedraw.label`)
@@ -82,7 +82,10 @@ def _flow_relative(frag: bytes) -> bytes:
     return bytes(out)
 
 
-def _index_colour(frag: bytes, roles: tuple, index: int) -> bytes:
+def _index_colour(data: bytes, frag: bytes, roles: tuple, index: int) -> bytes:
+    """`frag` with each of `roles` set to mode-7 `index`; DonorError MODE7_INDEX when `index`
+    is not below `data`'s `donors.mode7_index_limit`."""
+    donors.check_mode7_index(data, index, "the label's mode-7 colour")
     for role in roles:
         frag = pd._set_mode(frag, role, 7, struct.pack("<H", index))
     return frag
@@ -116,12 +119,12 @@ def label_records(data: bytes, *, text: str, font: int, w: int, h: int, align: i
         parts = []
         if bg_index is not None:
             fill = pd.capsule(data, x, y, w, h, FILL_RADIUS, _PLACEHOLDER)
-            fill = _index_colour(place(fill), ("fillA", "fillA2"), bg_index)
+            fill = _index_colour(data, place(fill), ("fillA", "fillA2"), bg_index)
             _check(fill, 33, w, h, ("fillA", 7, bg_index), at)
             parts.append(fill)
         lab = pd.label(data, text, x, y, w, h, font=font, rgb=_PLACEHOLDER, h_align=align,
                        v_align=2, multiline=multiline)
-        lab = _index_colour(place(lab), ("fillA", "fillA2"), colour_index)
+        lab = _index_colour(data, place(lab), ("fillA", "fillA2"), colour_index)
         r = _check(lab, 11, w, h, ("fillA", 7, colour_index), at)
         if not (r.label == text and r.font == font and r.h_align == align):
             raise EnumLabelError(f"authored label {text!r} failed its self-decode: {lab.hex()}")
@@ -152,7 +155,7 @@ def blank_arm(data: bytes, *, w: int, h: int, bg_index: int | None) -> bytes:
         parts = []
         if bg_index is not None:
             fill = pd.capsule(data, 0, 0, w, h, FILL_RADIUS, _PLACEHOLDER)
-            fill = _index_colour(_flow_relative(fill), ("fillA", "fillA2"), bg_index)
+            fill = _index_colour(data, _flow_relative(fill), ("fillA", "fillA2"), bg_index)
             _check(fill, 33, w, h, ("fillA", 7, bg_index))
             parts.append(fill)
         parts.append(cornermark.build_empty_record())

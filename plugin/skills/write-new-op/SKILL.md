@@ -109,6 +109,7 @@ not yet booted (`help()` on that class is the full reference):
 | `s.set_tank_raw(sensor, raw)` | the G12's raw tank input (1 fresh, 2 grey, 3 black, 4 grey 2; high is empty), read once a second |
 | `s.g12_selector(sel)` | the emulated G12's stored value for a config selector (None: unset) |
 | `s.set_g12_selector(sel, value)` | give the G12 a stored value (before `boot()`: the coach comes up that way); the panel learns it from the G12's report, so run a few seconds |
+| `s.set_g12_output(inst, level)` | forces the G12's output `inst` (1-44) to `level` (0 off, 1-200) as a test stimulus: no command on the bus and no ACK, and the G12's rules (interlocks included) do not run, so it is not a wall switch. The G12 reports it on 1FEDA; the panel sends nothing |
 | `s.frames(dgn=, sa=0x9F, since=)` | frames on the bus (`.t`, `.can_id`, `.dgn`, `.sa`, `.data`); `sa=None` for every sender |
 | `s.read_mem(addr, n)` | emulated RAM, e.g. a cell your routine owns |
 | `s.screen`, `s.page`, `s.control_box(c)` | the screen id and header showing; a control's touch box |
@@ -148,7 +149,7 @@ config write on selector `0x9B` at boot (observed in the emulator, not checked a
 capture). "Nothing was sent" is false on stock; a test must assert only what the op changes.
 
 **What emulated means.** The emulator runs the panel's own code against a simulated G12 and RV-C
-network on 13.6 only. Any other build reports `not emulated: <reason>`, never a pass. It is not
+network on 13.6 and 14.7. Any other build reports `not emulated: <reason>`, never a pass. It is not
 the coach: a pass says the panel does what the test asserts against simulated peers. When a coach
 capture disagrees, the capture wins.
 
@@ -198,7 +199,7 @@ with JSON-able or bytes arguments (lists, not sets):
 | `ed.call("resolve_register", dgn=, instance=, selector=, var_index=, field=)` | an existing receive register and its `slot_addr` |
 | `ed.call("slot_addr", var_index)` | a variable-table slot (index-split) |
 | `config_frame(selector, value, function)` | a 12-byte `0x1FED9` OPTIONS frame template (`0xD1` write, `0xD2` delta, `0xD3` read-back) |
-| `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
+| `emit_send_frame(r, template_addr, value_in_r3=False, sender_addr=None)` | the panel's own send call for a template in your prefix; inside `install_tick` the image's sender cell is found for you, outside pass `sender_addr=plan.sender_addr` |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
 | `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=, repaint=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); with `repaint=True` a store of a new colour also repaints the control in place (without it, the colour shows only at the control's next repaint); touches GuiCode and GuiData |
 | `ed.call("own_colour_cells", [[object_index, field], ...], repaint=)` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells; a dict request takes its own `"repaint"` |
@@ -351,8 +352,8 @@ pinned by its tests). `PC.N` and `Finding N` name entries in the fireflymcf repo
 - **SRAM above `0x2000AD98` holds nothing unless something writes it**: the C runtime initialises
   only below (*proven-from-code*: the reset handler's `.data`/`.bss` loops on 13.6). A fresh cell
   is garbage at power-on: initialise it or tolerate any start value.
-- **Chain on the one hook.** Every routine shares the per-tick `bl` at GuiCode+`0xEE3C`
-  (*proven-from-code*; chains of four or more links run on the coach, *hardware*). Install
+- **Chain on the one hook.** Every routine shares the one per-tick `bl`, located per image
+  (13.6 GuiCode+`0xEE3C`, 14.7 `0xF288`; *proven-from-code*; chains of four or more links run on the coach, *hardware*). Install
   through `install_tick`, which keeps every earlier link, and never patch the hook yourself.
 - **Switch arms must be flow-neutral, and the `0xFFFF` default arm sits at the base.** A record
   advances the layout pen by its own x, so an arm that does not put the pen back moves every later

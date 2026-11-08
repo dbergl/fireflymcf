@@ -16,7 +16,7 @@ import dataclasses
 import struct
 
 from fireflymcf import (aescompact, celltables, cli, container, followchannel, gestures,
-                             glyphenc, navicon,
+                             glyphenc, hooklocate, navicon,
                               glyphs, growsection, guidata, holdregion, insert, interlocks,
                               labels, layout, mastergroup, metrics, newbutton, optionrow,
                               options, patch,
@@ -24,6 +24,7 @@ from fireflymcf import (aescompact, celltables, cli, container, followchannel, g
                               sramreach, status_map, statusbind, tankgates, theme, thumb,
                               voltagebattery)
 from fireflymcf import absrecord
+from fireflymcf import donors
 from fireflymcf import altreboot
 from fireflymcf import appendfilter
 from fireflymcf import battglyph
@@ -48,6 +49,15 @@ from fireflymcf.recipe import Ctx, Op, RecipeError, op, resolve_target
 def _gs_tab(data):
     gs, _ = guidata.guidata_extent(data)
     return gs, guidata.object_tables(data)[1]
+
+
+def _require_object(data, obj, op_id=None):
+    """Refuse (NO_SUCH_OBJECT) an object index outside the image's object table, instead of
+    letting the IndexError or InsertError of the lookup reach the user."""
+    n = len(guidata.object_tables(data)[1])
+    if not isinstance(obj, int) or isinstance(obj, bool) or not 0 <= obj < n:
+        raise RecipeError("NO_SUCH_OBJECT", "object %r is not an object index in [0, %d)"
+                          % (obj, n), op_id=op_id)
 
 
 def _put16(buf, off, value, ctx, note):
@@ -92,6 +102,10 @@ class RenameLabel(Op):
     Returns sealed image with the label field updated (and, on a grow, the image
     relocated) and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "object": {"type": "integer", "description": "stock object index holding the label"},
@@ -119,6 +133,7 @@ class RenameLabel(Op):
         self.allow_grow = self._param("allow_grow", False, kind=bool)
 
     def apply(self, data, ctx):
+        _require_object(data, self.object, self.spec.id)
         gs, _ = guidata.guidata_extent(data)
         lo, hi = insert._object_span(data, self.object)
         sites = [s for s in patch.find_label_sites(data, self.old)
@@ -180,6 +195,7 @@ def _select_record(data, gs, tab, obj, selector, op_id):
     wtype = selector.get("wtype")
     label = selector.get("label")
     nth = selector.get("nth", 0)
+    _require_object(data, obj, op_id)
     recs = records.object_records(data, gs + tab[obj])
     cand = [r for r in recs
             if (wtype is None or r.wtype == wtype)
@@ -228,6 +244,10 @@ class MoveElement(Op):
     `CompileResult.shifts`, the sidecar's `shifts`. It never refuses; `assert_layout`'s `snapshot`/`unchanged_since` around
     the op is the form that does.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -338,6 +358,10 @@ class SetCornerRadius(Op):
     The object is drawn wherever it is attached: an object shared by several pages changes on
     all of them.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -464,10 +488,19 @@ class SetRecordColor(Op):
       NO_FIELD -- the record's type (or its colour-mode bytes) gives it no such field
       POINTER_INSIDE -- a GuiCode/LCD literal points into the object after the edited record
       RELOCATE_REFUSED -- the relocation gates refused the grown object
+      MODE7_INDEX -- an `{"index": n}` colour at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7); the decoder would clamp it to
+        cell 0.
+      GRAMMAR -- an `{"index": n}` colour on an image whose record grammar is not proven 13.6's
+        (`grammar.prove`), so its bound is unknown.
 
     `set_theme` runs after it and remaps an inline colour equal to a theme colour, as it does
     every inline field.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -533,6 +566,8 @@ class SetRecordColor(Op):
         obj, idxs = self._targets(data, ctx)
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[obj])
+        if self.mode == 7:
+            donors.check_mode7_index(data, self.value, "set_record_color")
         new = {}
         try:
             for i in idxs:
@@ -583,6 +618,10 @@ class FillToCapsule(Op):
       NOT_A_FILL -- the record is not wtype 4
       POINTER_INSIDE / RELOCATE_REFUSED -- as `set_record_color`
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
     PARAMS = {
         "properties": {
@@ -646,9 +685,12 @@ class MoveAttach(Op):
              via resolve_target(ctx, child)
       x: int (optional) — new x-coordinate to write to matching attach record(s)
       y: int (optional) — new y-coordinate to write to matching attach record(s)
+      A coordinate is -32768..65535: the layout engine reads geometry signed (`layout._s16`),
+      so a negative offset is stored as its two's complement, as `move_element` does.
 
     Error codes:
-      BAD_PARAMS — x and y are both None (at least one coordinate is required)
+      BAD_PARAMS — x and y are both None (at least one coordinate is required), or a
+                   coordinate is not an int in -32768..65535
       NO_SUCH_PAGE — page name cannot be resolved to an object index
       NO_SUCH_RECORD — page has no wtype-5 attach records with matching child_index
       NO_FIELD — a requested coordinate (x or y) exists on no matching attach record.
@@ -658,6 +700,10 @@ class MoveAttach(Op):
 
     Returns sealed image with geometry fields updated and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "page": {"type": ["string", "integer"],
@@ -680,6 +726,17 @@ class MoveAttach(Op):
         if self.x is None and self.y is None:
             raise RecipeError("BAD_PARAMS", "move_attach wants x and/or y",
                               op_id=self.spec.id)
+        for name in ("x", "y"):
+            v = getattr(self, name)
+            if v is None:
+                continue
+            if not isinstance(v, int) or isinstance(v, bool) or not -0x8000 <= v <= 0xFFFF:
+                raise RecipeError("BAD_PARAMS", "move_attach %s = %r is not an int in "
+                                  "-32768..65535" % (name, v), op_id=self.spec.id)
+        self.written = {"x": self.x, "y": self.y}       # for messages
+        # signed -> stored u16, as move_element: the layout engine reads geometry signed
+        self.x = None if self.x is None else self.x & 0xFFFF
+        self.y = None if self.y is None else self.y & 0xFFFF
 
     def _root(self, data):
         if isinstance(self.page, int):
@@ -692,6 +749,7 @@ class MoveAttach(Op):
 
     def apply(self, data, ctx):
         root = self._root(data)
+        _require_object(data, root, self.spec.id)
         child = resolve_target(ctx, self.child)
         gs, tab = _gs_tab(data)
         buf = bytearray(data)
@@ -708,7 +766,8 @@ class MoveAttach(Op):
                 if off is not None:
                     moved.add(key)
                     _put16(buf, off, val, ctx,
-                           "attach of obj %d on page %d: %s -> %d" % (child, root, key, val))
+                           "attach of obj %d on page %d: %s -> %d" % (child, root, key,
+                                                                layout._s16(val)))
         if hit == 0:
             raise RecipeError("NO_SUCH_RECORD", "page %d has no attach record for "
                               "object %d" % (root, child))
@@ -738,7 +797,7 @@ class MoveAttach(Op):
         assert hit > 0, "verify: page %d attach record for object %d was removed" % (
             root_idx, child)
         return "attach: object %d on page %d -> (%s, %s)" % (
-            child, root_idx, self.x, self.y)
+            child, root_idx, self.written["x"], self.written["y"])
 
 
 @op("set_font")
@@ -842,6 +901,10 @@ class SetIcon(Op):
 
     Returns sealed image with icon record and/or caption updated and edits logged.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -989,6 +1052,10 @@ class Recolor(Op):
 
     Returns sealed image with box fill colour repointed and edits logged to context.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "object": {"type": ["integer", "object"],
@@ -1381,6 +1448,10 @@ class DropFromMaster(Op):
     produces. The build's capability gate then surfaces the intended loss instead of a
     repurposed group silently eating a real control.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = True     # FLASHED AND VERIFIED 2026-09-14
     PARAMS = {
         "properties": {
@@ -1862,7 +1933,9 @@ class AddGlyphButton(Op):
     Params:
       page: str|int — page name (resolved via cli._resolve_page_root) or object index
             to attach the clone under
-      donor: int (default 247) — object index to clone (insert.clone_object)
+      donor: int (default: the one object of the stock image with the glyph-button shape,
+             `donors.glyph_button`; 247 on 13.6) — object index to clone (insert.clone_object);
+             checked against the same shape predicate on the stock image
       x: int, y: int — absolute attach position (insert.insert_object position=)
       w: int, h: int — size written to every geometry dim2/dim3 field the clone's
          box/icon/caption/touch records carry
@@ -1873,6 +1946,8 @@ class AddGlyphButton(Op):
       INSERT_REFUSED — insert.insert_object refused (bad parent, no template, etc.)
       NO_FIELD — a box/icon/caption/touch record lacks the w or h geometry field
       NO_SUCH_PAGE — page name cannot be resolved to an object index (via cli)
+      NO_DONOR — the stock image has zero or several objects of the glyph-button shape, or
+                 `donor` is not one (out of range, or failing a named clause)
 
     This is a relocating op (insert_object appends a new object). Registers
     ctx.handles[op_id] = {"object": idx, "cell": fill_cell, "group": None} — group is
@@ -1882,8 +1957,9 @@ class AddGlyphButton(Op):
         "properties": {
             "page": {"type": ["string", "integer"],
                      "description": "page name (resolved via cli._resolve_page_root) or object index"},
-            "donor": {"type": "integer", "default": 247,
-                      "description": "object index to clone"},
+            "donor": {"type": "integer",
+                      "description": "object index to clone (default: located, 247 on 13.6 "
+                                     "stock; pass it when the stock has several)"},
             "x": {"type": "integer", "description": "absolute attach x-position"},
             "y": {"type": "integer", "description": "absolute attach y-position"},
             "w": {"type": "integer", "description": "width written to every box/icon/caption/touch geometry field"},
@@ -1896,7 +1972,10 @@ class AddGlyphButton(Op):
 
     def validate(self):
         self.page = self._param("page")
-        self.donor = self._param("donor", 247, kind=int)
+        self.donor = self._param("donor", None, kind=int)
+        if isinstance(self.donor, bool):
+            raise RecipeError("BAD_PARAMS", "add_glyph_button: param 'donor' wants an integer, "
+                              "got %r" % self.donor, op_id=self.spec.id)
         self.x = self._param("x", kind=int)
         self.y = self._param("y", kind=int)
         self.w = self._param("w", kind=int)
@@ -1912,7 +1991,14 @@ class AddGlyphButton(Op):
             except Exception as e:
                 raise RecipeError("NO_SUCH_PAGE", "cannot resolve page %r: %s"
                                   % (self.page, e))
-        clone = insert.clone_object(data, self.donor)
+        donor, _proof = donors.glyph_button(ctx.stock, self.donor)
+        recs = donors._object_records(data, donor)
+        why = None if recs is None else donors._glyph_clause(recs)
+        if recs is None or why is not None:
+            raise donors.DonorError(
+                "NO_DONOR", "donor %d no longer has the glyph-button shape in the working "
+                "image (an earlier op changed it): %s" % (donor, why or "does not decode"))
+        clone = insert.clone_object(data, donor)
         try:
             data, e = insert.insert_object(data, clone, root,
                                            position=(self.x, self.y))
@@ -1940,7 +2026,7 @@ class AddGlyphButton(Op):
         fillA_off = records.color_offset(data, w33, "fillA")
         if fillA_off is None:
             raise RecipeError("NO_FIELD", "donor %d box has no fillA colour field"
-                              % self.donor)
+                              % donor)
         _put16(buf, fillA_off, self.fill_cell, ctx, "fillA -> %d" % self.fill_cell)
         for rec, what in ((w33, "box"), (icon, "icon"), (cap, "caption")):
             o = records.value_slot_offset(data, rec)
@@ -1949,7 +2035,7 @@ class AddGlyphButton(Op):
                        "%s value_slot -> %d" % (what, self.fill_cell))
         data, _ = patch.reseal(bytes(buf))
         ctx.handles[self.spec.id] = {"object": idx, "cell": self.fill_cell,
-                                     "group": None}
+                                     "group": None, "donor": donor}
         return data
 
     def verify(self, data, ctx):
@@ -1957,7 +2043,7 @@ class AddGlyphButton(Op):
         idx = h["object"]
         assert h["group"] is not None, \
             ("shell (object %d) was never wired -- it still carries donor %d's "
-             "inherited command group" % (idx, self.donor))
+             "inherited command group" % (idx, h["donor"]))
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[idx])
         for r in recs:
@@ -2622,10 +2708,10 @@ class AddVoltageBattery(Op):
         # them), so no config-byte silencing is needed: the chain runs before FUN_00247BF8 and that
         # block never touches these addresses.
         slot_addr = self._resolve_48v_slot(out)
-        hook_old, tail = followchannel.hook_state(out)
+        hook_at, hook_old, tail = followchannel.hook_site(out, stock=ctx.stock)
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob = voltagebattery.build_routine(
                 slot_addr=slot_addr, color_cell=color_cell,
@@ -2641,7 +2727,6 @@ class AddVoltageBattery(Op):
             gcs.offset + load_off, b"", blob, "GuiCode",
             "add_voltage_battery: %d-byte per-tick routine (48V slot %#x -> colour %#x / "
             "level %#x; value reads live cell 209)" % (len(blob), slot_addr, color_cell, level_cell)))
-        hook_at = followchannel.HOOK_OFF
         hook_runtime = theme.GUICODE_BASE_DEFAULT + hook_at
         hook_new = thumb.bl(hook_runtime, code_load_addr + voltagebattery.ENTRY_OFF)
         file_off = gcs.offset + hook_at
@@ -2854,6 +2939,10 @@ class InstallGlyph(Op):
     checksum word -- the documented trap (`CLAUDE.md` "Traps"). `-4` lands the
     insertion just before that word instead.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "slot": {"type": "integer", "description": "icon/value font slot; must be a 4bpp font"},
@@ -3212,6 +3301,7 @@ def _remove_records(data, ctx, obj, entries, op_id):
     shrunk stream in with `relocate.replace_object_records`, refusing POINTER_INSIDE for a
     GuiCode or LCD literal between the first removed record and the object's end. Returns the
     new image and the removed records (as decoded from `data`, entry order)."""
+    _require_object(data, obj, op_id)
     gs, tab = _gs_tab(data)
     recs = records.object_records(data, gs + tab[obj])
     doomed = _select_entries(data, obj, entries, op_id)
@@ -3296,6 +3386,10 @@ class RemoveRecords(Op):
     region were removed from the compact AES card (object 1427) with the gear button's offset
     restored; the card draws without it and the moved control works on the settings page.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = True
 
     PARAMS = {
@@ -3322,6 +3416,14 @@ class RemoveRecords(Op):
             "obj": obj, "count": len(records.object_records(out, gs + tab[obj])),
             "gone": [(d.wtype, d.child_index, _touch_id(data, d)) for d in doomed]}
         recs = records.object_records(data, gs_before + tab_before[obj])
+        # An object may attach one child more than once, and removing one attach is a
+        # legitimate edit: verify wants the stock count minus the removed ones, not zero.
+        gone = {(d.wtype, d.child_index) for d in doomed
+                if d.child_index is not None and not (d.wtype == 12 and _touch_id(data, d) is not None)}
+        ctx.handles[self.spec.id]["attach_left"] = {
+            k: sum(1 for r in recs if (r.wtype, r.child_index) == k)
+               - sum(1 for d in doomed if (d.wtype, d.child_index) == k)
+            for k in gone}
         removed = {i for i, r in enumerate(recs) if r.offset in {d.offset for d in doomed}}
         _report_shifts(ctx, self.spec.id, data, out, obj, removed=removed)
         return out
@@ -3330,15 +3432,20 @@ class RemoveRecords(Op):
         h = ctx.handles[self.spec.id]
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[h["obj"]])
-        assert len(recs) == h["count"], "object %d has %d records, wanted %d" % (
-            h["obj"], len(recs), h["count"])
+        if len(recs) != h["count"]:
+            raise RecipeError("VERIFY_FAILED", "object %d has %d records, wanted %d"
+                              % (h["obj"], len(recs), h["count"]), op_id=self.spec.id)
         for wtype, child, tid in h["gone"]:
             if wtype == 12 and tid is not None:
-                assert tid not in gestures.touch_ids(data, h["obj"], tab), \
-                    "touch id %d still registered by object %d" % (tid, h["obj"])
-            elif child is not None:
-                assert not any(r.wtype == wtype and r.child_index == child for r in recs), \
-                    "object %d still attaches child %d" % (h["obj"], child)
+                if tid in gestures.touch_ids(data, h["obj"], tab):
+                    raise RecipeError("VERIFY_FAILED", "touch id %d still registered by "
+                                      "object %d" % (tid, h["obj"]), op_id=self.spec.id)
+        for (wtype, child), want in sorted(h["attach_left"].items()):
+            have = sum(1 for r in recs if r.wtype == wtype and r.child_index == child)
+            if have != want:
+                raise RecipeError("VERIFY_FAILED", "object %d attaches child %d %d time(s) "
+                                  "(wtype %d), wanted %d" % (h["obj"], child, have, wtype, want),
+                                  op_id=self.spec.id)
         return "remove_records: object %d lost %d record(s) %s, now %d" % (
             h["obj"], len(h["gone"]),
             ", ".join("wtype %d%s" % (w, " touch %d" % t if t is not None else
@@ -4020,14 +4127,14 @@ def _append_statusfold(out, items, ctx, op_id, *, refused, what, describe):
     DETOUR_REFUSED; a routine that cannot be built or appended raises `refused`. Shared by
     `add_button_status` and `add_enum_label`."""
     try:
-        plan = statusfold.resolve(out, items)
+        plan = statusfold.resolve(out, items, stock=ctx.stock)
     except followchannel.FollowChannelError as err:
         raise RecipeError("DETOUR_REFUSED", str(err), op_id=op_id)
     except statusfold.StatusFoldError as err:
         raise RecipeError(refused, str(err), op_id=op_id)
     gc = theme.guicode_section(out)
     code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-    _check_append_point(code_load_addr, op_id)
+    _check_append_point(code_load_addr, op_id, ctx.stock)
     try:
         blob, _ = statusfold.build(plan, code_load_addr)
         grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
@@ -4752,6 +4859,10 @@ class RemoveControl(Op):
     round-trip has not yet confirmed (the discipline `CLAUDE.md` calls out
     repeatedly: a defensible negative, not a fitted claim of "done").
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False    # off-canvas parking has never been flashed; the
                                  # manifest flags it so the first flash knows to check
 
@@ -5383,13 +5494,13 @@ class FollowChannel(Op):
         # append the routine.
         try:
             plan = followchannel.resolve(data, self.watch_channel, self.target_channel,
-                                         self.on_level, self.gate_option)
+                                         self.on_level, self.gate_option, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
 
         gc = theme.guicode_section(data_after_rename)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -5451,15 +5562,15 @@ class FollowChannel(Op):
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
         detour = data[file_off:file_off + 4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour was not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # A later GuiCode-growing op may have chained ANOTHER routine in front of this one
         # (`followchannel.hook_state`), so the entry must be reachable through the chain --
         # not necessarily the hook's direct target -- and the chain must end at the paint fn.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("follow_channel: watch=%d -> target=%d (on_level=%d), gated by %r (object "
                 "%d row); detour GuiCode+%#x -> %#x"
@@ -5468,18 +5579,30 @@ class FollowChannel(Op):
 
 
 
-def _check_append_point(code_load_addr: int, op_id: str) -> None:
-    """The GuiCode append point must be stock 13.6's (0x00259BB4) or beyond it by earlier appends,
-    and word-aligned. Used to be pinned to exactly 0x00259BB4, which made any two GuiCode-growing
-    ops refuse each other; the routines chain instead (`followchannel.hook_state`), so a grown
-    section is expected, and a SHRUNK or misaligned one is what is refused."""
-    if code_load_addr < followchannel.STOCK_APPEND_POINT or code_load_addr % 4:
+def _check_append_point(code_load_addr: int, op_id: str, stock: bytes) -> None:
+    """The GuiCode append point must be the stock image's (`hooklocate.stock_append_point`, 13.6:
+    0x00259BB4) or beyond it by earlier appends, and word-aligned. Used to be pinned to exactly
+    the stock point, which made any two GuiCode-growing ops refuse each other; the routines chain
+    instead (`followchannel.hook_site`), so a grown section is expected, and a SHRUNK or
+    misaligned one is what is refused."""
+    try:
+        stock_point = hooklocate.stock_append_point(stock)
+    except followchannel.FollowChannelError as e:
+        raise RecipeError("UNEXPECTED_APPEND_POINT", "the stock image's append point is not "
+                          "located: %s" % e, op_id=op_id)
+    if code_load_addr < stock_point or code_load_addr % 4:
         raise RecipeError(
             "UNEXPECTED_APPEND_POINT",
-            "GuiCode append point is %#x; expected stock 13.6's %#x or a 4-aligned point beyond "
-            "it (a section grown only by earlier appends); refusing to build a routine against "
-            "an image this op was not proven on" % (code_load_addr, followchannel.STOCK_APPEND_POINT),
+            "GuiCode append point is %#x; expected the stock image's %#x or a 4-aligned point "
+            "beyond it (a section grown only by earlier appends); refusing to build a routine "
+            "against an image this op was not proven on" % (code_load_addr, stock_point),
             op_id=op_id)
+
+
+def _stock_hook(ctx):
+    """The stock image's located per-tick hook (`hooklocate.Hook`): its bytes and callee are
+    what a verify compares the built image's hook and chain against."""
+    return hooklocate.locate_hook(ctx.stock)
 
 @op("add_option_follower")
 class AddOptionFollower(Op):
@@ -5638,7 +5761,7 @@ class AddOptionFollower(Op):
                 tog.grown, self.watch_channel, self.target_channel, self.on_level,
                 gate_slot_selector=self.selector, gate_mask=self.gate_mask,
                 gate_on_value=self.gate_on_value, variant_group=tog.new_group_index,
-                alloc_display=True)
+                alloc_display=True, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
 
@@ -5659,7 +5782,7 @@ class AddOptionFollower(Op):
         # follow_channel does (an earlier op's append moves it, and the routine chains).
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -5758,15 +5881,15 @@ class AddOptionFollower(Op):
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
         detour = data[file_off:file_off + 4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour was not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # A later GuiCode-growing op may have chained ANOTHER routine in front of this one
         # (`followchannel.hook_state`), so the entry must be reachable through the chain --
         # not necessarily the hook's direct target -- and the chain must end at the paint fn.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("add_option_follower: %r row (object %d, touch id %d -> group %d, config "
                 "%#04x toggle) gates watch=%d -> target=%d (on_level=%d); display cell %d "
@@ -5928,8 +6051,13 @@ class AppendFilter(Op):
     class-2 temperature readouts on the same page went back to their no-data text.
 
     Error codes:
-      APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate).
+      APPEND_REFUSED -- appendfilter refused (bad entry, registry cap, no arena room, a gate,
+        or an LCD firmware without the instructions `appendfilter.LCD_FACTS` cites).
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
 
     # COACH-VERIFIED 2026-09-22: var 298 appended for 0x1FEA0,
     # the panel booted with the 299-entry table, and the HOME readout followed injected payload[0]
@@ -6135,13 +6263,13 @@ class FollowRegister(Op):
             gates = [self._condition(data, ctx, g, default_mask=0xFFFF) for g in self.gates]
             plan = followchannel.plan_from_registers(
                 data, watch=watch, target_channel=self.target_channel,
-                on_level=self.on_level, gates=gates)
+                on_level=self.on_level, gates=gates, stock=ctx.stock)
         except (register.RegisterError, followchannel.FollowChannelError) as e:
             raise RecipeError("FOLLOW_REFUSED", str(e), op_id=self.spec.id)
         # --- the add_option_follower step-4 sequence: build @ pinned append point, grow, detour.
         gc = theme.guicode_section(data)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _ = followchannel.build(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
@@ -6177,7 +6305,7 @@ class FollowRegister(Op):
         h = ctx.handles[self.spec.id]
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, "detour not applied"
+        assert detour != _stock_hook(ctx).hook_bytes, "detour not applied"
         text = thumb.disassemble(detour, theme.GUICODE_BASE_DEFAULT + h["hook_at"])[0][1]
         assert text == "bl #%#x" % h["entry"], "detour decodes to %r" % text
         return "follow_register: detour GuiCode+%#x -> %#x" % (h["hook_at"], h["entry"])
@@ -6222,7 +6350,28 @@ class AddRegisterReadout(Op):
     AND VERIFIED 2026-09-04 (`docs/BUS-BASELINE.md` PC.59). `hardware_verified` is `True` by default
     now, but a TIER-3 instance -- a fresh SRAM cell no stock instruction names -- keeps it `False`
     per instance (`apply`, when `cell.fresh`): a coach photo of one tier does not vouch for an
-    address nothing has ever touched."""
+    address nothing has ever touched.
+
+    Error codes:
+      BAD_PARAMS -- a malformed param: drawing params with `draw` false or with `cell_slot`, a
+        non-integer `cell_slot`, `silence` that is not a list of addresses or comes without
+        `cell_slot`, a missing page/x/y, or a bad `format`.
+      READOUT_REFUSED -- the register, the display cell or the copy routine could not be
+        resolved or built.
+      GROW_REFUSED -- GuiCode could not be grown for the routine.
+      DETOUR_REFUSED -- the per-tick hook did not hold the `bl` the chain expects.
+      ATTACH_REFUSED -- the readout object could not be attached to `page`.
+      NO_DONOR -- a caller-named `donor` that does not exist or is not a (directive, wtype-8)
+        pair.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen readout template cannot be used on this image (`donors`): no
+        stock record witnesses its form, or the value font is missing or cannot draw
+        `donors.READOUT_CHARS`.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+    """
     hardware_verified = True
     PARAMS = {
         "properties": {
@@ -6247,7 +6396,12 @@ class AddRegisterReadout(Op):
             "x": {"type": "integer"}, "y": {"type": "integer"},
             "format": {"type": "object", "default": {"width": 0, "places": 0, "zero_pad": False}},
             "donor": {"type": "object", "default": {"obj": readout.DONOR_OBJECT,
-                                                    "rec": readout.DONOR_READOUT_REC}},
+                                                    "rec": readout.DONOR_READOUT_REC},
+                      "description": "the default names the frozen readout templates "
+                                     "(`donors`); another {obj, rec} is read from the image "
+                                     "and refused NO_DONOR when it does not exist or is not a "
+                                     "(directive, wtype-8) pair (ATTACH_REFUSED before "
+                                     "2026-11-08)"},
             "cell_slot": {"type": "integer",
                           "description": "FEED AN EXISTING display cell (a stock readout's "
                                          "value_slot) instead of allocating one and authoring a "
@@ -6355,7 +6509,7 @@ class AddRegisterReadout(Op):
                 out, cell, cell_edits = readout.allocate_display_cell(data, self.width_bytes)
             plan = readout.resolve(out, register=reg, cell=cell, mask=self.mask,
                                    add=self.add, shift=self.shift, sub=self.sub,
-                                   mul=self.mul)
+                                   mul=self.mul, stock=ctx.stock)
         except readout.ReadoutError as e:
             code = "NO_DISPLAY_CELL" if "NO_DISPLAY_CELL" in str(e) else "READOUT_REFUSED"
             raise RecipeError(code, str(e), op_id=self.spec.id)
@@ -6372,7 +6526,7 @@ class AddRegisterReadout(Op):
         # the routine: build at the current append point, grow, detour (the follower sequence)
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _ = readout.build(plan, code_load_addr)
         except readout.ReadoutError as e:
@@ -6457,14 +6611,14 @@ class AddRegisterReadout(Op):
     def capability_delta(self, ctx):
         return set(), set()
 
-    def _verify_existing_cell(self, data, h):
+    def _verify_existing_cell(self, data, ctx, h):
         """The fed cell keeps its stock type, our routine is on the chain and reaches the cell,
         every silenced site now disassembles to `nop` and is no longer a writer, and the
         writers that remain are exactly the ones the recipe chose to leave."""
         gs, _ = guidata.guidata_extent(data)
         assert (data[gs + celltables.type_table_off(data) + h["display_slot"]]
                == readout._TYPE_FOR_WIDTH[h["width"]])
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "the copy routine is not on the hook chain"
         cell = readout.DisplayCell(h["display_slot"], h["display_addr"], h["width"], 0, False)
         writers = readout.stock_writers(data, cell)
@@ -6492,7 +6646,7 @@ class AddRegisterReadout(Op):
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         if self.cell_slot is not None:
-            return self._verify_existing_cell(data, h)
+            return self._verify_existing_cell(data, ctx, h)
         for root in h["roots"]:
             events = readout.directive_in_force(data, root)
             mine = [e for e in events if e[0] == "readout" and e[1] == h["object_index"]]
@@ -6511,7 +6665,7 @@ class AddRegisterReadout(Op):
         gs, _ = guidata.guidata_extent(data)
         assert (data[gs + celltables.type_table_off(data) + h["display_slot"]]
                == readout._TYPE_FOR_WIDTH[h["width"]])
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "the copy routine is not on the hook chain"
         forms = sramreach.reaching_forms(data, h["display_addr"], h["width"])
         assert not forms["state_struct"]
@@ -6614,6 +6768,13 @@ class SwapAesElectrical(Op):
                  not run, ran after this op, or is disabled), or the handle is missing the
                  field the ref needs (`pump_section_ids`' fields, or `display_slot`) --
                  refuses rather than wire the button to stale or absent ids.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
     `hardware_verified = True` by default -- HARDWARE-VERIFIED on the owner's coach 2026-09-01
     over five flash/verify rounds: AGS
@@ -7014,8 +7175,6 @@ class AddAesLowVoltsTrigger(Op):
         "required": [],
     }
 
-    APPEND_POINT = followchannel.STOCK_APPEND_POINT   # the FIRST routine lands here; later ones chain
-
     def validate(self):
         self.x = self._param("x", 120, kind=int)
         self.y = self._param("y", 300, kind=int)
@@ -7039,10 +7198,10 @@ class AddAesLowVoltsTrigger(Op):
         # routine -- in which case this bridge lands after it and chains onto it.
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             plan = followchannel.resolve_display_bridge(
-                out, gate_addr=reg.slot_addr, gate_on_value=1)
+                out, gate_addr=reg.slot_addr, gate_on_value=1, stock=ctx.stock)
             blob, _disasm = followchannel.build_display_bridge(plan, code_load_addr)
         except followchannel.FollowChannelError as e:
             raise RecipeError("BRIDGE_REFUSED", str(e), op_id=self.spec.id)
@@ -7123,14 +7282,14 @@ class AddAesLowVoltsTrigger(Op):
         # The un-gated display bridge is appended and the stock hook detoured to its entry.
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
         # Reachable THROUGH the per-tick chain (a later op may have chained in front), ending
         # at the displaced paint fn -- `followchannel.hook_state` / `chain_from_hook`.
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "bridge entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         return ("add_aes_low_volts_trigger: AGS-style Low Volts control (object(s) %s, wtype-5 "
                 "recolor container on slot %d / cell %#x, touch id %d -> group 129) driven by an "
@@ -7178,6 +7337,13 @@ class AddAesBattHeat(Op):
       NO_FREE_GROUP -- no empty group-table slot to host the button's command group.
       GROW_REFUSED  -- the binding table could not be grown (padding arena / gates).
       BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = True     # coach-verified 2026-09-21: hold->enable / tap->off captured on
@@ -7528,6 +7694,13 @@ class AddAesBattHeatStatus(Op):
       INDICATOR_REFUSED -- the routine, switch or an arm could not be built or spliced onto 829.
       DETOUR_REFUSED    -- the per-tick hook did not hold the `bl` the chain expects.
       BAD_REF           -- `button` names an op with no handle (not run, later, or disabled).
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     # COACH-VERIFIED 2026-09-22, both halves. RECEIVE: both appended subscriptions
@@ -7608,10 +7781,11 @@ class AddAesBattHeatStatus(Op):
                                         aescompact.BATT_HEAT_CONTACTOR_ON_MASK,
                                         aescompact.BATT_HEAT_CONTACTOR_WEIGHT))
         try:
-            plan = bitcombine.resolve(out, sources=sources, cell=cell_state)
+            plan = bitcombine.resolve(out, sources=sources, cell=cell_state,
+                                         stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = bitcombine.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (bitcombine.BitCombineError, followchannel.FollowChannelError,
@@ -7889,6 +8063,13 @@ class AddCardReadouts(Op):
                          character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
       NO_GLYPH        -- a non-ASCII caption or unit character the row's font has no glyph for
                          (captions font 10, units font 12; both carry '°').
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
@@ -8036,6 +8217,13 @@ class AddAesBmsButtonStatus(Op):
       NO_BODY_COLOUR    -- the blue/cyan pair is not in this build's palette.
       INDICATOR_REFUSED -- the routine or switch could not be built or spliced onto 829.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8077,10 +8265,10 @@ class AddAesBmsButtonStatus(Op):
         (cell,) = cells
         source = bitcombine.BitSource(register.status_slot_addr(sh["var_heat"]), self.mask, 1)
         try:
-            plan = bitcombine.resolve(out, sources=(source,), cell=cell)
+            plan = bitcombine.resolve(out, sources=(source,), cell=cell, stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = bitcombine.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (bitcombine.BitCombineError, followchannel.FollowChannelError,
@@ -8204,6 +8392,13 @@ class AddButtonStatus(Op):
       INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, or a wrap
                            changes any other record on a page reaching the button.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8404,7 +8599,7 @@ class AddButtonStatus(Op):
                 if b["glyph"] is not None:
                     assert [(r.font, r.label) for r in arm if r.wtype == 0] == [b["glyph"]], \
                         "button %r: arm %d lacks the glyph" % (b["ref"], obj)
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         # The routine, decoded back to its entries: rebuild it from each button's recorded
         # fields (source address, mask, shift, compare, valid_max, cell, group) at the recorded
@@ -8529,6 +8724,13 @@ class AddEnumLabel(_LabelBox, Op):
                           attaches carry value_slot 0).
       OFF_CANVAS       -- the box leaves the 800x480 canvas.
       DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8714,7 +8916,7 @@ class AddEnumLabel(_LabelBox, Op):
         assert len(blob) == h["blob_len"] and data[at:at + len(blob)] == blob, \
             "the routine at %#x is not the one its source and %d keys build" % (
                 h["code_load_addr"], n)
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         return ("add_enum_label: var %d (mask %#x, shift %d) -> fresh cell %d -> %d-arm "
                 "switch %s + %r in object %d under %d; UNVERIFIED on the coach"
@@ -8776,9 +8978,26 @@ class AddTextLabel(_LabelBox, Op):
                         font/align cannot be measured or written back (no page reaches
                         `parent`, pages disagree, no font yet, align 0); or a record could not
                         be built or attached.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`). Where the
+        text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font,
+        alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of
+        the recipe's stock image; one that does not is refused here.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+
+    On 14.7, emulated only (2026-11-08, tests/emu/test_ops147.py): its text drawers are not twins
+    of 13.6's (`grammar.prove`), so the pixels are the evidence. White "FAN SPEED" in font 16 on
+    CLIMATE CONTROL draws every glyph of the text in its box, each full-coverage pixel `ffffff`;
+    no pixel outside the box changes there, and no other rail page changes.
     """
 
     hardware_verified = False
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {
@@ -9025,6 +9244,13 @@ class AddButtonStates(Op):
       INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, a wrap
                            changes any other record, or an arm draws out of place.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -9391,7 +9617,7 @@ class AddButtonStates(Op):
                          % (b["ref"], len(b["item"].rules), b["vars"], b["slot"],
                             "" if b["form"] != "cycle"
                             else ", cycling group %d" % b["group"]))
-        assert h["entry"] in followchannel.chain_from_hook(data), \
+        assert h["entry"] in followchannel.chain_from_hook(data, stock=ctx.stock), \
             "the per-tick chain does not reach the routine at %#x" % h["entry"]
         plan = h["plan"]
         items = tuple(b["item"] for b in h["buttons"])
@@ -9483,6 +9709,13 @@ class AddRvcButton(Op):
                         the placement changes another record.
       TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
       CYCLE_UNDRIVEN  -- (compile) a cycle that no later enabled `add_button_states` drives.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -9912,6 +10145,13 @@ class AddBattHeatBatteryGlyph(Op):
       BAD_REF          -- `status` or a battery ref names no prior op of the right kind.
       NOT_A_BATTERY    -- a named object is not a House battery (seven-record signature).
       WRAP_REFUSED     -- the arms, the match table or the switch could not be built or spliced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
     # COACH-VERIFIED 2026-09-26: the white glyph appears and clears with
     # the heater contactor on the HOME and ELECTRICAL House batteries. Owner note: with the voltage
@@ -10331,13 +10571,13 @@ class AddPumpAutoOff(Op):
         try:
             plan = pumpauto.resolve(out, config=config_reg, pump=pump_reg,
                                     minutes_min=0 if self.allow_disable
-                                    else pumpauto.MINUTES_MIN)
+                                    else pumpauto.MINUTES_MIN, stock=ctx.stock)
         except pumpauto.PumpAutoError as e:
             raise RecipeError("SECTION_REFUSED", str(e), op_id=self.spec.id)
 
         gc = theme.guicode_section(out)
         code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-        _check_append_point(code_load_addr, self.spec.id)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
         try:
             blob, _disasm = pumpauto.build(plan, code_load_addr)
         except pumpauto.PumpAutoError as e:
@@ -10482,12 +10722,12 @@ class AddPumpAutoOff(Op):
         # --- the per-tick routine is appended and the stock hook detoured to it.
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         detour = data[gcs.offset + h["hook_at"]:][:4]
-        assert detour != followchannel.HOOK_STOCK, \
+        assert detour != _stock_hook(ctx).hook_bytes, \
             "detour not applied: stock bl still present at GuiCode+%#x" % h["hook_at"]
-        chain = followchannel.chain_from_hook(data)
+        chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         assert h["entry"] in chain, "routine entry %#x not in the per-tick chain %s" % (
             h["entry"], [hex(c) for c in chain])
-        assert chain[-1] == followchannel.TAIL_TARGET
+        assert chain[-1] == _stock_hook(ctx).stock_callee
 
         toggle_branch = "CREATED fresh (+%d bindings)" % optionrow.DONOR_COUNT \
             if h["toggle_created"] else "ADOPTED a pre-existing group (no growth)"
@@ -11194,6 +11434,13 @@ class AddLevelPage(Op):
       ROUTINE_REFUSED -- the routine could not be resolved, built or appended to GuiCode.
       DETOUR_REFUSED  -- the per-tick hook did not hold the `bl` the chain expects.
       PAGE_REFUSED    -- the body could not be drawn or object 367 could not be replaced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     # Nothing of this page has been on the coach: a live readout inside a switch arm has no
@@ -11624,10 +11871,10 @@ class AddLevelPage(Op):
 
         # (3) ROUTINE, then the detour (AddAesBattHeatStatus's sequence).
         try:
-            plan = levelfeed.resolve(out, slots=slots, cells=cells)
+            plan = levelfeed.resolve(out, slots=slots, cells=cells, stock=ctx.stock)
             gc = theme.guicode_section(out)
             code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
-            _check_append_point(code_load_addr, self.spec.id)
+            _check_append_point(code_load_addr, self.spec.id, ctx.stock)
             blob, _ = levelfeed.build(plan, code_load_addr)
             grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
         except (levelfeed.LevelFeedError, bitcombine.BitCombineError,
@@ -11720,7 +11967,7 @@ class AddLevelPage(Op):
             a = register.status_slot_addr(v)
             assert struct.pack("<I", a) in code, "no routine carries var %d's slot %#x" % (v, a)
         try:
-            chain = followchannel.chain_from_hook(data)
+            chain = followchannel.chain_from_hook(data, stock=ctx.stock)
         except followchannel.FollowChannelError as e:
             raise AssertionError("per-tick chain broken: %s" % e)
         assert h["routine_addr"] in chain, \
@@ -11780,15 +12027,20 @@ class SetTheme(Op):
     Error codes:
       BAD_PARAMS — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is
                    not a role with a static index
-      WRONG_BUILD — the GuiCode theme-init does not hold 13.6's stock bytes (another build, or
-                    a theme already applied)
+      WRONG_BUILD — the GuiCode theme-init is not located in its stock form
+                    (`themeswap.locate_theme_init`: another build, or a theme already applied)
 
     Hardware status: verified on the coach 2026-11-02 (owner): a reference build with the six
     roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.
     First run in the emulator the same day (a re-themed reference build: no stock theme pixel
-    on any nav-rail page).
+    on any nav-rail page). On 14.7, emulated only (2026-11-07, tests/emu/test_ops147.py): 6
+    GuiCode edits, 1 inline field, 7 mode-6 palette entries, 5 tank wells; every role cell
+    holds its colour and no rail page draws a stock role colour.
     """
     hardware_verified = True
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "colours": {"type": "object",
@@ -11836,7 +12088,7 @@ class SetTheme(Op):
                 if themeswap.rgb_int(pair[0]) in themeswap.STOCK.values():
                     raise themeswap.ThemeSwapError("extra %r is a role's stock colour; set the "
                                                    "role in colours" % (pair[0],))
-            if self.tank_wells is not None and self.tank_wells not in themeswap.STATIC_INDEX:
+            if self.tank_wells is not None and self.tank_wells not in themeswap.TANK_WELL_ROLES:
                 raise themeswap.ThemeSwapError("tank_wells wants a role, got %r" % self.tank_wells)
         except themeswap.ThemeSwapError as e:
             raise RecipeError("BAD_PARAMS", str(e), op_id=self.spec.id)
@@ -11880,7 +12132,9 @@ class SetTheme(Op):
             "first at %#x" % (len(stale), stale[0][0])
         applied = ", ".join("%s #%06X" % (r, h["applied"][r]) for r in themeswap.ROLES)
         return ("set_theme: %s; %d extra colour(s); %d inline fields, %d mode-6 palette "
-                "entries, %d GuiCode colour literals, %d tank fills, %d tank wells "
-                "-- HARDWARE-VERIFIED (2026-11-02)"
+                "entries, %d GuiCode colour literals, %d tank fills, %d tank wells -- %s"
                 % (applied, len(h.get("extra", {})), h["inline"], h["palette"],
-                   h.get("literals", 0), h.get("tank_fills", 0), h["wells"]))
+                   h.get("literals", 0), h.get("tank_fills", 0), h["wells"],
+                   "emulated on %s (2026-11-07), not run on a coach" % ctx.firmware
+                   if ctx.firmware not in self.verified_on and ctx.firmware in self.emulated_on
+                   else "HARDWARE-VERIFIED (2026-11-02)"))

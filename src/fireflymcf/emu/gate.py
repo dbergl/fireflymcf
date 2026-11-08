@@ -2,8 +2,8 @@
 
 The scenario runs in a subprocess (`gate_worker`), so a hang or an emulator crash cannot take the
 CLI down; the parent kills it a little after `timeout_s`. A failing result never stops an image
-being written (the caller records it in the sidecar). Only 13.6 is emulated: anything else is
-`not emulated`, never a pass.
+being written (the caller records it in the sidecar). Only 13.6 and 14.7 are emulated
+(`scenario.supported`): anything else is `not emulated`, never a pass.
 """
 from __future__ import annotations
 

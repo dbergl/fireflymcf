@@ -369,8 +369,8 @@ def variable_register(data: bytes, slot: int, dptr_table_off: int | None = None,
     per-build (`DAT_00253D04/D08`); left `None` (the default), both are found structurally per
     `data` via `guidata.find_variable_tables` rather than assumed to be the 13.6 offsets — pass
     either explicitly (e.g. `VAR_DPTR_TABLE_136`/`VAR_TYPE_TABLE_136`) to pin a specific location
-    instead. `proven-from-code` (GUICODE Finding 17) for the mechanism; the locator itself is
-    `inferred-from-data` (see its docstring).
+    instead. `proven-from-code` (GUICODE Finding 17) for the mechanism; the locator is
+    `proven-from-code`: the GuiCode literal pairs that load the tables (`guidata.variable_table_literals`).
     """
     if dptr_table_off is None or type_table_off is None:
         found_dptr, found_type = guidata.find_variable_tables(data)

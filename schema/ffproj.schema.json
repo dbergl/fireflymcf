@@ -1641,8 +1641,7 @@
                   },
                   "donor": {
                     "type": "integer",
-                    "default": 247,
-                    "description": "object index to clone"
+                    "description": "object index to clone (default: located, 247 on 13.6 stock; pass it when the stock has several)"
                   },
                   "x": {
                     "type": "integer",
@@ -2794,7 +2793,8 @@
                     "default": {
                       "obj": 793,
                       "rec": 5
-                    }
+                    },
+                    "description": "the default names the frozen readout templates (`donors`); another {obj, rec} is read from the image and refused NO_DONOR when it does not exist or is not a (directive, wtype-8) pair (ATTACH_REFUSED before 2026-11-08)"
                   },
                   "cell_slot": {
                     "type": "integer",

@@ -47,6 +47,8 @@ def test_enum_tests_are_not_reported_as_ranges(mcf_136):
         assert all(f[1] > decodeguards.MIN_RANGE_IMMEDIATE for f in guard.fences)
 
 
-def test_the_sibling_build_scans_without_error(mcf_1123):
-    guards = decodeguards.range_guards(mcf_1123)
-    assert isinstance(guards, list)
+def test_the_sibling_build_is_refused_not_scanned_over_a_13_6_window(mcf_1123):
+    """11.23's callee is `0x247590`; the 13.6 end pin means nothing there (2026-11-07)."""
+    with pytest.raises(decodeguards.DecoderRangeUnknown):
+        decodeguards.range_guards(mcf_1123)
+    assert isinstance(decodeguards.range_guards(mcf_1123, 0x247590, 0x247600), list)

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import struct
 
-from . import guidata, insert, memo, patch, records, relocate
+from . import firmware, guidata, insert, memo, patch, records, relocate
 from .cli import _resolve_page_root
 
 
@@ -498,7 +498,7 @@ def set_binding_dgn(data: bytes, binding_index: int, dgn: int, *,
                            f"(payload unchanged, wire {binding_payload(entry.raw).hex()})")]
     checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(out))}
     resealed, changed_labels = patch.reseal(bytes(out))
-    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    expected = [firmware.guidata_checksum_label(data)]
     if changed_labels != expected:
         raise ValueError(f"reseal changed {changed_labels}, expected exactly {expected}")
     for label in changed_labels:
@@ -586,7 +586,7 @@ def set_binding_bytes(data: bytes, group: int, *, dgn: int, bindings: "str | lis
 
     checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(out))}
     resealed, changed_labels = patch.reseal(bytes(out))
-    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    expected = [firmware.guidata_checksum_label(data)]
     if changed_labels != expected:
         raise ValueError(f"reseal changed {changed_labels}, expected exactly {expected}")
     for label in changed_labels:
@@ -759,7 +759,7 @@ def retarget_command(data: bytes, obj_index: int, *, channel: int | None = None,
 
     checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(out))}
     resealed, changed_labels = patch.reseal(bytes(out))
-    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    expected = [firmware.guidata_checksum_label(data)]
     if changed_labels != expected:
         raise ValueError(
             f"reseal changed {changed_labels}, expected exactly {expected}")
@@ -914,7 +914,7 @@ def retarget_indicator(data: bytes, obj_index: int, *,
 
     checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(out))}
     resealed, changed_labels = patch.reseal(bytes(out))
-    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    expected = [firmware.guidata_checksum_label(data)]
     if changed_labels != expected:
         raise ValueError(
             f"reseal changed {changed_labels}, expected exactly {expected}")
@@ -1060,7 +1060,7 @@ def build_home_button(data: bytes, *, channel: int | None = None,
 
     checksum_positions = {f.label: f.position for f in patch.checksum_fields(bytes(working))}
     resealed, changed_labels = patch.reseal(bytes(working))
-    expected = ["section-checksum:Lyra 13v6 GuiData"]
+    expected = [firmware.guidata_checksum_label(data)]
     if changed_labels != expected:
         raise ValueError(
             f"reseal changed {changed_labels}, expected exactly {expected}")

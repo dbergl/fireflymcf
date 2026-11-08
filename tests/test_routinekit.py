@@ -129,7 +129,7 @@ def test_emit_send_frame_is_pumpautos_sequence():
     tpl = routinekit.config_frame(0x2F, 0xFFFF, 0xD3)
     r = thumb.Routine({}, error=routinekit.RoutineKitError)
     routinekit.emit_prologue(r)
-    routinekit.emit_send_frame(r, 0x00259BB4)
+    routinekit.emit_send_frame(r, 0x00259BB4, sender_addr=followchannel.SENDER_PTR_ADDR)
     routinekit.emit_tail(r, followchannel.TAIL_TARGET)
     _, dis = r.assemble(0x00259BB4 + len(tpl), 0)
     mine = [_norm_ldr(t) for _, t in dis][1:-2]
@@ -147,7 +147,8 @@ def test_emit_send_frame_is_pumpautos_sequence():
     assert any(ptext[i:i + n] == mine for i in range(len(ptext) - n + 1)), mine
 
     with_value = thumb.Routine({}, error=routinekit.RoutineKitError)
-    routinekit.emit_send_frame(with_value, 0x00259BB4, value_in_r3=True)
+    routinekit.emit_send_frame(with_value, 0x00259BB4, value_in_r3=True,
+                               sender_addr=followchannel.SENDER_PTR_ADDR)
     _, vdis = with_value.assemble(0x00259BC0, 0)
     vtext = [_norm_ldr(t) for _, t in vdis]
     assert "strh r3, [r0, #8]" in vtext
