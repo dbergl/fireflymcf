@@ -421,7 +421,7 @@ def test_every_147_op_is_tested_here():
 
 # --- the theme ----------------------------------------------------------------------------------
 
-# Six distinct role colours (tests/test_themeswap.py's HARVEST, the 13.6 test's).
+# Six distinct role colours (the same six as tests/test_themeswap.py's THEME_SIX, the 13.6 test's).
 THEME = {"bg": (33, 22, 17), "panel": (61, 40, 29), "button": (166, 86, 38),
          "header": (176, 58, 28), "rail": (112, 40, 22), "active": (200, 118, 22)}
 RAIL_PAGES = ("HOME", "ELECTRICAL", "LIGHTS", "CLIMATE", "SETTINGS")

@@ -274,6 +274,49 @@ def test_black_refused_on_147(mcf_147):
     assert "(255, 255, 255)" in str(r.value)
 
 
+def _set_code_word(data, addr, value):
+    sec = theme.guicode_section(data)
+    out = bytearray(data)
+    struct.pack_into("<I", out, sec.offset + addr - theme.guicode_base(sec), value)
+    return bytes(out)
+
+
+def test_colour_decode_refuses_when_arm2_is_the_last_arm(mcf_136):
+    """Arm 2's table byte (13.6 `0x2534DF`) pushed past every other arm: no arm lies above it to
+    bound the anchor, so it refuses with ColourDecodeError, not a bare ValueError."""
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    off = sec.offset + 0x2534DF - theme.guicode_base(sec)
+    out[off] = 0xFF
+    with pytest.raises(theme.ColourDecodeError, match="not in arm 2"):
+        theme.colour_decode(bytes(out))
+
+
+def test_colour_decode_refuses_a_palette_past_the_ceiling(mcf_136):
+    """Every GuiData literal between the palette and the next far structure (13.6 `0x90010060`,
+    `70`, `80`, six literal words) moved above the ceiling: the lowest one left is then over
+    64 words on, and a reading that long refuses rather than hand `themeswap` a palette that
+    runs into the next structure."""
+    sec = theme.guicode_section(mcf_136)
+    bad = bytearray(mcf_136)
+    moved = 0
+    for off, rel in theme.guicode_guidata_pointers(mcf_136):
+        if 0x10010 < rel < 0x11000:
+            struct.pack_into("<I", bad, off, 0x90010010 + 4 * 200)
+            moved += 1
+    assert moved == 6
+    with pytest.raises(theme.ColourDecodeError, match="ceiling"):
+        theme.colour_decode(bytes(bad))
+
+
+def test_colour_decode_refuses_a_mode7_table_that_is_not_the_pointer_table(mcf_136):
+    """The mode-7 table literal (13.6 `0x2535B4`) off by one word from the data-pointer table
+    the value-slot reader loads: the two readings disagree, both are named."""
+    bad = _set_code_word(mcf_136, 0x2535B4, 0x90044BC8 + 4)
+    with pytest.raises(theme.ColourDecodeError, match="0x90044bcc.*0x90044bc8"):
+        theme.colour_decode(bad)
+
+
 def test_colour_decode_refuses_a_reader_of_another_shape(mcf_136):
     """The reader's last merge (`add.w r0,r1,r3,lsl #16` at `0x25215A`) gone: not a 24-bit
     inline colour, refuse."""
@@ -430,7 +473,7 @@ def test_theme_init_on_the_reference_builds():
 
 
 def test_plan_on_147_patches_the_located_sites(mcf_147):
-    """`plan` runs on 14.7 when called directly (the op stays 13.6-only for now): its GuiCode
+    """`plan` runs on 14.7 directly (the op runs there too, tests/emu/test_ops147.py): its GuiCode
     edits are the located sites, and the tank wells are the located well index's."""
     sec = theme.guicode_section(mcf_147)
     base = theme.guicode_base(sec)

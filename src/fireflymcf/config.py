@@ -139,8 +139,8 @@ CFG_FLOORPLAN = 0x00   # the one cfg offset stable across all three builds (Find
 def _slot_of_register(data: bytes, register: int) -> int | None:
     """The variable slot whose pointer-table entry is `register`, or None.
 
-    Walks Finding 17's GuiData variable pointer table (located structurally by
-    `guidata.find_variable_tables`) with the same run rule that table is defined by --
+    Walks Finding 17's GuiData variable pointer table (located by the GuiCode literal pairs,
+    `guidata.variable_table_literals`) with the same run rule that table is defined by --
     entries are 0 or SRAM addresses, the first word that is neither ends the table.
     A register that appears zero times or more than once yields None, never a guess
     (the module's standing ambiguity rule)."""

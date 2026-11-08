@@ -1305,7 +1305,7 @@ words — with `cli.bin`'s region-2 instance; only the payload differs, and
 `subcontainer.parse_header` reads either. Here the payload at `+0x10` is a **colour palette**
 (`0x90010010`, the mode-6 palette
 `DAT_002535B0` in `FUN_00252CB0`'s colour decode) — an array of `u32` colours stored
-**B, G, R** (low byte first). The first ~28 entries are clean RGB — `#00a79d` teal,
+**B, G, R** (low byte first). The first 20 entries (13.6; 21 on 14.7, see below) are clean RGB — `#00a79d` teal,
 `#00aeef` cyan, `#1b75bc` blue, `#cc2127` red, grays, white — and read like a UI theme.
 **Its length is bounded by the code that follows it, not by the decoder (2026-11-07).** The
 mode-6 arm indexes the palette with no compare (13.6 `0x25353A ldr r0,=..; bl; ldr r3,=PAL;
@@ -1316,7 +1316,8 @@ palette is taken as **20** and **21** entries; the words past them (13.6's `0x96
 structure's (`theme.colour_decode`; the bound is `inferred-from-data`, the arm is
 `proven-from-code`).
 
-**But it is not the main theme — `observed-on-hardware`, 2026-08-14.** Setting all 28 to
+**But it is not the main theme — `observed-on-hardware`, 2026-08-14.** Setting 28 words (the 20 palette entries and the eight past
+them, which are read as the next structure, inference) to
 magenta changed only a *subset* of the screen: the inactive/placeholder mode boxes on the
 Climate screen and the service-mode indicator area. The Starlink button, the header and nav
 bars, the fan tabs and the background **kept their colours**. So this palette paints

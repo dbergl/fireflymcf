@@ -48,6 +48,7 @@ six stock colours; an image `plan` has already re-themed matches the second skel
 from __future__ import annotations
 
 import struct
+import types
 from dataclasses import dataclass
 
 from . import guidata, memo, records, theme
@@ -390,7 +391,9 @@ def _locate_theme_init(data: bytes, skeletons: tuple, sram_low: int, sram_high: 
              "rail_chain": at["rail chain"].address}
     proof = (("block start", block[0].address), ("block end", block[-1].address + block[-1].size)) \
         + tuple(("insn " + label, at[label].address) for label in _POS)
-    return ThemeInit(sites, cells, values, indices, indices["button"][0], form, proof)
+    ro = types.MappingProxyType      # the result is cached and shared: no caller may mutate it
+    return ThemeInit(ro(sites), ro(cells), ro(values), ro(indices), indices["button"][0], form,
+                     proof)
 
 
 def inline_fields(data: bytes) -> list[tuple[int, int, int]]:

@@ -12,7 +12,7 @@ import pytest
 
 from fireflymcf import patch, recipe, theme, themeswap
 
-HARVEST = {"bg": (33, 22, 17), "panel": (61, 40, 29), "button": (166, 86, 38),
+THEME_SIX = {"bg": (33, 22, 17), "panel": (61, 40, 29), "button": (166, 86, 38),
            "header": (176, 58, 28), "rail": (112, 40, 22), "active": (200, 118, 22)}
 
 
@@ -43,25 +43,25 @@ def test_stock_theme_is_what_the_extractor_reads(mcf_136):
 
 
 def test_swap_reads_back_through_the_independent_extractor(mcf_136):
-    out, p = _apply(mcf_136, HARVEST)
+    out, p = _apply(mcf_136, THEME_SIX)
     pal = theme.mode7_palette(out)
-    assert pal[3] == HARVEST["bg"] and pal[4] == HARVEST["header"]
-    assert pal[8] == HARVEST["panel"] and pal[10] == HARVEST["rail"]
+    assert pal[3] == THEME_SIX["bg"] and pal[4] == THEME_SIX["header"]
+    assert pal[8] == THEME_SIX["panel"] and pal[10] == THEME_SIX["rail"]
     # header and rail are exact (movw/movt), whatever bg and button are
-    assert p.applied["header"] == themeswap.rgb_int(HARVEST["header"])
-    assert p.applied["rail"] == themeswap.rgb_int(HARVEST["rail"])
+    assert p.applied["header"] == themeswap.rgb_int(THEME_SIX["header"])
+    assert p.applied["rail"] == themeswap.rgb_int(THEME_SIX["rail"])
 
 
 def test_active_lands_on_the_nearest_reachable_colour_and_says_so(mcf_136):
-    out, p = _apply(mcf_136, HARVEST)
+    out, p = _apply(mcf_136, THEME_SIX)
     got = themeswap.int_rgb(p.applied["active"])
-    assert max(abs(a - b) for a, b in zip(got, HARVEST["active"])) <= 16
+    assert max(abs(a - b) for a, b in zip(got, THEME_SIX["active"])) <= 16
     # the extractor emulates add.w r1,r3,#imm from the button literal: idx 35 is the lit colour
     assert theme.mode7_palette(out)[35] == got
 
 
 def test_no_guidata_field_keeps_a_stock_theme_colour(mcf_136):
-    out, p = _apply(mcf_136, HARVEST)
+    out, p = _apply(mcf_136, THEME_SIX)
     stock = set(themeswap.STOCK.values())
     assert p.inline > 0
     assert not [o for o, v, _ in themeswap.inline_fields(out) if v in stock]
@@ -73,7 +73,7 @@ def test_no_guidata_field_keeps_a_stock_theme_colour(mcf_136):
 
 
 def test_only_the_traced_block_changes_in_guicode(mcf_136):
-    out, _ = _apply(mcf_136, HARVEST)
+    out, _ = _apply(mcf_136, THEME_SIX)
     sec = theme.guicode_section(mcf_136)
     base = theme.guicode_base(sec)
     for off, n in patch.diff_ranges(mcf_136, out):
@@ -85,23 +85,23 @@ def test_only_the_traced_block_changes_in_guicode(mcf_136):
 
 
 def test_tank_wells_repoint_only_wtype32_index_161(mcf_136):
-    out, p = _apply(mcf_136, HARVEST, wells="bg")
+    out, p = _apply(mcf_136, THEME_SIX, wells="bg")
     assert p.wells >= 4
-    out2, p2 = _apply(mcf_136, HARVEST)
+    out2, p2 = _apply(mcf_136, THEME_SIX)
     assert p2.wells == 0
 
 
 def test_a_second_swap_refuses(mcf_136):
-    out, _ = _apply(mcf_136, HARVEST)
+    out, _ = _apply(mcf_136, THEME_SIX)
     with pytest.raises(themeswap.ThemeSwapError, match="already"):
-        themeswap.plan(out, HARVEST)
+        themeswap.plan(out, THEME_SIX)
 
 
 def test_other_builds_refuse(mcf_1123):
     """11.23 has no theme-init in either skeleton's shape (`plan` on 14.7 is
     `test_colour_locate.test_plan_on_147_patches_the_located_sites`)."""
     with pytest.raises(themeswap.ThemeSwapError, match="theme-init"):
-        themeswap.plan(mcf_1123, HARVEST)
+        themeswap.plan(mcf_1123, THEME_SIX)
 
 
 def test_unknown_role_refuses(mcf_136):
@@ -115,7 +115,7 @@ def test_op_compiles_unverified_and_verifies(mcf_136):
     doc = {"schema": 1, "base_sha256": hashlib.sha256(mcf_136).hexdigest(),
            "build_name": "theme test", "ops": [
                {"id": "t", "type": "set_theme", "params": {
-                   "colours": {k: list(v) for k, v in HARVEST.items()}, "tank_wells": "bg"}}]}
+                   "colours": {k: list(v) for k, v in THEME_SIX.items()}, "tank_wells": "bg"}}]}
     res = recipe.compile_project(recipe.Project.from_json(json.dumps(doc)), mcf_136)
     assert res.ok, res.errors
     assert res.unverified == []                # verified on the coach 2026-11-02
@@ -151,11 +151,11 @@ def test_extra_reaches_the_mode6_palette(mcf_136):
 
 def test_extra_refuses_a_role_colour(mcf_136):
     with pytest.raises(themeswap.ThemeSwapError, match="role"):
-        themeswap.plan(mcf_136, HARVEST, extra=[((39, 40, 98), (1, 2, 3))])
+        themeswap.plan(mcf_136, THEME_SIX, extra=[((39, 40, 98), (1, 2, 3))])
 
 
 def _apply_extra(data, extra):
-    p = themeswap.plan(data, HARVEST, None, extra)
+    p = themeswap.plan(data, THEME_SIX, None, extra)
     pt = patch.McfPatcher(data)
     for off, old, new, note in p.edits:
         pt.set_bytes(off, old, new, note)
@@ -179,7 +179,7 @@ def test_extra_rewrites_a_stored_literal(mcf_136):
 def test_tank_fills_change_tanks_only(mcf_136):
     grey = 0x808285
     before = sum(v == grey for _, v, _ in themeswap.inline_fields(mcf_136))
-    p = themeswap.plan(mcf_136, HARVEST, None, None, [((128, 130, 133), (150, 134, 118))])
+    p = themeswap.plan(mcf_136, THEME_SIX, None, None, [((128, 130, 133), (150, 134, 118))])
     assert p.tank_fills == 2                   # GREY and GREY2
     pt = patch.McfPatcher(mcf_136)
     for e in p.edits:

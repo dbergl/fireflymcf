@@ -673,7 +673,10 @@ def colour_decode(data: bytes) -> ColourDecode:
     the distance from PAL to the lowest other GuiData literal GuiCode loads above it, in words
     (13.6 `0x90010060`, 20 entries; 14.7 `0x90010064`, 21). That literal is taken to mark the
     next structure in the same sub-container, so the words past it are not palette entries.
-    PAL must be the payload of a `0x8F7E6D5C` sub-container (`PAL - 0x10` holds the magic).
+    PAL must be the payload of a `0x8F7E6D5C` sub-container (`PAL - 0x10` holds the magic). The
+    sub-container header carries no length, so the bound is a ceiling of 64 entries: a longer
+    reading refuses. The mode-7 table must equal `guidata.variable_table_literals`' data-pointer
+    table, or it refuses naming both.
 
     11.23 refuses: its arm 3 builds its argument with `movw r0,#0x67e4; add r0,r6` and stores
     through r6, a shape this locator does not prove. Raises `ColourDecodeError` with the
@@ -699,6 +702,10 @@ def _shape(ins, mnemonic: str, op_str: str | None = None, prefix: str | None = N
     if op_str is not None and ins.op_str != op_str:
         return False
     return prefix is None or ins.op_str.startswith(prefix)
+
+
+# No stock palette is near this; a longer reading means the "next structure" literal is not one.
+_PALETTE_MAX_ENTRIES = 64
 
 
 @memo.content_cached(copy=None)
@@ -754,7 +761,8 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
     tbb = flat[t].address
     table = code[tbb + 4 - base:tbb + 4 - base + 7]
     arms = {m: tbb + 4 + 2 * table[m - 1] for m in range(1, 8)}
-    if not arms[2] <= mode2 < min(a for a in arms.values() if a > arms[2]):
+    higher = [a for a in arms.values() if a > arms[2]]
+    if not higher or not arms[2] <= mode2 < min(higher):
         raise ColourDecodeError("the mode-2 store at %#x is not in arm 2 (%#x) of the switch at "
                                 "%#x" % (mode2, arms[2], tbb))
 
@@ -803,6 +811,16 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
             "the mode-7 arm at %#x is not `ldr r0,=..; bl ..; uxth r0,r0; cmp.w r0,#BOUND; bls; "
             "movs r0,#0; ldr r3,=TAB; ldr.w r3,[r3,r0,lsl #2]`" % arms[7])
     bound = a7[3].operands[1].imm
+    # the mode-7 table is the variable data-pointer table: two readings of the code must agree
+    try:
+        dptr_off = guidata.variable_table_literals(data).dptr_off
+    except guidata.VariableTableNotFound as e:
+        raise ColourDecodeError("the variable-table literals cannot cross-check the mode-7 "
+                                "table %#x: %s" % (tab[1], e)) from e
+    if tab[1] != gd_base + dptr_off:
+        raise ColourDecodeError(
+            "the mode-7 table %#x (literal %#x) is not the variable data-pointer table %#x "
+            "(guidata.variable_table_literals)" % (tab[1], tab[0], gd_base + dptr_off))
 
     # the palette's length (inference: the next structure's literal bounds it)
     gs, ge = guidata.guidata_extent(data)
@@ -817,6 +835,11 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
         raise ColourDecodeError("no GuiCode literal bounds the mode-6 palette %#x in whole words"
                                 % pal[1])
     nxt = above[0]
+    if (nxt - pal_off) // 4 > _PALETTE_MAX_ENTRIES:
+        raise ColourDecodeError(
+            "the lowest GuiData literal above the mode-6 palette %#x is %#x, %d entries on: over "
+            "the %d-entry ceiling, so it is not the next structure after the palette"
+            % (pal[1], nxt + gd_base, (nxt - pal_off) // 4, _PALETTE_MAX_ENTRIES))
     # the literal word(s) holding it, and the PC-relative `ldr`s that load the lowest one
     nxt_lits = sorted(base + o - section.offset for o, rel in guicode_guidata_pointers(data)
                       if rel == nxt)
@@ -843,7 +866,8 @@ def _colour_decode(data: bytes, gd_base: int) -> ColourDecode:
 
 def _colour_cells(data: bytes) -> Dict[int, int]:
     """`{SRAM cell address: mode-7 index}` for every type-10 (colour) entry of the variable
-    table. Located structurally via `guidata.find_variable_tables`, not by a hardcoded offset.
+    table. The tables are the literal pairs GuiCode loads (`guidata.variable_table_literals`), not a
+    hardcoded offset.
     """
     gs, ge = guidata.guidata_extent(data)
     dptr_off, type_off = guidata.find_variable_tables(data)
