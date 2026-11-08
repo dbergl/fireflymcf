@@ -714,7 +714,7 @@ def _copy(p: GrammarProof) -> GrammarProof:
 
 
 @memo.content_cached(copy=_copy)
-def _prove(data: bytes, fp_text: str) -> GrammarProof:
+def _prove(data: bytes, fp_text: str, text_drawers: tuple) -> GrammarProof:
     whole = json.loads(fp_text)
     fp = whole["functions"]
     code, base = section(data)
@@ -724,7 +724,7 @@ def _prove(data: bytes, fp_text: str) -> GrammarProof:
     ren, wtypes, defaults, p3 = _renderer(code, base, fp["renderer"], regions)
     bounds = {n: (a, b) for n, (a, b, _s) in {**dec_bounds, **lay_bounds}.items() if a != b}
     texts, p4 = True, []
-    for name in TEXT_DRAWERS:
+    for name in text_drawers:
         try:
             _addr, _b, lines = _whole(code, base, name, fp[name], regions)
             p4 += lines
@@ -742,4 +742,4 @@ def prove(data: bytes) -> GrammarProof:
         import capstone  # noqa: F401 -- before the cache, so a bare install fails the same way
     except ImportError as e:                                    # pragma: no cover
         raise theme.CapstoneUnavailable(str(e)) from e
-    return _prove(data, _fingerprint_text())
+    return _prove(data, _fingerprint_text(), TEXT_DRAWERS)

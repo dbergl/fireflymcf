@@ -580,7 +580,8 @@ def _verify(o, data: bytes, ctx: Ctx) -> str:
     whole-image state another op may have rewritten, so it is refused as a gate is: a failed
     CompileResult in a build that holds a user op, raised otherwise (`_finish_or_refuse`)."""
     try:
-        return o.verify(data, ctx)
+        with donors.witness_scope(getattr(ctx, "stock", None)):
+            return o.verify(data, ctx)
     except followchannel.FollowChannelError as e:
         raise GateError("HOOK_REFUSED", "%s verify: the per-tick hook does not prove out: %s"
                         % (o.spec.id, e), op_id=o.spec.id) from e
@@ -592,7 +593,8 @@ def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
     """`o.apply` plus the tick-chain check, with a per-tick hook that does not prove out
     (`FollowChannelError` escaping an op) refused as DETOUR_REFUSED, naming the op."""
     try:
-        out = o.apply(data, ctx)
+        with donors.witness_scope(getattr(ctx, "stock", None)):
+            out = o.apply(data, ctx)
     except followchannel.FollowChannelError as e:
         raise RecipeError("DETOUR_REFUSED", "%s: the per-tick hook does not prove out: %s"
                           % (o.spec.id, e), op_id=o.spec.id) from e

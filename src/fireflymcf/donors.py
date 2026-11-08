@@ -36,8 +36,14 @@ gates each emitted wt-11/wt-8 record. Where the text drawers are twins, the proo
 Otherwise every field value the drawer reads must occur, field by field, in some record of the
 same wtype on the image: the font slot, the header align, and for wt 11 the R49 h-align, v-align
 and (line height, adds-font) pair. A missing value refuses NO_TEMPLATE naming the field.
+A fixed text template emitted with a caller's font (the rvcbutton caption override,
+`cardreadouts.VALUE_FONT`, `pagedraw.readout`) is checked the same way on such an image: the
+font must occur in a stock record of that wtype.
 Masked (not checked), because a proven twin consumes them and the drawers never see them raw:
-- geometry and header byte 1 (the base modes): the decoder reads b1 back only at `0x25309E` and
+- geometry: the layout engine resolves it; the drawers read only its outputs, the box at state
+  `+0x2a..+0x30` (text11 `0x2559AE`-`0x2559C0` `ldrsh.w [r4, #0x2a/#0x2c/#0x2e/#0x30]`; text8
+  `0x2557FA`, `0x25580A`), both inside the text-drawer fingerprints;
+- header byte 1 (the base modes): the decoder reads b1 back only at `0x25309E` and
   unpacks it to state `+0x7034..+0x7037` (`0x2530A4`-`0x2530C8`), which only the layout engine
   reads (`0x257C98`, `0x257D78`, `0x257E00`, `0x258248`). The drawers' only `+0x70xx` access is
   `+0x704C` (`0x2559E8`, `0x255852`), measured by a `movw` sweep of 13.6's GuiCode, 2026-11-08;
@@ -45,9 +51,17 @@ Masked (not checked), because a proven twin consumes them and the drawers never 
   `0x25340A`-`0x25341A` (header byte 5 bits 1-3, a jump table, the colour to `+0x6C`); fillB2 at
   `0x2535C6`-`0x25362A` (bits 4-6, `tbb`, `+0x70`, transparency bit `0x8000`); fillB mode 3 at
   `0x253508`-`0x253514` and mode 5 at `0x253532` (`+0x68`, bit 2);
-- the text and value_slot (the op's parameters).
+- the text and value_slot, which no twin covers: they are the op's parameters, the text checked
+  glyph by glyph (`check_text`) and the value_slot naming the cell the op allocates or names.
 Per-field evidence does not prove combinations: each value is drawn somewhere on the image, not
 necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's (Plan 4 Task 4).
+
+**Witnesses come from the stock image** (2026-11-08). Inside a recipe, `recipe` holds
+`witness_scope(ctx.stock)` around every op's apply and verify, so a record an earlier op wrote
+(ungated writers such as `set_font` included) can never witness a later one. Outside a recipe, a
+direct caller's `data` is taken as the stock. A built image used as a compile base is that
+recipe's stock: its authored records count, which is acceptable because they passed their own
+build's gates.
 
 Witnesses are reported for every template, required or not (`TemplateProof.witnesses`). Several
 witnesses are corroboration only, since equal canonical bytes draw identically.
@@ -85,6 +99,8 @@ wrappers do not recode it; `recipe` surfaces the code as the op's refusal.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import struct
 import types
 from dataclasses import dataclass
@@ -318,6 +334,29 @@ def require_grammar(data: bytes, what: str) -> grammar.GrammarProof:
     return _prove(data, what)
 
 
+_WITNESS_IMAGE: contextvars.ContextVar = contextvars.ContextVar("donors_witness_image",
+                                                                default=None)
+
+
+@contextlib.contextmanager
+def witness_scope(stock: bytes | None):
+    """Within the block, witnesses (whole-record and per-field) come from `stock`: `recipe`
+    holds one around every op's apply and verify, with the compile's stock image (module
+    docstring)."""
+    token = _WITNESS_IMAGE.set(None if stock is None else bytes(stock))
+    try:
+        yield
+    finally:
+        _WITNESS_IMAGE.reset(token)
+
+
+def witness_image(data: bytes) -> bytes:
+    """The image witnesses are read from: the recipe's stock inside `witness_scope`, else
+    `data` itself (a direct caller's `data` is taken as the stock)."""
+    stock = _WITNESS_IMAGE.get()
+    return bytes(data) if stock is None else stock
+
+
 @memo.content_cached(copy=None)
 def _text_field_values(data: bytes) -> types.MappingProxyType:
     """`{(wtype, field): frozenset(values)}` over every wt-11 and wt-8 record that decodes."""
@@ -355,7 +394,7 @@ def check_text_record(data: bytes, raw: bytes, what: str) -> tuple:
         raise DonorError("NO_TEMPLATE", f"{what}: wt {r.wtype} is not a text record")
     if p.text_drawers_twin:
         return ("the text drawers are twins of 13.6's; no witness needed",)
-    seen = _text_field_values(data)
+    seen = _text_field_values(witness_image(data))
     lines = []
     for field, value in _text_fields(r).items():
         if value not in seen.get((r.wtype, field), ()):
@@ -397,11 +436,11 @@ def template(data: bytes, name: str, *, font: int | None = None) -> tuple[bytes,
     except ImportError as e:                                    # pragma: no cover
         from . import theme
         raise theme.CapstoneUnavailable(str(e)) from e
-    return _template(data, name, t, font)
+    return _template(data, name, t, font, witness_image(data))
 
 
 @memo.content_cached(copy=None, maxsize=64)
-def _template(data: bytes, name: str, t: Template, font: int | None
+def _template(data: bytes, name: str, t: Template, font: int | None, base: bytes
               ) -> tuple[bytes, TemplateProof]:
     p = _prove(data, f"template {name}")
     rec = _decode(t.raw, f"template {name}")
@@ -441,7 +480,13 @@ def _template(data: bytes, name: str, t: Template, font: int | None
                      f"(themeswap.locate_theme_init)")
     for slot in {s for s in (rec.font, font) if s is not None}:
         _check_font(data, slot, f"template {name}")
-    wit = _witnesses(data, t)
+    if t.text and font is not None and font != rec.font and not p.text_drawers_twin:
+        if font not in _text_field_values(base).get((wt, "font"), ()):
+            raise DonorError("NO_TEMPLATE", f"template {name}: the text drawers are not twins "
+                                            f"of 13.6's and no stock wt-{wt} record has font "
+                                            f"{font!r}")
+        lines.append(f"caller font {font}: present in a stock wt-{wt} record")
+    wit = _witnesses(base, t)
     if t.text and not wit and not p.text_drawers_twin:
         canon = _canonical(t.raw, t.rewrites, t.located).hex()
         raise DonorError("NO_TEMPLATE", f"template {name}: no stock record has its form "

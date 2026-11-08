@@ -348,3 +348,56 @@ def test_custom_readout_donor_refuses_with_a_code(stocks):
         readout.author_readout_object(stocks["11.23"], x=1, y=1, display_slot=3,
                                       directive=readout.directive_bytes(3, 0), donor=(10, 2))
     assert e.value.code == "GRAMMAR"
+
+
+def test_witnesses_come_from_the_recipe_stock_not_the_working_image(stocks):
+    """The reviewer's sequence on 14.7: set_font puts font 24 on a wt-8 record (an ungated
+    writer), then a pagedraw readout in font 24 must still refuse inside a recipe, because the
+    witnesses are the stock's. Outside a recipe, the edited image IS the caller's stock."""
+    stock = stocks["14.7"]
+    gs, _ = guidata.guidata_extent(stock)
+    target = None
+    for i, off in enumerate(guidata.object_tables(stock)[1]):
+        try:
+            recs = records.object_records(stock, gs + off)
+        except (IndexError, ValueError):
+            continue
+        if any(r.wtype == 8 and r.font_off is not None for r in recs):
+            target = i
+            break
+    ctx = recipe.Ctx(stock=stock, edits=[], insertions=[], handles={})
+    set_font = recipe._lookup("set_font")(recipe.OpSpec(
+        "sf", "set_font", {"target": target, "selector": {"wtype": 8}, "slot": 24}))
+    set_font.validate()
+    edited = recipe._apply(set_font, stock, ctx, 8)
+    assert (8, "font") in donors._text_field_values(edited) \
+        and 24 in donors._text_field_values(edited)[(8, "font")]
+
+    class Spec:
+        id = "ro"
+
+    class Readout:
+        spec = Spec()
+
+        def apply(self, data, ctx):
+            pagedraw.readout(data, 0, 0, 80, 60, value_slot=3, width=3, places=0, font=24,
+                             rgb=(1, 2, 3), bg=(4, 5, 6))
+            return data
+
+    with pytest.raises(recipe.RecipeError) as e:
+        recipe._apply(Readout(), edited, ctx, 8)
+    assert e.value.code == "NO_TEMPLATE" and "font 24" in str(e.value)
+    Readout().apply(edited, None)                 # outside a recipe: `edited` is the stock
+
+
+def test_caller_font_on_a_fixed_template_is_witnessed_on_147(stocks):
+    """rvcbutton's caption font override on 14.7: font 8 is in no stock wt-11 record there."""
+    assert 8 not in donors._text_field_values(stocks["14.7"])[(11, "font")]
+    rvcbutton.button_records(stocks["14.7"], touch_id=5, w=100, h=50, text="Hi", glyph=None,
+                             font=15, fill_index=10)
+    with pytest.raises(donors.DonorError) as e:
+        rvcbutton.button_records(stocks["14.7"], touch_id=5, w=100, h=50, text="Hi",
+                                 glyph=None, font=8, fill_index=10)
+    assert e.value.code == "NO_TEMPLATE" and "font 8" in str(e.value)
+    rvcbutton.button_records(stocks["13.6"], touch_id=5, w=100, h=50, text="Hi", glyph=None,
+                             font=8, fill_index=10)          # the drawers are twins on 13.6
