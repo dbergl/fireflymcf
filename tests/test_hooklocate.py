@@ -347,3 +347,38 @@ def test_manual_two_phase_passes_plan_sender(mcf_147):
         routine()
     assert e.value.code == "BAD_ROUTINE"
     assert "sender_addr=plan.sender_addr" in str(e.value)
+
+
+# The decoder range as it stood before 2026-11-07, copied in as the oracle for 13.6 images.
+_PIN_DECODER_START = 0x247BF8
+_PIN_DECODER_END = 0x24AB00
+
+
+def test_decoder_range(mcf_136, mcf_147, mcf_1123):
+    """`decodeguards.range_guards` starts at the located callee; its end is a 13.6 pin (it sits
+    inside the literal pool `0x24AAE4`-`0x24AB2F`, so no instruction marks it), and every other
+    firmware is refused rather than scanned over a 13.6 window."""
+    from fireflymcf import decodeguards
+    assert decodeguards.decoder_range(mcf_136) == (_PIN_DECODER_START, _PIN_DECODER_END)
+    want = decodeguards.range_guards(mcf_136, _PIN_DECODER_START, _PIN_DECODER_END)
+    assert decodeguards.range_guards(mcf_136) == want
+    assert {g.cell for g in want} >= {0x20039F30}
+    for name, img in _built_136_images(mcf_136):
+        assert decodeguards.range_guards(img) == decodeguards.range_guards(
+            img, _PIN_DECODER_START, _PIN_DECODER_END), name
+    for other in (mcf_147, mcf_1123):
+        with pytest.raises(decodeguards.DecoderRangeUnknown, match="13.6"):
+            decodeguards.range_guards(other)
+        with pytest.raises(decodeguards.DecoderRangeUnknown):
+            decodeguards.guard_for_cell(other, 0x20039F30)
+
+
+def test_decoder_range_does_not_read_module_constants(mcf_136, monkeypatch):
+    """The cached scan takes its range as arguments: patching the pin after a call does not
+    serve the old range from the cache, and the default still resolves the same."""
+    from fireflymcf import decodeguards
+    want = decodeguards.range_guards(mcf_136)
+    monkeypatch.setattr(decodeguards, "DECODER_END_136", _PIN_DECODER_START + 0x100)
+    assert decodeguards.range_guards(mcf_136) != want
+    monkeypatch.undo()
+    assert decodeguards.range_guards(mcf_136) == want

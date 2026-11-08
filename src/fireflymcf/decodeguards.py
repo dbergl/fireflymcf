@@ -21,16 +21,30 @@ therefore cleared only at the store.
 
 `r4` is the receive-slot array base (`FUN_00247BF8`'s parameter), so `[r4,#imm]` is **variable
 `imm/2`** — the same numbering `guidata.variable_table` uses.
+
+**The range (2026-11-07).** The scan starts at the per-tick callee `hooklocate` locates (13.6
+`0x00247BF8 push {r4, r5, r6, r7, lr}`). Its end, 13.6 `0x0024AB00`, is a 13.6 pin with no
+structural marker: it is a word (`0xFFFFDDE0`, loaded by `0x0024A9E8 ldr r3, [pc, #0x114]`) in
+the literal pool `0x0024AAE4`-`0x0024AB2F` (the code before it ends `0x0024AAE0 b #0x24ab34`, the
+code after it resumes at `0x0024AB30 ldr r3, [pc, #0x298]`), and the callee runs on to
+`0x0024EDB0 pop {r4, r5, r6, r7, pc}`, the only `pop {.., pc}` a linear decode finds in it. No
+instruction boundary falls at `0x0024AB00`, so no structural rule can return it. Scanning to that
+epilogue gives 13.6's
+same seven guards and finds 14.7's `Absorb`/`Float` fence (`0x0024ABE0 cmp #239`), which the 13.6
+window misses; adopting it is a decision this module has not taken. Until then the default range
+is given only for 13.6 (`firmware.identify`) and every other firmware is refused
+(`DecoderRangeUnknown`); an explicit `start`/`end` is the caller's own claim and is scanned as
+given.
 """
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 
-from . import memo, slotsource
+from . import firmware, hooklocate, memo, slotsource
 
-DECODER_START = 0x247BF8
-DECODER_END = 0x24AB00
+# 13.6 only: the end of the decode window, inside a literal pool (module docstring).
+DECODER_END_136 = 0x24AB00
 MIN_RANGE_IMMEDIATE = 16          # below this a `cmp` is an enum/state test, not a range fence
 _SKIP_BRANCHES = ("ble", "bge", "blt", "bgt", "bls", "bhi")
 
@@ -48,9 +62,34 @@ class RangeGuard:
         return len(self.fences) >= 2
 
 
+class DecoderRangeUnknown(ValueError):
+    """The decode window's end is not known for this firmware."""
+
+
+def decoder_range(data: bytes) -> tuple[int, int]:
+    """(start, end) of the per-tick decode window: the located callee, and the 13.6 end pin.
+    Refuses any image `firmware.identify` does not name 13.6."""
+    which = firmware.identify(data)
+    if which != "13.6":
+        raise DecoderRangeUnknown(
+            f"the per-tick decoder's range is known only for 13.6; this image is "
+            f"{which or firmware.describe(data)}. Its end (13.6 0x24AB00) has no structural "
+            f"marker to locate on another firmware; pass start and end explicitly")
+    return hooklocate.locate_hook(data).stock_callee, DECODER_END_136
+
+
+def range_guards(data: bytes, start: int | None = None, end: int | None = None) -> list:
+    """Every per-tick decode whose store is skipped when the value fails a magnitude test.
+    The default range is `decoder_range(data)`."""
+    if start is None or end is None:
+        located = decoder_range(data)
+        start = located[0] if start is None else start
+        end = located[1] if end is None else end
+    return _scan(data, start, end)
+
+
 @memo.content_cached()
-def range_guards(data: bytes, start: int = DECODER_START, end: int = DECODER_END) -> list:
-    """Every per-tick decode whose store is skipped when the value fails a magnitude test."""
+def _scan(data: bytes, start: int, end: int) -> list:
     body, base = slotsource._guicode_body(data)
     md = slotsource._disassemble(body, base)
     ins = [i for i in md if start <= i.address < end]
