@@ -64,6 +64,7 @@ class RangeGuard:
 
 class DecoderRangeUnknown(ValueError):
     """The decode window's end is not known for this firmware."""
+    code = "DECODER_RANGE_UNKNOWN"
 
 
 def decoder_range(data: bytes) -> tuple[int, int]:
@@ -75,7 +76,12 @@ def decoder_range(data: bytes) -> tuple[int, int]:
             f"the per-tick decoder's range is known only for 13.6; this image is "
             f"{which or firmware.describe(data)}. Its end (13.6 0x24AB00) has no structural "
             f"marker to locate on another firmware; pass start and end explicitly")
-    return hooklocate.locate_hook(data).stock_callee, DECODER_END_136
+    try:
+        start = hooklocate.locate_hook(data).stock_callee
+    except hooklocate.HookNotFound as e:
+        raise DecoderRangeUnknown(
+            f"the per-tick hook did not prove out on this 13.6 image: {e}") from e
+    return start, DECODER_END_136
 
 
 def range_guards(data: bytes, start: int | None = None, end: int | None = None) -> list:

@@ -16,7 +16,8 @@ expectations read from 14.7's own GuiCode, never locators:
   (`0x2540CA ldr r4, [pc, #0x100]`, then `ldr.w r2, [r4, r0, lsl #2]`) and `0x200371D5`, so both
   read as unbounded indexed tables and poison all SRAM above them. The counter cells below are
   therefore test expectations: with those two bases bounded as 13.6's are (state span to
-  `0x20039548`), `0x20039F20` opens 14.7's longest free run (64 bytes), and no other form
+  `0x20039548`, applied here by inference, as 13.6's span is), `0x20039F20` opens 14.7's longest
+  free run (64 bytes; the run bound is inferred on the same footing), and no other form
   reaches it (`test_cells_are_reached_only_through_the_unbounded_bases`). The emulator then
   shows nothing else writes them: each counter advances exactly as the stock tick does.
 
@@ -197,7 +198,7 @@ def test_chain_of_two(mcf_147):
 
 def test_sender_cell_sends(mcf_147):
     """A latched link sends one fixed frame through host API +0x08's cell: the panel transmits
-    it once, from its own source address. This is what settles +0x08 = the sender on 14.7."""
+    it once, with the template's id intact. This is what settles +0x08 = the sender on 14.7."""
     tpl = routinekit.config_frame(0x2F, 0xFFFF, 0xD3)
     ed = userop.Editor(mcf_147)
     flag = CELLS[2]

@@ -234,6 +234,19 @@ def test_entry1_branch_before_bl_refused(stocks, version):
         hooklocate.locate_hook(img)
 
 
+@pytest.mark.parametrize("code", [bytes.fromhex("10bd"), bytes.fromhex("8746"),
+                                  bytes.fromhex("d0f800f0")],
+                         ids=["pop-pc", "mov-pc", "ldr-pc"])
+def test_entry1_pc_write_before_bl_refused(stocks, code):
+    """An unconditional exit that writes pc is refused like `b`; stock still locates."""
+    for data in stocks.values():
+        hooklocate.locate_hook(data)
+        e1 = hooklocate.locate_hook(data).entry1
+        img = _patch(data, e1 + 2, code)
+        with pytest.raises(hooklocate.HookNotFound, match="leaves"):
+            hooklocate.locate_hook(img)
+
+
 def test_entry1_r0_write_before_bl_refused(mcf_136):
     e1 = hooklocate.locate_hook(mcf_136).entry1
     img = _patch(mcf_136, e1 + 2, thumb.movs_imm(0, 0))
@@ -371,6 +384,23 @@ def test_decoder_range(mcf_136, mcf_147, mcf_1123):
             decodeguards.range_guards(other)
         with pytest.raises(decodeguards.DecoderRangeUnknown):
             decodeguards.guard_for_cell(other, 0x20039F30)
+
+
+def test_decoder_range_unproven_hook_is_decoder_range_unknown(mcf_136):
+    from fireflymcf import decodeguards
+    e1 = hooklocate.locate_hook(mcf_136).entry1
+    img = _patch(mcf_136, e1 + 2, thumb.b_n(e1 + 2, e1 + 6))
+    with pytest.raises(decodeguards.DecoderRangeUnknown) as ei:
+        decodeguards.decoder_range(img)
+    assert ei.value.code == "DECODER_RANGE_UNKNOWN"
+    assert isinstance(ei.value.__cause__, hooklocate.HookNotFound)
+    assert decodeguards.DecoderRangeUnknown.code == "DECODER_RANGE_UNKNOWN"
+
+
+def test_sender_slot_agrees_with_host_api_cells(stocks):
+    from fireflymcf import sendmap
+    for name, data in stocks.items():
+        assert sendmap.sender_slot(data)[0] == hooklocate.host_api_cells(data)[0x08], name
 
 
 def test_decoder_range_does_not_read_module_constants(mcf_136, monkeypatch):

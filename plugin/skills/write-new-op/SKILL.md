@@ -352,8 +352,8 @@ pinned by its tests). `PC.N` and `Finding N` name entries in the fireflymcf repo
 - **SRAM above `0x2000AD98` holds nothing unless something writes it**: the C runtime initialises
   only below (*proven-from-code*: the reset handler's `.data`/`.bss` loops on 13.6). A fresh cell
   is garbage at power-on: initialise it or tolerate any start value.
-- **Chain on the one hook.** Every routine shares the per-tick `bl` at GuiCode+`0xEE3C`
-  (*proven-from-code*; chains of four or more links run on the coach, *hardware*). Install
+- **Chain on the one hook.** Every routine shares the one per-tick `bl`, located per image
+  (13.6 GuiCode+`0xEE3C`, 14.7 `0xF288`; *proven-from-code*; chains of four or more links run on the coach, *hardware*). Install
   through `install_tick`, which keeps every earlier link, and never patch the hook yourself.
 - **Switch arms must be flow-neutral, and the `0xFFFF` default arm sits at the base.** A record
   advances the layout pen by its own x, so an arm that does not put the pen back moves every later

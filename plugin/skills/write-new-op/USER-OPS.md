@@ -134,9 +134,9 @@ class MyOp(UserOp):
   when the op changes what the panel can send: a non-empty `capability_delta`, or a
   `(channel, command)` pair of the group and binding tables that its own build added or removed,
   or a tick routine that sends frames of its own. A routine's frames are found in the blob of
-  each `install_tick_routine` call: the host sender's pointer (the image's own cell, host API +0x08;
-  13.6's is `0x2003986C`; the pool word `emit_send_frame` adds) or a `config_frame` template (CAN id, then `FF 96 <selector> 0F`, with
-  D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
+  each `install_tick_routine` call: the host sender's pointer (the image's own cell, host API
+  +0x08; 13.6's is `0x2003986C`; the pool word `emit_send_frame` adds) or a `config_frame`
+  template (CAN id, then `FF 96 <selector> 0F`, with D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
   the folder hash, so any edit to the folder voids it.
 - **What that detection cannot see.** It is a disclosure prompt, not a sandbox: a routine that
   computes the sender's address in code (`movw`/`movt`) and builds its frame on the stack carries
@@ -216,18 +216,25 @@ first grown GuiCode on the coach (2026-08-31). Two chained routines ran on 2026-
 and the AES Low Volts bridge). Every coach build since then carries four or more links. The
 library does not check r4-r7 for you.
 
-**User tick ops run on 13.6 and 14.7.** Nothing here names a firmware's address: the hook, the
-chain, the builder it ends in, the append point and the host CAN sender are found in each image
-(`hooklocate`, *proven-from-code* on 13.6, 14.7 and 11.23), and the chain limit
-(`tick_chain_limit`) counts the links that walk finds. On 14.7 (*emulator*, 2026-11-07,
+**User tick ops run on 13.6 and 14.7.** No step takes a firmware address as input: the hook, the
+chain, the builder it ends in and the host CAN sender are found in each image (`hooklocate`,
+*proven-from-code* on 13.6, 14.7 and 11.23), and the chain limit (`tick_chain_limit`) counts the
+links that walk finds. The append point is not found in a user op's image: it needs the stock image,
+so `routinekit._plan` checks only its alignment. 11.23 is located and compile-only: its hook is
+located and a tick install is accepted, but it was never emulated and never run on a coach, and the
+`+0x08` sender meaning carries over from 14.7's emulator proof by inference only (11.23 and 14.7
+share one LCD firmware, per the spec). On 14.7 (*emulator*, 2026-11-07,
 `tests/emu/test_hook147.py`): one link and two chained links each run once per tick, in step with
-the builder's own tick counter, and HOME draws as stock; a link that calls host API `+0x08`'s
-cell (`0x20039558`) puts its frame on the bus once, from the panel's address, which settles that
-`+0x08` is the frame sender on 14.7's LCD firmware too; the `send_frame` test op compiles on 14.7
-and sends. No 14.7 tick routine has run on a coach. Two gaps on 14.7: `fresh_sram` refuses
-(`NO_SRAM`), because `sramreach` bounds 13.6's render-state and digit-buffer bases by hand and
-14.7's sit 4 bytes higher (`0x200301B4`, `0x200371D5`), so every SRAM word reads as reachable;
-and the variant setter (host API `+0x04`) is located but unproven there.
+the builder's own tick counter, and HOME draws as stock; a link that calls host API `+0x08`'s cell
+(`0x20039558`) puts its frame on the bus once, with the template's CAN id intact (the source address
+comes from the template), which settles that `+0x08` is the frame sender on 14.7's LCD firmware too;
+the `send_frame` test op compiles on 14.7 and sends. No 14.7 tick routine has run on a coach. Two
+gaps on 14.7: `fresh_sram` refuses (`NO_SRAM`), because `sramreach` bounds 13.6's render-state and
+digit-buffer bases by hand and 14.7's sit 4 bytes higher (`0x200301B4`, `0x200371D5`), so everything
+from `0x200301B4` to `0x20040000` reads as reachable. On 14.7 a tick op cannot get scratch SRAM from
+`fresh_sram` yet: it refuses `NO_SRAM` until the display-cell-table work locates the render state,
+and a hand-picked cell is unchecked. The other gap: the variant setter (host API `+0x04`) is located
+but unproven there.
 
 **`tick_install_plan(data) -> (data, TickPlan)`** (read-only). Returns where the next routine
 loads and what it must tail-branch to. `TickPlan` has these fields:

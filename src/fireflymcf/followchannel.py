@@ -1085,8 +1085,8 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
     selector 0x2F, from `register.resolve_register`); the rest default to the stock block's own
     pinned addresses so the bridge writes exactly what the stock block writes and AGS runtime is
     unchanged. REV 3: the group-129 counter is updated through the firmware's own variant setter
-    (the fn-ptr at `setter_addr`, located by default: `host_setter_addr`), NOT a direct byte-write, and the armed-flag byte
-    at `armflag_addr` (stock 0x24a182) is written too. Refuses rather than corrupt if an address
+    (the fn-ptr at `setter_addr`, located by default: `host_setter_addr`), NOT a direct
+    byte-write, and the armed-flag byte at `armflag_addr` (stock 0x24a182) is written too. Refuses rather than corrupt if an address
     is out of SRAM, mis-aligned, or the hook is not stock.
 
     `gate_mask` (Task 13) narrows the test to `(slot & gate_mask) == gate_on_value`. It defaults

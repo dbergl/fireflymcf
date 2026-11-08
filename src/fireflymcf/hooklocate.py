@@ -25,8 +25,16 @@ whose hook already reaches a link.
 **The host-API cells.** `GuiCode_entry0` (header `+0x0C`) keeps `r0` (the LCD's host API
 table) and copies each entry to an SRAM cell: `ldr r2,[r4,#k]; ldr r3,=CELL; str r2,[r3]`.
 `+0x04` is the group-variant setter (13.6 `0x20039908`), `+0x08` the CAN-frame sender
-(13.6 `0x2003986C`). That 14.7's and 11.23's `+0x04`/`+0x08` mean the same functions is
-inferred from position (the same entry0 shape), not read from their LCD firmware.
+(13.6 `0x2003986C`). That `+0x08` is the CAN-frame sender is proven on 14.7 in the emulator
+(2026-11-07, `tests/emu/test_hook147.py`); the rest is inferred: 14.7's `+0x04`, and both of
+11.23's, mean the same functions by position (the same entry0 shape, and 11.23 and 14.7 share one
+LCD firmware), not read from their LCD firmware.
+
+Between entry1's `push` and the hook `bl`, conditional early-out branches are allowed, because
+all three stock images have one (13.6 `cbz` at `0x24EE2E`, 14.7 `0x24F27A`, 11.23 `bne` at
+`0x24CE18`). Only unconditional exits are refused: `b`, `bx`, `blx`, `tbb`, `tbh`, and a write to `pc`
+(`pop {..., pc}`, `ldr pc`, `mov pc`) unless it is the body of a `cbz`/`cbnz` that skips exactly
+it, as in the stock early-outs.
 
 Every refusal is a `HookNotFound`; nothing here guesses.
 """
@@ -41,7 +49,7 @@ from .followchannel import FollowChannelError
 
 ENTRY0_VECTOR = 0x0C
 ENTRY1_VECTOR = 0x10
-# How far into entry1 the hook may sit (13.6 and 14.7 at +0x14, 11.23 at +0x14).
+# How far into entry1 the hook may sit (all three at +0x14).
 ENTRY1_WINDOW = 0x40
 # How far into F its config-buffer load may sit (13.6 +0x20, after the tick counter).
 CALLEE_WINDOW = 0x100
@@ -54,6 +62,8 @@ _PUSH_LR = re.compile(r"push(\.w)? \{.*lr\}")
 _MOV_FROM_R0 = re.compile(r"mov (r\d+), r0")
 _BL = re.compile(r"bl #(0x[0-9a-f]+)")
 _BRANCH = re.compile(r"(b|b\.w|bx|blx|tbb|tbh) ")
+# An unconditional exit that writes pc: `pop {..., pc}`, `ldr pc, ...`, `mov pc, ...`.
+_PC_WRITE = re.compile(r"(pop(\.w)? \{[^}]*\bpc\b[^}]*\}|ldr(\.w)? pc, .*|mov(s|\.w)? pc, .*)")
 
 
 class HookNotFound(FollowChannelError):
@@ -153,13 +163,21 @@ def _locate(data: bytes, limit: int, lower: int | None, config_off: int, default
     if not ins or not _PUSH_LR.fullmatch(ins[0][1]):
         raise HookNotFound(f"entry1 {e1:#x} does not open with push {{..., lr}}")
     kept, hook = None, None
-    for a, t in ins[1:]:
+    for k, (a, t) in enumerate(ins[1:], 1):
         m = _BL.fullmatch(t)
         if m:
             hook = (a, int(m.group(1), 16))
             break
         if _BRANCH.match(t):
             raise HookNotFound(f"entry1 leaves at {a:#x} ({t}) before its first bl")
+        if _PC_WRITE.fullmatch(t):
+            # Allowed only as the body of a `cbz`/`cbnz` early-out that skips exactly it
+            # (all three stock images: `cbz r3, <next>; pop {..., pc}`).
+            nxt = ins[k + 1][0] if k + 1 < len(ins) else None
+            pm = re.fullmatch(r"cbn?z \w+, #(0x[0-9a-f]+)", ins[k - 1][1])
+            if not (pm and nxt is not None and int(pm.group(1), 16) == nxt):
+                raise HookNotFound(f"entry1 leaves at {a:#x} ({t}) before its first bl")
+            continue
         m = _MOV_FROM_R0.fullmatch(t)
         if m:
             kept = m.group(1)
