@@ -54,7 +54,9 @@ Masked (not checked), because a proven twin consumes them and the drawers never 
 - the text and value_slot, which no twin covers: they are the op's parameters, the text checked
   glyph by glyph (`check_text`) and the value_slot naming the cell the op allocates or names.
 Per-field evidence does not prove combinations: each value is drawn somewhere on the image, not
-necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's (Plan 4 Task 4).
+necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's
+(`tests/emu/test_ops147.py::test_add_text_label`, 2026-11-08: font 16, white, left-aligned,
+every glyph drawn in its box).
 
 **Witnesses come from the stock image** (2026-11-08). Inside a recipe, `recipe` holds
 `witness_scope(ctx.stock)` around every op's apply and verify, so a record an earlier op wrote

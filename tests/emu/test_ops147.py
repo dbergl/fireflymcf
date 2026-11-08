@@ -28,8 +28,9 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from fireflymcf import (buildcheck, container, coverage, followchannel, glyphs,  # noqa: E402
-                        guidata, patch, recipe, themeswap)
+from fireflymcf import (buildcheck, container, coverage, donors, followchannel,  # noqa: E402
+                        glyphs, guidata, insert, metrics, newbutton, pagewalk, patch, recipe,
+                        themeswap)
 from fireflymcf.emu import g12, peers  # noqa: E402
 from fireflymcf.emu.canbus import Peer  # noqa: E402
 from fireflymcf.emu.scenario import PANEL_SA, Scenario  # noqa: E402
@@ -62,7 +63,7 @@ CLOCK = time.struct_time((2026, 11, 7, 11, 0, 0, 5, 311, 0))
 TESTED_147 = frozenset({
     "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
-    "install_glyph", "append_filter", "drop_from_master", "set_theme"})
+    "install_glyph", "append_filter", "drop_from_master", "set_theme", "add_text_label"})
 
 
 class _PinnedTime:
@@ -248,6 +249,67 @@ def test_recolor_index1(mcf_147, stock, tmp_path):
     assert _inside(_diff_bbox(stock["home"], shot), box)
 
 
+# CLIMATE CONTROL's root on 14.7 (`fireflymcf pages`: screen 3, root 12), and a label in the
+# empty band left of the fan grid; test expectations only.
+CLIMATE_ROOT = 12
+LABEL = {"x": 90, "y": 320, "w": 180, "h": 30, "font": 16, "text": "FAN SPEED"}
+WHITE = (255, 255, 255)
+
+
+def _text_coverage(img: bytes, slot: int, text: str) -> np.ndarray:
+    """`text`'s full coverage (0..15) set in font `slot`, each glyph's bitmap at its kerned
+    advance (`metrics.glyph_positions`) and its own bearing, cropped to the ink: the picture
+    the panel must draw. A blank (the space: height 0) adds no ink."""
+    font = glyphs.font_for_slot(img, slot)
+    bpp = glyphs.font_bpp(img, font)
+    pos = metrics.glyph_positions(img, slot, text)
+    assert pos is not None, "a glyph of the label is missing from the font"
+    placed = []
+    for ch, x in zip(text, pos):
+        try:
+            g = glyphs.decode_glyph(img, font.glyph_index(ord(ch)), bpp=bpp)
+        except glyphs.GlyphError:
+            assert ch == " ", ch
+            continue
+        placed.append((x + g.x, g.y, np.array(g.rows)))
+    top = min(y for _x, y, _r in placed)
+    h = max(y + r.shape[0] for _x, y, r in placed) - top
+    w = max(x + r.shape[1] for x, _y, r in placed)
+    cov = np.zeros((h, w), int)
+    for x, y, r in placed:
+        sub = cov[y - top:y - top + r.shape[0], x:x + r.shape[1]]
+        np.maximum(sub, r, out=sub)
+    return cov
+
+
+def test_add_text_label(mcf_147, tmp_path):
+    """White text on CLIMATE CONTROL. 14.7's text drawers are not twins of 13.6's
+    (`grammar.prove`), so this is the pixel evidence `donors` defers to: every glyph of the
+    text is drawn in the declared box (each full-coverage pixel exactly `ffffff`, each empty
+    one the box's background), and no pixel outside the box changes on the page that reaches
+    the parent; the other rail pages do not change at all (2026-11-08)."""
+    img = _build(mcf_147, [("t", "add_text_label", {"parent": CLIMATE_ROOT, **LABEL})])
+    assert pagewalk.reaching_roots(img, CLIMATE_ROOT) == [CLIMATE_ROOT]
+    box = (LABEL["x"], LABEL["y"], LABEL["x"] + LABEL["w"], LABEL["y"] + LABEL["h"])
+    s = _settled(img)
+    assert s._roots_for("CLIMATE CONTROL") == {CLIMATE_ROOT}
+    stock = _rail_shots(_settled(mcf_147), tmp_path, "stock")
+    shots = _rail_shots(s, tmp_path, "build")
+    for page in RAIL_PAGES:
+        bbox = _diff_bbox(stock[page], shots[page])
+        if page == "CLIMATE":
+            assert bbox is not None, "the label drew nothing"
+            assert _inside(bbox, box), (bbox, box)
+        else:
+            assert bbox is None, (page, bbox)
+    cov = _text_coverage(img, LABEL["font"], LABEL["text"])
+    x0, y0, x1, y1 = box
+    crop = shots["CLIMATE"][y0:y1 + 1, x0:x1 + 1]
+    assert not _draws_glyph(stock["CLIMATE"][y0:y1 + 1, x0:x1 + 1], cov)
+    assert _draws_glyph(crop, cov, visible=1.0), "the text is not drawn in the box"
+    assert _exact(crop, WHITE) == int((cov == 15).sum()), "the full-coverage ink is not white"
+
+
 # --- geometry -----------------------------------------------------------------------------------
 
 def _assert_translated(before, after, box, dx):
@@ -417,6 +479,76 @@ def test_every_147_op_is_tested_here():
     for n in TESTED_147:
         cls = recipe.REGISTRY[n]
         assert "14.7" in cls.emulated_on and "14.7" not in cls.verified_on, n
+
+
+# --- a new button -------------------------------------------------------------------------------
+
+GLYPH_DONOR = 214               # `donors.glyph_button` on 14.7: the Bath Fan button
+DONOR_GROUP = 40                # its group: two 1FEDB bindings on output 40 (commands 5 and 3)
+WIRE_PIN = 3                    # a free output whose 13.6 bridge row binds without refusing
+OFF = (65, 81, 163)
+SHELL = {"page": "climate", "x": 100, "y": 380, "w": 120, "h": 60, "fill_cell": 164}
+
+
+def test_unwired_glyph_button_clone_carries_the_donors_live_group(mcf_147, monkeypatch):
+    """The 14.7 donor's clone carries the donor's own command group, which drives a live
+    output (Bath Fan, output 40), so `add_glyph_button` must refuse a shell no `wire_button`
+    rewired. Checked with the op admitted on 14.7 for this test only (2026-11-08)."""
+    donor, _proof = donors.glyph_button(mcf_147)
+    assert donor == GLYPH_DONOR
+    assert newbutton.object_group(mcf_147, donor) == DONOR_GROUP
+    grp = guidata.group_table(mcf_147)[DONOR_GROUP]
+    bt = guidata.binding_table(mcf_147)
+    assert [(bt[j].channel, bt[j].raw[4]) for j in range(grp.start, grp.start + grp.count)] \
+        == [(40, 5), (40, 3)]
+    clone = insert.clone_object(mcf_147, donor)
+    placed, _e = insert.insert_object(mcf_147, clone, CLIMATE_ROOT, position=(100, 380))
+    assert newbutton.object_group(placed, newbutton.last_object_index(placed)) == DONOR_GROUP
+
+    monkeypatch.setattr(recipe.REGISTRY["add_glyph_button"], "firmwares",
+                        frozenset({"13.6", "14.7"}))
+    with pytest.raises(AssertionError, match="was never wired"):
+        _build(mcf_147, [("shell", "add_glyph_button", SHELL)])
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
+    "wire_button carries a 13.6 pin: statusbind.bind_pin reads status_map.load_bridge('136'), "
+    "the committed 13.6 GuiCode bridge dump (data/slot_bridge_136.txt), for the SRAM colour "
+    "cell each status var drives. Observed 2026-11-08 with both ops admitted on 14.7: the "
+    "clone draws at its place and a tap sends 1FEDB pin 3 command 5, but pin 3's var 20 binds "
+    "to 13.6's cell 0x20039BB0, which stays 0x004151A3 when the G12 reports pin 3 on, so the "
+    "button never recolours (on 13.6 the same flow on pin 29 recolours); pins 9, 14 and 15 are "
+    "refused (their 13.6 cells or off loads are not in 14.7's GuiCode). Both ops stay off 14.7 "
+    "until the bridge is located per build (the cell table, Plan 5)."))
+def test_add_glyph_button_and_wire_button(mcf_147, tmp_path):
+    """A glyph button cloned from 14.7's donor, wired to output 3: it draws at its new place,
+    a tap sends that output's toggle (and nothing to the donor's output 40), and the G12
+    reporting the output on recolours it in place."""
+    img = _build(mcf_147, [
+        ("shell", "add_glyph_button", SHELL),
+        ("wire", "wire_button", {"target": {"ref": "shell"}, "channel": WIRE_PIN,
+                                 "off_colour": list(OFF), "allow_commanded_channel": True,
+                                 "allow_named_output": True})])
+    x0, y0 = SHELL["x"], SHELL["y"]
+    box = (x0, y0, x0 + SHELL["w"], y0 + SHELL["h"])
+    area = SHELL["w"] * SHELL["h"]
+    s = _settled(img)
+    s.goto("CLIMATE CONTROL")
+    s.run(2.0)
+    off = _shot(s, tmp_path, "off")
+    assert _near(_crop(off, box), OFF) > area // 2, "the clone does not draw at its new place"
+
+    t = _press_at(s, *_centre(box))
+    s.run(1.0)
+    sent = [f.data for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
+    assert [(d[0], d[3]) for d in sent] == [(WIRE_PIN, TOGGLE)], sent
+
+    s.set_g12_output(WIRE_PIN, 200)
+    s.run(2.0)
+    on = _shot(s, tmp_path, "on")
+    assert _near(_crop(on, box), OFF) < area // 4, "the button did not recolour"
+    bbox = _diff_bbox(off, on)
+    assert bbox is not None and bbox[0] >= x0 and y0 <= bbox[1] and bbox[3] <= box[3], bbox
 
 
 # --- the theme ----------------------------------------------------------------------------------

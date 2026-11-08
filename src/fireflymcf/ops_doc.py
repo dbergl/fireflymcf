@@ -303,7 +303,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a "
         "two-line label spaces its lines by the font's cell, and every other control on the "
         "page draws as before, its text in its own font, and a `frame` draws as the stock "
-        "section frames do, its edge masked behind a title's fill (photo against stock).",
+        "section frames do, its edge masked behind a title's fill (photo against stock). On "
+        "14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no "
+        "pixel outside the box changed on any rail page.",
         "`enumlabel.py`, `pagedraw.py`"),
     "add_rvc_button": ("structural",
         "Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, "

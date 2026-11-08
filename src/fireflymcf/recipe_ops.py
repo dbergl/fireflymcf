@@ -8901,9 +8901,17 @@ class AddTextLabel(_LabelBox, Op):
                         font/align cannot be measured or written back (no page reaches
                         `parent`, pages disagree, no font yet, align 0); or a record could not
                         be built or attached.
+
+    On 14.7, emulated only (2026-11-08, tests/emu/test_ops147.py): its text drawers are not twins
+    of 13.6's (`grammar.prove`), so the pixels are the evidence. White "FAN SPEED" in font 16 on
+    CLIMATE CONTROL draws every glyph of the text in its box, each full-coverage pixel `ffffff`;
+    no pixel outside the box changes there, and no other rail page changes.
     """
 
     hardware_verified = False
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {
