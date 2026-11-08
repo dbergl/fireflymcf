@@ -25,7 +25,8 @@ stock colours show through:
 2. **GuiData inline (mode-3) fields** carrying a stock theme colour as a BGR u24: 155 on a reference
    build (the stock body boxes, the CLIMATE header, every page fireflymcf authored).
 3. **The GuiData mode-6 palette** (`0x90010010`, MCF-FORMAT §5.5): entries 4/14-18 are the
-   theme colours (the CLIMATE empty mode cells read entry 16).
+   theme colours (the CLIMATE empty mode cells read entry 16). Its place and its 20 entries are
+   read from the record decoder by `theme.colour_decode`; the words past it are not touched.
 
 Tank wells (wtype-32 fillB mode-7 idx 161) share the button colour's cell; `tank_wells`
 repoints them to another role's static index so an empty tank does not read as button-filled.
@@ -64,8 +65,8 @@ TANK_WELL_INDEX = 161
 _LIT_BG, _LIT_PANEL, _LIT_BUTTON = 0x2485CC, 0x2485D8, 0x2485DC
 _HEADER_CHAIN, _ACTIVE_MOVW, _RAIL_CHAIN = 0x24831E, 0x248336, 0x248340
 
-GUIDATA_PALETTE_OFFSET = 0x10010   # the mode-6 palette's offset in GuiData (render.py agrees)
-GUIDATA_PALETTE_LEN = 30
+# The mode-6 palette's offset and length come from the code (`theme.colour_decode`): 13.6
+# `0x90010010`, 20 entries, bounded by the next structure's literal `0x90010060` (2026-11-07).
 
 
 class ThemeSwapError(ValueError):
@@ -419,9 +420,13 @@ def plan(data: bytes, colours: dict, tank_wells: str | None = None,
             inline += 1
 
     gs, _ = guidata.guidata_extent(data)
-    pb = gs + GUIDATA_PALETTE_OFFSET
+    try:
+        decode = theme.colour_decode(data)
+    except theme.ColourDecodeError as e:
+        raise ThemeSwapError("the mode-6 palette is not located: %s" % e)
+    pb = gs + decode.palette_offset
     pal = 0
-    for i in range(GUIDATA_PALETTE_LEN):
+    for i in range(decode.palette_len):
         v = struct.unpack_from("<I", data, pb + 4 * i)[0]
         if v in remap:
             put(pb + 4 * i, struct.pack("<I", v), struct.pack("<I", remap[v]),

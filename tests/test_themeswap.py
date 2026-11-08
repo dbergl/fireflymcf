@@ -66,8 +66,9 @@ def test_no_guidata_field_keeps_a_stock_theme_colour(mcf_136):
     assert p.inline > 0
     assert not [o for o, v, _ in themeswap.inline_fields(out) if v in stock]
     gs, _ = __import__("fireflymcf").guidata.guidata_extent(out)
-    pal = [struct.unpack_from("<I", out, gs + themeswap.GUIDATA_PALETTE_OFFSET + 4 * i)[0]
-           for i in range(themeswap.GUIDATA_PALETTE_LEN)]
+    decode = theme.colour_decode(out)
+    pal = [struct.unpack_from("<I", out, gs + decode.palette_offset + 4 * i)[0]
+           for i in range(decode.palette_len)]
     assert not stock & set(pal)
 
 
@@ -145,7 +146,7 @@ def test_extra_reaches_the_mode6_palette(mcf_136):
     blue = (27, 117, 188)           # mode-6 entry 5
     out, _ = _apply_extra(mcf_136, [(blue, (184, 104, 44))])
     gs, _ = __import__("fireflymcf").guidata.guidata_extent(out)
-    assert struct.unpack_from("<I", out, gs + themeswap.GUIDATA_PALETTE_OFFSET + 20)[0] == 0xB8682C
+    assert struct.unpack_from("<I", out, gs + theme.colour_decode(out).palette_offset + 20)[0] == 0xB8682C
 
 
 def test_extra_refuses_a_role_colour(mcf_136):

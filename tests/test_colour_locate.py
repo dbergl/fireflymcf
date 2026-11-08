@@ -8,15 +8,28 @@ table from an adjacent pair of GuiCode literal words: on 13.6 the pair at `0x253
 padding and rounded to `0x42970`, so every 14.7 type was read from the entry 8 places earlier and
 the mode-7 palette lost the navy body (index 1) and the background (index 8) (measured
 2026-11-07).
+
+`theme.colour_decode` is the record decoder's colour-mode switch (13.6 `FUN_00252CB0`, 14.7
+`0x255578`), located by its mode-2 store. The expected values are measured from the corpus
+(2026-11-07) and appear only here; the locator reads them from the code:
+
+| | 13.6 | 14.7 |
+|---|---|---|
+| mode-6 palette / length | `0x90010010` / 20 | `0x90010010` / 21 |
+| mode-7 table / bound | `0x90044BC8` / `0x298` | `0x90042B74` / `0x1F8` |
+| mode-3 reader | `0x252140` | `0x254A08` (byte-identical) |
+
+11.23's mode-3 arm calls its reader with a different shape and is refused.
 """
 from __future__ import annotations
 
 import struct
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from fireflymcf import guidata, tablegrow, theme
+from fireflymcf import guidata, recipe, recipe_ops, tablegrow, theme, themeswap
 
 GD = 0x90000000
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -145,3 +158,124 @@ def test_type_table_refuses_with_no_pair(mcf_136):
     with pytest.raises(guidata.VariableTableNotFound, match="no GuiCode literal pair"):
         guidata.variable_type_table(bad)
 
+
+
+# ------------------------------------------------------------------- the colour decode switch
+
+def _code_at(data, addr, n):
+    sec = theme.guicode_section(data)
+    off = sec.offset + addr - theme.guicode_base(sec)
+    return data[off:off + n]
+
+
+def test_colour_decode_136(mcf_136):
+    cd = theme.colour_decode(mcf_136)
+    assert (cd.palette_base, cd.palette_len) == (0x90010010, 20)
+    assert (cd.mode7_table, cd.mode7_bound) == (0x90044BC8, 0x298)
+    assert cd.mode3_reader == 0x252140
+    assert cd.palette_offset == 0x10010
+    p = dict(cd.proof)
+    assert p["mode 2 mvn"] == 0x2534F8
+    assert p["mode 3 arm"] == 0x253508
+    assert p["mode 3 bl"] == 0x25350A
+    assert p["mode 6 palette literal"] == 0x2535B0
+    assert p["mode 7 cmp.w"] == 0x25355C
+    assert p["mode 7 table literal"] == 0x2535B4
+    assert p["next structure"] == 0x90010060
+
+
+def test_colour_decode_147(mcf_147):
+    cd = theme.colour_decode(mcf_147)
+    assert (cd.palette_base, cd.palette_len) == (0x90010010, 21)
+    assert (cd.mode7_table, cd.mode7_bound) == (0x90042B74, 0x1F8)
+    assert cd.mode3_reader == 0x254A08
+    p = dict(cd.proof)
+    assert p["mode 2 mvn"] == 0x255DC0
+    assert p["mode 3 arm"] == 0x255DD0
+    assert p["mode 3 bl"] == 0x255DD2
+    assert p["mode 7 cmp.w"] == 0x255E24
+    assert p["mode 6 palette literal"] == 0x255E78
+    assert p["mode 7 table literal"] == 0x255E7C
+    assert p["next structure"] == 0x90010064
+
+
+def test_colour_decode_147_reader_is_136s(mcf_136, mcf_147):
+    a, b = theme.colour_decode(mcf_136), theme.colour_decode(mcf_147)
+    n = dict(a.proof)["mode 3 reader bx"] + 2 - a.mode3_reader
+    assert n == 0x20
+    assert _code_at(mcf_136, a.mode3_reader, n) == _code_at(mcf_147, b.mode3_reader, n)
+
+
+@pytest.mark.parametrize("version", ["13.6", "14.7"])
+def test_colour_decode_mode7_table_is_the_variable_pointer_table(corpus, version):
+    data = corpus[version]["mcf"]
+    cd = theme.colour_decode(data)
+    assert cd.mode7_table - GD == guidata.find_variable_tables(data)[0]
+
+
+def test_colour_decode_refuses_1123(mcf_1123):
+    """11.23 reaches its reader through `movw r0,#0x67e4; add r0,r6; bl` and stores through r6:
+    not the shape this locator proves, so it refuses rather than guess."""
+    with pytest.raises(theme.ColourDecodeError, match="mode-3 arm"):
+        theme.colour_decode(mcf_1123)
+
+
+def test_colour_decode_refuses_without_the_mode2_anchor(mcf_136):
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    off = sec.offset + 0x2534F8 - theme.guicode_base(sec)
+    assert bytes(out[off:off + 4]) == bytes.fromhex("6ff07f42")     # mvn r2, #0xff000000
+    out[off:off + 4] = bytes.fromhex("00bf00bf")                      # nop; nop
+    with pytest.raises(theme.ColourDecodeError, match="mode-2"):
+        theme.colour_decode(bytes(out))
+
+
+def test_colour_decode_refuses_two_mode2_anchors(mcf_136):
+    """A second `mvn r2,#0xff000000; str r2,[r3,#0x68]` (here over the mode-1 arm's
+    `ldr r2,=..; str r2,[r3,#0x68]; ldr r2,[r3]`) is ambiguous."""
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    base = theme.guicode_base(sec)
+    src, dst = sec.offset + 0x2534F8 - base, sec.offset + 0x2534E8 - base
+    out[dst:dst + 6] = out[src:src + 6]
+    with pytest.raises(theme.ColourDecodeError, match="2 mode-2"):
+        theme.colour_decode(bytes(out))
+
+
+def test_themeswap_bounds_the_palette_by_the_code(mcf_136):
+    """13.6's word 20 (`0x96007d`) is past the 20-entry palette: an `extra` naming it no longer
+    reaches it."""
+    gs, _ = guidata.guidata_extent(mcf_136)
+    assert struct.unpack_from("<I", mcf_136, gs + 0x10010 + 4 * 20)[0] == 0x96007D
+    p = themeswap.plan(mcf_136, {}, None, [((150, 0, 125), (1, 2, 3))])
+    words = range(gs + 0x10010, gs + 0x10010 + 4 * 30)
+    assert not [e for e in p.edits if e[0] in words]
+    assert p.palette == 0
+
+
+def test_black_refused_on_147(mcf_147):
+    """14.7's code-cited static palette has no black (the old idx-34 black was a mistyped
+    entry). The label ops refuse it as NO_COLOUR (`add_text_label` is 13.6-only, so its
+    firmware gate answers first in a compile; this calls the shared resolver directly), and
+    the message lists the palette."""
+    with pytest.raises(theme.PaletteError) as e:
+        theme.resolve_fill_index(mcf_147, color=(0, 0, 0))
+    msg = str(e.value)
+    assert "(0, 0, 0)" in msg and "palette" in msg
+    assert "(255, 255, 255)" in msg and "(39, 40, 98)" in msg       # white, the navy body
+    box = SimpleNamespace(colour=(0, 0, 0), background=None, spec=SimpleNamespace(id="lbl"))
+    with pytest.raises(recipe.RecipeError) as r:
+        recipe_ops._LabelBox._resolve_colours(box, mcf_147)
+    assert r.value.code == "NO_COLOUR"
+    assert "(255, 255, 255)" in str(r.value)
+
+
+def test_colour_decode_refuses_a_reader_of_another_shape(mcf_136):
+    """The reader's last merge (`add.w r0,r1,r3,lsl #16` at `0x25215A`) gone: not a 24-bit
+    inline colour, refuse."""
+    out = bytearray(mcf_136)
+    sec = theme.guicode_section(mcf_136)
+    off = sec.offset + 0x25215A - theme.guicode_base(sec)
+    out[off:off + 4] = bytes.fromhex("00bf00bf")
+    with pytest.raises(theme.ColourDecodeError, match="mode-3 reader 0x252140"):
+        theme.colour_decode(bytes(out))

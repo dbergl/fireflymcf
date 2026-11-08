@@ -1307,6 +1307,13 @@ words — with `cli.bin`'s region-2 instance; only the payload differs, and
 `DAT_002535B0` in `FUN_00252CB0`'s colour decode) — an array of `u32` colours stored
 **B, G, R** (low byte first). The first ~28 entries are clean RGB — `#00a79d` teal,
 `#00aeef` cyan, `#1b75bc` blue, `#cc2127` red, grays, white — and read like a UI theme.
+**Its length is bounded by the code that follows it, not by the decoder (2026-11-07).** The
+mode-6 arm indexes the palette with no compare (13.6 `0x25353A ldr r0,=..; bl; ldr r3,=PAL;
+0x253542 ldr.w r2,[r3,r0,lsl #2]`). The lowest other GuiData literal GuiCode loads above it is
+`0x90010060` on 13.6 and `0x90010064` on 14.7, so the palette is taken as **20** and **21**
+entries; the words past them (13.6's `0x96007d`, `0xb4003d`, … at 20-27) are read as the next
+structure's (`theme.colour_decode`; the bound is `inferred-from-data`, the arm is
+`proven-from-code`).
 
 **But it is not the main theme — `observed-on-hardware`, 2026-08-14.** Setting all 28 to
 magenta changed only a *subset* of the screen: the inactive/placeholder mode boxes on the
