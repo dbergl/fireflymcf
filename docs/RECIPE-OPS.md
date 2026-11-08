@@ -1290,7 +1290,7 @@ Show any register as a live number on any page, or feed an existing readout's ce
 | `x` | integer |  |  |  |
 | `y` | integer |  |  |  |
 | `format` | object |  | {"width": 0, "places": 0, "zero_pad": false} |  |
-| `donor` | object |  | {"obj": 793, "rec": 5} |  |
+| `donor` | object |  | {"obj": 793, "rec": 5} | the default names the frozen readout templates (`donors`); another {obj, rec} is read from the image and refused NO_DONOR when it does not exist or is not a (directive, wtype-8) pair (ATTACH_REFUSED before 2026-11-08) |
 | `cell_slot` | integer |  |  | FEED AN EXISTING display cell (a stock readout's value_slot) instead of allocating one and authoring a widget; excludes page/x/y/format/donor |
 | `silence` | array |  |  | with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick |
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 
 import pytest
 
-from fireflymcf import (donors, grammar, guidata, pagedraw, readout, recipe, records, rvcbutton,
-                        statelights, switchbuild)
+from fireflymcf import (cardreadouts, donors, grammar, guidata, metrics, pagedraw, readout, recipe,
+                        records, rvcbutton, statelights, switchbuild)
 
 NEEDS_RESEARCH_DATA = "reads the three stock images"
 
@@ -181,6 +181,60 @@ def test_font_slot_checked(stocks):
     assert e.value.code == "NO_TEMPLATE"
 
 
+def _without_glyph(monkeypatch, char: str):
+    """Every stock font covers every byte (2026-11-08), so a missing glyph is simulated: the
+    measurer reports `char` missing, as `metrics.text_width` does for an absent glyph."""
+    real = metrics.text_width
+
+    def fake(data, slot, text, table=None):
+        return None if char in text else real(data, slot, text, table)
+    monkeypatch.setattr(metrics, "text_width", fake)
+
+
+def test_caption_font_must_cover_the_text(stocks, monkeypatch):
+    data = stocks["13.6"]
+    rvcbutton.button_records(data, touch_id=5, w=100, h=50, text="Hi\nyo", glyph=None,
+                             font=None, fill_index=10)
+    _without_glyph(monkeypatch, "y")
+    with pytest.raises(donors.DonorError) as e:
+        rvcbutton.button_records(data, touch_id=5, w=100, h=50, text="Hi\nyo", glyph=None,
+                                 font=None, fill_index=10)
+    assert e.value.code == "NO_TEMPLATE" and "'yo'" in str(e.value)
+
+
+@pytest.mark.parametrize("char", list(donors.READOUT_CHARS))
+def test_readout_font_must_cover_digits_point_and_minus(stocks, monkeypatch, char):
+    data = stocks["13.6"]
+    calls = [
+        lambda: readout.author_readout_object(data, x=1, y=1, display_slot=3,
+                                              directive=readout.directive_bytes(3, 0)),
+        lambda: readout.author_readout_object(data, x=1, y=1, display_slot=3,
+                                              directive=readout.directive_bytes(3, 0),
+                                              font=cardreadouts.VALUE_FONT),
+        lambda: pagedraw.readout(data, 0, 0, 60, 30, value_slot=3, width=3, places=0, font=17,
+                                 rgb=(1, 2, 3), bg=(4, 5, 6)),
+    ]
+    for call in calls:
+        call()
+    _without_glyph(monkeypatch, char)
+    for call in calls:
+        with pytest.raises(donors.DonorError) as e:
+            call()
+        assert e.value.code == "NO_TEMPLATE"
+
+
+def test_card_value_font_is_checked(stocks, monkeypatch):
+    seen = []
+    real = donors.template
+
+    def spy(data, name, *, font=None):
+        seen.append((name, font))
+        return real(data, name, font=font)
+    monkeypatch.setattr(donors, "template", spy)
+    cardreadouts._value_records(stocks["13.6"], 10, 10, 3, 3, 0)
+    assert ("readout.wt8", cardreadouts.VALUE_FONT) in seen
+
+
 def test_mode7_index_bound(stocks):
     assert donors.mode7_index_limit(stocks["13.6"]) == 0x298
     assert donors.mode7_index_limit(stocks["14.7"]) == 0x1F8
@@ -245,3 +299,16 @@ def test_custom_readout_donor_refuses_with_a_code(stocks):
                                       directive=readout.directive_bytes(3, 0),
                                       donor=(10 ** 6, 5))
     assert e.value.code == "NO_DONOR"
+    for bad in ((-1, 5), (793, 0), (793, -2)):     # a negative index would wrap silently
+        with pytest.raises(donors.DonorError) as e:
+            readout.author_readout_object(stocks["13.6"], x=1, y=1, display_slot=3,
+                                          directive=readout.directive_bytes(3, 0), donor=bad)
+        assert e.value.code == "NO_DONOR"
+    with pytest.raises(donors.DonorError) as e:      # the grammar gate comes first
+        readout.author_readout_object(stocks["11.23"], x=1, y=1, display_slot=3,
+                                      directive=readout.directive_bytes(3, 0), donor=(782, 5))
+    assert e.value.code == "GRAMMAR"
+    with pytest.raises(donors.DonorError) as e:
+        readout.author_readout_object(stocks["11.23"], x=1, y=1, display_slot=3,
+                                      directive=readout.directive_bytes(3, 0), donor=(10, 2))
+    assert e.value.code == "GRAMMAR"

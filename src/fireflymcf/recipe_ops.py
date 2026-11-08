@@ -6352,7 +6352,12 @@ class AddRegisterReadout(Op):
             "x": {"type": "integer"}, "y": {"type": "integer"},
             "format": {"type": "object", "default": {"width": 0, "places": 0, "zero_pad": False}},
             "donor": {"type": "object", "default": {"obj": readout.DONOR_OBJECT,
-                                                    "rec": readout.DONOR_READOUT_REC}},
+                                                    "rec": readout.DONOR_READOUT_REC},
+                      "description": "the default names the frozen readout templates "
+                                     "(`donors`); another {obj, rec} is read from the image "
+                                     "and refused NO_DONOR when it does not exist or is not a "
+                                     "(directive, wtype-8) pair (ATTACH_REFUSED before "
+                                     "2026-11-08)"},
             "cell_slot": {"type": "integer",
                           "description": "FEED AN EXISTING display cell (a stock readout's "
                                          "value_slot) instead of allocating one and authoring a "

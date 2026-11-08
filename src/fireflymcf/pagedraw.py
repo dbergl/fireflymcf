@@ -478,7 +478,7 @@ def readout(data: bytes, x: int, y: int, w: int, h: int, *, value_slot: int, wid
         directive = _readout.directive_bytes(width, places, justify=justify)
         obj = _readout.author_readout_object(data, x=_u16("pen_x", pen_x),
                                              y=_u16("pen_y", pen_y), display_slot=value_slot,
-                                             directive=directive)
+                                             directive=directive, font=font)
     except _readout.ReadoutError as e:
         raise PageDrawError(str(e)) from e
     d_rec, r_rec = records.object_records(obj, 0)

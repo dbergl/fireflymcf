@@ -425,40 +425,51 @@ def directive_bytes(width: int, places: int, zero_pad: bool = False,
     return bytes([0, 0x10 | JUSTIFY[justify] << 2 | (0x02 if zero_pad else 0), width, places])
 
 
-def _donor_pair(data: bytes, donor: tuple[int, int]) -> tuple[bytes, bytes]:
+def _donor_pair(data: bytes, donor: tuple[int, int],
+                font: int | None) -> tuple[bytes, bytes]:
     """`(directive record, wt-8 readout record)`: the frozen templates for the default donor
     (`donors.template`, the readout's background cell the theme's panel), else the image's
-    records `donor[1] - 1` and `donor[1]` of object `donor[0]`, refused NO_DONOR when they do
-    not exist or are not a (directive, readout) pair."""
+    records `donor[1] - 1` and `donor[1]` of object `donor[0]` behind the same grammar gate,
+    refused NO_DONOR when they do not exist or are not a (directive, readout) pair. The
+    effective value font (`font`, else the readout's own) must draw `donors.READOUT_CHARS`."""
     if tuple(donor) == (DONOR_OBJECT, DONOR_READOUT_REC):
         d, _ = donors.template(data, "readout.directive")
-        r, _ = donors.template(data, "readout.wt8")
-        return d, r
-    obj, j = donor
-    try:
-        gs, _ = guidata.guidata_extent(data)
-        tbl = guidata.object_tables(data)[1]
-        recs = records.object_records(data, gs + tbl[obj])
-        if j < 1:
-            raise IndexError(f"record {j} has no directive before it")
-        d, r = recs[j - 1], recs[j]
-    except (IndexError, ValueError, TypeError) as e:
-        raise donors.DonorError("NO_DONOR", f"readout donor {donor}: {e}") from e
-    if (r.wtype != 8 or r.value_slot is None or d.wtype != 9 or d.fmt is None):
-        raise donors.DonorError(
-            "NO_DONOR", f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 "
-                        f"readout) pair")
-    return bytes(data[d.offset:d.end]), bytes(data[r.offset:r.end])
+        r, _ = donors.template(data, "readout.wt8", font=font)
+    else:
+        donors.require_grammar(data, f"readout donor {donor}")
+        obj, j = donor
+        if not all(isinstance(v, int) and not isinstance(v, bool) for v in (obj, j)) \
+                or obj < 0 or j < 1:
+            raise donors.DonorError("NO_DONOR", f"readout donor {donor}: needs an object >= 0 "
+                                                f"and a record >= 1 (its directive before it)")
+        try:
+            gs, _ = guidata.guidata_extent(data)
+            tbl = guidata.object_tables(data)[1]
+            recs = records.object_records(data, gs + tbl[obj])
+            dr, rr = recs[j - 1], recs[j]
+        except (IndexError, ValueError, TypeError) as e:
+            raise donors.DonorError("NO_DONOR", f"readout donor {donor}: {e}") from e
+        if (rr.wtype != 8 or rr.value_slot is None or dr.wtype != 9 or dr.fmt is None):
+            raise donors.DonorError(
+                "NO_DONOR", f"object {obj} records {j - 1}/{j} are not a (directive, wtype-8 "
+                            f"readout) pair")
+        d, r = bytes(data[dr.offset:dr.end]), bytes(data[rr.offset:rr.end])
+    slot = records.decode_record(r, 0).font if font is None else font
+    if slot is not None:
+        donors.check_readout_font(data, slot, f"readout value font {slot}")
+    return d, r
 
 
 def author_readout_object(data: bytes, *, x: int, y: int, display_slot: int, directive: bytes,
-                          donor: tuple[int, int] = (DONOR_OBJECT, DONOR_READOUT_REC)) -> bytes:
+                          donor: tuple[int, int] = (DONOR_OBJECT, DONOR_READOUT_REC),
+                          font: int | None = None) -> bytes:
     """`<count=2><directive><readout>`: the donor directive record with its four tail bytes
     replaced, then the donor readout made absolute at (x, y) reading `display_slot`. The donor
-    is the frozen template pair by default (`_donor_pair`)."""
+    is the frozen template pair by default (`_donor_pair`). `font` is the value font the caller
+    will write into the readout (default: the readout's own); it is checked, not written."""
     if len(directive) != 4 or directive[0] != 0:
         raise ReadoutError("directive must be 4 bytes with mode 0 (see directive_bytes)")
-    draw, rraw = _donor_pair(data, donor)
+    draw, rraw = _donor_pair(data, donor, font)
     d, r = records.decode_record(draw, 0), records.decode_record(rraw, 0)
     dfrag = bytearray(draw)
     dfrag[d.fmt_off:d.fmt_off + 4] = directive

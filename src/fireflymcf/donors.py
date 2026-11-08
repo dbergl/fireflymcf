@@ -31,7 +31,11 @@ Witnesses are reported for every template, required or not (`TemplateProof.witne
 witnesses are corroboration only, since equal canonical bytes draw identically.
 
 **Fonts.** A template that carries a font (the caption's slot 14, the readout's 15), and any
-`font` the caller will write, must name a font the image has (`glyphs.font_for_slot`).
+`font` the caller will write, must name a font the image has (`glyphs.font_for_slot`). The text
+drawn in it must be covered too (`check_text`: `metrics.text_width` finds every glyph, as
+`pagedraw.label` requires): a caption's lines, and a readout's `READOUT_CHARS` (the digits,
+`.` and `-` a number formats to; `check_readout_font`). On 13.6 and 14.7 every stock font
+covers every byte, measured 2026-11-08, so the check refuses only an image whose font lacks one.
 
 **The readout's background.** `readout.wt8` paints an opaque mode-7 background that erases the
 previous digits; on 13.6 that is cell 8, the theme's panel colour. The cell is not grammar, so
@@ -63,7 +67,7 @@ import struct
 import types
 from dataclasses import dataclass
 
-from . import glyphs, grammar, guidata, memo, records, themeswap
+from . import glyphs, grammar, guidata, memo, metrics, records, themeswap
 
 
 class DonorError(Exception):
@@ -266,6 +270,30 @@ def _check_font(data: bytes, slot: int, what: str) -> None:
     except glyphs.GlyphError as e:
         raise DonorError("NO_TEMPLATE", f"{what}: font slot {slot} has no font in this image "
                                         f"({e})") from e
+
+
+READOUT_CHARS = "0123456789.-"
+
+
+def check_text(data: bytes, slot: int, text: str, what: str) -> None:
+    """DonorError NO_TEMPLATE unless font `slot` exists and has a glyph for every character of
+    every line of `text`."""
+    _check_font(data, slot, what)
+    for line in text.split("\n"):
+        if metrics.text_width(data, slot, line) is None:
+            raise DonorError("NO_TEMPLATE", f"{what}: font {slot} cannot draw {line!r} "
+                                            f"(missing glyph)")
+
+
+def check_readout_font(data: bytes, slot: int, what: str) -> None:
+    """`check_text` for each of `READOUT_CHARS` in font `slot`."""
+    for ch in READOUT_CHARS:
+        check_text(data, slot, ch, what)
+
+
+def require_grammar(data: bytes, what: str) -> grammar.GrammarProof:
+    """`grammar.prove(data)`, or DonorError GRAMMAR naming `what`."""
+    return _prove(data, what)
 
 
 def mode7_index_limit(data: bytes) -> int:

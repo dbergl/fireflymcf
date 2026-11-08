@@ -326,6 +326,9 @@ def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text:
     if text is not None:
         label_raw, _proof = _donors.template(donors, "rvc.caption", font=font)
         cap_font = records.decode_record(label_raw, 0).font if font is None else font
+        if cap_font is None:
+            raise RvcButtonError("the caption template carries no font")
+        _donors.check_text(donors, cap_font, text, "the button caption")
     strip = 0                                # the caption's y inside the inner box
     if glyph is not None:
         slot, char = glyph
