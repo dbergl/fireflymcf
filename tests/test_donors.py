@@ -401,3 +401,102 @@ def test_caller_font_on_a_fixed_template_is_witnessed_on_147(stocks):
     assert e.value.code == "NO_TEMPLATE" and "font 8" in str(e.value)
     rvcbutton.button_records(stocks["13.6"], touch_id=5, w=100, h=50, text="Hi", glyph=None,
                              font=8, fill_index=10)          # the drawers are twins on 13.6
+
+
+# ---- the glyph-button content donor (Plan 4 Task 3) --------------------------------------
+
+def test_glyph_button_donor_is_found_by_its_predicate(stocks):
+    """Measured 2026-11-07/08: one object of the shape on each image. The numbers are the test's;
+    the module locates by the predicate."""
+    for key, want in (("13.6", 247), ("14.7", 214), ("11.23", 178)):
+        idx, proof = donors.glyph_button(stocks[key])
+        assert idx == want and proof.object == want, key
+        assert proof.value_slot is not None
+
+
+def _bad_donor(stock, donor):
+    return recipe.OpSpec("g", "add_glyph_button", {
+        "page": 0, "donor": donor, "x": 0, "y": 0, "w": 10, "h": 10, "fill_cell": 3})
+
+
+def test_bad_donor_param_refused(stocks):
+    """A `donor` is validated by the predicate on the stock: NO_DONOR naming the clause, never
+    IndexError, for a wrong shape, a negative index and one past the table."""
+    d = stocks["13.6"]
+    n = len(guidata.object_tables(d)[1])
+    for donor, text in ((0, "not a glyph-button shape"), (-1, "not a decodable"),
+                        (n, "not a decodable"), (10 ** 9, "not a decodable")):
+        with pytest.raises(donors.DonorError) as e:
+            donors.glyph_button(d, donor)
+        assert e.value.code == "NO_DONOR" and text in str(e.value), donor
+    assert donors.glyph_button(d, 247)[0] == 247
+    # through the recipe: a clean refusal, not an exception
+    for donor in (0, -1, n):
+        op_ = recipe._lookup("add_glyph_button")(_bad_donor(d, donor))
+        op_.validate()
+        ctx = recipe.Ctx(stock=d, edits=[], insertions=[], handles={})
+        with pytest.raises(recipe.RecipeError) as e:
+            recipe._apply(op_, d, ctx, 8)
+        assert e.value.code == "NO_DONOR", donor
+
+
+def test_default_donor_comes_from_the_stock_not_the_working_image(stocks):
+    """Review focus: the search is on ctx.stock. A working image whose donor was edited
+    does not change the choice; a stock with a second shaped object refuses."""
+    d = stocks["13.6"]
+    op_ = recipe._lookup("add_glyph_button")(recipe.OpSpec("g", "add_glyph_button", {
+        "page": 0, "x": 0, "y": 0, "w": 10, "h": 10, "fill_cell": 3}))
+    op_.validate()
+    assert op_.donor is None
+    # a stock with a second shaped object: the predicate refuses
+    two = _second_glyph_shape(d)
+    with pytest.raises(donors.DonorError) as e:
+        donors.glyph_button(two)
+    assert e.value.code == "NO_DONOR" and "2 glyph-button donors" in str(e.value)
+    ctx = recipe.Ctx(stock=two, edits=[], insertions=[], handles={})
+    with pytest.raises(recipe.RecipeError) as e:
+        recipe._apply(op_, d, ctx, 8)
+    assert e.value.code == "NO_DONOR"
+
+
+def _second_glyph_shape(d: bytes) -> bytes:
+    """`d` with object 248's records rewritten to the shape of 247 (same bytes), by copying the
+    donor object's record bytes over another object of the same length, found by search."""
+    gs, _ = guidata.guidata_extent(d)
+    tab = guidata.object_tables(d)[1]
+    src = records.object_records(d, gs + tab[247])
+    raw = bytes(d[src[0].offset:src[-1].end])
+    for i, off in enumerate(tab):
+        if i == 247:
+            continue
+        try:
+            rs = records.object_records(d, gs + off)
+        except (IndexError, ValueError):
+            continue
+        if rs and rs[-1].end - rs[0].offset == len(raw) and i != 247:
+            buf = bytearray(d)
+            buf[rs[0].offset:rs[-1].end] = raw
+            assert len(donors._glyph_hits(bytes(buf))) == 2
+            return bytes(buf)
+    raise AssertionError("no object of the donor's length to overwrite")
+
+
+def test_predicate_clauses_each_refuse(stocks):
+    """Break each clause of 247 in turn: the predicate no longer matches and says which."""
+    d = stocks["13.6"]
+    gs, _ = guidata.guidata_extent(d)
+    recs = records.object_records(d, gs + guidata.object_tables(d)[1][247])
+    box, icon, cap, touch = recs
+    assert donors._glyph_clause(recs) is None
+    from types import SimpleNamespace as NS
+    def clone(r, **kw):
+        return NS(**{**{k: getattr(r, k) for k in ("wtype", "colors", "font", "geom", "value_slot")}, **kw})
+    cases = {
+        "wtypes": [clone(box, wtype=11), icon, cap, touch],
+        "fillA mode 7": [clone(box, colors=[("fillA", 6, 0)]), icon, cap, touch],
+        "no font": [box, clone(icon, font=None), cap, touch],
+        "geom": [box, icon, clone(cap, geom=(0, 0, None, 0)), touch],
+        "value_slot": [box, icon, clone(cap, value_slot=icon.value_slot + 1), touch],
+    }
+    for name, rs in cases.items():
+        assert donors._glyph_clause(rs) is not None, name

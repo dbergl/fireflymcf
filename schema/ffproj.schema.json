@@ -1641,8 +1641,7 @@
                   },
                   "donor": {
                     "type": "integer",
-                    "default": 247,
-                    "description": "object index to clone"
+                    "description": "object index to clone (default: the stock image's one glyph-button-shaped object, 247 on 13.6)"
                   },
                   "x": {
                     "type": "integer",

@@ -24,6 +24,7 @@ from fireflymcf import (aescompact, celltables, cli, container, followchannel, g
                               sramreach, status_map, statusbind, tankgates, theme, thumb,
                               voltagebattery)
 from fireflymcf import absrecord
+from fireflymcf import donors
 from fireflymcf import altreboot
 from fireflymcf import appendfilter
 from fireflymcf import battglyph
@@ -1925,7 +1926,9 @@ class AddGlyphButton(Op):
     Params:
       page: str|int — page name (resolved via cli._resolve_page_root) or object index
             to attach the clone under
-      donor: int (default 247) — object index to clone (insert.clone_object)
+      donor: int (default: the one object of the stock image with the glyph-button shape,
+             `donors.glyph_button`; 247 on 13.6) — object index to clone (insert.clone_object);
+             checked against the same shape predicate on the stock image
       x: int, y: int — absolute attach position (insert.insert_object position=)
       w: int, h: int — size written to every geometry dim2/dim3 field the clone's
          box/icon/caption/touch records carry
@@ -1936,6 +1939,8 @@ class AddGlyphButton(Op):
       INSERT_REFUSED — insert.insert_object refused (bad parent, no template, etc.)
       NO_FIELD — a box/icon/caption/touch record lacks the w or h geometry field
       NO_SUCH_PAGE — page name cannot be resolved to an object index (via cli)
+      NO_DONOR — the stock image has zero or several objects of the glyph-button shape, or
+                 `donor` is not one (out of range, or failing a named clause)
 
     This is a relocating op (insert_object appends a new object). Registers
     ctx.handles[op_id] = {"object": idx, "cell": fill_cell, "group": None} — group is
@@ -1945,8 +1950,9 @@ class AddGlyphButton(Op):
         "properties": {
             "page": {"type": ["string", "integer"],
                      "description": "page name (resolved via cli._resolve_page_root) or object index"},
-            "donor": {"type": "integer", "default": 247,
-                      "description": "object index to clone"},
+            "donor": {"type": "integer",
+                      "description": "object index to clone (default: the stock image's one "
+                                     "glyph-button-shaped object, 247 on 13.6)"},
             "x": {"type": "integer", "description": "absolute attach x-position"},
             "y": {"type": "integer", "description": "absolute attach y-position"},
             "w": {"type": "integer", "description": "width written to every box/icon/caption/touch geometry field"},
@@ -1959,7 +1965,7 @@ class AddGlyphButton(Op):
 
     def validate(self):
         self.page = self._param("page")
-        self.donor = self._param("donor", 247, kind=int)
+        self.donor = self._param("donor", None, kind=int)
         self.x = self._param("x", kind=int)
         self.y = self._param("y", kind=int)
         self.w = self._param("w", kind=int)
@@ -1975,6 +1981,7 @@ class AddGlyphButton(Op):
             except Exception as e:
                 raise RecipeError("NO_SUCH_PAGE", "cannot resolve page %r: %s"
                                   % (self.page, e))
+        self.donor, _proof = donors.glyph_button(ctx.stock, self.donor)
         clone = insert.clone_object(data, self.donor)
         try:
             data, e = insert.insert_object(data, clone, root,

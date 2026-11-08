@@ -511,3 +511,83 @@ def group_prefix(data: bytes, name: str) -> tuple[bytes, tuple]:
     return g.prefix, (f"grammar: decoder {p.decoder:#x}",
                       "prefix semantics are the LCD firmware's (FUN_0021B420); equal at this "
                       "group on 11.23, 13.6 and 14.7 (data evidence, 2026-11-07)")
+
+
+@dataclass(frozen=True)
+class ContentProof:
+    """Why an object is a glyph-button donor: its value_slot (shared by box, icon and caption)
+    and the two labels, for the manifest."""
+    object: int
+    value_slot: int
+    icon_label: str | None
+    caption_label: str | None
+
+
+def _glyph_clause(recs) -> str | None:
+    """None when `recs` has the glyph-button shape, else the first clause it fails. The shape
+    is what `add_glyph_button` rewrites and relies on: a box, an icon cell, a caption cell and
+    a touch region, the box filled by a mode-7 colour index (`fillA`), a font on the icon (so
+    `set_icon` has a glyph cell), the w and h geometry fields on every record, and ONE
+    value_slot on box, icon and caption (the live-redraw invariant: the clone redraws in place
+    once `wire_button` points that slot, the fillA index and the group at the pin)."""
+    if [r.wtype for r in recs] != [33, 11, 11, 12]:
+        return f"records are wtypes {[r.wtype for r in recs]}, not [33, 11, 11, 12]"
+    box, icon, cap, _touch = recs
+    if not box.colors or box.colors[0][:2] != ("fillA", 7):
+        return "the box's first colour is not fillA mode 7"
+    if icon.font is None:
+        return "the icon record has no font"
+    if any(r.geom[2] is None or r.geom[3] is None for r in recs):
+        return "a record lacks the geom[2]/geom[3] (w, h) fields"
+    slots = {box.value_slot, icon.value_slot, cap.value_slot}
+    if None in slots or len(slots) != 1:
+        return "box, icon and caption do not share one value_slot"
+    return None
+
+
+def _object_records(data: bytes, index: int):
+    gs, _ = guidata.guidata_extent(data)
+    tab = guidata.object_tables(data)[1]
+    if not 0 <= index < len(tab):
+        return None
+    try:
+        return records.object_records(data, gs + tab[index])
+    except (IndexError, ValueError):
+        return None
+
+
+def _proof(index: int, recs) -> ContentProof:
+    box, icon, cap, _touch = recs
+    return ContentProof(index, box.value_slot, icon.label, cap.label)
+
+
+@memo.content_cached(copy=None)
+def _glyph_hits(data: bytes) -> tuple:
+    hits = []
+    for i in range(len(guidata.object_tables(data)[1])):
+        recs = _object_records(data, i)
+        if recs is not None and _glyph_clause(recs) is None:
+            hits.append(_proof(i, recs))
+    return tuple(hits)
+
+
+def glyph_button(data: bytes, donor: int | None = None) -> tuple[int, ContentProof]:
+    """`(object index, proof)` of the glyph-button donor `add_glyph_button` clones. With no
+    `donor` the object is found by the shape predicate (`_glyph_clause`): exactly one match, or
+    DonorError NO_DONOR naming the count. With `donor`, that object is checked by the same
+    predicate and NO_DONOR names the clause it fails (an index outside the object table, or an
+    object that does not decode, included). No grammar proof is required: this reads the data
+    shape only. Measured 2026-11-07: 13.6 object 247, 14.7 object 214, 11.23 object 178."""
+    if donor is not None:
+        recs = _object_records(data, donor) if isinstance(donor, int) else None
+        if recs is None:
+            raise DonorError("NO_DONOR", f"donor {donor} is not a decodable object of this image")
+        why = _glyph_clause(recs)
+        if why is not None:
+            raise DonorError("NO_DONOR", f"donor {donor} is not a glyph-button shape: {why}")
+        return donor, _proof(donor, recs)
+    hits = _glyph_hits(data)
+    if len(hits) != 1:
+        raise DonorError("NO_DONOR", f"{len(hits)} glyph-button donors on this image "
+                         f"(want exactly one): {[h.object for h in hits]}")
+    return hits[0].object, hits[0]

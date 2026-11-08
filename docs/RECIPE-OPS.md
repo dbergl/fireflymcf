@@ -801,7 +801,7 @@ Clone a donor control into a bare button shell on a page, sized w x h, unwired.
 | parameter | type | required | default | meaning |
 |---|---|---|---|---|
 | `page` | string\|integer | yes |  | page name (resolved via cli._resolve_page_root) or object index |
-| `donor` | integer |  | 247 | object index to clone |
+| `donor` | integer |  |  | object index to clone (default: the stock image's one glyph-button-shaped object, 247 on 13.6) |
 | `x` | integer | yes |  | absolute attach x-position |
 | `y` | integer | yes |  | absolute attach y-position |
 | `w` | integer | yes |  | width written to every box/icon/caption/touch geometry field |
@@ -813,6 +813,7 @@ Error codes:
 - `INSERT_REFUSED` — insert.insert_object refused (bad parent, no template, etc.)
 - `NO_FIELD` — a box/icon/caption/touch record lacks the w or h geometry field
 - `NO_SUCH_PAGE` — page name cannot be resolved to an object index (via cli)
+- `NO_DONOR` — the stock image has zero or several objects of the glyph-button shape, or `donor` is not one (out of range, or failing a named clause)
 
 ### add_level_page
 
