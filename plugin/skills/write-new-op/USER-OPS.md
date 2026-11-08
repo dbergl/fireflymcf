@@ -202,9 +202,11 @@ compile reports it as the op's failure.
 ### Per-tick routines
 
 Every routine-authoring op in the library runs from the same place (*proven-from-code*, the hook;
-*hardware*, the chain). GuiCode calls the per-tick paint function `FUN_00247BF8` from one `bl` at GuiCode+`0xEE3C`. An appended routine takes over
+*hardware*, the chain). The LCD's paint tick calls `GuiCode_entry1`, and entry1's first `bl` calls
+the per-tick builder: on 13.6 the `bl` at GuiCode+`0xEE3C` into `FUN_00247BF8`, on 14.7 the `bl` at
+GuiCode+`0xF288` into `0x247CAC`. An appended routine takes over
 that `bl` and tail-branches to whatever the `bl` reached before, so routines chain: hook → newest
-→ … → `FUN_00247BF8`. Every link obeys one contract. It starts with `push {r0, r1, r2, r3, lr}`,
+→ … → the builder. Every link obeys one contract. It starts with `push {r0, r1, r2, r3, lr}`,
 never writes r4-r7, and leaves through `pop.w {r0, r1, r2, r3, lr}` followed by `b.w` to the
 previous callee. That `b.w` is the first `b.w` in the routine, because
 `followchannel.chain_from_hook` follows it.
@@ -214,12 +216,25 @@ first grown GuiCode on the coach (2026-08-31). Two chained routines ran on 2026-
 and the AES Low Volts bridge). Every coach build since then carries four or more links. The
 library does not check r4-r7 for you.
 
+**User tick ops run on 13.6 and 14.7.** Nothing here names a firmware's address: the hook, the
+chain, the builder it ends in, the append point and the host CAN sender are found in each image
+(`hooklocate`, *proven-from-code* on 13.6, 14.7 and 11.23), and the chain limit
+(`tick_chain_limit`) counts the links that walk finds. On 14.7 (*emulator*, 2026-11-07,
+`tests/emu/test_hook147.py`): one link and two chained links each run once per tick, in step with
+the builder's own tick counter, and HOME draws as stock; a link that calls host API `+0x08`'s
+cell (`0x20039558`) puts its frame on the bus once, from the panel's address, which settles that
+`+0x08` is the frame sender on 14.7's LCD firmware too; the `send_frame` test op compiles on 14.7
+and sends. No 14.7 tick routine has run on a coach. Two gaps on 14.7: `fresh_sram` refuses
+(`NO_SRAM`), because `sramreach` bounds 13.6's render-state and digit-buffer bases by hand and
+14.7's sit 4 bytes higher (`0x200301B4`, `0x200371D5`), so every SRAM word reads as reachable;
+and the variant setter (host API `+0x04`) is located but unproven there.
+
 **`tick_install_plan(data) -> (data, TickPlan)`** (read-only). Returns where the next routine
 loads and what it must tail-branch to. `TickPlan` has these fields:
 
 - `code_load_addr`: the GuiCode append point, as a runtime address.
 - `tail_target`: the hook's current callee.
-- `hook_at`: the hook's GuiCode offset, `0xEE3C`.
+- `hook_at`: the hook's GuiCode offset, located in the image (13.6 `0xEE3C`, 14.7 `0xF288`).
 - `hook_old`: the hook's current 4 bytes.
 - `sender_addr`: the host CAN sender's SRAM cell, located in this image (host API +0x08; 13.6
   `0x2003986C`, 14.7 `0x20039558`). Pass it to `emit_send_frame` when you call it outside
@@ -227,9 +242,11 @@ loads and what it must tail-branch to. `TickPlan` has these fields:
 
 It refuses (`BAD_HOOK`) in any of these cases:
 
-- the hook is neither the stock `bl` nor a `bl` into the appended region (`followchannel.hook_state`);
-- the append point is below stock 13.6's `0x00259BB4` or not 4-aligned (the rule
-  `_check_append_point` applies to every built-in op);
+- the hook does not prove out (`hooklocate.locate_hook`: entry1's first `bl`, every link's
+  prologue and `pop.w; b.w` tail, and a builder that loads the config buffer and has that one
+  caller), or the host-API cells cannot be read from `GuiCode_entry0`;
+- the append point is not 4-aligned. The image alone cannot say where stock's GuiCode ended;
+  the built-in ops also check the append point against the stock image (`_check_append_point`);
 - the GuiCode descriptor maps the section anywhere but `0x00240000`. Every address here uses
   that one base.
 
@@ -313,7 +330,7 @@ ldr r0, =template
 ldr r1, [r0]; ldr r2, [r0, #4]; str r1, [sp]; str r2, [sp, #4]
 ldr r1, [r0, #8]; str r1, [sp, #8]
 mov r0, sp
-ldr r2, =<sender cell>; ldr r2, [r2]        ; 13.6: 0x2003986C
+ldr r2, =<sender cell>; ldr r2, [r2]        ; 13.6: 0x2003986C, 14.7: 0x20039558
 blx r2
 add sp, #0x14
 ```
