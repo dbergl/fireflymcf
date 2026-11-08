@@ -543,6 +543,9 @@ Error codes:
 
 - `NO_FREE_GROUP` — no empty group-table slot to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates). BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_aes_batt_heat_status
 
@@ -564,6 +567,9 @@ Error codes:
 - `INDICATOR_REFUSED` — the routine, switch or an arm could not be built or spliced onto 829.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
 - `BAD_REF` — `button` names an op with no handle (not run, later, or disabled).
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_aes_bms_button_status
 
@@ -586,6 +592,9 @@ Error codes:
 - `NO_BODY_COLOUR` — the blue/cyan pair is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or switch could not be built or spliced onto 829.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_alt_reboot
 
@@ -626,6 +635,9 @@ Error codes:
 - `BAD_REF` — `status` or a battery ref names no prior op of the right kind.
 - `NOT_A_BATTERY` — a named object is not a House battery (seven-record signature).
 - `WRAP_REFUSED` — the arms, the match table or the switch could not be built or spliced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_button
 
@@ -676,6 +688,9 @@ Error codes:
 - `NO_BODY_COLOUR` — a colour is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, a wrap changes any other record, or an arm draws out of place.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_button_status
 
@@ -700,6 +715,9 @@ Error codes:
 - `NO_BODY_COLOUR` — a colour is not in this build's palette.
 - `INDICATOR_REFUSED` — the routine or a switch could not be built or spliced, or a wrap changes any other record on a page reaching the button.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_card_readouts
 
@@ -727,6 +745,9 @@ Error codes:
 - `REPLACE_REFUSED` — 829 could not be relocated.
 - `BAD_PARAMS` — a row lacks caption, unit or value, or its caption or unit has a character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
 - `NO_GLYPH` — a non-ASCII caption or unit character the row's font has no glyph for (captions font 10, units font 12; both carry '°').
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_corner_mark
 
@@ -789,6 +810,9 @@ Error codes:
 - `LABEL_REFUSED` — an arm, the routine or the switch could not be built or placed; the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); the placement changes any other record on a page reaching `parent`; or a pasted record would inherit a value slot (e.g. under 899, whose attaches carry value_slot 0).
 - `OFF_CANVAS` — the box leaves the 800x480 canvas.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the expected `bl`.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_glyph_button
 
@@ -853,6 +877,9 @@ Error codes:
 - `ROUTINE_REFUSED` — the routine could not be resolved, built or appended to GuiCode.
 - `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
 - `PAGE_REFUSED` — the body could not be drawn or object 367 could not be replaced.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_low_volts_control
 
@@ -924,6 +951,9 @@ Error codes:
 - `INSERT_REFUSED` — the attach could not be cloned or inserted, the walk's font/align state cannot be handed back, a pasted record would inherit a value slot, or the placement changes another record.
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 - `CYCLE_UNDRIVEN` — (compile) a cycle that no later enabled `add_button_states` drives.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_text_label
 
@@ -955,6 +985,9 @@ Error codes:
 - `NO_COLOUR` — `colour` or `background` is not in this build's palette.
 - `OFF_CANVAS` — the box or the frame leaves the 800x480 canvas.
 - `LAYOUT_REFUSED` — the placement changes any other record on a page reaching `parent`; a pasted record would inherit a value slot (e.g. under 899); the entering font/align cannot be measured or written back (no page reaches `parent`, pages disagree, no font yet, align 0); or a record could not be built or attached.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`). Where the text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font, alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of the recipe's stock image; one that does not is refused here.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### aes_card_layout
 
@@ -1123,6 +1156,8 @@ Error codes:
 - `NO_FIELD` — the record's type (or its colour-mode bytes) gives it no such field
 - `POINTER_INSIDE` — a GuiCode/LCD literal points into the object after the edited record
 - `RELOCATE_REFUSED` — the relocation gates refused the grown object
+- `MODE7_INDEX` — an `{"index": n}` colour at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7); the decoder would clamp it to cell 0.
+- `GRAMMAR` — an `{"index": n}` colour on an image whose record grammar is not proven 13.6's (`grammar.prove`), so its bound is unknown.
 
 ### split_hold_region
 
@@ -1170,6 +1205,9 @@ Error codes:
 - `SETTINGS_REFUSED` — `build_settings_screen` refused (the object-31 rebuild's own `relocate.replace_object_records` gate failed)
 - `WIRE_REFUSED` — `wire_settings_nav` refused: a DISPLAYED object OUTSIDE the AES page subtree already carries touch id 0x7DE (a hit-test collision), or the 0x7DE leaf's stock bytes at its GuiCode site do not match (a drifted build)
 - `BAD_REF` — `pump_section` or `link_indicator` names an op id with no handle yet (it has not run, ran after this op, or is disabled), or the handle is missing the field the ref needs (`pump_section_ids`' fields, or `display_slot`) -- refuses rather than wire the button to stale or absent ids.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### wire_button
 
@@ -1294,6 +1332,18 @@ Show any register as a live number on any page, or feed an existing readout's ce
 | `donor` | object |  | {"obj": 793, "rec": 5} | the default names the frozen readout templates (`donors`); another {obj, rec} is read from the image and refused NO_DONOR when it does not exist or is not a (directive, wtype-8) pair (ATTACH_REFUSED before 2026-11-08) |
 | `cell_slot` | integer |  |  | FEED AN EXISTING display cell (a stock readout's value_slot) instead of allocating one and authoring a widget; excludes page/x/y/format/donor |
 | `silence` | array |  |  | with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick |
+
+Error codes:
+
+- `BAD_PARAMS` — a malformed param: drawing params with `draw` false or with `cell_slot`, a non-integer `cell_slot`, `silence` that is not a list of addresses or comes without `cell_slot`, a missing page/x/y, or a bad `format`.
+- `READOUT_REFUSED` — the register, the display cell or the copy routine could not be resolved or built.
+- `GROW_REFUSED` — GuiCode could not be grown for the routine.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
+- `ATTACH_REFUSED` — the readout object could not be attached to `page`.
+- `NO_DONOR` — a caller-named `donor` that does not exist or is not a (directive, wtype-8) pair.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
 ### add_voltage_battery
 

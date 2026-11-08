@@ -336,8 +336,6 @@ def button_records(donors: bytes, *, touch_id: int | None, w: int, h: int, text:
         g = glyphs.decode_glyph(img, glyphs.font_for_slot(img, slot).glyph_index(ord(char)))
         area = ih
         if text is not None:
-            if cap_font is None:
-                raise RvcButtonError("the caption template carries no font to measure")
             cap_h = metrics.font_metrics(donors, cap_font).height * (text.count("\n") + 1)
             area = ih - cap_h
             strip = area

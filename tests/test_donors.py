@@ -568,3 +568,39 @@ def test_bool_donor_refused(stocks):
     with pytest.raises(recipe.RecipeError) as e:
         recipe._lookup("add_glyph_button")(_spec(donor=True)).validate()
     assert e.value.code == "BAD_PARAMS"
+
+
+def _paint_index(stock: bytes, obj: int, selector: dict, index: int):
+    import hashlib
+    spec = recipe.OpSpec(id="c", type="set_record_color",
+                         params={"target": obj, "selector": selector,
+                                 "color": {"index": index}})
+    p = recipe.Project(base_sha256=hashlib.sha256(stock).hexdigest(), build_name=None,
+                       ops=[spec])
+    return recipe.compile_project(p, stock)
+
+
+# A record with a fillA field on each image: 14.7 object 3 record 0 (the review's probe), 13.6
+# object 380 'ON' (tests/test_recipe_ops.py's set_record_color fixture).
+@pytest.mark.parametrize("version,obj,selector,limit", [
+    ("14.7", 3, {"nth": 0}, 0x1F8), ("13.6", 380, {"label": "ON"}, 0x298)])
+def test_set_record_color_index_bound(stocks, version, obj, selector, limit):
+    stock = stocks[version]
+    r = _paint_index(stock, obj, selector, limit - 1)
+    assert r.ok, r.errors
+    r = _paint_index(stock, obj, selector, limit)
+    assert not r.ok and r.errors[0]["code"] == "MODE7_INDEX", r.errors
+
+
+@pytest.mark.parametrize("version", ["13.6", "14.7"])
+def test_enum_label_index_colour_bound(stocks, version):
+    from fireflymcf import enumlabel
+    data = stocks[version]
+    limit = donors.mode7_index_limit(data)
+    kw = dict(text="Hi", font=16, w=60, h=30, align=2, at=(10, 10))
+    enumlabel.label_records(data, colour_index=limit - 1, bg_index=limit - 1, **kw)
+    for bad in ({"colour_index": limit, "bg_index": None},
+                {"colour_index": 1, "bg_index": limit}):
+        with pytest.raises(donors.DonorError) as e:
+            enumlabel.label_records(data, **bad, **kw)
+        assert e.value.code == "MODE7_INDEX"

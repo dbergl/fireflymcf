@@ -488,6 +488,11 @@ class SetRecordColor(Op):
       NO_FIELD -- the record's type (or its colour-mode bytes) gives it no such field
       POINTER_INSIDE -- a GuiCode/LCD literal points into the object after the edited record
       RELOCATE_REFUSED -- the relocation gates refused the grown object
+      MODE7_INDEX -- an `{"index": n}` colour at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7); the decoder would clamp it to
+        cell 0.
+      GRAMMAR -- an `{"index": n}` colour on an image whose record grammar is not proven 13.6's
+        (`grammar.prove`), so its bound is unknown.
 
     `set_theme` runs after it and remaps an inline colour equal to a theme colour, as it does
     every inline field.
@@ -561,6 +566,8 @@ class SetRecordColor(Op):
         obj, idxs = self._targets(data, ctx)
         gs, tab = _gs_tab(data)
         recs = records.object_records(data, gs + tab[obj])
+        if self.mode == 7:
+            donors.check_mode7_index(data, self.value, "set_record_color")
         new = {}
         try:
             for i in idxs:
@@ -6343,7 +6350,28 @@ class AddRegisterReadout(Op):
     AND VERIFIED 2026-09-04 (`docs/BUS-BASELINE.md` PC.59). `hardware_verified` is `True` by default
     now, but a TIER-3 instance -- a fresh SRAM cell no stock instruction names -- keeps it `False`
     per instance (`apply`, when `cell.fresh`): a coach photo of one tier does not vouch for an
-    address nothing has ever touched."""
+    address nothing has ever touched.
+
+    Error codes:
+      BAD_PARAMS -- a malformed param: drawing params with `draw` false or with `cell_slot`, a
+        non-integer `cell_slot`, `silence` that is not a list of addresses or comes without
+        `cell_slot`, a missing page/x/y, or a bad `format`.
+      READOUT_REFUSED -- the register, the display cell or the copy routine could not be
+        resolved or built.
+      GROW_REFUSED -- GuiCode could not be grown for the routine.
+      DETOUR_REFUSED -- the per-tick hook did not hold the `bl` the chain expects.
+      ATTACH_REFUSED -- the readout object could not be attached to `page`.
+      NO_DONOR -- a caller-named `donor` that does not exist or is not a (directive, wtype-8)
+        pair.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen readout template cannot be used on this image (`donors`): no
+        stock record witnesses its form, or the value font is missing or cannot draw
+        `donors.READOUT_CHARS`.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+    """
     hardware_verified = True
     PARAMS = {
         "properties": {
@@ -6740,6 +6768,13 @@ class SwapAesElectrical(Op):
                  not run, ran after this op, or is disabled), or the handle is missing the
                  field the ref needs (`pump_section_ids`' fields, or `display_slot`) --
                  refuses rather than wire the button to stale or absent ids.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
     `hardware_verified = True` by default -- HARDWARE-VERIFIED on the owner's coach 2026-09-01
     over five flash/verify rounds: AGS
@@ -7302,6 +7337,13 @@ class AddAesBattHeat(Op):
       NO_FREE_GROUP -- no empty group-table slot to host the button's command group.
       GROW_REFUSED  -- the binding table could not be grown (padding arena / gates).
       BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = True     # coach-verified 2026-09-21: hold->enable / tap->off captured on
@@ -7652,6 +7694,13 @@ class AddAesBattHeatStatus(Op):
       INDICATOR_REFUSED -- the routine, switch or an arm could not be built or spliced onto 829.
       DETOUR_REFUSED    -- the per-tick hook did not hold the `bl` the chain expects.
       BAD_REF           -- `button` names an op with no handle (not run, later, or disabled).
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     # COACH-VERIFIED 2026-09-22, both halves. RECEIVE: both appended subscriptions
@@ -8014,6 +8063,13 @@ class AddCardReadouts(Op):
                          character outside latin-1 (a label byte indexes the font; '°' is 0xB0).
       NO_GLYPH        -- a non-ASCII caption or unit character the row's font has no glyph for
                          (captions font 10, units font 12; both carry '°').
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = True     # flashed 2026-10-15 on 829; narrowed in validate()
@@ -8161,6 +8217,13 @@ class AddAesBmsButtonStatus(Op):
       NO_BODY_COLOUR    -- the blue/cyan pair is not in this build's palette.
       INDICATOR_REFUSED -- the routine or switch could not be built or spliced onto 829.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8329,6 +8392,13 @@ class AddButtonStatus(Op):
       INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, or a wrap
                            changes any other record on a page reaching the button.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8654,6 +8724,13 @@ class AddEnumLabel(_LabelBox, Op):
                           attaches carry value_slot 0).
       OFF_CANVAS       -- the box leaves the 800x480 canvas.
       DETOUR_REFUSED   -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -8901,6 +8978,15 @@ class AddTextLabel(_LabelBox, Op):
                         font/align cannot be measured or written back (no page reaches
                         `parent`, pages disagree, no font yet, align 0); or a record could not
                         be built or attached.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`). Where the
+        text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font,
+        alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of
+        the recipe's stock image; one that does not is refused here.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 
     On 14.7, emulated only (2026-11-08, tests/emu/test_ops147.py): its text drawers are not twins
     of 13.6's (`grammar.prove`), so the pixels are the evidence. White "FAN SPEED" in font 16 on
@@ -9158,6 +9244,13 @@ class AddButtonStates(Op):
       INDICATOR_REFUSED -- the routine or a switch could not be built or spliced, a wrap
                            changes any other record, or an arm draws out of place.
       DETOUR_REFUSED    -- the per-tick hook did not hold the expected `bl`.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -9616,6 +9709,13 @@ class AddRvcButton(Op):
                         the placement changes another record.
       TOGGLE_UNDRIVEN -- (compile) a toggle that no later enabled `add_button_status` drives.
       CYCLE_UNDRIVEN  -- (compile) a cycle that no later enabled `add_button_states` drives.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     hardware_verified = False
@@ -10045,6 +10145,13 @@ class AddBattHeatBatteryGlyph(Op):
       BAD_REF          -- `status` or a battery ref names no prior op of the right kind.
       NOT_A_BATTERY    -- a named object is not a House battery (seven-record signature).
       WRAP_REFUSED     -- the arms, the match table or the switch could not be built or spliced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
     # COACH-VERIFIED 2026-09-26: the white glyph appears and clears with
     # the heater contactor on the HOME and ELECTRICAL House batteries. Owner note: with the voltage
@@ -11327,6 +11434,13 @@ class AddLevelPage(Op):
       ROUTINE_REFUSED -- the routine could not be resolved, built or appended to GuiCode.
       DETOUR_REFUSED  -- the per-tick hook did not hold the `bl` the chain expects.
       PAGE_REFUSED    -- the body could not be drawn or object 367 could not be replaced.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
+        record witnesses its form, or a font slot is missing or cannot draw the text.
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
 
     # Nothing of this page has been on the coach: a live readout inside a switch arm has no

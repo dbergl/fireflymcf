@@ -441,7 +441,7 @@ def template(data: bytes, name: str, *, font: int | None = None) -> tuple[bytes,
     return _template(data, name, t, font, witness_image(data))
 
 
-@memo.content_cached(copy=None, maxsize=64)
+@memo.content_cached(copy=None)
 def _template(data: bytes, name: str, t: Template, font: int | None, base: bytes
               ) -> tuple[bytes, TemplateProof]:
     p = _prove(data, f"template {name}")
