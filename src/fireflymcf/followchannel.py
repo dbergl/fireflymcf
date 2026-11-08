@@ -53,14 +53,29 @@ HOOK_STOCK = bytes.fromhex("f8f7dcfe")
 STOCK_APPEND_POINT = 0x00259BB4
 
 # Host CAN-frame sender: SRAM holds a function pointer at this address (host API +0x08). The
-# routine does `ldr r2,[&sender]; blx r2`.
+# routine does `ldr r2,[&sender]; blx r2`. DEPRECATED: 13.6's value, kept for tests and
+# docs; no builder reads it. The cell is located in the image (`host_sender_addr`).
 SENDER_PTR_ADDR = 0x2003986C
 
 # Group-variant setter: SRAM holds a function pointer at this address. The stock Low Volts bridge
 # block (0x0024A176-0x0024A1A6, proven-from-code) does `ldr rX,[0x20039908]; ldr rX,[rX];
 # movs r1,#variant; movs r0,#group_id; blx rX` each tick, unconditionally, to drive a config-
-# toggle's on-screen checkbox state and the tap direction of the next write.
+# toggle's on-screen checkbox state and the tap direction of the next write. DEPRECATED:
+# 13.6's value, kept for tests and docs; no builder reads it (`host_setter_addr`).
 VARIANT_SETTER = 0x20039908
+
+
+def host_sender_addr(data: bytes) -> int:
+    """The CAN-frame sender's SRAM cell (host API +0x08), read from the image's GuiCode entry0
+    (`hooklocate.host_api_cells`). Refuses `hooklocate.HookNotFound`."""
+    from . import hooklocate   # here, not at the top: hooklocate imports FollowChannelError
+    return hooklocate.host_api_cells(data)[0x08]
+
+
+def host_setter_addr(data: bytes) -> int:
+    """The group-variant setter's SRAM cell (host API +0x04); see `host_sender_addr`."""
+    from . import hooklocate
+    return hooklocate.host_api_cells(data)[0x04]
 
 # Receive-filter status slot array. When a subscribed frame arrives, the LCD firmware
 # (FUN_0021C760) writes the extracted value to slot[var]. The store base is **index-split**
@@ -204,6 +219,8 @@ class FollowPlan:
                           # previous appended routine's entry (`hook_site`)
     display_addr: int | None = None    # &(spare display cell): strb'd the gate's on/off flag byte
     display_slot: int | None = None    # its +0x44BC8 cell index (for a later wtype-6 widget)
+    sender_addr: int | None = None     # &(host CAN sender fn-ptr), located (`host_sender_addr`)
+    setter_addr: int | None = None     # &(variant setter fn-ptr), located (`host_setter_addr`)
     variant_group: int | None = None   # group id `build` hands to the setVariant bridge each tick
     gate_mask: int = 0xFFFF   # the mask the gate slot is ANDed with before the == gate_on_value
                               # test: `(slot & gate_mask) == gate_on_value`. 0xFFFF (the default)
@@ -563,6 +580,8 @@ def resolve(data: bytes, watch_channel: int, target_channel: int, on_level: int,
         display_addr=display_addr,
         display_slot=display_slot,
         variant_group=variant_group,
+        sender_addr=host_sender_addr(data),
+        setter_addr=host_setter_addr(data) if variant_group is not None else None,
     )
 
 
@@ -596,7 +615,7 @@ def plan_from_registers(data: bytes, *, watch: Condition, target_channel: int,
         on_template=_template(target_channel, on_level, 1),
         off_template=_template(target_channel, 0, 3),
         hook_at=hook_at, hook_old=hook_old, tail_target=tail_target, gates=list(gates),
-        use_gate_list=True)
+        use_gate_list=True, sender_addr=host_sender_addr(data))
 
 
 def build(plan: FollowPlan, code_load_addr: int) -> tuple[bytes, list]:
@@ -608,6 +627,9 @@ def build(plan: FollowPlan, code_load_addr: int) -> tuple[bytes, list]:
     """
     if len(plan.on_template) != 12 or len(plan.off_template) != 12:
         raise FollowChannelError("templates must be 12 bytes")
+    if plan.sender_addr is None or (plan.setter_addr is None) != (plan.variant_group is None):
+        raise FollowChannelError("the plan carries no located sender/setter cell "
+                                 "(build it with `resolve` or `plan_from_registers`)")
 
     # The bridge block (this task) is emitted only when both a display cell and a variant group
     # were resolved. It reads the gate as a live halfword, so it only makes sense on the slot path
@@ -646,9 +668,9 @@ def build(plan: FollowPlan, code_load_addr: int) -> tuple[bytes, list]:
     if has_bridge:
         pool_order += ["display", "setter"]
         pool_val["display"] = plan.display_addr
-        pool_val["setter"] = VARIANT_SETTER
+        pool_val["setter"] = plan.setter_addr
     pool_order += ["sender", "on", "off"]
-    pool_val["sender"] = SENDER_PTR_ADDR
+    pool_val["sender"] = plan.sender_addr
     pool_val["on"] = code_load_addr + ON_OFF
     pool_val["off"] = code_load_addr + OFF_OFF
 
@@ -1006,7 +1028,7 @@ class DisplayBridgePlan:
     hook_at: int            # GuiCode-section offset of the detoured `bl` (`hook_site`)
     hook_old: bytes         # its current 4 bytes (stock, or a bl into an earlier appended routine)
     tail_target: int        # the stock callee, or the previous routine's entry (`hook_site`)
-    setter_addr: int = VARIANT_SETTER          # &(fn-ptr to setVariant); `ldr r3,[this]; ldr
+    setter_addr: int | None = None             # &(fn-ptr to setVariant); `ldr r3,[this]; ldr
                                                # r3,[r3]; blx r3` -- the firmware's own updater
     armflag_addr: int = ARM_FLAG_ADDR          # &(armed-flag byte); stock strb'd armed here
     variant_group: int = VARIANT_GROUP_LOW_VOLTS   # setVariant group arg (129 = movs r0,#0x81)
@@ -1054,7 +1076,7 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
                            on_master_addr: int = ON_MASTER_COLOR_ADDR,
                            off_master_addr: int = OFF_MASTER_COLOR_ADDR,
                            cell_addr: int = RECOLOR_CELL_ADDR,
-                           setter_addr: int = VARIANT_SETTER,
+                           setter_addr: int | None = None,
                            armflag_addr: int = ARM_FLAG_ADDR,
                            variant_group: int = VARIANT_GROUP_LOW_VOLTS,
                            stock: bytes | None = None) -> DisplayBridgePlan:
@@ -1063,7 +1085,7 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
     selector 0x2F, from `register.resolve_register`); the rest default to the stock block's own
     pinned addresses so the bridge writes exactly what the stock block writes and AGS runtime is
     unchanged. REV 3: the group-129 counter is updated through the firmware's own variant setter
-    (the fn-ptr at `setter_addr` = 0x20039908), NOT a direct byte-write, and the armed-flag byte
+    (the fn-ptr at `setter_addr`, located by default: `host_setter_addr`), NOT a direct byte-write, and the armed-flag byte
     at `armflag_addr` (stock 0x24a182) is written too. Refuses rather than corrupt if an address
     is out of SRAM, mis-aligned, or the hook is not stock.
 
@@ -1081,6 +1103,8 @@ def resolve_display_bridge(data: bytes, *, gate_addr: int, gate_on_value: int = 
         raise FollowChannelError(
             f"the display bridge mirrors 13.6's stock cell-45 block at its pinned addresses; "
             f"this image is {fw or 'unidentified'} ({firmware.describe(data)}), refusing")
+    if setter_addr is None:
+        setter_addr = host_setter_addr(data)
     # gate_addr/counter_addr live in the receive/var-state window (0x2000xxxx); the masters,
     # cell 45, setter fn-ptr and armed flag in the colour/config window (0x2003xxxx) -- validate
     # all against the full SRAM window (theme.SRAM_LOW/HIGH), not the narrower SRAM_LOW/HIGH used

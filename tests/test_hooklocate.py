@@ -290,3 +290,37 @@ def test_memo_does_not_read_module_constants(mcf_136, monkeypatch):
         hooklocate.locate_hook(mcf_136)
     monkeypatch.undo()
     assert hooklocate.locate_hook(mcf_136).hook_off == STOCK["13.6"]["hook_off"]
+
+
+def test_routine_pools_use_located_sender(mcf_136, mcf_147):
+    """A tick routine's literal pool holds the image's own sender cell (host API +0x08)."""
+    from fireflymcf import routinekit, userop
+    for data, want in ((mcf_136, 0x2003986C), (mcf_147, 0x20039558)):
+        ed = userop.Editor(data)
+        seen = {}
+
+        def build(load, tail):
+            r = thumb.Routine({}, error=routinekit.RoutineKitError)
+            routinekit.emit_prologue(r)
+            routinekit.emit_send_frame(r, load)
+            routinekit.emit_tail(r, tail)
+            seen.update(r.pool)
+            return routinekit.assemble_tick(r, load, prefix=routinekit.config_frame(0x2F, 0, 0xD1))
+
+        inst = routinekit.install_tick(ed, build, "send")
+        assert seen["_sender"] == want == hooklocate.host_api_cells(data)[8]
+        g = routinekit.guicode(ed.data)
+        blob = g.body[inst.load_addr - g.load_addr:]
+        assert want.to_bytes(4, "little") in blob
+        assert (0x2003986C).to_bytes(4, "little") in blob or want != 0x2003986C
+        if want != 0x2003986C:
+            assert (0x2003986C).to_bytes(4, "little") not in blob
+
+
+def test_followchannel_and_fold_cells_are_located(mcf_136, mcf_147):
+    from fireflymcf import statusfold
+    for data, snd, stt in ((mcf_136, 0x2003986C, 0x20039908), (mcf_147, 0x20039558, 0x200395FC)):
+        assert followchannel.host_sender_addr(data) == snd
+        assert followchannel.host_setter_addr(data) == stt
+        item = statusfold.Light(0x20008000, 1, 0, "bit", 1, None, 0x2003A000, None)
+        assert statusfold.resolve(data, [item]).setter_addr == stt

@@ -347,16 +347,14 @@ def _frame_shape() -> tuple[int, int, int, dict]:
     return len(a), sel, fn, fixed
 
 
-_SENDER_WORD = followchannel.SENDER_PTR_ADDR.to_bytes(4, "little")
-
-
-def routine_frames(ledger: tuple[Step, ...]) -> list[dict]:
+def routine_frames(ledger: tuple[Step, ...], data: bytes) -> list[dict]:
     """One entry per `install_tick_routine` call whose blob carries the host CAN sender's pointer
-    (`followchannel.SENDER_PTR_ADDR`, a little-endian word, as `routinekit.emit_send_frame`'s pool
+    (the image's sender cell, `followchannel.host_sender_addr(data)`, a little-endian word, as `routinekit.emit_send_frame`'s pool
     holds it) or a `routinekit.config_frame` template: {"routine": note, "sender": bool,
     "templates": [{"selector", "function", "kind"}]}. A disclosure, not a sandbox: a routine
     that computes the sender's address (movw/movt) and builds its frame in code is not found."""
     n, sel, fn, fixed = _frame_shape()
+    sender_word = followchannel.host_sender_addr(data).to_bytes(4, "little")
     out = []
     for st in ledger:
         if st.kind != "call" or st.args[0] != "install_tick_routine":
@@ -370,7 +368,7 @@ def routine_frames(ledger: tuple[Step, ...]) -> list[dict]:
             if all(w[k] == v for k, v in fixed.items()) and w[fn] in _FRAME_KINDS:
                 templates.append({"selector": w[sel], "function": w[fn],
                                   "kind": _FRAME_KINDS[w[fn]]})
-        sender = _SENDER_WORD in blob
+        sender = sender_word in blob
         if sender or templates:
             out.append({"routine": note, "sender": sender, "templates": templates})
     return out
@@ -470,7 +468,7 @@ class UserOp(recipe.Op):
         # and the frames its own tick routines send (`routine_frames`), which no table shows
         ctx.handles[(recipe.USER_OP_CAPS, self.spec.id)] = {
             "lost": sorted(before - after), "gained": sorted(after - before),
-            "frames": routine_frames(ed.ledger)}
+            "frames": routine_frames(ed.ledger, data)}
         return out
 
     def verify(self, data: bytes, ctx: recipe.Ctx) -> str:

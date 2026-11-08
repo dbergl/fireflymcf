@@ -37,6 +37,7 @@ holds wherever this module runs.
 """
 from __future__ import annotations
 
+import contextvars
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
@@ -84,6 +85,7 @@ class TickPlan:
     tail_target: int        # the routine's `b.w` target: the hook's current callee
     hook_at: int            # GuiCode-section offset of the hook `bl` (13.6: 0xEE3C)
     hook_old: bytes         # its current 4 bytes
+    sender_addr: int | None = None   # the host CAN sender's SRAM cell, located in the image
 
 
 @dataclass(frozen=True)
@@ -110,7 +112,11 @@ def _plan(data: bytes) -> TickPlan:
     # (`hooklocate.stock_append_point` needs the stock image), so only the alignment is checked.
     if load % 4:
         raise RoutineKitError("BAD_HOOK", f"GuiCode append point {load:#x} is not 4-aligned")
-    return TickPlan(load, tail, hook_at, hook_old)
+    try:
+        sender = followchannel.host_sender_addr(data)
+    except followchannel.FollowChannelError as e:
+        raise RoutineKitError("BAD_HOOK", str(e)) from e
+    return TickPlan(load, tail, hook_at, hook_old, sender)
 
 
 # --------------------------------------------------------------------------------------------
@@ -260,7 +266,11 @@ def install_tick(ed, build: Callable[[int, int], tuple[bytes, int]], note: str) 
     """The two-phase install through an `Editor`: `build(code_load_addr, tail_target)` returns
     `(blob, entry_offset)` (`assemble_tick` returns exactly that)."""
     plan = ed.call("tick_install_plan")
-    blob, entry_offset = build(plan.code_load_addr, plan.tail_target)
+    token = _SENDER.set(plan.sender_addr)    # `emit_send_frame` reads the image's own sender
+    try:
+        blob, entry_offset = build(plan.code_load_addr, plan.tail_target)
+    finally:
+        _SENDER.reset(token)
     return ed.call("install_tick_routine", bytes(blob), int(entry_offset), note,
                    code_load_addr=plan.code_load_addr, tail_target=plan.tail_target)
 
@@ -494,7 +504,11 @@ def emit_tail(r: thumb.Routine, tail_target: int) -> None:
     r.emit(4, lambda h, s: (thumb.b_w(h, tail_target), f"b.w #{tail_target:#x}"))
 
 
-def emit_send_frame(r: thumb.Routine, template_addr: int, *, value_in_r3: bool = False) -> None:
+_SENDER: contextvars.ContextVar = contextvars.ContextVar("routinekit_sender", default=None)
+
+
+def emit_send_frame(r: thumb.Routine, template_addr: int, *, value_in_r3: bool = False,
+                    sender_addr: int | None = None) -> None:
     """Transmit the 12-byte frame at `template_addr` through the host CAN sender: pumpauto's
     send sequence (Finding 7; flashed since 2026-09-04), instruction for instruction.
 
@@ -502,10 +516,18 @@ def emit_send_frame(r: thumb.Routine, template_addr: int, *, value_in_r3: bool =
     frame is copied to the stack with r0-r2 and `r0 = sp` is the argument. With `value_in_r3`,
     r3 is stored over the frame's value halfword (payload[4..5], frame offset 8) before the send,
     so a D1 write can carry a runtime-computed word. The sender is an AAPCS call: r0-r3 are dead
-    after it. Adds the sender pointer and the template address to `r.pool`."""
+    after it. Adds the sender pointer and the template address to `r.pool`.
+
+    The sender's cell is the image's own (host API +0x08, `followchannel.host_sender_addr`):
+    inside `install_tick`'s `build` it is the plan's `sender_addr`; pass `sender_addr` to assemble
+    outside it. With neither it refuses rather than guess a firmware's cell."""
     tname = f"_frame_{template_addr:08x}"
     r.pool.setdefault(tname, template_addr)
-    r.pool.setdefault("_sender", followchannel.SENDER_PTR_ADDR)
+    sender = sender_addr if sender_addr is not None else _SENDER.get()
+    if sender is None:
+        raise RoutineKitError("BAD_ROUTINE", "emit_send_frame needs the image's sender cell: call it "
+                              "inside install_tick's build, or pass sender_addr=")
+    r.pool.setdefault("_sender", sender)
     r.emit(2, lambda h, s: (thumb.sub_sp_imm(20), "sub sp, #0x14"))
     r.ldr_lit(0, tname)
     r.emit(2, lambda h, s: (thumb.ldr_imm(1, 0, 0), "ldr r1, [r0]"))

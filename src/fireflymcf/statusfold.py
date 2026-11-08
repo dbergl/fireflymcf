@@ -91,7 +91,7 @@ class FoldPlan:
     hook_at: int
     hook_old: bytes
     tail_target: int
-    setter_addr: int = followchannel.VARIANT_SETTER
+    setter_addr: int | None = None   # &(variant setter fn-ptr), located by `resolve`
 
 
 def _check_addr(name: str, addr: int) -> None:
@@ -189,7 +189,8 @@ def resolve(data: bytes, items, *, stock: bytes | None = None) -> FoldPlan:
     routine already on the hook, as `readout.resolve` does)."""
     items = validate(items)
     hook_at, hook_old, tail = followchannel.hook_site(data, stock=stock)
-    return FoldPlan(items, hook_at, hook_old, tail)
+    return FoldPlan(items, hook_at, hook_old, tail,
+                    followchannel.host_setter_addr(data))
 
 
 def _imm(v: int) -> str:
