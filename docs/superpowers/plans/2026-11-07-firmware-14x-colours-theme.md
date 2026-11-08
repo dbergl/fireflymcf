@@ -33,7 +33,7 @@ On 13.6 each one returns today's constants.
 
 ## Global Constraints
 
-- **13.6 stays byte-identical.** The full suite passes, and so do the research byte pins (`cd ../firefly-firmware && .venv/bin/python -m pytest tests -q -n auto`). This includes the Saffron and Hank `set_theme` pins.
+- **13.6 stays byte-identical.** The full suite passes, and so do the research byte pins (`cd ../firefly-firmware && .venv/bin/python -m pytest tests -q -n auto`). This includes the reference builds that carry `set_theme`.
 - **No 14.7 constant becomes a locator.** The 14.7 values above are test expectations only.
 - **Each locator refuses on zero or more than one candidate.** Its proof names the instruction addresses it relied on.
 - **Never invent a colour.** `render.py`'s fill policy still governs.
@@ -46,7 +46,7 @@ On 13.6 each one returns today's constants.
 
 1. **A `tablegrow`n image.** The code literal pairs move with the table, so `variable_type_table` must still agree with the 13.6-only `_relocated_variable_tables` override on every grown reference build (Task 1 `test_type_table_on_grown_builds`).
 2. **Value-slot typing on 14.7.** `readout`, `slotsource`, `options`, `outputs` and `status_map` change results on 14.7. Record which results change, and confirm no 13.6 result changes (Task 1).
-3. **An already re-themed image** (Saffron-built 13.6). It must still get today's "already re-themed" refusal, not a vague "not found" (Task 3).
+3. **An already re-themed image** (a 13.6 build that already ran `set_theme`). It must still get today's "already re-themed" refusal, not a vague "not found" (Task 3).
 4. **Palette length.** Bounding 30 → 20 must change no 13.6 byte on any reference recipe (Task 2).
 5. **Black on 14.7.** It has no static `000000` entry, so a label asking for black refuses with `NO_COLOUR` and a message that names the palette (Task 2).
 
@@ -128,11 +128,11 @@ On 13.6 each one returns today's constants.
      - 13.6 returns today's constants exactly;
      - 14.7 returns the table's values;
      - 11.23 refuses;
-     - a Saffron-built 13.6 gets the "already re-themed" message;
+     - a 13.6 build that already ran `set_theme` gets the "already re-themed" message;
      - a mutation of one chain refuses.
   2. Run them and see them fail.
   3. Implement.
-  4. Run both suites, including the Saffron/Hank theme pins.
+  4. Run both suites, including the reference builds that carry `set_theme`.
   5. Commit: `"themeswap: locate the theme-init; tank wells by located index"`.
 
 ### Task 4: `set_theme` on 14.7, proved in the emulator

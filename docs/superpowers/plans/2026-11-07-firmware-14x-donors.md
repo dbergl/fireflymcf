@@ -118,7 +118,7 @@ The readout template's fillB background cell comes from Plan 3. `theme.locate_th
      - `test_mode7_index_bound`: a builder writing a mode-7 index ≥ the located bound refuses.
   2. Run the tests; they should fail.
   3. Implement.
-  4. Run the full suite and the research byte pins. Every Hank, Saffron and engine pin must pass.
+  4. Run the full suite and the research byte pins. Every reference-build and engine pin must pass.
   5. Commit: `"donors: frozen templates behind the grammar proof replace donor index reads"`.
 
 ### Task 3: The glyph-button content donor
