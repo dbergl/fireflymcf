@@ -525,8 +525,9 @@ def emit_send_frame(r: thumb.Routine, template_addr: int, *, value_in_r3: bool =
     r.pool.setdefault(tname, template_addr)
     sender = sender_addr if sender_addr is not None else _SENDER.get()
     if sender is None:
-        raise RoutineKitError("BAD_ROUTINE", "emit_send_frame needs the image's sender cell: call it "
-                              "inside install_tick's build, or pass sender_addr=")
+        raise RoutineKitError(
+            "BAD_ROUTINE", "emit_send_frame outside install_tick needs the image's sender "
+            "cell: pass sender_addr=plan.sender_addr (from tick_install_plan)")
     r.pool.setdefault("_sender", sender)
     r.emit(2, lambda h, s: (thumb.sub_sp_imm(20), "sub sp, #0x14"))
     r.ldr_lit(0, tname)

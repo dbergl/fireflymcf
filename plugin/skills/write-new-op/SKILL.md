@@ -199,7 +199,7 @@ with JSON-able or bytes arguments (lists, not sets):
 | `ed.call("resolve_register", dgn=, instance=, selector=, var_index=, field=)` | an existing receive register and its `slot_addr` |
 | `ed.call("slot_addr", var_index)` | a variable-table slot (index-split) |
 | `config_frame(selector, value, function)` | a 12-byte `0x1FED9` OPTIONS frame template (`0xD1` write, `0xD2` delta, `0xD3` read-back) |
-| `emit_send_frame(r, template_addr, value_in_r3=False)` | the panel's own send call for a template in your prefix |
+| `emit_send_frame(r, template_addr, value_in_r3=False, sender_addr=None)` | the panel's own send call for a template in your prefix; inside `install_tick` the image's sender cell is found for you, outside pass `sender_addr=plan.sender_addr` |
 | `ed.call("find_config_toggle", selector)` | an existing OPTIONS toggle group, or None |
 | `ed.call("own_colour_cell", object_index, "border" or "fill", record=, expect=, repaint=)` | a private mode-7 colour cell for one record's border or fill: the SRAM word (`addr`, u32 `0x00RRGGBB`) a routine must write every tick, and the colour it drew before (`before_word`); with `repaint=True` a store of a new colour also repaints the control in place (without it, the colour shows only at the control's next repaint); touches GuiCode and GuiData |
 | `ed.call("own_colour_cells", [[object_index, field], ...], repaint=)` | the same for several fields with one grow of the table (prefer it for more than one); a list of cells; a dict request takes its own `"repaint"` |

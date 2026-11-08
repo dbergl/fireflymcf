@@ -324,3 +324,26 @@ def test_followchannel_and_fold_cells_are_located(mcf_136, mcf_147):
         assert followchannel.host_setter_addr(data) == stt
         item = statusfold.Light(0x20008000, 1, 0, "bit", 1, None, 0x2003A000, None)
         assert statusfold.resolve(data, [item]).setter_addr == stt
+
+
+def test_manual_two_phase_passes_plan_sender(mcf_147):
+    """The documented manual pattern: `emit_send_frame(..., sender_addr=plan.sender_addr)`;
+    omitting it outside `install_tick` refuses with instructions."""
+    from fireflymcf import routinekit, userop
+    ed = userop.Editor(mcf_147)
+    plan = ed.call("tick_install_plan")
+    assert plan.sender_addr == 0x20039558
+
+    def routine(**kw):
+        r = thumb.Routine({}, error=routinekit.RoutineKitError)
+        routinekit.emit_prologue(r)
+        routinekit.emit_send_frame(r, plan.code_load_addr, **kw)
+        routinekit.emit_tail(r, plan.tail_target)
+        return r
+
+    r = routine(sender_addr=plan.sender_addr)
+    assert r.pool["_sender"] == 0x20039558
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        routine()
+    assert e.value.code == "BAD_ROUTINE"
+    assert "sender_addr=plan.sender_addr" in str(e.value)

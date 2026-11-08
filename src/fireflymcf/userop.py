@@ -354,11 +354,18 @@ def routine_frames(ledger: tuple[Step, ...], data: bytes) -> list[dict]:
     "templates": [{"selector", "function", "kind"}]}. A disclosure, not a sandbox: a routine
     that computes the sender's address (movw/movt) and builds its frame in code is not found."""
     n, sel, fn, fixed = _frame_shape()
-    sender_word = followchannel.host_sender_addr(data).to_bytes(4, "little")
+    sender_word = None      # located lazily: an op with no tick routine never needs the cell
     out = []
     for st in ledger:
         if st.kind != "call" or st.args[0] != "install_tick_routine":
             continue
+        if sender_word is None:
+            try:
+                sender_word = followchannel.host_sender_addr(data).to_bytes(4, "little")
+            except followchannel.FollowChannelError as e:
+                raise routinekit.RoutineKitError(
+                    "BAD_HOOK", f"cannot locate the host sender cell to read this op's tick "
+                    f"routine frames: {e}") from e
         _, args, kwargs = st.args
         blob = bytes(args[0] if args else kwargs.get("blob", b""))
         note = args[2] if len(args) > 2 else kwargs.get("note", "")

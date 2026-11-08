@@ -746,3 +746,40 @@ def test_op_io_failure_is_structured(tmp_path, mcf_136, capsys):
     assert err["code"] == "OP_IO_ERROR" and set(err) == {"op_id", "code", "message", "offers"}
     assert main(["op", "pack", str(pf), "hook_nop", "-o", str(tmp_path / "file" / "x.zip")]) == 1
     assert "OP_IO_ERROR" in capsys.readouterr().err
+
+
+def test_op_without_tick_routine_compiles_when_host_cells_are_unlocatable(
+        tmp_path, mcf_136, monkeypatch):
+    """`routine_frames` locates the sender cell only for an op that installed a tick routine."""
+    from fireflymcf import hooklocate
+    pf = _project(tmp_path, mcf_136, ("nop", "user:hook-nop"))
+    proj = recipe.Project.from_json(pf.read_text())
+
+    def refuse(data):
+        raise hooklocate.HookNotFound("no host cells here")
+    monkeypatch.setattr(hooklocate, "host_api_cells", refuse)
+    with userop.registered(userop.load_user_ops(pf, proj)):
+        res = recipe.compile_project(proj, mcf_136)
+    assert res.ok, res.errors
+
+
+def test_routine_frames_unlocatable_sender_is_a_coded_refusal(mcf_136, monkeypatch):
+    from fireflymcf import hooklocate, routinekit
+    ed = userop.Editor(mcf_136)
+    routinekit.install_tick(ed, lambda load, tail: routinekit.assemble_tick(
+        _tail_only(tail, load), load), "t")
+
+    def refuse(data):
+        raise hooklocate.HookNotFound("no host cells here")
+    monkeypatch.setattr(hooklocate, "host_api_cells", refuse)
+    with pytest.raises(routinekit.RoutineKitError) as e:
+        userop.routine_frames(ed.ledger, mcf_136)
+    assert e.value.code == "BAD_HOOK"
+
+
+def _tail_only(tail, load):
+    from fireflymcf import routinekit, thumb
+    r = thumb.Routine({}, error=routinekit.RoutineKitError)
+    routinekit.emit_prologue(r)
+    routinekit.emit_tail(r, tail)
+    return r

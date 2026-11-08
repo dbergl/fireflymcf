@@ -134,8 +134,8 @@ class MyOp(UserOp):
   when the op changes what the panel can send: a non-empty `capability_delta`, or a
   `(channel, command)` pair of the group and binding tables that its own build added or removed,
   or a tick routine that sends frames of its own. A routine's frames are found in the blob of
-  each `install_tick_routine` call: the host sender's pointer (`SENDER_PTR_ADDR`, the pool word
-  `emit_send_frame` adds) or a `config_frame` template (CAN id, then `FF 96 <selector> 0F`, with
+  each `install_tick_routine` call: the host sender's pointer (the image's own cell, host API +0x08;
+  13.6's is `0x2003986C`; the pool word `emit_send_frame` adds) or a `config_frame` template (CAN id, then `FF 96 <selector> 0F`, with
   D1, D2 or D3), and the refusal names each template's selector and write kind. The record names
   the folder hash, so any edit to the folder voids it.
 - **What that detection cannot see.** It is a disclosure prompt, not a sandbox: a routine that
@@ -221,6 +221,9 @@ loads and what it must tail-branch to. `TickPlan` has these fields:
 - `tail_target`: the hook's current callee.
 - `hook_at`: the hook's GuiCode offset, `0xEE3C`.
 - `hook_old`: the hook's current 4 bytes.
+- `sender_addr`: the host CAN sender's SRAM cell, located in this image (host API +0x08; 13.6
+  `0x2003986C`, 14.7 `0x20039558`). Pass it to `emit_send_frame` when you call it outside
+  `install_tick`.
 
 It refuses (`BAD_HOOK`) in any of these cases:
 
@@ -248,13 +251,14 @@ because an editor call cannot carry a callable:
 
 ```python
 plan = ed.call("tick_install_plan")
-blob, entry = build(plan.code_load_addr, plan.tail_target)
+blob, entry = build(plan.code_load_addr, plan.tail_target)   # emit_send_frame(..., sender_addr=plan.sender_addr)
 ed.call("install_tick_routine", blob, entry, note,
         code_load_addr=plan.code_load_addr, tail_target=plan.tail_target)
 ```
 
 `build(code_load_addr, tail_target)` returns `(blob, entry_offset)`. Only the two calls are
-recorded, so replay never runs `build` again.
+recorded, so replay never runs `build` again. Inside `install_tick`'s `build`, `emit_send_frame`
+finds the sender cell itself; in the manual two-phase form you pass `sender_addr=plan.sender_addr`.
 
 **Routine helpers** (pure, on a `thumb.Routine`):
 
@@ -296,7 +300,9 @@ OPTIONS config frame in the template pool's wire order: the u32 little-endian CA
 `pumpauto.config_frame`. The D1 payload on selector `0xEE` is *hardware* (`FF96EE0F0100D1EA`,
 PC.47). 13.6's own pool carries D2 and D3 records of this shape (*proven-from-code*, Finding 7).
 
-**`emit_send_frame(r, template_addr, *, value_in_r3=False)`** (pure). Emits the host CAN sender
+**`emit_send_frame(r, template_addr, *, value_in_r3=False, sender_addr=None)`** (pure given the
+sender cell: inside `install_tick`'s `build` it is the plan's; outside, pass
+`sender_addr=plan.sender_addr`, or it refuses `BAD_ROUTINE`; there is no 13.6 fallback). Emits the host CAN sender
 call for the 12-byte frame at `template_addr`. It is the send sequence from `add_pump_auto_off`
 (*hardware*: flashed and verified 2026-09-04), instruction for instruction, and a test pins it against the
 built routine:
@@ -307,7 +313,7 @@ ldr r0, =template
 ldr r1, [r0]; ldr r2, [r0, #4]; str r1, [sp]; str r2, [sp, #4]
 ldr r1, [r0, #8]; str r1, [sp, #8]
 mov r0, sp
-ldr r2, =0x2003986C; ldr r2, [r2]
+ldr r2, =<sender cell>; ldr r2, [r2]        ; 13.6: 0x2003986C
 blx r2
 add sp, #0x14
 ```
