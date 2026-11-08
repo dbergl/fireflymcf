@@ -16,8 +16,8 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import (coverage, donors, firmware, followchannel, grammar, guidata, patch,
-                        relocate, theme)
+from fireflymcf import (celltables, coverage, donors, firmware, followchannel, grammar, guidata,
+                        patch, relocate, theme)
 
 SCHEMA = 1
 
@@ -569,9 +569,10 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 
 
 # Coded refusals from the locators an op builds on (a template or donor this image does not
-# prove, `donors`; a record grammar that is not 13.6's, `grammar`), surfaced under their own
-# code as the op's refusal, as FollowChannelError is above.
-_CODED = (donors.DonorError, grammar.GrammarError)
+# prove, `donors`; a record grammar that is not 13.6's, `grammar`; a cell or type table that
+# does not locate, `celltables`), surfaced under their own code as the op's refusal, as
+# FollowChannelError is above.
+_CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:

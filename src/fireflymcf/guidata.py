@@ -1976,17 +1976,24 @@ def variable_type_table(data: bytes) -> int:
 
 def find_variable_tables(data: bytes) -> tuple[int, int]:
     """`(data_ptr_off, type_off)`: GuiData-relative offsets of the variable register
-    tables `layout.variable_register` reads, located by `variable_table_literals` (the
-    GuiCode literal pairs that load them, checked against the structural pointer run).
+    tables `layout.variable_register` reads, located by `celltables.locate` (GuiCode's bound
+    compares, checked against the literal pairs of `variable_table_literals`).
 
     On 13.6 this returns exactly `(layout.VAR_DPTR_TABLE_136, layout.VAR_TYPE_TABLE_136)`
     = `(0x44BC8, 0x4492C)` -- checked in `tests/test_guidata.py` after locating, not
     fitted to it -- and on a grown image the relocated pair the code now loads. Raises
-    `VariableTableNotFound` if no run scores at least `VARIABLE_TABLE_MIN_RUN`, or the code
-    names no table or disagrees with itself.
+    `VariableTableNotFound` (`celltables.CellTableError` is one) when either method does not
+    prove out or they disagree. An image with no GuiCode section falls to
+    `variable_table_literals`, which refuses it as before.
     """
-    found = variable_table_literals(data)
-    return found.dptr_off, found.type_off
+    from . import celltables, theme
+    try:
+        theme.guicode_section(data)
+    except ValueError:
+        found = variable_table_literals(data)
+        return found.dptr_off, found.type_off
+    located = celltables.locate(data)
+    return located.cell_off, located.type_off
 
 
 def switch_candidates(data: bytes, rec, match_off: int | None = None) -> list[tuple[int, int]]:

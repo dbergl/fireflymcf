@@ -269,11 +269,17 @@ def _pcrel_ldr(insn, base: int) -> "tuple[int, int] | None":
 
 def _reaches_indexed_read_off_base(md, code: bytes, base: int, start_off: int, idx_reg: int,
                                    pool_addrs: "set[int]", max_visits: int = 28,
-                                   max_depth: int = 2) -> bool:
+                                   max_depth: int = 2, loads_seen: "set[int] | None" = None
+                                   ) -> bool:
     """Like `_indexed_read_follows`, but requires the indexed load to (a) use `idx_reg` as its
     index and (b) read through a base register loaded from one of `pool_addrs` (the literal
     words holding the table base). Tracks which registers currently hold the table base along
-    each path, so a `cmp.w` is credited to a table only when its gated read is that table's."""
+    each path, so a `cmp.w` is credited to a table only when its gated read is that table's.
+
+    `loads_seen`, when given, collects the literal address of every PC-relative `ldr` the walk
+    decodes. Until the walk loads one of `pool_addrs` its states do not depend on them, so a
+    walk with empty `pool_addrs` that never loads a pool of table T is exactly T's walk, and
+    T's answer is False (`celltables` uses this to skip such tables)."""
     frontier = deque([(start_off, 0, frozenset())])
     seen: set = set()
     visits = 0
@@ -292,6 +298,8 @@ def _reaches_indexed_read_off_base(md, code: bytes, base: int, start_off: int, i
         lit = _pcrel_ldr(insn, base)
         if lit is not None:                       # a literal load (re)defines its dest register
             dst, target = lit
+            if loads_seen is not None:
+                loads_seen.add(target)
             regs.discard(dst)
             if target in pool_addrs:
                 regs.add(dst)
