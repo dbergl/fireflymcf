@@ -41,7 +41,9 @@ class SramReachError(ValueError):
     """The render state or the cell area does not prove out on this image. `code` is one of
     RENDER_STATE_BASES (not exactly one literal SRAM base is addressed through `movw` offsets),
     CELL_AREA_NO_CEILING (no register-indexed base lies above the render state to bound the
-    area) or CELL_OUTSIDE_AREA (a display-cell table row names SRAM outside the area)."""
+    area) or CELL_OUTSIDE_AREA (a display-cell table row names SRAM outside the area).
+    RENDER_STATE_BASES also refuses an image where an authored routine addresses its own
+    literal SRAM base through `movw` offsets: that is a second such base."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)

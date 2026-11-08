@@ -45,7 +45,8 @@ def test_the_live_table_is_the_one_a_gui_code_base_literal_actually_loads(path):
 # An `ast`-based scan instead flags every real (non-comment, non-docstring, non-string-literal)
 # appearance of the flagged identifiers or integer literals, anywhere in an expression, and is
 # blind to source formatting.
-_FLAGGED_NAMES = {"CELL_TABLE_OFF", "VAR_TYPE_TABLE_OFF", "VAR_DPTR_TABLE_136", "VAR_TYPE_TABLE_136"}
+_FLAGGED_NAMES = {"CELL_TABLE_OFF", "CELL_TABLE_LEN", "VAR_TYPE_TABLE_OFF", "VAR_DPTR_TABLE_136",
+                  "VAR_TYPE_TABLE_136"}
 _FLAGGED_INTS = {0x44BC8, 0x4492C}
 
 # (path, lineno): one-line reason a hit here is not the dead-copy defect. Only a constant's own
@@ -55,7 +56,9 @@ _ALLOW = {
     ("src/fireflymcf/layout.py", 280): "VAR_DPTR_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/layout.py", 281): "VAR_TYPE_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/status_map.py", 37): "CELL_TABLE_OFF's own definition (the stock constant)",
-    ("src/fireflymcf/statusbind.py", 50):
+    ("src/fireflymcf/status_map.py", 38): "CELL_TABLE_LEN's own definition (13.6's 665 rows; "
+                                          "the live count is celltables.row_count)",
+    ("src/fireflymcf/statusbind.py", 51):
         "CELL_TABLE_OFF re-exports status_map.CELL_TABLE_OFF -- kept, per the task brief, because "
         "tests/docs cite it as the stock value; not used to index a table",
 }

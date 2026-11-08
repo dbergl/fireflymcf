@@ -6506,7 +6506,15 @@ class AddRegisterReadout(Op):
                     data, [(self.width_bytes, readout._TYPE_FOR_WIDTH[self.width_bytes])])
                 cell = cells[0]
             else:
-                out, cell, cell_edits = readout.allocate_display_cell(data, self.width_bytes)
+                try:
+                    out, cell, cell_edits = readout.allocate_display_cell(data,
+                                                                          self.width_bytes)
+                except statusbind.SpareRowsUnknown:
+                    # A grown stock: no stock index is known spare, so mint a fresh one (as
+                    # draw:false does). Fresh, so this instance is unverified below.
+                    out, cells, cell_edits = readout.allocate_fresh_cells(
+                        data, [(self.width_bytes, readout._TYPE_FOR_WIDTH[self.width_bytes])])
+                    cell = cells[0]
             plan = readout.resolve(out, register=reg, cell=cell, mask=self.mask,
                                    add=self.add, shift=self.shift, sub=self.sub,
                                    mul=self.mul, stock=ctx.stock)

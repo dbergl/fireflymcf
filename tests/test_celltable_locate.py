@@ -316,17 +316,72 @@ def test_spare_not_read_elsewhere(corpus, version):
 
 
 @pytest.mark.parametrize("version", ["11.23", "13.6", "14.7"])
-def test_stock_rows_is_rows_on_stock(corpus, version):
-    data = corpus[version]["mcf"]
-    assert celltables.stock_rows(data) == celltables.row_count(data)
+def test_no_stale_pair_on_stock(corpus, version):
+    assert celltables.stale_pair(corpus[version]["mcf"]) is None
 
 
 @pytest.mark.skipif(not _GROWN_BUILDS, reason="research builds/ not linked")
 @pytest.mark.parametrize("path", _GROWN_BUILDS, ids=lambda p: p.name)
-def test_no_spare_among_grown_rows(path):
-    """A grown row was minted for an op: never offered as spare, even when no decoded record
-    names it. Every reference build grew from 13.6, whose stale pair stays at +0x44BC8."""
+def test_grown_build_spares_come_from_the_stock(path, mcf_136):
+    """Every reference build grew from 13.6, whose stale pair stays at +0x44BC8. As its own
+    stock it refuses spare reuse; inside a recipe whose stock is 13.6 stock, no grown row is
+    offered."""
+    from fireflymcf import stockscope
     data = path.read_bytes()
-    assert celltables.stock_rows(data) == 665
-    spare = statusbind.spare_cell_indices(data)
+    assert celltables.stale_pair(data) == 0x44BC8
+    with pytest.raises(statusbind.SpareRowsUnknown) as e:
+        statusbind.spare_cell_indices(data)
+    assert e.value.code == "SPARE_ROWS_UNKNOWN"
+    with stockscope.stock_scope(mcf_136):
+        spare = statusbind.spare_cell_indices(data)
     assert spare and max(spare) < 665
+
+
+# the first grown reference build (the review reproduced the case on one, 2026-11-08)
+_GROWN = _GROWN_BUILDS[0] if _GROWN_BUILDS else None
+
+
+def _grown_with_a_repointed_spare() -> bytes:
+    """The review's case: one stock spare row (173) repointed after the grow, as `index_cell`
+    does. A prefix match against the stale copy stops at row 173 and loses the stock count."""
+    data = bytearray(_GROWN.read_bytes())
+    gs, _ = guidata.guidata_extent(bytes(data))
+    struct.pack_into("<I", data, gs + celltables.cell_table_off(bytes(data)) + 173 * 4,
+                     0x2003A000)
+    return bytes(data)
+
+
+@pytest.mark.skipif(_GROWN is None, reason="research builds/ not linked")
+def test_repointed_spare_on_grown_image_offers_no_grown_row(mcf_136):
+    from fireflymcf import stockscope
+    data = _grown_with_a_repointed_spare()
+    with stockscope.stock_scope(mcf_136):
+        spare = statusbind.spare_cell_indices(data)
+    assert spare and max(spare) < 665
+
+
+@pytest.mark.skipif(_GROWN is None, reason="research builds/ not linked")
+def test_grown_stock_refuses_spare_reuse():
+    for data in (_GROWN.read_bytes(), _grown_with_a_repointed_spare()):
+        with pytest.raises(statusbind.SpareRowsUnknown) as e:
+            statusbind.spare_cell_indices(data)
+        assert e.value.code == "SPARE_ROWS_UNKNOWN"
+
+
+def test_spare_rows_unknown_is_coded_for_recipes():
+    assert statusbind.SpareRowsUnknown in recipe._CODED
+    assert issubclass(statusbind.SpareRowsUnknown, statusbind.StatusBindError)
+
+
+@pytest.mark.skipif(_GROWN is None, reason="research builds/ not linked")
+def test_stale_pair_needs_an_unread_copy(monkeypatch):
+    """The test can fail: a copy GuiCode still loads is not stale, so the same image with every
+    base reported as read has no stale pair."""
+    from fireflymcf import tablegrow
+    data = _GROWN.read_bytes()
+    monkeypatch.setattr(tablegrow, "find_base_refs", lambda d, base: [0x240000])
+    celltables._stale_pair.cache_clear()
+    try:
+        assert celltables._stale_pair(data, guidata.SRAM_LOW, guidata.SRAM_HIGH) is None
+    finally:
+        celltables._stale_pair.cache_clear()

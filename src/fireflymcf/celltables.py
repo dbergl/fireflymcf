@@ -268,38 +268,40 @@ def row_count(data: bytes) -> int:
     return locate(data).rows
 
 
-def stock_rows(data: bytes) -> int:
-    """The rows the table had before any grow: `rows` on an ungrown image; on a grown one, the
-    row count of the lowest-addressed copy of the live pair left in GuiData. A grow
-    (`tablegrow.grow_indexed_tables`) copies every old row verbatim to the end of GuiData and
-    leaves the old pair in place, unread, so the stock pair is the lowest copy. Rows at or past
-    this count were minted by an op (`readout.allocate_fresh_cells`) and are never spare.
 
-    A copy is accepted only when, at a 4-aligned GuiData offset below the live cell table, the
-    live cell table's first rows repeat word for word and the live type table's first rows
-    repeat byte for byte ending, 4-aligned, where that cell copy starts (the stock adjacency).
-    Measured 2026-11-08: 665 on every grown reference build (copy at +0x44BC8); no copy on
-    stock 11.23/13.6/14.7. Refuses as `locate` does."""
+def stale_pair(data: bytes) -> int | None:
+    """The GuiData offset of a cell table GuiCode no longer reads, or None: the sign that this
+    image's display-cell table was grown (`tablegrow.grow_indexed_tables` copies the pair to the
+    end of GuiData and leaves the old pair in place, unread).
+
+    A stale pair is accepted only when, below the located pair, all of these hold: the live cell
+    table's first four rows repeat at a 4-aligned offset C (a grow copies old rows verbatim); the
+    live type table's first 16 bytes repeat at a 4-aligned T with 0 < C - T <= align4(rows)
+    (the stock adjacency, type table ending where its cell table starts); and no GuiCode literal
+    loads either base (`tablegrow.find_base_refs`). It answers only "grown or not"; the old pair's
+    row count is not read from it. Measured 2026-11-08: +0x44BC8 on every grown reference build;
+    None on stock 11.23/13.6/14.7. Refuses as `locate` does."""
     locate(data)
-    return _stock_rows(data, guidata.SRAM_LOW, guidata.SRAM_HIGH)
+    return _stale_pair(data, guidata.SRAM_LOW, guidata.SRAM_HIGH)
 
 
 @memo.content_cached(copy=None)
-def _stock_rows(data: bytes, sram_lo: int, sram_hi: int) -> int:
+def _stale_pair(data: bytes, sram_lo: int, sram_hi: int) -> int | None:
+    from . import tablegrow
     ct = _locate(data, sram_lo, sram_hi)
     gs, _ = guidata.guidata_extent(data)
     live, live_t = gs + ct.cell_off, gs + ct.type_off
-    cells, types = data[live:live + 4 * ct.rows], data[live_t:live_t + ct.rows]
+    cell16, type16 = data[live:live + 16], data[live_t:live_t + 16]
+    span4 = (ct.rows + 3) & ~3
     at = gs
     while True:
-        at = data.find(cells[:16], at, live)
+        at = data.find(cell16, at, min(live, live_t))
         if at < 0:
-            return ct.rows
+            return None
         if (at - gs) % 4 == 0:
-            n = 0
-            while n < ct.rows and data[at + 4 * n:at + 4 * n + 4] == cells[4 * n:4 * n + 4]:
-                n += 1
-            t = at - ((n + 3) & ~3)
-            if n >= 4 and t >= gs and data[t:t + n] == types[:n]:
-                return n
+            t = data.rfind(type16, max(gs, at - span4), at)
+            if (t >= 0 and (t - gs) % 4 == 0
+                    and not tablegrow.find_base_refs(data, _GD + at - gs)
+                    and not tablegrow.find_base_refs(data, _GD + t - gs)):
+                return at - gs
         at += 1

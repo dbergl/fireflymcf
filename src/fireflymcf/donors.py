@@ -59,7 +59,7 @@ necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's
 every glyph drawn in its box).
 
 **Witnesses come from the stock image** (2026-11-08). Inside a recipe, `recipe` holds
-`witness_scope(ctx.stock)` around every op's apply and verify, so a record an earlier op wrote
+`stockscope.stock_scope(ctx.stock)` (here `witness_scope`) around every op's apply and verify, so a record an earlier op wrote
 (ungated writers such as `set_font` included) can never witness a later one. Outside a recipe, a
 direct caller's `data` is taken as the stock. A built image used as a compile base is that
 recipe's stock: its authored records count, which is acceptable because they passed their own
@@ -101,13 +101,11 @@ wrappers do not recode it; `recipe` surfaces the code as the op's refusal.
 """
 from __future__ import annotations
 
-import contextlib
-import contextvars
 import struct
 import types
 from dataclasses import dataclass
 
-from . import glyphs, grammar, guidata, memo, metrics, records, themeswap
+from . import glyphs, grammar, guidata, memo, metrics, records, stockscope, themeswap
 
 
 class DonorError(Exception):
@@ -336,27 +334,10 @@ def require_grammar(data: bytes, what: str) -> grammar.GrammarProof:
     return _prove(data, what)
 
 
-_WITNESS_IMAGE: contextvars.ContextVar = contextvars.ContextVar("donors_witness_image",
-                                                                default=None)
-
-
-@contextlib.contextmanager
-def witness_scope(stock: bytes | None):
-    """Within the block, witnesses (whole-record and per-field) come from `stock`: `recipe`
-    holds one around every op's apply and verify, with the compile's stock image (module
-    docstring)."""
-    token = _WITNESS_IMAGE.set(None if stock is None else bytes(stock))
-    try:
-        yield
-    finally:
-        _WITNESS_IMAGE.reset(token)
-
-
-def witness_image(data: bytes) -> bytes:
-    """The image witnesses are read from: the recipe's stock inside `witness_scope`, else
-    `data` itself (a direct caller's `data` is taken as the stock)."""
-    stock = _WITNESS_IMAGE.get()
-    return bytes(data) if stock is None else stock
+# The stock scope is shared with every reader that judges against the stock image
+# (`stockscope`); these names are kept for the donors callers.
+witness_scope = stockscope.stock_scope
+witness_image = stockscope.stock_image
 
 
 @memo.content_cached(copy=None)

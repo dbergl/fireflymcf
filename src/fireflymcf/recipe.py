@@ -17,7 +17,7 @@ import json
 import struct
 
 from fireflymcf import (celltables, coverage, donors, firmware, followchannel, grammar, guidata,
-                        patch, relocate, sramreach, theme)
+                        patch, relocate, sramreach, statusbind, stockscope, theme)
 
 SCHEMA = 1
 
@@ -573,7 +573,7 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 # does not locate, `celltables`), surfaced under their own code as the op's refusal, as
 # FollowChannelError is above.
 _CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError,
-          sramreach.SramReachError)
+          sramreach.SramReachError, statusbind.SpareRowsUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:
@@ -582,7 +582,7 @@ def _verify(o, data: bytes, ctx: Ctx) -> str:
     whole-image state another op may have rewritten, so it is refused as a gate is: a failed
     CompileResult in a build that holds a user op, raised otherwise (`_finish_or_refuse`)."""
     try:
-        with donors.witness_scope(getattr(ctx, "stock", None)):
+        with stockscope.stock_scope(getattr(ctx, "stock", None)):
             return o.verify(data, ctx)
     except followchannel.FollowChannelError as e:
         raise GateError("HOOK_REFUSED", "%s verify: the per-tick hook does not prove out: %s"
@@ -595,7 +595,7 @@ def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
     """`o.apply` plus the tick-chain check, with a per-tick hook that does not prove out
     (`FollowChannelError` escaping an op) refused as DETOUR_REFUSED, naming the op."""
     try:
-        with donors.witness_scope(getattr(ctx, "stock", None)):
+        with stockscope.stock_scope(getattr(ctx, "stock", None)):
             out = o.apply(data, ctx)
     except followchannel.FollowChannelError as e:
         raise RecipeError("DETOUR_REFUSED", "%s: the per-tick hook does not prove out: %s"
