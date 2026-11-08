@@ -23,7 +23,12 @@ def test_locate_136(mcf_136):
     assert (ct.cell_off, ct.type_off, ct.rows) == (0x44BC8, 0x4492C, 665)
     assert (ct.cell_base, ct.type_base) == (0x90044BC8, 0x9004492C)
     assert ct.bound_form == "cmp.w"
-    assert len(ct.bound_sites) == 8 and 0x2533BA in ct.bound_sites
+    assert len(ct.gate_sites) == 8 and 0x2533BA in ct.gate_sites
+    assert ct.clamp_sites == (0x25383C, 0x253870, 0x25388E, 0x2538AC, 0x2538C6, 0x2538E4)
+    assert ct.bound_sites == tuple(sorted(ct.gate_sites + ct.clamp_sites))
+    # each clamp names its store and the read that indexes the cell table with what it stored
+    assert ("clamp 0x25383c (cmp.w): strh at 0x25383a stores the index to 0x20036da8; ldrh at "
+            "0x258208 reads it back and indexes the cell table at 0x25820c") in ct.proof
     assert ct.cell_refs == (0x2535B4, 0x25385C, 0x253D04, 0x25689C, 0x257E68, 0x258020,
                             0x2582C0)
     assert ct.type_refs == (0x253D08, 0x257E6C, 0x258024, 0x2582C4)
@@ -35,14 +40,16 @@ def test_locate_147(mcf_147):
     assert (ct.type_off, ct.rows) == (0x42978, 505)
     assert ct.cell_off == ct.type_off + 0x1FC          # align4(505): the cell table as found
     assert ct.bound_form == "cmp.w"
-    assert 0x255C82 in ct.bound_sites
+    assert 0x255C82 in ct.gate_sites and len(ct.gate_sites) == 8
+    assert ct.clamp_sites == (0x256104, 0x256138, 0x256156, 0x256174, 0x25618E, 0x2561AC)
 
 
 def test_locate_1123_reads_the_movw_bound(mcf_1123):
     ct = celltables.locate(mcf_1123)
     assert (ct.cell_off, ct.type_off, ct.rows) == (0x44B60, 0x4492C, 562)
     assert ct.bound_form == "movw+cmp"
-    assert 0x250CEA in ct.bound_sites
+    assert 0x250CEA in ct.gate_sites
+    assert len(ct.clamp_sites) == 6 and 0x251548 in ct.clamp_sites
 
 
 def test_accessors_follow_locate(corpus):
@@ -385,3 +392,18 @@ def test_stale_pair_needs_an_unread_copy(monkeypatch):
         assert celltables._stale_pair(data, guidata.SRAM_LOW, guidata.SRAM_HIGH) is None
     finally:
         celltables._stale_pair.cache_clear()
+
+
+def test_halfword_moves_reuse_equals_a_fresh_evaluation(mcf_136):
+    """`_halfword_moves` reuses a recent evaluation's untouched starts; after a grow (GuiCode
+    literals repointed, bounds rebumped) the reused answer equals a from-scratch one."""
+    from fireflymcf import readout, tablegrow
+    grown, _cells, _edits = readout.allocate_fresh_cells(mcf_136, [(2, 3)])
+    args = []
+    for img in (mcf_136, grown):
+        code, base = tablegrow._guicode_slice(img)
+        args.append((bytes(code), base, guidata.SRAM_LOW, guidata.SRAM_HIGH))
+    celltables._halfword_moves(*args[0])
+    reused = celltables._halfword_moves(*args[1])
+    celltables._RECENT_HALF.clear()
+    assert celltables._halfword_moves.__wrapped__(*args[1]) == reused

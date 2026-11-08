@@ -149,13 +149,22 @@ def resolve_cell_tables(data: bytes) -> "tuple[int, int, int]":
     Raises `ReadoutError` (NO_DISPLAY_CELL) if the tables cannot be located -- a clean refusal,
     never a guess. Whether the table can be GROWN is `allocate_fresh_cells`'s question.
     """
+    ct = _located(data)
+    return ct.cell_base, ct.type_base, ct.rows
+
+
+def _located(data: bytes):
+    """`celltables.locate(data)`, with a table that does not locate (a `CellTableError`, a
+    `VariableTableNotFound`, or a `ValueError` such as a missing GuiCode section) refused as
+    `ReadoutError` NO_DISPLAY_CELL, naming the locator's own code."""
     from . import celltables
     try:
-        ct = celltables.locate(data)
-    except guidata.VariableTableNotFound as e:
+        return celltables.locate(data)
+    except (guidata.VariableTableNotFound, ValueError) as e:
+        code = getattr(e, "code", None)
         raise ReadoutError(
-            "NO_DISPLAY_CELL: cannot locate the cell table structurally (unsupported build?): %s" % e)
-    return ct.cell_base, ct.type_base, ct.rows
+            "NO_DISPLAY_CELL: cannot locate the cell table structurally (unsupported build?): %s%s"
+            % ("%s: " % code if code else "", e)) from e
 
 
 def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
@@ -188,15 +197,14 @@ def allocate_fresh_cells(data: bytes, specs: "list[tuple[int, int | None]]"
     if not specs:
         return data, [], []
 
-    from . import celltables
-    cell_base, type_base, old_len = resolve_cell_tables(data)
+    located = _located(data)
+    cell_base, type_base, old_len = located.cell_base, located.type_base, located.rows
 
     # Discover the GuiCode patch surfaces structurally too (base literals to repoint, bound sites
     # to rebump) and pass their counts to the grow as its self-consistency guard. Refuse if any is
     # empty -- a table with no relocatable refs or no rebumpable bound cannot be grown safely. A
     # bound in a form the grow cannot rebump (11.23's `movw+cmp`) refuses as
     # `celltables.CellTableError` CELL_TABLE_BOUND_FORM (`tablegrow.cell_table_bound_sites`).
-    located = celltables.locate(data)
     cell_refs = list(located.cell_refs)
     type_refs = list(located.type_refs)
     bound_sites = tablegrow.cell_table_bound_sites(data, located)

@@ -269,8 +269,8 @@ def _pcrel_ldr(insn, base: int) -> "tuple[int, int] | None":
 
 def _reaches_indexed_read_off_base(md, code: bytes, base: int, start_off: int, idx_reg: int,
                                    pool_addrs: "set[int]", max_visits: int = 28,
-                                   max_depth: int = 2, loads_seen: "set[int] | None" = None
-                                   ) -> bool:
+                                   max_depth: int = 2, loads_seen: "set[int] | None" = None,
+                                   hits: "list[int] | None" = None) -> bool:
     """Like `_indexed_read_follows`, but requires the indexed load to (a) use `idx_reg` as its
     index and (b) read through a base register loaded from one of `pool_addrs` (the literal
     words holding the table base). Tracks which registers currently hold the table base along
@@ -279,7 +279,9 @@ def _reaches_indexed_read_off_base(md, code: bytes, base: int, start_off: int, i
     `loads_seen`, when given, collects the literal address of every PC-relative `ldr` the walk
     decodes. Until the walk loads one of `pool_addrs` its states do not depend on them, so a
     walk with empty `pool_addrs` that never loads a pool of table T is exactly T's walk, and
-    T's answer is False (`celltables` uses this to skip such tables)."""
+    T's answer is False (`celltables` uses this to skip such tables).
+
+    `hits`, when given, receives the address of the indexed load that answered True."""
     frontier = deque([(start_off, 0, frozenset())])
     seen: set = set()
     visits = 0
@@ -308,6 +310,8 @@ def _reaches_indexed_read_off_base(md, code: bytes, base: int, start_off: int, i
         if insn.mnemonic.startswith("ldr") and idx_match:
             b, ix = int(idx_match.group(1)), int(idx_match.group(2))
             if ix == idx_reg and b in regs:
+                if hits is not None:
+                    hits.append(insn.address)
                 return True
 
         frozen = frozenset(regs)
@@ -360,52 +364,55 @@ def find_index_bound(data: bytes, base_addr: int) -> int:
 
 
 def cell_table_bound_sites(data: bytes, located) -> list[int]:
-    """Sorted GuiCode runtime addresses of every bound compare the display-cell table's grow
-    must rebump, for `located` (`celltables.locate(data)`).
-
-    The surface is `find_bound_sites(data, rows - 1)`: every `cmp.w rX, #bound` an indexed read
-    follows. That is wider than the sites `celltables.locate` credits to the table: GuiCode also
-    clamps an index to the bound as it stores it (`cmp.w r0,#bound ; bls.w`, then `strh` 0 on
-    the out-of-range path), and the read that index later feeds is not within the locator's two
-    hops. 13.6 and 14.7 each have 8 located sites and 14 in all (measured 2026-11-08).
+    """The display-cell table's rebump surface: exactly `located.bound_sites`
+    (`celltables.locate`: the gate sites, which bound an indexed read of the table, and the
+    clamp sites, which bound an index GuiCode stores and later reads back to index it), checked
+    complete in both directions before a grow rewrites any of it.
 
     Refuses (`celltables.CellTableError`) rather than leave a gate at the old bound:
-      - CELL_TABLE_BOUND_FORM: a located site, or any unsigned bound compare at the table's
-        bound, is not `cmp.w rX, #imm` (11.23's `movw rB,#imm ; cmp rI,rB`, or a 16-bit
-        `cmp rI,#imm8`), a form the grow does not re-encode;
-      - CELL_TABLE_BOUND_SITES: a located site is missing from the surface, or an unsigned
-        bound compare at the bound (`celltables._bound_compares`, every form) is not in it.
-    The second check is the guarantee that nothing is missed: every compare of the bound's
-    value followed by an unsigned branch, in any of the three forms, is either rebumped or a
-    refusal. On 13.6 and 14.7 the two sets are equal."""
+      - CELL_TABLE_BOUND_FORM: a surface site is a compare in another form than
+        `cmp.w rX, #imm` (11.23's `movw rB,#imm ; cmp rI,rB`, or a 16-bit `cmp rI,#imm8`),
+        which the grow does not re-encode;
+      - CELL_TABLE_BOUND_SITES: a compare of a register against `rows - 1` or `rows` anywhere
+        in GuiCode, in any of the three forms and whatever branch follows it
+        (`celltables._compares`), is outside the surface; or a surface site does not decode as
+        `cmp.w rX, #rows-1`.
+    On 13.6 and 14.7 both directions hold: 14 compares at the bound, 8 gate and 6 clamp
+    sites, none at `rows` (measured 2026-11-08)."""
     from . import celltables
     bound = located.rows - 1
     code, base = _guicode_slice(data)
     code = bytes(code)
-    compares = [(base + off, form) for off, _after, _ri, imm, form
-                in celltables._bound_compares(code, base) if imm == bound]
-    # `located.bound_form` joins its sites' forms with "+", and "movw+cmp" is one form, so the
-    # located sites' forms are read from their compares, not split out of that string
-    forms = {a: form for a, form in compares}
-    odd = sorted({form for _a, form in compares if form != "cmp.w"}
-                 | {forms.get(a, "unrecognised") for a in located.bound_sites
-                    if forms.get(a) != "cmp.w"})
+    forms = {base + off: form for off, _after, _ri, _imm, form in celltables._compares(code, base)}
+    odd = sorted({forms[a] for a in located.bound_sites if forms.get(a, "cmp.w") != "cmp.w"})
     if odd:
         raise celltables.CellTableError(
             "CELL_TABLE_BOUND_FORM",
             "the display-cell table's bound %#x is compared in the %s form, which the grow does "
             "not rebump (only cmp.w rX,#imm); this build's table cannot be grown"
             % (bound, " and ".join(odd)))
-    sites = find_bound_sites(data, bound)
-    missing = sorted(set(located.bound_sites) - set(sites))
-    unbumped = sorted({a for a, _f in compares} - set(sites))
-    if missing or unbumped:
+    surface = set(located.bound_sites)
+    outside = sorted(base + off for off, _after, _ri, imm, _form
+                     in celltables._compares(code, base)
+                     if imm in (bound, bound + 1) and base + off not in surface)
+    undecoded = []
+    for site in sorted(surface):
+        try:
+            if read_cmpw_bound(data, site) != bound:
+                undecoded.append(site)
+        except TableGrowError:
+            undecoded.append(site)
+    if outside or undecoded:
         raise celltables.CellTableError(
             "CELL_TABLE_BOUND_SITES",
-            "the grow's bound surface for %#x (%d cmp.w sites) leaves out %s; refusing rather "
-            "than leave a gate at the old bound"
-            % (bound, len(sites), ", ".join("%#x" % a for a in missing + unbumped)))
-    return sites
+            "the display-cell table's rebump surface (%d sites at bound %#x) is not complete: "
+            "%s; refusing rather than leave a gate at the old bound"
+            % (len(surface), bound, "; ".join(filter(None, (
+                ("compares against %#x/%#x no gate or clamp credits: %s" % (
+                    bound, bound + 1, ", ".join("%#x" % a for a in outside))) if outside else "",
+                ("surface sites that are not cmp.w #%#x: %s" % (
+                    bound, ", ".join("%#x" % a for a in undecoded))) if undecoded else "")))))
+    return sorted(surface)
 
 
 # --------------------------------------------------------------------------------------
@@ -482,7 +489,12 @@ def read_cmpw_bound(data: bytes, site_runtime: int) -> int:
     section = theme.guicode_section(data)
     base = theme.guicode_base(section)
     off = _guicode_off(section, base, site_runtime)
-    hw1, hw2 = struct.unpack_from("<HH", data, off)
+    return _cmpw_imm(bytes(data[off:off + 4]), site_runtime)
+
+
+def _cmpw_imm(insn4: bytes, site_runtime: int) -> int:
+    """The immediate of the `cmp.w rN, #imm` in `insn4`; `TableGrowError` if it is not one."""
+    hw1, hw2 = struct.unpack("<HH", insn4)
     if (hw1 & 0xFBF0) != 0xF1B0 or (hw2 & 0x8F00) != 0x0F00:
         raise TableGrowError(
             f"{site_runtime:#x} is not a cmp.w rN,#imm (hw1={hw1:#06x} hw2={hw2:#06x})")
@@ -642,6 +654,9 @@ def grow_indexed_tables(data, tables: "list[IndexedTable]", old_len: int, extra:
     for runtime in bound_sites:
         off = _guicode_off(section, gc_base, runtime)
         cur = bytes(out[off:off + 4])
+        if _cmpw_imm(cur, runtime) != old_bound:
+            raise TableGrowError(
+                f"bound site {runtime:#x} is not cmp.w #{old_bound:#x} ({cur.hex()})")
         new_cmp = _reencode_cmpw(cur, new_bound)
         out[off:off + 4] = new_cmp
         new_cmp_by_off[off] = new_cmp

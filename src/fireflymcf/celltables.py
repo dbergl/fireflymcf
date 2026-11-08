@@ -19,8 +19,30 @@ stock copy in place but unread. Every reader and writer resolves through here; a
    table starts: `T + align4(rows) == cell`.
 5. The type table has one source of truth: the located pair must equal the literal pair
    `guidata.variable_table_literals` names, or the locator refuses.
+6. The bound's other compares are clamp sites: GuiCode stores an index with `strh` just before
+   comparing it to the bound (and stores 0 when it is out of range), and a later `ldrh` of that
+   SRAM halfword indexes the cell table. A compare counts as a clamp site only when
+   `_halfword_moves` resolves both the store and a read whose loaded register reaches an indexed
+   `ldr` off the cell table's base (`_clamps`); `proof` names the store, the read and the indexed
+   load. `bound_sites` = gate sites (step 2) + clamp sites: everything a grow rebumps
+   (`tablegrow.cell_table_bound_sites` refuses unless every compare against the bound is in it).
 
-Measured 2026-11-07: 13.6 cell 0x44BC8 / type 0x4492C / 665 rows (`cmp.w r0,#0x298`, 8 sites);
+   Measured 2026-11-08 (compare: strh -> SRAM; ldrh reader -> indexed cell read):
+   13.6  0x25383C: 0x25383A -> 0x20036DA8; 0x258208 -> 0x25820C
+         0x253870: 0x25386E -> 0x20036DAA; 0x257C56 -> 0x257C5A
+         0x25388E: 0x25388C -> 0x20036DAC; 0x257D38 -> 0x257D3C
+         0x2538AC: 0x2538AA -> 0x20036DAE; 0x257E3C -> 0x257E40
+         0x2538C6: 0x2538C4 -> 0x20036DB0; 0x257ED4 -> 0x257ED8
+         0x2538E4: 0x2538E2 -> 0x20036DB2; 0x257FF4 -> 0x257FF8
+   14.7  0x256104: 0x256102 -> 0x20036DAC; 0x25AAC4 -> 0x25AAC8
+         0x256138: 0x256136 -> 0x20036DAE; 0x25A512 -> 0x25A516
+         0x256156: 0x256154 -> 0x20036DB0; 0x25A5F4 -> 0x25A5F8
+         0x256174: 0x256172 -> 0x20036DB2; 0x25A6F8 -> 0x25A6FC
+         0x25618E: 0x25618C -> 0x20036DB4; 0x25A790 -> 0x25A794
+         0x2561AC: 0x2561AA -> 0x20036DB6; 0x25A8B0 -> 0x25A8B4
+   11.23 credits six too (0x251548 ... 0x25163E, `movw+cmp`), which the grow refuses by form.
+
+Measured 2026-11-07: 13.6 cell 0x44BC8 / type 0x4492C / 665 rows (`cmp.w r0,#0x298`, 8 gate sites);
 14.7 0x42B74 / 0x42978 / 505 (`cmp.w #0x1F8`); 11.23 0x44B60 / 0x4492C / 562 (`movw r3,#0x231 ;
 cmp r0,r3`); and the relocated pair on every grown reference build.
 """
@@ -28,6 +50,7 @@ from __future__ import annotations
 
 import re
 import struct
+from collections import deque
 from dataclasses import dataclass
 
 from . import guidata, memo
@@ -59,11 +82,13 @@ class CellTables:
     cell_base: int                  # runtime address (0x9xxxxxxx) of the u32 cell table
     type_base: int                  # runtime address of the u8 type table
     rows: int                       # bound + 1
-    bound_sites: tuple[int, ...]    # runtime addresses of the bound compares gating the cell table
+    bound_sites: tuple[int, ...]    # gate_sites + clamp_sites: every compare a grow rebumps
     bound_form: str                 # "cmp", "cmp.w" or "movw+cmp" ("+"-joined if mixed)
     cell_refs: tuple[int, ...]      # GuiCode loads of cell_base (`tablegrow.find_base_refs`)
     type_refs: tuple[int, ...]
     proof: tuple[str, ...]
+    gate_sites: tuple[int, ...] = ()    # compares that gate an indexed read of the cell table
+    clamp_sites: tuple[int, ...] = ()   # compares that clamp an index stored for a later read
 
     @property
     def cell_off(self) -> int:
@@ -76,10 +101,26 @@ class CellTables:
 
 @memo.content_cached(copy=None)
 def _bound_compares(code: bytes, base: int) -> tuple:
-    """`(off, after, idx_reg, imm, form)` for every bound compare decoded at a halfword of
-    `code` (a linear pass desyncs across literal pools) and followed by an unsigned branch.
-    `cmp.w` comes from `tablegrow._cmp_w_sites` (memoised, incremental across GuiCode edits);
-    the 16-bit `cmp` and the `movw` of the register form are prefiltered by their encodings."""
+    """`(off, after, idx_reg, imm, form)` for every compare of `_compares` followed by an
+    unsigned branch: the bound compares."""
+    from . import tablegrow
+    md = tablegrow._capstone_thumb()
+    out = []
+    for site in _compares(code, base):
+        nxt = (next(md.disasm_lite(code[site[1]:site[1] + 4], base + site[1], 1), None)
+               if site[1] + 2 <= len(code) else None)
+        if nxt is not None and nxt[2].split(".")[0] in _UNSIGNED_BRANCHES:
+            out.append(site)
+    return tuple(out)
+
+
+@memo.content_cached(copy=None)
+def _compares(code: bytes, base: int) -> tuple:
+    """`(off, after, idx_reg, imm, form)` for every register-against-constant compare decoded
+    at a halfword of `code` (a linear pass desyncs across literal pools), whatever follows it:
+    `cmp rI,#imm8`, `cmp.w rI,#imm` and `movw rB,#imm ; cmp rI,rB`. `cmp.w` comes from
+    `tablegrow._cmp_w_sites` (memoised, incremental across GuiCode edits); the 16-bit `cmp` and
+    the `movw` of the register form are prefiltered by their encodings."""
     import numpy as np
     from . import tablegrow
     md = tablegrow._capstone_thumb()
@@ -113,12 +154,7 @@ def _bound_compares(code: bytes, base: int) -> tuple:
         mr = _REG_REG.fullmatch(j[3])
         if mr and int(mr.group(2)) == int(m.group(1)):
             found.append((off, off + 4 + j[1], int(mr.group(1)), int(m.group(2), 0), "movw+cmp"))
-    out = []
-    for site in sorted(found):
-        nxt = one(site[1]) if site[1] + 2 <= len(code) else None
-        if nxt is not None and nxt[2].split(".")[0] in _UNSIGNED_BRANCHES:
-            out.append(site)
-    return tuple(out)
+    return tuple(sorted(found))
 
 
 @memo.content_cached(copy=None)
@@ -163,6 +199,240 @@ class _DecodeCache:
         if hit is None:
             hit = self._seen[key] = [_Insn(*i) for i in self._md.disasm_lite(code, addr, 1)]
         return hit
+
+
+_REGNO = {**{"r%d" % i: i for i in range(13)}, "sb": 9, "sl": 10, "fp": 11, "ip": 12}
+_HALF_STEPS = 400                   # as `sramreach._MAX_STEPS`: a literal's longest lifetime
+_REG_LIST = re.compile(r"\{([^}]*)\}")
+_PC_LIT = re.compile(r"^(\w+), \[pc, #(0x[0-9a-f]+|\d+)\]$")
+_MEM = re.compile(r"\[(\w+)(?:, (?:#(-?0x[0-9a-f]+|-?\d+)|(\w+)))?\]$")
+
+
+@memo.content_cached(copy=None)
+def _halfword_moves(code: bytes, base: int, sram_lo: int, sram_hi: int) -> tuple:
+    """`(stores, reads)`: every `strh` and `ldrh`/`ldrsh` of GuiCode whose SRAM address a
+    straight-line evaluation resolves. `stores` maps a store's address to `{(src_reg, addr)}`;
+    `reads` maps an SRAM address to `{(load address, dest_reg, load size)}`.
+
+    The evaluation starts at every literal load of an SRAM word (`sramreach._literal_loads`) and
+    follows the registers forward through literal loads, `movw`/`mov #imm`, register copies
+    (`mov r3, r2`) and `add` of known values or an immediate (`add.w r2, r2, #0x6c00`). A branch
+    within `_BRANCH_DEPTH` hops is taken as well as fallen through (13.6's reader at 0x257FF4
+    is reached only through a `blt`); a return or `pop` ends a path, and so does a point where
+    no register holds an SRAM value. Each start decodes at most `_HALF_STEPS` instructions. A
+    call clobbers r0-r3 and r12; any other write forgets its destination. It is blind to bases
+    passed in as parameters, to conditional writes inside an IT block (decoded one at a time,
+    they read as unconditional), and to computed offsets, so it credits only what it resolves:
+    a store or read it misses is not credited, and the grow then refuses."""
+    from . import sramreach
+    import numpy as np
+    md = _decoder()
+    seen: dict = {}
+    touched: set = set()
+
+    def ins(addr: int):
+        off = addr - base
+        touched.add(off)
+        hit = seen.get(addr)
+        if hit is None:
+            hit = seen[addr] = (next(md.disasm_lite(code[off:off + 4], addr, 1), None)
+                                if 0 <= off and off + 2 <= len(code) else None)
+        return hit
+
+    def regs_of(text: str) -> list:
+        return [_REGNO[t] for t in (x.strip() for x in text.split(",")) if t in _REGNO]
+
+    # Each start's result depends only on the bytes it decoded (instructions and literal
+    # words, `touched`), so a recent evaluation of the same base is reused for every start none
+    # of whose touched offsets lies within 3 bytes before a changed byte: a compile asks again
+    # after each GuiCode edit, which changes a few literals and appends at the end.
+    affected = None
+    prev_starts: dict = {}
+    for prev_code, prev_key, prev in reversed(_RECENT_HALF):
+        if prev_key == (base, sram_lo, sram_hi):
+            common = min(len(code), len(prev_code))
+            changed = np.flatnonzero(np.frombuffer(code, np.uint8, common)
+                                     != np.frombuffer(prev_code, np.uint8, common)).tolist()
+            if len(code) != len(prev_code):
+                changed += range(max(0, common - 4), max(len(code), len(prev_code)))
+            affected = {o for c in changed for o in range(c - 3, c + 1)}
+            prev_starts = prev
+            break
+
+    per_start: dict = {}
+    for site, rx, value, size in sramreach._literal_loads(code, base):
+        if not sram_lo <= value < sram_hi:
+            continue
+        old = prev_starts.get((site, rx, value, size))
+        if old is not None and affected is not None and not (old[0] & affected):
+            per_start[(site, rx, value, size)] = old
+            continue
+        touched = set()
+        st: dict = {}
+        rd: dict = {}
+        work = [(site + size, {rx: value}, 0)]
+        budget = _HALF_STEPS
+        visited: set = set()
+        while work and budget > 0:
+            pos, regs, depth = work.pop()
+            state = (pos, frozenset(regs.items()))
+            if state in visited:
+                continue
+            visited.add(state)
+            budget -= _walk_half(ins, code, base, pos, regs, depth, work, st, rd,
+                                 sram_lo, sram_hi, regs_of, budget, touched)
+        touched.update(range(site - base, site - base + size))
+        per_start[(site, rx, value, size)] = (
+            frozenset(touched),
+            tuple((k, x) for k, v in st.items() for x in v),
+            tuple((k, x) for k, v in rd.items() for x in v))
+    _RECENT_HALF.append((code, (base, sram_lo, sram_hi), per_start))
+    stores: dict = {}
+    reads: dict = {}
+    for _touched, st_items, rd_items in per_start.values():
+        for k, x in st_items:
+            stores.setdefault(k, set()).add(x)
+        for k, x in rd_items:
+            reads.setdefault(k, set()).add(x)
+    return ({k: frozenset(v) for k, v in stores.items()},
+            {k: frozenset(v) for k, v in reads.items()})
+
+
+_RECENT_HALF: deque = deque(maxlen=2)
+
+
+_COND_BRANCH = re.compile(r"^b(?:eq|ne|cs|cc|hs|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)$")
+_BRANCH_DEPTH = 2                   # branch hops followed from one literal load
+
+
+def _walk_half(ins, code, base, pos, regs, depth, work, stores, reads, sram_lo, sram_hi,
+               regs_of, budget, touched) -> int:
+    """One straight-line run of `_halfword_moves` from `pos`, of at most `budget` instructions;
+    a branch within `_BRANCH_DEPTH` hops queues its target on `work` (a conditional one also
+    falls through). Returns the instructions it decoded (at least 1)."""
+    steps = 0
+    while steps < budget:
+        steps += 1
+        i = ins(pos)
+        if i is None:
+            break
+        _addr, isize, mn, ops = i
+        op = mn.split(".")[0]
+        parts = [x.strip() for x in ops.split(",")]
+        dst = _REGNO.get(parts[0]) if parts else None
+        if op in ("bx", "pop") or op.startswith(("tbb", "tbh")):
+            break
+        if op == "b" or _COND_BRANCH.match(op) or op in ("cbz", "cbnz"):
+            m = re.search(r"#(0x[0-9a-f]+)$", ops)
+            if m and depth < _BRANCH_DEPTH:
+                work.append((int(m.group(1), 16), dict(regs), depth + 1))
+            if op == "b":
+                break
+            pos += isize
+            continue
+        if op in ("bl", "blx"):
+            for r in (0, 1, 2, 3, 12):
+                regs.pop(r, None)
+        elif op in ("ldrh", "ldrsh", "strh"):
+            m = _MEM.search(ops)
+            where = None
+            if m and _REGNO.get(m.group(1)) in regs:
+                b = regs[_REGNO[m.group(1)]]
+                if m.group(3) is None:
+                    where = b + (int(m.group(2), 0) if m.group(2) else 0)
+                elif _REGNO.get(m.group(3)) in regs:
+                    where = b + regs[_REGNO[m.group(3)]]
+            if where is not None and dst is not None:
+                if op == "strh":
+                    stores.setdefault(pos, set()).add((dst, where))
+                else:
+                    reads.setdefault(where, set()).add((pos, dst, isize))
+            if "!" in ops or "], #" in ops:
+                m2 = re.search(r"\[(\w+)", ops)
+                if m2:
+                    regs.pop(_REGNO.get(m2.group(1)), None)
+            if op != "strh":
+                regs.pop(dst, None)
+        elif op.startswith(("ldm", "stm", "push")):
+            m = _REG_LIST.search(ops)
+            if op.startswith("ldm") and m:
+                for r in regs_of(m.group(1)):
+                    regs.pop(r, None)
+            if "!" in ops:
+                regs.pop(dst, None)
+        elif op.startswith(("str", "cmp", "cmn", "tst", "teq", "it", "nop")):
+            pass
+        elif dst is not None:
+            new = None
+            lit = _PC_LIT.match(ops)
+            if op == "ldr" and lit:
+                at = ((pos + 4) & ~3) + int(lit.group(2), 0) - base
+                touched.update(range(at, at + 4))
+                if 0 <= at and at + 4 <= len(code):
+                    new = struct.unpack_from("<I", code, at)[0]
+            elif op in ("movw", "mov", "movs") and len(parts) == 2:
+                if parts[1].startswith("#"):
+                    new = int(parts[1][1:], 0)
+                elif _REGNO.get(parts[1]) in regs:
+                    new = regs[_REGNO[parts[1]]]
+            elif op in ("add", "adds", "addw"):
+                terms = parts[1:] if len(parts) == 3 else parts[:2] if len(parts) == 2 else []
+                vals = []
+                for t in terms:
+                    if t.startswith("#"):
+                        vals.append(int(t[1:], 0))
+                    elif _REGNO.get(t) in regs:
+                        vals.append(regs[_REGNO[t]])
+                if terms and len(vals) == len(terms):
+                    new = sum(vals) & 0xFFFFFFFF
+            if op.startswith(("umull", "smull", "umlal", "smlal", "ldrd", "ldrexd")):
+                regs.pop(_REGNO.get(parts[1]) if len(parts) > 1 else None, None)
+            if new is None:
+                regs.pop(dst, None)
+            else:
+                regs[dst] = new
+        if not any(sram_lo <= v < sram_hi for v in regs.values()):
+            break
+        pos += isize
+    return max(steps, 1)
+
+
+@memo.content_cached(copy=None)
+def _clamps(code: bytes, base: int, cell: int, bound: int, gates: tuple, sram_lo: int,
+            sram_hi: int) -> tuple:
+    """`(site, form, store, addr, ((reader, read), ...))` for every clamp site of the cell table:
+    a bound compare (`_bound_compares`, imm == `bound`, not a gate site) whose index register
+    the instruction just before it stores with `strh` to SRAM `addr`, where some `ldrh` of
+    `addr` (`reader`) loads a register that indexes the cell table (`read`, the indexed `ldr`
+    off a base literal-loaded with `cell`, `tablegrow._reaches_indexed_read_off_base`). A
+    compare with no such reader is not credited."""
+    from . import tablegrow, xref
+    stores, reads = _halfword_moves(code, base, sram_lo, sram_hi)
+    md = _DecodeCache(tablegrow._capstone_thumb())
+    pools = {base + o for o in xref.find_u32(code, cell)}
+    out = []
+    for off, _after, ri, imm, form in _bound_compares(code, base):
+        site = base + off
+        if imm != bound or site in gates:
+            continue
+        for st in range(site - 8, site):
+            for reg, addr in sorted(stores.get(st, ())):
+                if reg != ri:
+                    continue
+                found = []
+                for reader, rd, rsize in sorted(reads.get(addr, ())):
+                    hits: list = []
+                    if tablegrow._reaches_indexed_read_off_base(
+                            md, code, base, reader - base + rsize, rd, pools, hits=hits):
+                        found.append((reader, hits[0]))
+                if found:
+                    out.append((site, form, st, addr, tuple(found)))
+    return tuple(sorted(set(out)))
+
+
+def _decoder():
+    from . import tablegrow
+    return tablegrow._capstone_thumb()
 
 
 def _guidata_literals(code: bytes, base: int, span: int) -> tuple:
@@ -226,20 +496,29 @@ def _locate(data: bytes, sram_lo: int, sram_hi: int) -> CellTables:
             "CELL_TABLE_ADJACENCY",
             "type table %#x + align4(%d) = %#x is not the cell table's base %#x"
             % (typ, rows, typ + span4, cell))
-    forms = sorted({f for _s, f in sites})
+    gates = tuple(sorted(s for s, _f in sites))
+    clamps = _clamps(code, base, cell, bound, gates, sram_lo, sram_hi)
+    forms = sorted({f for _s, f in sites} | {c[1] for c in clamps})
     cell_refs = tuple(tablegrow.find_base_refs(data, cell))
     type_refs = tuple(tablegrow.find_base_refs(data, typ))
     proof = (
         "bound %#x (%s) gates the cell table at %d sites: %s"
-        % (bound, "+".join(forms), len(sites), ", ".join("%#x" % s for s, _f in sites)),
+        % (bound, "+".join(sorted({f for _s, f in sites})), len(sites),
+           ", ".join("%#x" % s for s, _f in sites)),
+        *("clamp %#x (%s): strh at %#x stores the index to %#x; %s"
+          % (site, form, st, addr, "; ".join(
+              "ldrh at %#x reads it back and indexes the cell table at %#x" % rr
+              for rr in readers))
+          for site, form, st, addr, readers in clamps),
         "type table %#x shares the bound at %d sites: %s"
         % (typ, len(gated[typ][bound]), ", ".join("%#x" % s for s, _f in gated[typ][bound])),
         "%#x + align4(%d) == %#x" % (typ, rows, cell),
         "cell table loaded at %s; type table at %s"
         % (", ".join("%#x" % r for r in cell_refs), ", ".join("%#x" % r for r in type_refs)),
     )
-    return CellTables(cell, typ, rows, tuple(sorted(s for s, _f in sites)), "+".join(forms),
-                      cell_refs, type_refs, proof)
+    clamp_sites = tuple(c[0] for c in clamps)
+    return CellTables(cell, typ, rows, tuple(sorted(gates + clamp_sites)), "+".join(forms),
+                      cell_refs, type_refs, proof, gates, clamp_sites)
 
 
 def locate(data: bytes) -> CellTables:

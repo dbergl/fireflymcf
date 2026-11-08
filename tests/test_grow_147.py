@@ -6,11 +6,12 @@ The numbers are test expectations only (the 2026-11-07 prototype grow of 14.7, r
 """
 from __future__ import annotations
 
+import dataclasses
 import struct
 
 import pytest
 
-from fireflymcf import celltables, coverage, guidata, readout, sramreach, tablegrow
+from fireflymcf import celltables, coverage, guidata, readout, sramreach, tablegrow, theme
 
 GD = 0x90000000
 
@@ -41,7 +42,12 @@ def test_grow_147_relocates_the_pair_and_locates_it_again(mcf_147, grown_147):
     before, after = celltables.locate(mcf_147), celltables.locate(out)
     assert (after.cell_base, after.type_base, after.rows) == (0x90095168, 0x90094F6C, 507)
     assert after.bound_form == "cmp.w"
-    assert len(after.bound_sites) == len(before.bound_sites)
+    # the full rebump surface, 8 gate and 6 clamp sites, unchanged in place by the grow
+    assert before.bound_sites == after.bound_sites == (
+        0x255C82, 0x255D44, 0x255E24, 0x255F1C, 0x256104, 0x256138, 0x256156, 0x256174,
+        0x25618E, 0x2561AC, 0x25633E, 0x25638E, 0x2564A0, 0x259130)
+    assert after.clamp_sites == before.clamp_sites and len(after.gate_sites) == 8
+    assert all(tablegrow.read_cmpw_bound(out, a) == 506 for a in after.bound_sites)
     assert guidata.find_variable_tables(out) == (after.cell_off, after.type_off)
     assert celltables.stale_pair(out) == before.cell_off       # the old pair, left unread
     # the new row names the fresh cell with the requested type; the stock rows are verbatim
@@ -68,16 +74,16 @@ def test_grow_147_twice(grown_147):
     out2, cells2, _ = readout.allocate_fresh_cells(out, [(1, 1)])
     assert cells2[0].slot == 507
     ct = celltables.locate(out2)
-    assert ct.rows >= 508
+    assert ct.rows == 509                  # 508 needed; 0x1FB is not encodable, 0x1FC is
     assert _row(out2, ct, 507) == (cells2[0].addr, 1)
     assert cells2[0].addr != _row(out, celltables.locate(out), 505)[0]
     assert coverage.analyse(out2, deep=True).unclaimed == []
 
 
 def test_cell_table_copies_use_the_located_type_base(grown_147, monkeypatch):
-    """`coverage._cell_table_copies` names the live copy from `celltables.locate`: with the
-    locator refusing, it recognises nothing, so the grow's appended pair falls to the trailing
-    object and deep coverage refuses (the check can fail)."""
+    """`coverage._cell_table_copies` names the live copy from `celltables.locate` (type base,
+    cell base, rows); with the locator stubbed to refuse, it names no copy (the check can
+    fail)."""
     out, _cells, _edits = grown_147
     gs, ge = guidata.guidata_extent(out)
     copies = coverage._cell_table_copies(out, gs, gs, ge - 4)
@@ -98,24 +104,65 @@ def test_grow_refuses_the_1123_movw_bound(mcf_1123):
     assert "movw+cmp" in str(e.value)
 
 
-def test_bound_surface_covers_the_located_sites(mcf_136, mcf_147):
-    """The rewrite surface is every unsigned bound compare at the table's bound: the located
-    sites plus the clamp-and-store sites (`cmp.w r0,#bound ; bls.w`) the locator does not credit
-    to the table, all `cmp.w`; 13.6's is exactly what `find_bound_sites` has always rebumped."""
+def test_bound_surface_is_the_located_sites(mcf_136, mcf_147):
+    """The grow rebumps exactly `located.bound_sites`; on 13.6 that is what `find_bound_sites`
+    has always rebumped, so 13.6 output is unchanged."""
     for data in (mcf_136, mcf_147):
         ct = celltables.locate(data)
         sites = tablegrow.cell_table_bound_sites(data, ct)
-        assert set(ct.bound_sites) < set(sites)
-        assert sites == tablegrow.find_bound_sites(data, ct.rows - 1)
+        assert sites == list(ct.bound_sites) == tablegrow.find_bound_sites(data, ct.rows - 1)
         assert len(sites) == 14
 
 
-def test_bound_surface_refuses_a_missed_compare(mcf_147, monkeypatch):
-    """A bound compare the rebump surface leaves out refuses (stub the surface one site short)."""
+def _guicode_patch(data: bytes, runtime: int, new: bytes) -> bytes:
+    sec = theme.guicode_section(data)
+    off = tablegrow._guicode_off(sec, theme.guicode_base(sec), runtime)
+    out = bytearray(data)
+    out[off:off + len(new)] = new
+    return bytes(out)
+
+
+def test_an_extra_uncredited_bound_compare_refuses(mcf_147):
+    """Turn some other `cmp.w rX,#imm` into `cmp.w rX,#bound`: no gate or clamp credits it, so
+    the surface is incomplete and the grow refuses, naming it."""
     ct = celltables.locate(mcf_147)
-    full = tablegrow.find_bound_sites(mcf_147, ct.rows - 1)
-    monkeypatch.setattr(tablegrow, "find_bound_sites", lambda data, bound: full[:-1])
+    code, base = tablegrow._guicode_slice(mcf_147)
+    for off, _size, op_str in tablegrow._cmp_w_sites(bytes(code), base):
+        imm = int(op_str.rsplit("#", 1)[1], 0) if "#" in op_str else None
+        if imm is not None and imm not in (ct.rows - 1, ct.rows) and op_str.startswith("r"):
+            break
+    site = base + off
+    mutated = _guicode_patch(mcf_147, site,
+                             tablegrow._reencode_cmpw(bytes(code[off:off + 4]), ct.rows - 1))
+    mct = celltables.locate(mutated)
+    assert site not in mct.bound_sites
     with pytest.raises(celltables.CellTableError) as e:
-        tablegrow.cell_table_bound_sites(mcf_147, ct)
+        readout.allocate_fresh_cells(mutated, [(2, 3)])
     assert e.value.code == "CELL_TABLE_BOUND_SITES"
-    assert "%#x" % full[-1] in str(e.value)
+    assert "%#x" % site in str(e.value)
+
+
+def test_a_clamp_without_its_reader_is_not_credited(mcf_136):
+    """Replace the one read of 13.6's clamp-0x25383C store (`ldrh r2,[r3,r2]` at 0x258208,
+    state+0x6BF8) with `movs r2,#0`: the clamp is no longer credited, and the grow refuses."""
+    assert celltables.locate(mcf_136).clamp_sites[0] == 0x25383C
+    mutated = _guicode_patch(mcf_136, 0x258208, bytes.fromhex("0022"))
+    ct = celltables.locate(mutated)
+    assert 0x25383C not in ct.clamp_sites and len(ct.clamp_sites) == 5
+    with pytest.raises(celltables.CellTableError) as e:
+        tablegrow.cell_table_bound_sites(mutated, ct)
+    assert e.value.code == "CELL_TABLE_BOUND_SITES" and "0x25383c" in str(e.value)
+
+
+def test_a_surface_site_that_is_not_the_compare_refuses(mcf_147):
+    """A surface site whose bytes no longer decode as `cmp.w #bound` refuses: here a clamp
+    site rewritten to compare against 0x1F0 (the surface is the stock image's)."""
+    ct = celltables.locate(mcf_147)
+    site = ct.clamp_sites[0]
+    sec = theme.guicode_section(mcf_147)
+    off = tablegrow._guicode_off(sec, theme.guicode_base(sec), site)
+    mutated = _guicode_patch(mcf_147, site, tablegrow._reencode_cmpw(mcf_147[off:off + 4], 0x1F0))
+    with pytest.raises(celltables.CellTableError) as e:
+        tablegrow.cell_table_bound_sites(mutated, ct)
+    assert e.value.code == "CELL_TABLE_BOUND_SITES"
+    assert "not cmp.w #0x1f8: %#x" % site in str(e.value)

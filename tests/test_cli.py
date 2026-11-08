@@ -353,13 +353,16 @@ def test_pins_on_a_grown_image_reports_spares_unknown(tmp_path, mcf_136):
     `statusbind.spare_cell_indices`), which it says, with the reason, and still lists the pins."""
     import json
     from tests.conftest import REPO_ROOT
-    from fireflymcf import readout
+    from fireflymcf import celltables, readout
     grown, _cells, _edits = readout.allocate_fresh_cells(mcf_136, [(2, 3)])
+    live = celltables.locate(grown).cell_off
+    assert live != 0x44BC8                          # the label names the located (grown) table
     path = tmp_path / "mcf-grown.bin"
     path.write_bytes(grown)
     r = _run("pins", str(path), cwd=REPO_ROOT)
     assert r.returncode == 0, r.stderr
-    assert "spare +0x44BC8 indices: unknown (SPARE_ROWS_UNKNOWN" in r.stdout
+    assert (f"spare +0x{live:X} indices: unknown (SPARE_ROWS_UNKNOWN: the cell table was "
+            "grown; which rows are stock spares is unknown)") in r.stdout
     assert len([ln for ln in r.stdout.splitlines() if ln[:4].strip().isdigit()]) > 10
     r = _run("pins", str(path), "--json", cwd=REPO_ROOT)
     assert r.returncode == 0, r.stderr

@@ -1526,8 +1526,13 @@ def _cmd_pins(args: argparse.Namespace) -> int:
     try:
         spares, spares_unknown = statusbind.spare_cell_indices(data), None
     except statusbind.SpareRowsUnknown as e:
-        spares, spares_unknown = None, (str(e) if str(e).startswith(e.code)
-                                        else f"{e.code}: {e}")
+        spares, spares_unknown = None, (f"{e.code}: the cell table was grown; which rows are "
+                                        "stock spares is unknown")
+    from . import celltables
+    try:
+        spare_label = f"spare +0x{celltables.locate(data).cell_off:X} indices"
+    except (guidata.VariableTableNotFound, ValueError):
+        spare_label = "spare display-cell indices"
     if args.json:
         out = {"pins": rows, "spare_cell_indices": spares}
         if spares_unknown is not None:
@@ -1552,7 +1557,7 @@ def _cmd_pins(args: argparse.Namespace) -> int:
             for c in r["captions"]:
                 print(f"{'':>10}caption  {c['text']!r} ({'+'.join(c['via'])}, objects "
                       f"{', '.join(map(str, c['objects']))}): {c['when']}")
-    print(f"\nspare +0x44BC8 indices: "
+    print(f"\n{spare_label}: "
           f"{spares if spares_unknown is None else f'unknown ({spares_unknown})'}")
     print("OUTPUTS-page name: the G12 OUTPUTS row's names; + = shown only under some floorplan "
           "or option (--names lists the conditions and the control captions)")
