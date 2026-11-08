@@ -248,8 +248,8 @@ def locate_theme_init(data: bytes) -> ThemeInit:
          written again until the rail chain reads it); active the position-14 instruction;
          rail the chain at positions 18-19 on the button's r3.
       4. Cells are the store targets' literals; each must be SRAM and a type-10 entry of the
-         variable table the code loads (`guidata.find_variable_tables`), its index the lowest
-         such entry.
+         variable table the code loads (`guidata.find_variable_tables`), named by exactly one
+         such entry (its mode-7 index); a second refuses.
       5. The values are replayed from the instructions.
 
     13.6 and 14.7 match (14.7 `0x248386..0x2483BC`, the same bytes); 11.23 has no match and
@@ -359,7 +359,7 @@ def _locate_theme_init(data: bytes, skeletons: tuple, sram_low: int, sram_high: 
         if not (addr == 0 or sram_low <= addr < sram_high):
             break
         if addr and data[gs + type_off + index] == colour_type:
-            by_cell.setdefault(addr, index)
+            by_cell.setdefault(addr, []).append(index)
         index += 1
     cells: dict = {}
     indices: dict = {}
@@ -374,8 +374,14 @@ def _locate_theme_init(data: bytes, skeletons: tuple, sram_low: int, sram_high: 
                 raise ThemeInitError("the theme-init %s store at %#x targets %#x, which no "
                                      "type-%d (colour) variable-table entry names"
                                      % (role, at[label].address, cell, colour_type))
+            if len(by_cell[cell]) != 1:
+                raise ThemeInitError(
+                    "the theme-init %s store at %#x targets %#x, which %d type-%d (colour) "
+                    "variable-table entries name (indices %s); its mode-7 index is ambiguous"
+                    % (role, at[label].address, cell, len(by_cell[cell]), colour_type,
+                       ", ".join(str(i) for i in by_cell[cell])))
             cs.append(cell)
-            ix.append(by_cell[cell])
+            ix.append(by_cell[cell][0])
         cells[role], indices[role] = tuple(cs), tuple(ix)
 
     sites = {"lit_bg": literal("bg literal")[0], "lit_panel": literal("panel literal")[0],

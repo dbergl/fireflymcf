@@ -447,3 +447,23 @@ def test_plan_on_147_patches_the_located_sites(mcf_147):
 
 def test_tank_fill_offsets_136_unchanged(mcf_136):
     assert len(themeswap._tank_fill_offsets(mcf_136)) == 3
+
+
+def test_theme_init_refuses_a_role_cell_with_two_colour_entries(mcf_136):
+    """Give the well cell (button's first, idx 161) a second type-10 entry: its index is
+    ambiguous, so the locator refuses rather than take one."""
+    ti = themeswap.locate_theme_init(mcf_136)
+    well_cell = ti.cells["button"][0]
+    gs, _ = guidata.guidata_extent(mcf_136)
+    dptr, toff = guidata.find_variable_tables(mcf_136)
+    # an index whose entry is not a colour cell: point it at the well cell, type 10
+    spare = next(i for i in range(1, 600)
+                 if mcf_136[gs + toff + i] != 10
+                 and struct.unpack_from("<I", mcf_136, gs + dptr + 4 * i)[0] != 0)
+    out = bytearray(mcf_136)
+    struct.pack_into("<I", out, gs + dptr + 4 * spare, well_cell)
+    out[gs + toff + spare] = 10
+    with pytest.raises(themeswap.ThemeInitError, match="indices") as e:
+        themeswap.locate_theme_init(bytes(out))
+    msg = str(e.value)
+    assert f"{well_cell:#x}" in msg and "161" in msg and str(spare) in msg
