@@ -62,6 +62,12 @@ names the candidate with the longest matching prefix and its first difference.
 - **On 14.7** the arms for wt 10/18 and wt 14 differ (moved state offsets and a re-laid record
   array). `proof` names them as not proven, with the first differing instruction.
 
+**Text drawers** (2026-11-08). The wt-11 drawer `FUN_002559A0` and wt-8 drawer `FUN_002557C0`
+are fingerprinted too and compared the same way. Their result is `text_drawers_twin`: True when
+both have exactly one twin, else False with the reason in `proof`. It never makes `prove` refuse.
+On 14.7 they are not twins; `proof` names the first differing instruction. `donors` uses the
+flag for its witness gate.
+
 **What is not proven.** A callee's own code: the mapping proves only that the twin calls
 corresponding helpers in the same pattern. Fingerprinted code is compared, not executed.
 
@@ -83,6 +89,9 @@ from typing import Iterator
 from . import memo, theme
 
 FINGERPRINT_RESOURCE = "data/grammar136.json"
+# The text drawers: fingerprinted and compared like the decoder, reported in
+# `GrammarProof.text_drawers_twin`, never refused on.
+TEXT_DRAWERS = ("text11", "text8")
 
 
 class GrammarError(ValueError):
@@ -100,6 +109,8 @@ class GrammarProof:
     renderer_wtypes: frozenset[int]     # wtypes whose renderer arm (and all it reaches) is a twin
     # the subset whose arm is the default (out-of-range) arm: they draw nothing of their own
     renderer_default_wtypes: frozenset[int] = frozenset()
+    # both text drawers (wt 11 `FUN_002559A0`, wt 8 `FUN_002557C0`) have a twin; never a refusal
+    text_drawers_twin: bool = False
 
 
 # ---------------------------------------------------------------------------------------------
@@ -712,7 +723,16 @@ def _prove(data: bytes, fp_text: str) -> GrammarProof:
     lay, lay_bounds, p2 = _whole(code, base, "layout", fp["layout"], regions)
     ren, wtypes, defaults, p3 = _renderer(code, base, fp["renderer"], regions)
     bounds = {n: (a, b) for n, (a, b, _s) in {**dec_bounds, **lay_bounds}.items() if a != b}
-    return GrammarProof(dec, lay, ren, bounds, tuple(proof + p2 + p3), wtypes, defaults)
+    texts, p4 = True, []
+    for name in TEXT_DRAWERS:
+        try:
+            _addr, _b, lines = _whole(code, base, name, fp[name], regions)
+            p4 += lines
+        except GrammarError as e:
+            texts = False
+            p4.append(f"{name}: not a twin (text drawers not proven): {e}")
+    return GrammarProof(dec, lay, ren, bounds, tuple(proof + p2 + p3 + p4), wtypes, defaults,
+                        texts)
 
 
 def prove(data: bytes) -> GrammarProof:

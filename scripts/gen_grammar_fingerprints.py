@@ -34,6 +34,10 @@ bijection. Data items hold their values (pool words, compared under the search's
 mappings). Code targets hold their position, or a callee's 13.6 address. `guicode_region` is
 13.6's GuiCode span, used to classify GuiCode pointers.
 
+**The text drawers** `FUN_002559A0` (wt 11) and `FUN_002557C0` (wt 8) are fingerprinted as
+whole functions, like the decoder; `grammar.prove` reports whether both have a twin
+(`text_drawers_twin`) and never refuses on them.
+
 **Bounds.** `BOUNDS` names the `cmp.w R, #imm` sites whose immediate may differ: the decoder's
 `mode7_index`, every `cmp.w R, #0x298` in it, 13 sites (`BOUND_SITES`).
 """
@@ -62,6 +66,10 @@ GHIDRA_BODIES = {
     "renderer": ("FUN_00256C54", 0x256C54, [
         (0x256C54, 0x256CD5), (0x256D36, 0x256EC5), (0x256ECC, 0x257113), (0x257120, 0x25740F),
         (0x257414, 0x2576E3), (0x2576E8, 0x25799D), (0x2579A4, 0x257BED)]),
+    # The text drawers (wt 11, wt 8), queried 2026-11-08 the same way. A separate result:
+    # `GrammarProof.text_drawers_twin`, never a refusal.
+    "text11": ("FUN_002559A0", 0x2559A0, [(0x2559A0, 0x255C55), (0x255C5C, 0x255E8B)]),
+    "text8": ("FUN_002557C0", 0x2557C0, [(0x2557C0, 0x25599B)]),
 }
 BOUNDS = {"decoder": {"mode7_index": "cmp.w R, #0x298"}}
 BOUND_SITES = {"mode7_index": 13}

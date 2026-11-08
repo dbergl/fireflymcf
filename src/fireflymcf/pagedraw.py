@@ -428,6 +428,7 @@ def label(data: bytes, text: str, x: int, y: int, w: int, h: int, *, font: int, 
     out = _finish(_set_align(_paint(frag, pairs), ALIGN_NO_SHIFT), 11, [x, y, w, h],
                    _expect(pairs))
     r = _decode(out)
+    donors.check_text_record(data, out, f"label {text!r}")
     if not (r.label == text and r.font == font and r.h_align == h_align
             and r.v_align == v_align and r.align == ALIGN_NO_SHIFT):
         raise PageDrawError(f"authored label {text!r} failed its self-decode: {out.hex()}")
@@ -488,6 +489,7 @@ def readout(data: bytes, x: int, y: int, w: int, h: int, *, value_slot: int, wid
     pairs = {"fillA": rgb, "fillA2": rgb, "fillB": _rgb(bg), "fillB2": bg}
     rfrag = _finish(_paint(rfrag, pairs), 8, [pen_x, pen_y], _expect(pairs), align=align)
     d, r = _decode(dfrag), _decode(rfrag)
+    donors.check_text_record(data, rfrag, f"readout of slot {value_slot}")
     if not (d.wtype == 9 and d.fmt == tuple(directive) and d.header[1] == 0x50
             and r.value_slot == value_slot and r.font == font and r.align == align
             and r.header[4] & 0x20):

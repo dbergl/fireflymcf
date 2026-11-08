@@ -131,8 +131,9 @@ def test_builders_refuse_on_1123_with_a_code(stocks):
 
 
 def test_text_template_without_witness_refuses(stocks, monkeypatch):
-    """A text record no stock record shares the form of refuses NO_TEMPLATE (the gate can fail:
-    the caption's R49 line height changed to one no record carries)."""
+    """Where the text drawers are not twins (14.7), a text record no stock record shares the form
+    of refuses NO_TEMPLATE (the gate can fail: the caption's R49 line height changed to one no
+    record carries). On 13.6 the drawers' twin proof satisfies the gate."""
     t = donors.TEMPLATES["rvc.caption"]
     raw = bytearray(t.raw)
     r = records.decode_record(t.raw, 0)
@@ -141,10 +142,45 @@ def test_text_template_without_witness_refuses(stocks, monkeypatch):
     raw[lh] = 0x77
     fake = donors.Template(**{**t.__dict__, "raw": bytes(raw)})
     monkeypatch.setitem(donors.TEMPLATES, "rvc.caption", fake)
-    for version in ("13.6", "14.7"):
+    _raw, proof = donors.template(stocks["13.6"], "rvc.caption")
+    assert proof.witnesses == () and "text drawers are twins" in proof.lines[-1]
+    with pytest.raises(donors.DonorError) as e:
+        donors.template(stocks["14.7"], "rvc.caption")
+    assert e.value.code == "NO_TEMPLATE"
+
+
+# The pagedraw text forms the reference recipes emit on 13.6 (2026-11-08): (font, h_align) labels
+# with header align 1, v_align 2 and pitch (20, 0); readouts in fonts 15 and 17, align 3.
+REFERENCE_LABELS = [(12, 1), (12, 2), (13, 1), (13, 2), (13, 3), (15, 1), (15, 2), (16, 2),
+                    (17, 2), (17, 3), (24, 2)]
+
+
+@pytest.mark.parametrize("version", ["13.6", "14.7"])
+def test_pagedraw_reference_text_forms_accepted(stocks, version):
+    data = stocks[version]
+    for font, h in REFERENCE_LABELS:
+        pagedraw.label(data, "A", 0, 0, 60, 60, font=font, rgb=(1, 2, 3), h_align=h)
+    pagedraw.label(data, "A\nB", 0, 0, 60, 120, font=15, rgb=(1, 2, 3), multiline=True)
+    for font in (15, 17):
+        pagedraw.readout(data, 0, 0, 80, 60, value_slot=3, width=3, places=0, font=font,
+                         rgb=(1, 2, 3), bg=(4, 5, 6))
+
+
+def test_pagedraw_text_field_without_occurrence_refuses_on_147(stocks):
+    """14.7's wt-8 records use fonts 7, 9, 11-15 and 17 only, and no wt-11 has h_align 0: a
+    readout in font 24 or a label with h_align 0 refuses, naming the field. 13.6 accepts both
+    (the drawers are twins)."""
+    def ro(d):
+        return pagedraw.readout(d, 0, 0, 80, 60, value_slot=3, width=3, places=0, font=24,
+                                rgb=(1, 2, 3), bg=(4, 5, 6))
+
+    def lab(d):
+        return pagedraw.label(d, "A", 0, 0, 60, 60, font=15, rgb=(1, 2, 3), h_align=0)
+    for make, field in ((ro, "font 24"), (lab, "h_align 0")):
+        make(stocks["13.6"])
         with pytest.raises(donors.DonorError) as e:
-            donors.template(stocks[version], "rvc.caption")
-        assert e.value.code == "NO_TEMPLATE"
+            make(stocks["14.7"])
+        assert e.value.code == "NO_TEMPLATE" and field in str(e.value)
 
 
 def test_wtype_whose_arm_differs_refuses_on_147(stocks, monkeypatch):

@@ -225,3 +225,27 @@ def test_generator_reproduces_shipped_fingerprints(stocks, tmp_path):
 def _dis(data: bytes, addr: int, n: int) -> list:
     from fireflymcf import thumb
     return thumb.disassemble(_read(data, addr, n), addr)
+
+
+def test_text_drawers_twin_on_136(stocks):
+    p = grammar.prove(stocks["13.6"])
+    assert p.text_drawers_twin
+    assert any(line.startswith("text11:") and "one twin, at 0x2559a0" in line for line in p.proof)
+    assert any(line.startswith("text8:") and "one twin, at 0x2557c0" in line for line in p.proof)
+
+
+def test_text_drawers_not_twins_on_147_without_refusing(stocks):
+    p = grammar.prove(stocks["14.7"])          # still proves the decoder, layout and renderer
+    assert not p.text_drawers_twin
+    lines = [ln for ln in p.proof if ln.startswith(("text11:", "text8:"))]
+    assert len(lines) == 2 and all("not a twin" in ln and "differs at" in ln for ln in lines)
+
+
+def test_text_drawer_mutation_clears_the_flag_only(stocks):
+    """One immediate changed in 13.6's wt-8 drawer: the flag drops, prove still succeeds."""
+    data = stocks["13.6"]
+    at = 0x255810                        # `ldrb r4, [r1, #0xb]` (Finding 84) in FUN_002557C0
+    old = _read(data, at, 2)
+    new = bytes([old[0] ^ 0x40, old[1]])  # imm5 0xb -> another offset
+    p = grammar.prove(_patch(data, at, new))
+    assert not p.text_drawers_twin and (p.decoder, p.layout, p.renderer) == TWINS["13.6"]

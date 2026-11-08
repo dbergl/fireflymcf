@@ -20,12 +20,34 @@ asserts all twelve). `template(data, name)` returns those bytes once two gates p
    the arms for wt 10/14/18 differ, so a template of those refuses). The one non-drawing template,
    the wt-9 number-format directive, reaches the renderer's default arm on 13.6, which draws
    nothing; it is accepted when its wtype reaches the default arm on the image too.
-2. **Witness (text templates only).** The wt-11 caption and the wt-8 readout are drawn by
-   `FUN_002559A0` / `FUN_002557C0`, which are not twins on 14.7 (2026-11-07), and the directive is
-   read by that wt-8 path. These need at least one stock record of the same form: one whose
-   `canonical` bytes equal the template's. `canonical` zeroes every field the builder rewrites,
-   and the value of a colour field another locator supplies (the readout's background cell). A
-   shape template needs no witness: its decode, layout and draw path is inside the proven twins.
+2. **Witness (text templates only, and only where the text drawers are not twins).** The wt-11
+   caption and the wt-8 readout are drawn by `FUN_002559A0` / `FUN_002557C0`, and the directive
+   is read by that wt-8 path. `grammar.prove` fingerprints both drawers
+   (`GrammarProof.text_drawers_twin`). Where they are twins (13.6) the proof covers the drawer and
+   no witness is needed. Where they are not (14.7, 2026-11-08), a text template needs at least
+   one stock record of the same form: one whose `canonical` bytes equal the template's.
+   `canonical` zeroes every field the builder rewrites, and the value of a colour field another
+   locator supplies (the readout's background cell). A shape template needs no witness: its
+   decode, layout and draw path is inside the proven twins.
+
+**Parametric text (`pagedraw`).** `pagedraw.label`/`readout` set the font, the header align and
+the R49 alignment and pitch per call, so no fixed form exists to witness. `check_text_record`
+gates each emitted wt-11/wt-8 record. Where the text drawers are twins, the proof suffices.
+Otherwise every field value the drawer reads must occur, field by field, in some record of the
+same wtype on the image: the font slot, the header align, and for wt 11 the R49 h-align, v-align
+and (line height, adds-font) pair. A missing value refuses NO_TEMPLATE naming the field.
+Masked (not checked), because a proven twin consumes them and the drawers never see them raw:
+- geometry and header byte 1 (the base modes): the decoder reads b1 back only at `0x25309E` and
+  unpacks it to state `+0x7034..+0x7037` (`0x2530A4`-`0x2530C8`), which only the layout engine
+  reads (`0x257C98`, `0x257D78`, `0x257E00`, `0x258248`). The drawers' only `+0x70xx` access is
+  `+0x704C` (`0x2559E8`, `0x255852`), measured by a `movw` sweep of 13.6's GuiCode, 2026-11-08;
+- every colour mode and value: the decoder resolves them into render state. fillA2 at
+  `0x25340A`-`0x25341A` (header byte 5 bits 1-3, a jump table, the colour to `+0x6C`); fillB2 at
+  `0x2535C6`-`0x25362A` (bits 4-6, `tbb`, `+0x70`, transparency bit `0x8000`); fillB mode 3 at
+  `0x253508`-`0x253514` and mode 5 at `0x253532` (`+0x68`, bit 2);
+- the text and value_slot (the op's parameters).
+Per-field evidence does not prove combinations: each value is drawn somewhere on the image, not
+necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's (Plan 4 Task 4).
 
 Witnesses are reported for every template, required or not (`TemplateProof.witnesses`). Several
 witnesses are corroboration only, since equal canonical bytes draw identically.
@@ -296,6 +318,54 @@ def require_grammar(data: bytes, what: str) -> grammar.GrammarProof:
     return _prove(data, what)
 
 
+@memo.content_cached(copy=None)
+def _text_field_values(data: bytes) -> types.MappingProxyType:
+    """`{(wtype, field): frozenset(values)}` over every wt-11 and wt-8 record that decodes."""
+    out: dict = {}
+    for first, recs in _records_by_first_byte(data).items():
+        for _where, raw in recs:
+            try:
+                r = records.decode_record(raw, 0)
+            except (IndexError, ValueError):
+                continue
+            if r.wtype not in (8, 11):
+                continue
+            for field, value in _text_fields(r).items():
+                out.setdefault((r.wtype, field), set()).add(value)
+    return types.MappingProxyType({k: frozenset(v) for k, v in out.items()})
+
+
+def _text_fields(r: records.WRecord) -> dict:
+    """The drawer-read fields of a text record that `pagedraw` sets (module docstring)."""
+    out = {"font": r.font, "align": r.align}
+    if r.wtype == 11:
+        out.update(h_align=r.h_align, v_align=r.v_align,
+                   pitch=None if r.line_height is None
+                   else (r.line_height, r.line_height_adds_font))
+    return {k: v for k, v in out.items() if v is not None}
+
+
+def check_text_record(data: bytes, raw: bytes, what: str) -> tuple:
+    """Gate a parametric wt-11/wt-8 record (`pagedraw`) on `data`: the text drawers are twins,
+    or each drawer-read field value occurs in a record of the same wtype on the image (module
+    docstring). Returns proof lines; refuses GRAMMAR or NO_TEMPLATE."""
+    p = _prove(data, what)
+    r = _decode(bytes(raw), what)
+    if r.wtype not in (8, 11):
+        raise DonorError("NO_TEMPLATE", f"{what}: wt {r.wtype} is not a text record")
+    if p.text_drawers_twin:
+        return ("the text drawers are twins of 13.6's; no witness needed",)
+    seen = _text_field_values(data)
+    lines = []
+    for field, value in _text_fields(r).items():
+        if value not in seen.get((r.wtype, field), ()):
+            raise DonorError("NO_TEMPLATE", f"{what}: the text drawers are not twins of 13.6's "
+                                            f"and no wt-{r.wtype} record on this image has "
+                                            f"{field} {value!r}")
+        lines.append(f"wt {r.wtype} {field} {value!r}: present on this image")
+    return tuple(lines)
+
+
 def mode7_index_limit(data: bytes) -> int:
     """The image's mode-7 colour-index limit: the decoder's `mode7_index` bound where
     `grammar.prove` reports it differing, else 13.6's fingerprint value (664). Raises
@@ -372,12 +442,14 @@ def _template(data: bytes, name: str, t: Template, font: int | None
     for slot in {s for s in (rec.font, font) if s is not None}:
         _check_font(data, slot, f"template {name}")
     wit = _witnesses(data, t)
-    if t.text and not wit:
+    if t.text and not wit and not p.text_drawers_twin:
         canon = _canonical(t.raw, t.rewrites, t.located).hex()
         raise DonorError("NO_TEMPLATE", f"template {name}: no stock record has its form "
                                         f"(canonical {canon}); its text drawer is not a proven "
                                         f"twin, so a witness is required")
-    lines.append(f"witnesses: {len(wit)}" + ("" if t.text else " (not required)"))
+    need = t.text and not p.text_drawers_twin
+    lines.append(f"witnesses: {len(wit)}" + ("" if need else " (not required: "
+                 + ("the text drawers are twins)" if t.text else "a shape template)")))
     return bytes(raw), TemplateProof(name, wt, p.decoder, p.layout, p.renderer, wit,
                                      types.MappingProxyType(colour), tuple(lines))
 
