@@ -11,15 +11,16 @@ expectations read from 14.7's own GuiCode, never locators:
   the CAN-frame sender on 14.7 was inferred from entry0's shape; `test_sender_cell_sends`
   settles it in the emulator, which runs 14.7's own LCD firmware.
 
-* `routinekit.fresh_sram` refuses on 14.7 (NO_SRAM, open item): `sramreach` names 13.6's
-  render-state base `0x200301B0` and digit buffer `0x200371D1`; 14.7 loads `0x200301B4`
-  (`0x2540CA ldr r4, [pc, #0x100]`, then `ldr.w r2, [r4, r0, lsl #2]`) and `0x200371D5`, so both
-  read as unbounded indexed tables and poison all SRAM above them. The counter cells below are
-  therefore test expectations: with those two bases bounded as 13.6's are (state span to
-  `0x20039548`, applied here by inference, as 13.6's span is), `0x20039F20` opens 14.7's longest
-  free run (64 bytes; the run bound is inferred on the same footing), and no other form
-  reaches it (`test_cells_are_reached_only_through_the_unbounded_bases`). The emulator then
-  shows nothing else writes them: each counter advances exactly as the stock tick does.
+* The counter cells are the first three words of 14.7's longest free run, 0x20039F20 (64
+  bytes). Plan 2 picked them by hand, because `routinekit.fresh_sram` then refused on 14.7
+  (NO_SRAM): `sramreach` named 13.6's render-state base `0x200301B0` and digit buffer
+  `0x200371D1`, so 14.7's `0x200301B4` (`0x2540CA ldr r4, [pc, #0x100]`, then
+  `ldr.w r2, [r4, r0, lsl #2]`) and `0x200371D5` read as unbounded indexed tables and poisoned all
+  SRAM above them. Since 2026-11-08 `sramreach` locates the render state (to `0x20039548`) and
+  bounds the digit buffer as a field of it, and `fresh_sram` returns `0x20039F20` itself
+  (`test_fresh_sram_picks_the_first_cell`); no form reaches the three words
+  (`test_cells_are_reached_by_nothing`). The emulator then shows nothing else writes them:
+  each counter advances exactly as the stock tick does.
 
 Each test fails on the stock image unchanged: no counter, no link, no frame.
 """
@@ -48,7 +49,6 @@ STOCK_TICK_HALFWORD = 0x20039D00     # what that literal holds (14.7 expectation
 SENDER_CELL = 0x20039558             # host API +0x08's cell on 14.7 (14.7 expectation)
 RAM_INIT_END = 0x2000AD98            # the C runtime initialises SRAM only below this (raminit)
 CELLS = (0x20039F20, 0x20039F24, 0x20039F28)   # free on 14.7 (module docstring)
-UNBOUNDED_147 = (0x200301B4, 0x200371D5)       # 14.7's render state and digit buffer
 TICK_PERIOD = 0x78                   # F wraps its halfword above 0x77 (`0x247CC2 cmp r3, #0x77`)
 CLOCK = time.struct_time((2026, 11, 7, 11, 0, 0, 5, 311, 0))
 
@@ -137,19 +137,17 @@ def test_expectations_read_from_the_image(mcf_147):
     assert hooklocate.host_api_cells(mcf_147)[0x08] == SENDER_CELL
 
 
-def test_cells_are_reached_only_through_the_unbounded_bases(mcf_147):
+def test_cells_are_reached_by_nothing(mcf_147):
     from fireflymcf import sramreach
+    lo, hi = sramreach.cell_area(mcf_147)
     for cell in CELLS:
-        forms = sramreach.reach(mcf_147).forms(cell, 4)
-        assert forms and all(f == "indexed_table" and d[0] in UNBOUNDED_147
-                             for f, d in forms), (hex(cell), forms)
+        assert lo <= cell and cell + 4 <= hi
+        assert sramreach.reach(mcf_147).forms(cell, 4) == [], hex(cell)
 
 
-def test_fresh_sram_refuses_on_147(mcf_147):
-    """Open item: a defensible refusal, not a wrong cell (module docstring)."""
-    with pytest.raises(routinekit.RoutineKitError) as e:
-        userop.Editor(mcf_147).call("fresh_sram", 4)
-    assert e.value.code == "NO_SRAM"
+def test_fresh_sram_picks_the_first_cell(mcf_147):
+    """Plan 2's open item, closed: the located render state frees 14.7's cell area."""
+    assert userop.Editor(mcf_147).call("fresh_sram", 4) == CELLS[0]
 
 
 def _in_step_with_stock_tick(s: Scenario, cell: int, run_s: float) -> tuple[int, int]:

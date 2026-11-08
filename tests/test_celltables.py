@@ -55,9 +55,6 @@ _ALLOW = {
     ("src/fireflymcf/layout.py", 280): "VAR_DPTR_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/layout.py", 281): "VAR_TYPE_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/status_map.py", 37): "CELL_TABLE_OFF's own definition (the stock constant)",
-    ("src/fireflymcf/readout.py", 38):
-        "VAR_TYPE_TABLE_OFF re-exports layout.VAR_TYPE_TABLE_136 -- kept, per the task brief, "
-        "because tests/docs cite it as the stock value; not used to index a table",
     ("src/fireflymcf/statusbind.py", 50):
         "CELL_TABLE_OFF re-exports status_map.CELL_TABLE_OFF -- kept, per the task brief, because "
         "tests/docs cite it as the stock value; not used to index a table",

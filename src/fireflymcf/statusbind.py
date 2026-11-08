@@ -47,8 +47,7 @@ DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 FILTER_INSTANCE_FIELD = 4
 FILTER_DISABLED = 0xFF
 
-CELL_TABLE_OFF = status_map.CELL_TABLE_OFF        # GuiData-relative base of the +0x44BC8 table
-CELL_TABLE_LEN = status_map.CELL_TABLE_LEN
+CELL_TABLE_OFF = status_map.CELL_TABLE_OFF        # 13.6's stock +0x44BC8; read celltables.locate
 SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
 
 # The G12 drives 44 outputs (`g12_config`: 8 relay + 12 half-bridge + 24 high-current).
@@ -132,16 +131,34 @@ def free_pins(data: bytes, build: str = "136") -> list:
 
 
 def spare_cell_indices(data: bytes) -> list:
-    """`+0x44BC8` indices referenced by **no** record's colour field and no `value_slot`.
+    """Display-cell table indices referenced by **no** record's colour field and no `value_slot`,
+    in any of the four object tables, below the table's located stock row count.
 
     Such an index is dead: a widget reaches the table only by naming an index (§5.4b), so an
     index nothing names contributes nothing on screen and may be repointed. `inferred-from-data`
     — it is a whole-corpus scan of record references, and nothing is *known* to iterate the
     table rather than index it, but that has not been proven from code.
+
+    The rows are located (2026-11-08): a fixed 665 offered 14.7's indices 505-664, past its
+    505-row table. On a grown image the bound is `celltables.stock_rows`, not `row_count`: a
+    grown row was minted for an op, and a grown 13.6 reference build leaves 28 of its 68 grown
+    rows unnamed by any decoded record while authored routines still write their cells
+    (measured 2026-11-08), so "unnamed" there does not mean dead. An index object table 1
+    leaves unnamed but another table reads (`status_map.foreign_table_refs`: 13.6's 252-260
+    background-bar cells, 14.7's 187, 193, 224, 230 and more) is not spare: repointing
+    254/256/258 painted the coach-48V bars (2026-09-11).
     """
+    return _spare_cell_indices(data)
+
+
+@memo.content_cached
+def _spare_cell_indices(data: bytes) -> list:
+    rows = celltables.stock_rows(data)
     con = status_map.object_consumers(data)
     used = set(con.colour) | set(con.vslot)
-    return [i for i in range(CELL_TABLE_LEN) if i not in used]
+    cand = [i for i in range(rows) if i not in used]
+    foreign = status_map.foreign_table_refs(data, set(cand))
+    return [i for i in cand if i not in foreign]
 
 
 def cell_index(data: bytes, cell: int) -> int | None:

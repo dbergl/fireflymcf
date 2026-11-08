@@ -30,14 +30,6 @@ class DisplayCell:
 
 _TYPE_FOR_WIDTH = {1: 1, 2: statusbind.VARIABLE_TYPE_U16}
 
-# The variable-type table offset `_ensure_type` reads/writes -- named here (not just inlined)
-# so a caller checking a cell's stored type (recipe_ops.py's add_register_readout.verify) can
-# reference it instead of restating the literal. Re-exports `layout.VAR_TYPE_TABLE_136`, which
-# is what `_ensure_type` itself already matched -- both are 13.6-specific like every other
-# hardcoded GuiCode address this feature's ops refuse against off-build (`_check_append_point`).
-VAR_TYPE_TABLE_OFF = layout.VAR_TYPE_TABLE_136
-
-
 def _only_spare_cell_entries(data: bytes, addr: int, width: int) -> bool:
     forms = sramreach.reaching_forms(data, addr, width)
     if forms["raw_word"] or forms["base_offset"] or forms["state_struct"] or forms["indexed_table"]:

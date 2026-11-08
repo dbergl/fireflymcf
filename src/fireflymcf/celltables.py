@@ -266,3 +266,40 @@ def type_table_off(data: bytes) -> int:
 
 def row_count(data: bytes) -> int:
     return locate(data).rows
+
+
+def stock_rows(data: bytes) -> int:
+    """The rows the table had before any grow: `rows` on an ungrown image; on a grown one, the
+    row count of the lowest-addressed copy of the live pair left in GuiData. A grow
+    (`tablegrow.grow_indexed_tables`) copies every old row verbatim to the end of GuiData and
+    leaves the old pair in place, unread, so the stock pair is the lowest copy. Rows at or past
+    this count were minted by an op (`readout.allocate_fresh_cells`) and are never spare.
+
+    A copy is accepted only when, at a 4-aligned GuiData offset below the live cell table, the
+    live cell table's first rows repeat word for word and the live type table's first rows
+    repeat byte for byte ending, 4-aligned, where that cell copy starts (the stock adjacency).
+    Measured 2026-11-08: 665 on every grown reference build (copy at +0x44BC8); no copy on
+    stock 11.23/13.6/14.7. Refuses as `locate` does."""
+    locate(data)
+    return _stock_rows(data, guidata.SRAM_LOW, guidata.SRAM_HIGH)
+
+
+@memo.content_cached(copy=None)
+def _stock_rows(data: bytes, sram_lo: int, sram_hi: int) -> int:
+    ct = _locate(data, sram_lo, sram_hi)
+    gs, _ = guidata.guidata_extent(data)
+    live, live_t = gs + ct.cell_off, gs + ct.type_off
+    cells, types = data[live:live + 4 * ct.rows], data[live_t:live_t + ct.rows]
+    at = gs
+    while True:
+        at = data.find(cells[:16], at, live)
+        if at < 0:
+            return ct.rows
+        if (at - gs) % 4 == 0:
+            n = 0
+            while n < ct.rows and data[at + 4 * n:at + 4 * n + 4] == cells[4 * n:4 * n + 4]:
+                n += 1
+            t = at - ((n + 3) & ~3)
+            if n >= 4 and t >= gs and data[t:t + n] == types[:n]:
+                return n
+        at += 1

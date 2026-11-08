@@ -228,12 +228,10 @@ share one LCD firmware, per the spec). On 14.7 (*emulator*, 2026-11-07,
 the builder's own tick counter, and HOME draws as stock; a link that calls host API `+0x08`'s cell
 (`0x20039558`) puts its frame on the bus once, with the template's CAN id intact (the source address
 comes from the template), which settles that `+0x08` is the frame sender on 14.7's LCD firmware too;
-the `send_frame` test op compiles on 14.7 and sends. No 14.7 tick routine has run on a coach. Two
-gaps on 14.7: `fresh_sram` refuses (`NO_SRAM`), because `sramreach` bounds 13.6's render-state and
-digit-buffer bases by hand and 14.7's sit 4 bytes higher (`0x200301B4`, `0x200371D5`), so everything
-from `0x200301B4` to `0x20040000` reads as reachable. On 14.7 a tick op cannot get scratch SRAM from
-`fresh_sram` yet: it refuses `NO_SRAM` until the display-cell-table work locates the render state,
-and a hand-picked cell is unchecked. The other gap: the variant setter (host API `+0x04`) is located
+the `send_frame` test op compiles on 14.7 and sends. No 14.7 tick routine has run on a coach.
+`fresh_sram` works on 14.7 since 2026-11-08: `sramreach` locates the render state from GuiCode
+(`0x200301B4` on 14.7) instead of naming 13.6's, and on 14.7 it returns `0x20039F20`, the cell the
+emulator tests count in. One gap remains on 14.7: the variant setter (host API `+0x04`) is located
 but unproven there.
 
 **`tick_install_plan(data) -> (data, TickPlan)`** (read-only). Returns where the next routine
@@ -381,8 +379,9 @@ in mind:
 - The scan sees only what the image references. Two cells taken before the routine that uses
   them is installed need `taken=list(range(a, a + n))` on the second call. After the install,
   the routine's pool word makes the first cell referenced.
-- The free runs are holes between the panel's own cells, not one block (`0x20038000` to
-  `0x2003B000`): stock 13.6's longest is 44 bytes, and a build already carrying many routine
+- The free runs are holes between the panel's own cells, not one block (`sramreach.cell_area`:
+  from the render state's end to the first indexed table above it, 13.6 `0x20039868` to
+  `0x2003A8B8`): stock 13.6's longest is 44 bytes, and a build already carrying many routine
   ops can be down to under 20 (*library*: `sramreach.free_runs` on such a build). Keep state
   in bytes, not words, and ask for it in one call; `NO_SRAM` means it does not fit.
 - Power-on contents are garbage, because the C runtime initialises SRAM only up to `0x2000AD98`

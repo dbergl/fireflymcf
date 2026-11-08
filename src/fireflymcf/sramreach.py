@@ -15,6 +15,15 @@ with writeback, and register-indexed tables whose index is computed. The registe
 found on 13.6 are reported (`Reach.indexed_bases`) and bounded by hand in GUICODE.md: the render
 state (+12*depth, +(nibble+0x2d)*4), the digit buffer 0x200371D1 (+strlen), and two tables above
 the cell area (0x2003A8B8 at stride 8, 0x2003A9A8 at stride 4) that index upward only.
+
+**Located, not pinned (2026-11-08).** The render state is the one literal SRAM base GuiCode
+addresses through `movw` offsets (`locate_render_state`; 13.6 0x200301B0, 14.7 0x200301B4, 11.23
+0x20030160, measured 2026-11-07). It ends at its largest `movw` offset + 4. A register-indexed
+base inside it (the digit buffer, base + 0x7021 on 13.6 and 14.7) is a struct field, bounded by
+the struct's end -- an inference: GUICODE.md bounds 13.6's buffer at 0x40 by hand, inside a
+struct that runs further. Any other indexed base reaches everything above it. The free cell area
+(`cell_area`) runs from the struct's end to the lowest indexed base above it, and every cell the
+display-cell table names must lie in it, or the module refuses (`SramReachError`).
 """
 from __future__ import annotations
 
@@ -25,11 +34,39 @@ from dataclasses import dataclass, field
 from . import celltables, container, memo, status_map, theme
 
 SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
-RENDER_STATE_BASE = 0x200301B0      # the `ldr rX,[pc]` base of the +0x6bb4/+0x7021/+0x96b0 family
 _MAX_STEPS = 400                    # longest observed lifetime is 246 instructions on 13.6
-INDEXED_EXTENT = {                  # hand-bounded register-indexed bases (GUICODE.md, 2026-09-04)
-    0x200371D1: 0x40,               # the digit buffer: base + strlen, at most a formatted number
-}                                   # RENDER_STATE_BASE: +12*depth / +(nibble+0x2d)*4, inside state_span
+
+
+class SramReachError(ValueError):
+    """The render state or the cell area does not prove out on this image. `code` is one of
+    RENDER_STATE_BASES (not exactly one literal SRAM base is addressed through `movw` offsets),
+    CELL_AREA_NO_CEILING (no register-indexed base lies above the render state to bound the
+    area) or CELL_OUTSIDE_AREA (a display-cell table row names SRAM outside the area)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class RenderState:
+    """The renderer's state struct: the one SRAM base GuiCode reaches as `movw rZ,#off ;
+    ldr [rB,rZ]`. `end` is base + the largest such offset + 4; `indexed_fields` are the
+    register-indexed bases in [base, end), base included (13.6: the base itself, indexed
+    +12*depth and +(nibble+0x2d)*4, and the digit buffer 0x200371D1)."""
+    base: int
+    end: int
+    movw_sites: tuple[int, ...]       # GuiCode addresses of the [rB, rZ] accesses, rZ from movw
+    indexed_fields: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _Trace:
+    """What the per-base trace of GuiCode saw; a function of the GuiCode bytes alone."""
+    traced: frozenset
+    base_offset: dict                 # addr -> frozenset {(site, width)}
+    indexed: dict                     # base -> frozenset {sites} of [rX, rZ] with unknown rZ
+    movw: dict                        # base -> tuple ((site, movw offset), ...)
 
 
 @dataclass
@@ -39,7 +76,7 @@ class Reach:
     traced: set = field(default_factory=set)         # pool words whose loads were traced (width known)
     base_offset: dict = field(default_factory=dict)  # addr -> {(site, width)} via [rX,#imm] / movw
     indexed_bases: dict = field(default_factory=dict)  # base -> {sites} of [rX, rZ] with unknown rZ
-    state_span: tuple = (RENDER_STATE_BASE, RENDER_STATE_BASE)   # base .. base+max movw offset
+    state_span: tuple = (0, 0)                       # render state: base .. base+max movw offset+4
     cells: set = field(default_factory=set)          # +0x44BC8 cell-table entries
 
     cell_width: dict = field(default_factory=dict)   # cell addr -> bytes its variable type reads
@@ -156,32 +193,28 @@ _MEM_REG = r"\[r{r}, r(\d+)(?:, lsl #(\d))?\]"
 _WRITEBACK = r"\[r{r}\], #|\[r{r}, #-?\w+\]!"
 
 
-@memo.content_cached(copy=lambda r: r)
-def reach(data: bytes) -> Reach:
-    """Trace every literal-loaded working-area base through the instructions that use it."""
+@memo.content_cached(copy=None)
+def _trace(code: bytes, base: int, sram_lo: int, sram_hi: int) -> _Trace:
+    """Trace every literal-loaded working-area base of GuiCode `code` (loaded at `base`) through
+    the instructions that use it, until the register is redefined. Keyed on the GuiCode bytes,
+    so a GuiData-only edit reuses it; the SRAM bounds are arguments, never module reads."""
     from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
-
-    sec = theme.guicode_section(data)
-    body = bytes(data[sec.offset:sec.offset + sec.length])
-    base = theme.guicode_base(sec)
     md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
 
     def ins_at(addr: int):
         off = addr - base
-        if off < 0 or off + 2 > len(body):
+        if off < 0 or off + 2 > len(code):
             return None
-        return next(md.disasm(body[off:off + 4], addr, 1), None)
+        return next(md.disasm(code[off:off + 4], addr, 1), None)
 
-    out = Reach()
-    out.raw_words = {w for w in _words(body) if SRAM_LOW <= w < SRAM_HIGH} | _lcd_words(data)
-    out.cells = {c for c in status_map.cell_table(data) if SRAM_LOW <= c < SRAM_HIGH}
-    out.cell_width = _cell_widths(data)
-    max_movw = 0
-
-    for site, rx, value, size in _literal_loads(body, base):
-        if not (SRAM_LOW <= value < SRAM_HIGH):
+    traced: set = set()
+    base_offset: dict = {}
+    indexed: dict = {}
+    movw_access: dict = {}
+    for site, rx, value, size in _literal_loads(code, base):
+        if not (sram_lo <= value < sram_hi):
             continue
-        out.traced.add(value)
+        traced.add(value)
         mem_imm = re.compile(_MEM_IMM.format(r=rx))
         mem_reg = re.compile(_MEM_REG.format(r=rx))
         writeback = re.compile(_WRITEBACK.format(r=rx))
@@ -198,18 +231,17 @@ def reach(data: bytes) -> Reach:
             width = _access_width(i.mnemonic)
             for m in mem_imm.finditer(i.op_str):
                 imm = int(m.group(1), 0) if m.group(1) else 0
-                out.base_offset.setdefault(value + imm, set()).add((pos, width))
+                base_offset.setdefault(value + imm, set()).add((pos, width))
             m = mem_reg.search(i.op_str)
             if m:
                 rz = int(m.group(1))
                 if rz in movw:
-                    out.base_offset.setdefault(value + movw[rz], set()).add((pos, width))
-                    if value == RENDER_STATE_BASE:
-                        max_movw = max(max_movw, movw[rz])
+                    base_offset.setdefault(value + movw[rz], set()).add((pos, width))
+                    movw_access.setdefault(value, set()).add((pos, movw[rz]))
                 else:
-                    out.indexed_bases.setdefault(value, set()).add(pos)
+                    indexed.setdefault(value, set()).add(pos)
             if writeback.search(i.op_str):
-                out.indexed_bases.setdefault(value, set()).add(pos)
+                indexed.setdefault(value, set()).add(pos)
             # redefinition of rX ends the lifetime
             dst = re.match(r"r(\d+)", i.op_str)
             writes = (dst is not None and int(dst.group(1)) == rx
@@ -221,14 +253,96 @@ def reach(data: bytes) -> Reach:
             if writes or i.mnemonic in ("pop", "pop.w", "bx", "b", "b.w"):
                 break
             pos += i.size
-    out.state_span = (RENDER_STATE_BASE, RENDER_STATE_BASE + max_movw + 4)
+    return _Trace(frozenset(traced),
+                  {a: frozenset(v) for a, v in base_offset.items()},
+                  {b: frozenset(v) for b, v in indexed.items()},
+                  {b: tuple(sorted(v)) for b, v in movw_access.items()})
+
+
+def _guicode_trace(data: bytes) -> _Trace:
+    sec = theme.guicode_section(data)
+    return _trace(bytes(data[sec.offset:sec.offset + sec.length]), theme.guicode_base(sec),
+                  SRAM_LOW, SRAM_HIGH)
+
+
+def _render_state(t: _Trace) -> RenderState:
+    bases = {b: sites for b, sites in t.movw.items() if sites}
+    if len(bases) != 1:
+        raise SramReachError(
+            "RENDER_STATE_BASES",
+            "%d literal SRAM bases are addressed through movw offsets (%s); the render state is "
+            "the one such base, so it cannot be located" % (
+                len(bases), ", ".join("%#x (%d sites)" % (b, len(v))
+                                      for b, v in sorted(bases.items())) or "none"))
+    (b, accesses), = bases.items()
+    end = b + max(off for _site, off in accesses) + 4
+    return RenderState(b, end, tuple(sorted({site for site, _off in accesses})),
+                       tuple(sorted(x for x in t.indexed if b <= x < end)))
+
+
+def locate_render_state(data: bytes) -> RenderState:
+    """The render state of `data`, from GuiCode alone (module docstring). Raises
+    `SramReachError` (RENDER_STATE_BASES) unless exactly one literal SRAM base is addressed
+    through `movw` offsets."""
+    return _render_state(_guicode_trace(data))
+
+
+def cell_area(data: bytes) -> tuple[int, int]:
+    """`(lo, hi)`: the SRAM between the render state's end and the lowest register-indexed base
+    at or above it, where every display cell lives and a fresh one may be minted. Refuses
+    (`SramReachError`) when no indexed base lies above the struct (CELL_AREA_NO_CEILING) or a
+    cell-table row names SRAM outside the area (CELL_OUTSIDE_AREA)."""
+    t = _guicode_trace(data)
+    rs = _render_state(t)
+    above = [b for b in t.indexed if b >= rs.end]
+    if not above:
+        raise SramReachError(
+            "CELL_AREA_NO_CEILING",
+            "no register-indexed SRAM base lies above the render state (%#x..%#x), so nothing "
+            "bounds the cell area from above" % (rs.base, rs.end))
+    lo, hi = rs.end, min(above)
+    from . import guidata
+    ct = celltables.locate(data)
+    gs, _ = guidata.guidata_extent(data)
+    rows = struct.unpack_from("<%dI" % ct.rows, data, gs + ct.cell_off)
+    outside = [(i, c) for i, c in enumerate(rows) if c and not lo <= c < hi]
+    if outside:
+        raise SramReachError(
+            "CELL_OUTSIDE_AREA",
+            "%d display-cell table rows name SRAM outside the cell area [%#x, %#x): %s" % (
+                len(outside), lo, hi,
+                ", ".join("row %d -> %#x" % (i, c) for i, c in outside[:8])))
+    return lo, hi
+
+
+def reach(data: bytes) -> Reach:
+    """Every working-area address `data` reaches, by form (`Reach`). Raises `SramReachError`
+    when the render state cannot be located."""
+    return _reach(data, SRAM_LOW, SRAM_HIGH)
+
+
+@memo.content_cached(copy=lambda r: r)
+def _reach(data: bytes, sram_lo: int, sram_hi: int) -> Reach:
+    sec = theme.guicode_section(data)
+    body = bytes(data[sec.offset:sec.offset + sec.length])
+    t = _trace(body, theme.guicode_base(sec), sram_lo, sram_hi)
+    rs = _render_state(t)
+
+    out = Reach()
+    out.raw_words = {w for w in _words(body) if sram_lo <= w < sram_hi} | _lcd_words(data)
+    out.cells = {c for c in status_map.cell_table(data) if sram_lo <= c < sram_hi}
+    out.cell_width = _cell_widths(data)
+    out.traced = set(t.traced)
+    out.base_offset = {a: set(v) for a, v in t.base_offset.items()}
+    out.indexed_bases = {b: set(v) for b, v in t.indexed.items()}
+    out.state_span = (rs.base, rs.end)
     # An indexed table whose index this trace cannot bound reaches, as far as the file can say,
-    # everything above its base. Two bases are bounded by hand instead (module docstring).
+    # everything above its base. A base inside the render state is a field of it (the digit
+    # buffer), bounded by the struct; the struct's own base is its state span.
     for b in out.indexed_bases:
-        if b in INDEXED_EXTENT:
-            out.poisoned.append((b, b + INDEXED_EXTENT[b]))
-        elif b != RENDER_STATE_BASE:
-            out.poisoned.append((b, SRAM_HIGH))
+        if b == rs.base:
+            continue
+        out.poisoned.append((b, rs.end) if rs.base <= b < rs.end else (b, sram_hi))
     return out
 
 
@@ -253,21 +367,25 @@ def reaching_forms(data: bytes, addr: int, width: int = 1) -> dict:
     return {k: (sorted(set(v)) if isinstance(v, list) else v) for k, v in out.items()}
 
 
-def free_words(data: bytes, lo: int = 0x20038000, hi: int = 0x2003B000) -> list:
-    """4-aligned words in [lo, hi) with all four bytes unreached by every form traced.
+def free_words(data: bytes, lo: int | None = None, hi: int | None = None) -> list:
+    """4-aligned words in [lo, hi) with all four bytes unreached by every form traced. The
+    window defaults to the located `cell_area`.
 
     Candidates for a fresh u16/u32 display or scratch cell (`statusbind.index_cell` a spare index
     at one). Unreferenced by every form this module can see is NOT "unused": see the module
     docstring's limits, and the standing rule that power-on contents are garbage (raminit).
     """
+    lo, hi = _window(data, lo, hi)
     r = reach(data)
     return [a for a in range((lo + 3) & ~3, hi - 3, 4) if not r.referenced(a, 4)]
 
 
-def free_runs(data: bytes, min_bytes: int = 8, lo: int = 0x20038000, hi: int = 0x2003B000) -> list:
+def free_runs(data: bytes, min_bytes: int = 8, lo: int | None = None,
+              hi: int | None = None) -> list:
     """(start, length) of every run of >= `min_bytes` unreached bytes in [lo, hi), longest first.
     A long hole is a better candidate than a word squeezed between two byte cells: a mis-typed
-    neighbour cannot explain 30 free bytes."""
+    neighbour cannot explain 30 free bytes. The window defaults to the located `cell_area`."""
+    lo, hi = _window(data, lo, hi)
     r = reach(data)
     runs = []
     start = None
@@ -280,3 +398,11 @@ def free_runs(data: bytes, min_bytes: int = 8, lo: int = 0x20038000, hi: int = 0
                 runs.append((start, a - start))
             start = None
     return sorted(runs, key=lambda t: (-t[1], t[0]))
+
+
+def _window(data: bytes, lo: int | None, hi: int | None) -> tuple[int, int]:
+    if lo is None or hi is None:
+        alo, ahi = cell_area(data)
+        lo = alo if lo is None else lo
+        hi = ahi if hi is None else hi
+    return lo, hi

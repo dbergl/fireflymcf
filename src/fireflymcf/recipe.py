@@ -17,7 +17,7 @@ import json
 import struct
 
 from fireflymcf import (celltables, coverage, donors, firmware, followchannel, grammar, guidata,
-                        patch, relocate, theme)
+                        patch, relocate, sramreach, theme)
 
 SCHEMA = 1
 
@@ -572,7 +572,8 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 # prove, `donors`; a record grammar that is not 13.6's, `grammar`; a cell or type table that
 # does not locate, `celltables`), surfaced under their own code as the op's refusal, as
 # FollowChannelError is above.
-_CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError)
+_CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError,
+          sramreach.SramReachError)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:

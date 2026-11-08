@@ -31,18 +31,19 @@ import re
 import struct
 from dataclasses import dataclass, field
 
-from . import guidata, records, statusjoin, layout, options, cli
+from . import celltables, guidata, records, statusjoin, layout, options, cli
 
 DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 CELL_TABLE_OFF = 0x44BC8            # GuiData-relative base of the DAT_00253D04 pointer table
 CELL_TABLE_LEN = 665               # entries (MCF-FORMAT §5.5 / GUICODE Finding 17)
-# ...but BOTH of those are 13.6's values, and this table MOVES between builds: 11.23 puts it at
-# 0x44B60 (26 entries lower) and 14.7 at 0x42B74. Using the 13.6 constants on another build reads
-# the right table at the wrong base, so every index resolves to a cell ~26 entries away -- which
-# looks plausible (they are all SRAM addresses in the same region) and is silently wrong. That
-# produced a confident cross-build claim in session on 2026-08-23 before a control caught it.
-# `cell_table()` below locates the base per build; the constants remain for 13.6-pinned callers
-# (`statusbind.index_cell`, whose edits are all 13.6 same-size patches).
+# ...but BOTH of those are 13.6's stock values, and this table MOVES between builds: 11.23 puts
+# it at 0x44B60 (26 entries lower, 562 rows) and 14.7 at 0x42B74 (505 rows). Using the 13.6
+# constants on another build reads the right table at the wrong base, so every index resolves to
+# a cell ~26 entries away -- which looks plausible (they are all SRAM addresses in the same
+# region) and is silently wrong. That produced a confident cross-build claim in session on
+# 2026-08-23 before a control caught it. Nothing here reads them any more: the base and the row
+# count come from `celltables.locate` (2026-11-08); they remain as the documented 13.6 values
+# tests cite.
 SRAM_LOW, SRAM_HIGH = 0x20030000, 0x20040000
 
 # Floorplans are driven via layout switch slot 5 (GUICODE Finding 16; floorplan value -> the
@@ -135,7 +136,8 @@ class Consumers:
     vslot: dict[int, list[int]] = field(default_factory=dict)    # table idx -> objects (value_slot)
 
 
-def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers) -> None:
+def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers,
+                          rows: int) -> None:
     """Fold one object-pointer table's records into `con` in place. `obj` indices are local to
     `table` (the same convention every other table-1 caller here already used); a caller that
     folds multiple tables gets object indices that alias across tables, which is fine -- this
@@ -148,11 +150,11 @@ def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers
             continue
         for r in recs:
             vs = getattr(r, "value_slot", None)
-            if isinstance(vs, int) and 0 <= vs < CELL_TABLE_LEN:
+            if isinstance(vs, int) and 0 <= vs < rows:
                 con.vslot.setdefault(vs, []).append(obj)
             for entry in (getattr(r, "colors", None) or []):
                 if len(entry) > 2 and entry[1] in (6, 7) and isinstance(entry[2], int) \
-                        and 0 <= entry[2] < CELL_TABLE_LEN:
+                        and 0 <= entry[2] < rows:
                     con.colour.setdefault(entry[2], []).append(obj)
 
 
@@ -170,7 +172,8 @@ def object_consumers(data: bytes) -> Consumers:
     alone would strand every cell-allocating op with no allocator to grow for it."""
     gs, _ = guidata.guidata_extent(data)
     con = Consumers()
-    _scan_table_consumers(data, gs, guidata.object_tables(data)[1], con)
+    _scan_table_consumers(data, gs, guidata.object_tables(data)[1], con,
+                          celltables.row_count(data))
     for d in (con.colour, con.vslot):
         for k in d:
             d[k] = sorted(set(d[k]))
@@ -221,7 +224,7 @@ def foreign_table_refs(data: bytes, cells: "set[int]") -> dict[int, list[tuple[i
 def all_table_cell_consumers(data: bytes) -> set[int]:
     """Every `+0x44BC8` cell index referenced as a mode-6/7 colour or a `value_slot` by any
     object in ANY of the four GuiData object-pointer tables (`guidata.object_tables`), sanity-
-    filtered to `0 <= idx < CELL_TABLE_LEN` (the two big tables carry repeated/garbage pointers
+    filtered to `0 <= idx < rows`, the located row count (the two big tables carry repeated/garbage pointers
     that decode to nonsense out-of-range slots).
 
     This is the honest consumer set: cells 254/256/258/260 are referenced only by objects in the
@@ -232,8 +235,9 @@ def all_table_cell_consumers(data: bytes) -> set[int]:
     via an undecoded trailing field neither scan can see)."""
     gs, _ = guidata.guidata_extent(data)
     con = Consumers()
+    rows = celltables.row_count(data)
     for table in guidata.object_tables(data):
-        _scan_table_consumers(data, gs, table, con)
+        _scan_table_consumers(data, gs, table, con, rows)
     return set(con.colour) | set(con.vslot)
 
 

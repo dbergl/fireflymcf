@@ -20,7 +20,7 @@ def test_the_scanner_premise_is_false_movw_exists_and_offsets_are_large(data: by
     """`_guicode_references` says 13.6 has no movw. It has hundreds, and the render state is
     addressed with offsets up to ~0x96b4 off 0x200301B0 — a form a pool scan cannot see."""
     r = sramreach.reach(data)
-    assert r.state_span[0] == sramreach.RENDER_STATE_BASE
+    assert r.state_span[0] == sramreach.locate_render_state(data).base == 0x200301B0
     assert r.state_span[1] - r.state_span[0] >= 0x96B4
     assert len(r.base_offset) > 1000
 
