@@ -109,6 +109,7 @@ def test_move_element_reports_the_siblings_that_follow(stock):
     assert _line(r).startswith("moved 3 record(s), restyled 0, gone 0, new 0 on roots 5, 39: ")
 
 
+@pytest.mark.slow
 def test_the_report_changes_no_bytes(stock, monkeypatch):
     with_report = _compile(stock, _rr(), _move("mv", {"wtype": 11, "label": "L"}, {"x": 3}))
     monkeypatch.setattr(recipe_ops, "_side_shifts", lambda *a, **k: ([], []))
@@ -123,6 +124,7 @@ def test_the_report_changes_no_bytes(stock, monkeypatch):
     assert with_report.unverified == without.unverified
 
 
+@pytest.mark.slow
 def test_a_failing_report_never_refuses(stock, monkeypatch):
     def boom(*a, **k):
         raise ValueError("walk failed")
@@ -168,6 +170,7 @@ def test_compile_sidecar_and_json_carry_shifts(tmp_path, stock, capsys):
     assert out2.read_bytes() == out.read_bytes()
 
 
+@pytest.mark.slow
 def test_the_arm_filter_loses_no_shift(stock, monkeypatch):
     """`switch_arm_sets(touching=...)` walks only the arms a translation inside the card can
     show a different shift under (`move_element`); walking every arm set reports the same

@@ -201,6 +201,7 @@ def _spy_apply(monkeypatch):
     return seen
 
 
+@pytest.mark.slow
 def test_cells_are_recorded_for_the_aliasing_gate(monkeypatch):
     seen = _spy_apply(monkeypatch)
     _ok(BASE + [_status()])
@@ -208,6 +209,7 @@ def test_cells_are_recorded_for_the_aliasing_gate(monkeypatch):
     assert len(slots) == 3 and set(slots) <= seen["cells"]
 
 
+@pytest.mark.slow
 def test_verify_catches_a_tampered_routine(monkeypatch):
     seen = _spy_apply(monkeypatch)
     data = _ok(BASE + [_status()])
@@ -223,6 +225,7 @@ def test_verify_catches_a_tampered_routine(monkeypatch):
             op.verify(bytes(bad), ctx)
 
 
+@pytest.mark.slow
 def test_double_wrap_refuses():
     assert "BAD_PARAMS" in _errors(BASE + [_status([_entry("b1", 1)]),
                                            _status([_entry("b1", 3)], oid="st2")])
@@ -248,6 +251,7 @@ ALARMS_STATUS = {"id": "alarms-status", "type": "add_aes_bms_button_status", "en
                             "mask": 2}}
 
 
+@pytest.mark.slow
 def test_double_wrap_after_bms_status_refuses():
     assert "BAD_PARAMS" in _errors(ALARMS_BASE + [ALARMS_STATUS,
                                                   _status([_entry("alarms", 1)])])
@@ -270,6 +274,7 @@ def test_preset_button_wraps():
     assert len([r for r in frame if r.wtype == 6 and r.count == 4]) == 1, "heater switch kept"
 
 
+@pytest.mark.slow
 def test_ge_requires_valid_max():
     assert "BAD_PARAMS" in _errors(BASE + [_status([_entry("b1", 2, compare={"ge": 2})])])
     assert "BAD_PARAMS" in _errors(BASE + [_status([_entry("b1", 2, compare={"ne": 2})])])
@@ -293,12 +298,14 @@ def test_no_buttons_is_bad_params():
     assert "BAD_PARAMS" in _errors(BASE + [_status([])])
 
 
+@pytest.mark.slow
 def test_bad_ref():
     assert "BAD_REF" in _errors(BASE + [_status([_entry("nope", 1)])])
     assert "BAD_REF" in _errors(BASE + [_status([_entry("b1", 1, source={"ref": "nope"})])])
     assert "BAD_REF" in _errors(BASE + [_status([_entry("ring", 1)])])
 
 
+@pytest.mark.slow
 def test_no_body_colour():
     assert "NO_BODY_COLOUR" in _errors(BASE + [_status(on_colour=[1, 2, 3])])
     assert "NO_BODY_COLOUR" in _errors(
@@ -321,6 +328,7 @@ def test_heater_switch_unchanged():
     assert hashlib.sha256(bms).hexdigest() == BMS_SHA
 
 
+@pytest.mark.slow
 def test_inert_source_refuses():
     """Var 185's extraction mode is 0: it matches its DGN and writes no slot
     (`statusbind.LIVE_MODES`), so a light on it would never change."""
@@ -328,6 +336,7 @@ def test_inert_source_refuses():
     assert "NO_SUCH_REGISTER" in msg and "mode 0" in msg
 
 
+@pytest.mark.slow
 def test_preset_handle_has_the_rvc_button_keys(monkeypatch):
     """A status op reads its button's handle with `.get`: the `add_aes_batt_heat` preset's must
     carry every key an `add_rvc_button`'s does, with the values the preset really builds (fill

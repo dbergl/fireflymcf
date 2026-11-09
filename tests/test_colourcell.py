@@ -61,6 +61,7 @@ def _objects(data):
     return out
 
 
+@pytest.mark.slow
 def test_tank_gauges_found_from_the_bytes(gauges, mcf_136):
     assert gauges == {0: 721, 1: 719, 2: 723, 18: 725}       # fresh, black, grey, grey 2
     for oi in gauges.values():
@@ -137,6 +138,7 @@ def test_guicode_changes_are_only_the_table_grow_and_shifted_pointers(gauges, mc
     assert literals and bounds
 
 
+@pytest.mark.slow
 def test_fill_of_a_gauge(gauges, mcf_136):
     """The level fill: an inline (mode-3) colour on fresh, a shared row (mode 7) on black."""
     ed = userop.Editor(mcf_136)
@@ -245,6 +247,7 @@ def _count(px, rgb):
     return int(np.all(px == np.array(rgb, np.uint8), axis=1).sum())
 
 
+@pytest.mark.slow
 def test_emulated_outline_is_red_only_when_low(gauges, mcf_136, tmp_path):
     pytest.importorskip("unicorn")
     from fireflymcf.emu.scenario import Scenario
@@ -442,6 +445,7 @@ def crowded(mcf_136):
     return res.data
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("batched", [True, False])
 def test_four_cells_on_a_crowded_build(gauges, mcf_136, crowded, tmp_path, batched):
     """Four gauge outlines on a build whose tail headroom is below one table grow compile and

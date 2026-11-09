@@ -157,6 +157,7 @@ def test_add_button_refuses_variant_setter_unknown(mcf_136, monkeypatch, setter_
     assert [e["code"] for e in res.errors] == ["VARIANT_SETTER_UNKNOWN"], res.errors
 
 
+@pytest.mark.slow
 def test_wire_button_refuses_variant_setter_unknown(mcf_136, monkeypatch, setter_unknown):
     """`wire_button`'s `retarget_command` allocates the same way: VARIANT_SETTER_UNKNOWN, not
     WIRE_REFUSED."""

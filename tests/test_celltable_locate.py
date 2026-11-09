@@ -52,6 +52,7 @@ def test_locate_1123_reads_the_movw_bound(mcf_1123):
     assert len(ct.clamp_sites) == 6 and 0x251548 in ct.clamp_sites
 
 
+@pytest.mark.slow
 def test_accessors_follow_locate(corpus):
     for version in ("11.23", "13.6", "14.7"):
         data = corpus[version]["mcf"]
@@ -421,6 +422,7 @@ def _halfword_moves_reusing(monkeypatch, before: tuple, after: tuple) -> tuple:
     return reused, fresh, walks_reused, walks_fresh
 
 
+@pytest.mark.slow
 def test_halfword_moves_reuse_equals_a_fresh_evaluation(mcf_136, monkeypatch):
     """`_halfword_moves` reuses a recent evaluation's untouched starts; after a grow (GuiCode
     literals repointed, bounds rebumped) the reused answer equals a from-scratch one, and the
@@ -473,6 +475,7 @@ def test_area_comes_from_the_stock_not_a_user_pointed_cell(mcf_136):
         sramreach.cell_area(out)                      # outside a scope, the image is its own stock
 
 
+@pytest.mark.slow
 def test_render_state_comes_from_the_stock_not_an_authored_base(mcf_136, monkeypatch):
     """An authored routine that addresses its own literal SRAM base through `movw` offsets is a
     second such base in the working image only. Inside the stock scope the render state is the

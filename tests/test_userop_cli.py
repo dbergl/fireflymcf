@@ -443,6 +443,7 @@ def test_capability_gate_is_a_structured_refusal(tmp_path, mcf_136, capsys):
     assert body["passed"] is False and body["errors"][0]["code"] == "CAPABILITY_GATE"
 
 
+@pytest.mark.slow
 def test_gates_hold_under_python_O(tmp_path, mcf_136):
     """`python -O` strips `assert`: the gates must not be asserts, or the image is written."""
     pf = _project(tmp_path, mcf_136, ("flip", "user:cmd-flip"), folders=("cmd_flip",))

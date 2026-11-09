@@ -146,6 +146,7 @@ def test_gate_addr_is_a_plausible_sram_register(mcf_136):
     assert 0x20030000 <= plan.gate_addr < 0x20040000
 
 
+@pytest.mark.slow
 def test_resolve_refuses_a_corrupted_hook(mcf_136):
     """A cross-coach safety rail: if the byte we detour is not the stock `bl`, refuse."""
     from fireflymcf import theme
@@ -225,6 +226,7 @@ def test_build_gate_is_slot_reads_halfword(mcf_136):
     assert "cmp r0, #1" in texts
 
 
+@pytest.mark.slow
 def test_build_disassembles_as_authored(mcf_136):
     plan = followchannel.resolve(mcf_136, 25, 44, 200, "Heat Pump")
     blob, disasm = followchannel.build(plan, CODE_ADDR)

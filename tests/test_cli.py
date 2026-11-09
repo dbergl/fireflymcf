@@ -122,6 +122,7 @@ def test_identify_command_reports_characterisation():
             f"{name} must not be reported as an identified ARM image")
 
 
+@pytest.mark.slow
 def test_patch_list_colors_lists_the_button_blue():
     from tests.conftest import REPO_ROOT
     r = _run("patch", "firefly-13.6/mcf.bin", "/dev/null", "--list-colors", cwd=REPO_ROOT)
@@ -130,6 +131,7 @@ def test_patch_list_colors_lists_the_button_blue():
     assert "161" in r.stdout                       # a static index carrying it
 
 
+@pytest.mark.slow
 def test_patch_recolor_object_box_passes_the_ladder(tmp_path):
     from tests.conftest import REPO_ROOT
     out = tmp_path / "recolored.bin"
@@ -148,6 +150,7 @@ def test_patch_recolor_object_box_passes_the_ladder(tmp_path):
     assert data[off] | (data[off + 1] << 8) == 161
 
 
+@pytest.mark.slow
 def test_patch_recolor_rejects_off_palette_colour(tmp_path):
     from tests.conftest import REPO_ROOT
     out = tmp_path / "nope.bin"
@@ -157,6 +160,7 @@ def test_patch_recolor_rejects_off_palette_colour(tmp_path):
     assert not out.exists()
 
 
+@pytest.mark.slow
 def test_patch_auto_marks_custom_build(tmp_path):
     from tests.conftest import REPO_ROOT
     from fireflymcf import patch
@@ -167,6 +171,7 @@ def test_patch_auto_marks_custom_build(tmp_path):
     assert patch.build_name(out.read_bytes()) == "Jayco B-Van V13 (Custom)"
 
 
+@pytest.mark.slow
 def test_patch_name_overrides_and_no_mark_suppresses(tmp_path):
     from tests.conftest import REPO_ROOT
     from fireflymcf import patch
@@ -245,6 +250,7 @@ def test_image_export_lists_and_dumps_a_ppm(tmp_path):
     assert ppm.read_bytes().startswith(b"P6\n%d %d\n255\n" % (w, h))
 
 
+@pytest.mark.slow
 def test_swap_image_replaces_an_image_in_place(tmp_path):
     """Export image 0, invert it, swap it back: the new MCF must carry the inverted image, leave a
     neighbour untouched, and be a valid resealed container."""
@@ -286,6 +292,7 @@ def test_pages_lists_navigable_pages_with_root_and_page_columns():
             assert name in by_page, f"{name} not annotated on {mcf}"
 
 
+@pytest.mark.slow
 def test_pages_root_index_actually_renders(tmp_path):
     """A --root value from `pages` must render -- specifically 14.7's electrical page, whose static
     header is blank (dynamic AES/AGS caption) so `--page electrical` cannot find it, is reachable by
@@ -302,6 +309,7 @@ def test_pages_root_index_actually_renders(tmp_path):
     assert out.exists()
 
 
+@pytest.mark.slow
 def test_doctor_reports_build_general_capability_summary():
     """`doctor` is the one-command owner report; it must work on every corpus build and surface the
     self-identified interlocks -- Progressive Inverter (removable) on 13.6, Lithionics Batteries
@@ -348,6 +356,7 @@ def test_every_subcommand_prints_help():
         assert "usage: fireflymcf %s" % cmd in out.getvalue(), cmd
 
 
+@pytest.mark.slow
 def test_pins_on_a_grown_image_reports_spares_unknown(tmp_path, mcf_136):
     """`pins` on a built (grown) image: the spare indices are unknown (SPARE_ROWS_UNKNOWN,
     `statusbind.spare_cell_indices`), which it says, with the reason, and still lists the pins."""
@@ -371,6 +380,7 @@ def test_pins_on_a_grown_image_reports_spares_unknown(tmp_path, mcf_136):
     assert out["spare_cell_indices_unknown"].startswith("SPARE_ROWS_UNKNOWN")
 
 
+@pytest.mark.slow
 def test_pins_survives_a_bridge_refusal_in_state_loads(mcf_136, tmp_path, monkeypatch, capsys):
     """`state_loads` refuses BRIDGE_UNKNOWN (no longer a `StatusBindError`); `pins` leaves that
     pin's states blank instead of crashing."""

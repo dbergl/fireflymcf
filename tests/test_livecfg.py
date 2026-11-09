@@ -73,6 +73,7 @@ def test_garbage_input_is_empty_not_an_error():
     assert livecfg.decode_capture("").frames == 0
 
 
+@pytest.mark.slow
 def test_to_preview_maps_selectors_onto_the_coach_config(stock, capture):
     """The decoded map becomes exactly the shape `project.preview` stores."""
     live = livecfg.decode_capture(capture)

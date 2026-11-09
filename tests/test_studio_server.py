@@ -821,6 +821,7 @@ def test_placements_advertise_set_icon_on_the_box(client):
 
 # --- coach config: floorplans, options, per-floorplan defaults ---------------
 
+@pytest.mark.slow
 def test_reference_config_lists_every_floorplan(client):
     body = client.get("/api/reference/config").json()
     codes = {f["code"]: f["value"] for f in body["floorplans"]}
@@ -863,6 +864,7 @@ def test_reference_config_omits_floorplans_that_have_no_defaults(client):
     for code in ("4NJ", "3NG", "3NK", "3NJ"):
         assert by_code[code] not in body["defaults"], code
 
+@pytest.mark.slow
 def test_reference_config_wd_defaults_match_the_engine(client, stock):
     from fireflymcf import guidata
     body = client.get("/api/reference/config").json()
@@ -905,6 +907,7 @@ def test_preview_floorplan_drives_the_render(client):
     assert sha(explicit) == sha(withfp)
 
 
+@pytest.mark.slow
 def test_preview_options_reach_the_render(client):
     """AGS/AES/AES Single Output share slot 37 by VALUE, so they must not be booleans.
 
@@ -963,6 +966,7 @@ def test_radio_defaults_pick_one_mode_not_all_three(client):
     assert sy["AES Single Output"] is False
 
 
+@pytest.mark.slow
 def test_a_floorplans_own_defaults_render_without_a_422(client):
     """End-to-end: load a floorplan's defaults exactly as the UI does, and render.
 
@@ -981,6 +985,7 @@ def test_a_floorplans_own_defaults_render_without_a_422(client):
 
 # --- owner-supplied per-floorplan extra slots (the Batteries widget) ---------
 
+@pytest.mark.slow
 def test_the_battery_gate_is_on_for_every_floorplan(client):
     """Slot 512 is panel-local RUNTIME state, not a floorplan default.
 
@@ -1005,6 +1010,7 @@ def test_the_battery_gate_is_on_for_every_floorplan(client):
         assert sha(shown) != sha(hidden), code
 
 
+@pytest.mark.slow
 def test_battery_group_is_described_for_the_picker(client):
     """Slot 512 fronts TWO groups -- object 1121 ('Battery', inner slot 509) and object
     1235 (' Batteries:', inner slot 599). Both are described, identified by their content
@@ -1034,6 +1040,7 @@ def test_preview_extra_slots_reach_the_render(client):
     assert sha(explicit) == sha(off)
 
 
+@pytest.mark.slow
 def test_battery_count_default_is_one(client):
     """Slot 599 is ZERO-BASED: 0 shows '1', 1 shows '2'. Established by rendering
     all three values and comparing the dots, not by reading a match value -- both
@@ -1103,6 +1110,7 @@ def test_import_live_rejects_nothing_and_never_500s(client):
         assert r.json()["frames"] == 0
 
 
+@pytest.mark.slow
 def test_page_stays_findable_after_its_header_is_renamed(client):
     """Renaming a page header must not make the page unreachable in the editor.
 
@@ -1158,6 +1166,7 @@ def test_battery_block_follows_the_generator_setting(client):
     assert 6 not in reference.derived_slots(stock, {5: 8})
 
 
+@pytest.mark.slow
 def test_derived_slot_reaches_the_render_and_can_be_overridden(client):
     from studio.server import engine
     stock = open("firefly-13.6/mcf.bin", "rb").read()
@@ -1180,6 +1189,7 @@ def test_derived_slot_reaches_the_render_and_can_be_overridden(client):
     assert slot6({"floorplan": "WD", "options": ["AES"], "extra_slots": {"6": 0}}) == "0"
 
 
+@pytest.mark.slow
 def test_derived_battery_block_is_the_one_actually_rendered(client):
     """Not just the slot string: the object the walk places must change with it."""
     _make(client, "batt")
@@ -1258,6 +1268,7 @@ def test_derived_nav_rail_is_the_one_actually_rendered(client):
     assert 385 in pi and 386 not in pi, "the inverter alone brings the icon back"
 
 
+@pytest.mark.slow
 def test_config_reports_what_a_setting_derives_without_the_arithmetic(client):
     body = client.get("/api/reference/config").json()
     derives = body["derives"]
@@ -1335,6 +1346,7 @@ def other_client(request, tmp_path):
     return c
 
 
+@pytest.mark.slow
 def test_reference_endpoints_work_on_other_builds(other_client):
     for path in ("/api/reference/pins", "/api/reference/colors", "/api/reference/channels",
                  "/api/reference/fonts", "/api/reference/pages", "/api/reference/config"):

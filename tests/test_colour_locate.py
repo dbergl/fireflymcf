@@ -122,6 +122,7 @@ def test_type_table_on_grown_builds(path):
     assert guidata.find_variable_tables(data) == (lits.dptr_off, lits.type_off)
 
 
+@pytest.mark.slow
 def test_palette147(mcf_147):
     palette = theme.mode7_palette(mcf_147)
     assert palette == {i: _rgb(v) for i, v in PALETTE_147.items()}
@@ -257,6 +258,7 @@ def test_themeswap_bounds_the_palette_by_the_code(mcf_136):
     assert p.palette == 0
 
 
+@pytest.mark.slow
 def test_black_refused_on_147(mcf_147):
     """14.7's code-cited static palette has no black (the old idx-34 black was a mistyped
     entry). The label ops refuse it as NO_COLOUR (`add_text_label` is 13.6-only, so its
@@ -454,6 +456,7 @@ def test_theme_init_rethemed_form(mcf_136):
         themeswap.plan(out, {"bg": (1, 2, 3)})
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not _GROWN_BUILDS, reason="research builds/ not linked")
 def test_theme_init_on_the_reference_builds():
     """Every reference build is located; the ones that ran `set_theme` are in the re-themed
@@ -472,6 +475,7 @@ def test_theme_init_on_the_reference_builds():
     assert "rethemed" in forms.values() and "stock" in forms.values()
 
 
+@pytest.mark.slow
 def test_plan_on_147_patches_the_located_sites(mcf_147):
     """`plan` runs on 14.7 directly (the op runs there too, tests/emu/test_ops147.py): its GuiCode
     edits are the located sites, and the tank wells are the located well index's."""
@@ -488,6 +492,7 @@ def test_plan_on_147_patches_the_located_sites(mcf_147):
     assert themeswap._tank_fill_offsets(mcf_147)
 
 
+@pytest.mark.slow
 def test_tank_fill_offsets_136_unchanged(mcf_136):
     assert len(themeswap._tank_fill_offsets(mcf_136)) == 3
 

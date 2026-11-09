@@ -19,6 +19,7 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 SCRATCH_DIR = REPO / "build"          # gitignored outputs (and superseded ad-hoc scripts)
 
 
+@pytest.mark.slow
 def test_the_composed_pipeline_runs_from_stock(mcf_136):
     """Stock -> tank-heater widen -> Pin-15 button -> a second attached button, gates green.
 

@@ -142,6 +142,7 @@ def test_mask_2_fold_reads_bit_1(word, expect):
     assert s.rd(cell.addr, 2) == expect
 
 
+@pytest.mark.slow
 def test_cell_1_selects_the_cyan_arm(with_status):
     from tests.test_card_layout import COACH
     sw = _alarm_switch(with_status)

@@ -45,6 +45,7 @@ def test_skill_example_manifest_is_complete():
     assert d["type"] == "user:tick-counter"
 
 
+@pytest.mark.slow
 def test_skill_example_compiles_and_emulates(tmp_path, mcf_136, capsys):
     pytest.importorskip("unicorn")
     pf = _project(tmp_path, mcf_136)

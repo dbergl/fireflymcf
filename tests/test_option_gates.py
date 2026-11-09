@@ -131,6 +131,7 @@ def test_off_template_bytes_are_the_cited_ones(mcf_136):
 # 14.7: same shape, its own indices; no rebinding pair, so no OFF companions
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_147_gates_have_the_same_shape(mcf_147):
     by_name = {b.name: b for b in guidata.find_option_bindings(mcf_147)}
     assert by_name["Cargo Light"].channel == 25 and by_name["Cargo Light"].hides_control

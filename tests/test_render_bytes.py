@@ -87,6 +87,7 @@ def _boxless_mark(data, *, dx=80, dy=26, char="A", font=13):
     return out, base
 
 
+@pytest.mark.slow
 def test_a_boxless_record_draws_nothing(mcf_136):
     """The first corner mark, previewed the way the coach actually showed it: not at all.
 
@@ -116,6 +117,7 @@ def test_a_boxless_record_draws_nothing(mcf_136):
     assert not changed, f"the boxless mark drew {len(changed)} pixels; the coach showed none"
 
 
+@pytest.mark.slow
 def test_a_boxed_mark_IS_drawn(mcf_136):
     """The contrast: the same mark WITH a box renders in full, which is what the verified build
     ships.

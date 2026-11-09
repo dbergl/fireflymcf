@@ -62,6 +62,7 @@ COVERAGE_136 = {
 }
 
 
+@pytest.mark.slow
 def test_coverage_136():
     m = busmap.receive_map(image(B136))
     cov = busmap.coverage(m)
@@ -217,6 +218,7 @@ def test_derived_bridge_refuses_two_blocks_naming_different_cells(clean_caches, 
         status_map._derived_bridge.cache_clear()
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", [B136, B1123, B147])
 def test_tanks_through_the_generic_path(name):
     """The tank names come out of the generic trace and caption rules exactly as `tanknames`
@@ -336,6 +338,7 @@ def test_without_control_flow_the_decided_stores_vanish(clean_caches, monkeypatc
     assert status_map.load_bridge("136")[80]["colour_cell"] not in got
 
 
+@pytest.mark.slow
 def test_an_escape_voids_every_negative(clean_caches, monkeypatch):
     real = slottrace.state_reach
 
@@ -348,6 +351,7 @@ def test_an_escape_voids_every_negative(clean_caches, monkeypatch):
     assert outputs.status_join_refusal(image(B136)).startswith("BRIDGE_UNKNOWN")
 
 
+@pytest.mark.slow
 def test_an_escape_leaves_no_cached_captions_behind(monkeypatch):
     """The escape case, then the real trace restored: the status-joined captions are back at
     their full count (a cached refusal would leave only the command-joined ones)."""
@@ -365,6 +369,7 @@ def test_an_escape_leaves_no_cached_captions_behind(monkeypatch):
     assert outputs.status_join_refusal(data) is None
 
 
+@pytest.mark.slow
 def test_bus_map_says_when_the_status_join_is_unavailable(clean_caches, monkeypatch, capsys):
     real = slottrace.state_reach
     monkeypatch.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
@@ -378,6 +383,7 @@ def test_bus_map_says_when_the_status_join_is_unavailable(clean_caches, monkeypa
 
 # ------------------------------------------------------------------------------ spot checks
 
+@pytest.mark.slow
 def test_other_builds():
     m1123 = busmap.receive_map(image(B1123))
     m147 = busmap.receive_map(image(B147))

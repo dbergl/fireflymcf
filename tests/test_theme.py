@@ -67,6 +67,7 @@ def test_rgb888_format_constants_decode(mcf_136):
     assert _rgb(0x00AA00AA) == (0xAA, 0x00, 0xAA) and (0xAA, 0x00, 0xAA) in values
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("build", ["136", "1123", "147"])
 def test_runs_on_every_build_and_is_well_formed(build, request):
     """The same cell-pool method locates the theme-init on every build (no 13.6 hard-coding):
@@ -157,6 +158,7 @@ def test_resting_defaults_omits_ambiguous_and_non_copy(mcf_136):
     assert set(rd).isdisjoint(theme.mode7_palette(mcf_136))
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("build", ["136", "1123", "147"])
 def test_resting_defaults_well_formed_every_build(build, request):
     """Runs build-generally (no 13.6 addresses) and returns only valid RGB triples on all three

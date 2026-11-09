@@ -18,6 +18,8 @@ import pytest
 
 from fireflymcf import celltables, coverage, guidata, records, repaint, routinekit, userop
 
+pytestmark = pytest.mark.slow  # module-scoped emulation fixtures: every worker pays the setup
+
 NEEDS_RESEARCH_DATA = "binds the 13.6 corpus image's tank gauges for repaint, boots it"
 
 FRESH = 721                     # stock 13.6: the FRESH gauge (a wt-32 well first), test_colourcell

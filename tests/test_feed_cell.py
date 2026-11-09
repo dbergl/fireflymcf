@@ -120,6 +120,7 @@ def test_the_routine_rounds_like_the_panel(data) -> None:
         assert sim.rd(0x20039F30, 2) == want, (raw, sim.rd(0x20039F30, 2))
 
 
+@pytest.mark.slow
 def test_both_rows_fed_in_one_recipe_chain_and_keep_each_others_writers_straight(data) -> None:
     r = _compile(data,
                  recipe.OpSpec(id="absorb", type="add_register_readout", params=absorb_params()),
@@ -188,6 +189,7 @@ def test_the_manifest_line_names_the_stock_writers_left(data) -> None:
     ("firefly-14.7 (Terrain)/mcf.bin", 147, ["0x247ce8", "0x24ac0a"]),   # Absorb
     ("firefly-13.6/mcf.bin", 41, None),                           # 15 writers: none dropped
 ])
+@pytest.mark.slow
 def test_slot_source_lists_every_stock_writer_of_one_cell(image, slot, writers) -> None:
     import subprocess
     import sys

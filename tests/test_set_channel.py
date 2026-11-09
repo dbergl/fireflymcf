@@ -315,6 +315,7 @@ def test_refuses_a_destination_with_no_bridge_block(
         patch.McfPatcher(image).set_channel(bath_fan, 42)
 
 
+@pytest.mark.slow
 def test_retargets_on_14_7_to_its_derived_cells() -> None:
     """The status bridge is derived per image (2026-11-08): on 14.7 the default indicator
     retarget names 14.7's own cells for the new channel, not 13.6's."""

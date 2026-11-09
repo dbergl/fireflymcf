@@ -292,6 +292,7 @@ def test_the_gate_reads_the_147_driven_groups(mcf_147, monkeypatch):
 
 # --- the emulator: the located set is what the LCD's records show after boot ---------------------
 
+@pytest.mark.slow
 def test_boot_on_147_drives_only_located_groups(mcf_147):
     """After boot on stock 14.7, every group whose LCD runtime record (`host_writer.records`,
     16 bytes per group, variant counters at +0x0A/+0x0B) is non-zero is in the located set,
@@ -309,6 +310,7 @@ def test_boot_on_147_drives_only_located_groups(mcf_147):
     assert not lit & set(newbutton.hold_safe_groups(mcf_147))
 
 
+@pytest.mark.slow
 def test_sendmap_reports_driven_groups_as_unknown_when_the_scan_refuses(mcf_147):
     from fireflymcf import sendmap
     assert sendmap.binding_groups(mcf_147, False)[5].guicode_variant is True
@@ -479,6 +481,7 @@ def _with_dump(monkeypatch):
     monkeypatch.setattr(status_map, "derived_bridge", lambda _d: status_map.load_bridge("136"))
 
 
+@pytest.mark.slow
 def test_bridge_readers_on_13_6_equal_the_dump(mcf_136, monkeypatch):
     """`backbone`, `pin_bindings`, `state_loads` and `bind_pin` on 13.6 give exactly the values
     they gave on the committed dump, so every 13.6 build stays byte-identical."""
@@ -503,6 +506,7 @@ def test_bridge_readers_on_13_6_equal_the_dump(mcf_136, monkeypatch):
     assert any(isinstance(derived[p], tuple) and derived[p][2] for p in pins)
 
 
+@pytest.mark.slow
 def test_pin_bindings_on_14_7_name_the_derived_cells(mcf_147):
     """14.7's pins 1-43 are bridged, each on the cells the derivation names (research
     2026-11-08); none on 13.6's dump cells."""
@@ -584,6 +588,7 @@ def _bridge_follows_the_g12(s, data, pins):
     assert sole or len(pins) == 1, "no sampled pin's bool cell was checked"
 
 
+@pytest.mark.slow
 def test_the_derived_bridge_follows_the_g12_on_14_7(mcf_147, monkeypatch):
     """The emulator on stock 14.7 (research 2026-11-08, pin 3 by hand). Can fail: with the
     derivation stubbed to `{}` the same check fails."""

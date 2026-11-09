@@ -407,6 +407,7 @@ def _labelled(report, prefix):
     return [(s, n) for s, n, label in report.spans if label.split(":", 1)[0] == prefix]
 
 
+@pytest.mark.slow
 def test_appended_cell_tables_are_claimed(mcf_136):
     """Two grows leave one dead copy and the live pair after GuiData's last object. Each is
     claimed by name, the live one where the panel reads it, and the last table's trailing

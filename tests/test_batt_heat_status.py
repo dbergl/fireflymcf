@@ -9,6 +9,7 @@ whole buttons -- capsule, caption and (when the contactor is closed) the glyph -
 makes the repaint correct; see `test_every_arm_redraws_the_whole_button`. This exercises the op
 composed on the compact frame (swap_aes_electrical + add_aes_batt_heat + add_aes_batt_heat_status).
 """
+import pytest
 import json
 import struct
 
@@ -191,6 +192,7 @@ def test_capability_gate_sees_no_delta():
     assert recipe.capabilities(res.data) == recipe.capabilities(stock)
 
 
+@pytest.mark.slow
 def test_body_renders_blue_off_cyan_on():
     """The body reads the standard button blue for heater-off states {0, 2} and cyan for the
     heater-on states {1, 3} -- the pair Water Pump / Starlink / Overflow / Tank Heater use."""

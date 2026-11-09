@@ -295,6 +295,7 @@ def _coded_refusals_by_op() -> dict:
     return result
 
 
+@pytest.mark.slow
 def test_coded_refusals_are_documented():
     reach = _coded_refusals_by_op()
     # the derivation finds the template, donor and mode-7 users it must (a broken graph that

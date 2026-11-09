@@ -1,5 +1,6 @@
 """Ops declare the firmware they run on; compile refuses an op outside it, and refuses an image
 fireflymcf cannot identify. Hardware verification is per firmware (`Op.is_verified`)."""
+import pytest
 import hashlib
 import shutil
 from pathlib import Path
@@ -90,6 +91,7 @@ def test_an_unidentified_image_is_refused_without_ops(mcf_147):
     assert [(e["code"], e["op_id"]) for e in res.errors] == [("UNSUPPORTED_FIRMWARE", None)]
 
 
+@pytest.mark.slow
 def test_unverified_is_per_firmware(mcf_136, mcf_147, monkeypatch):
     monkeypatch.setattr(recipe.REGISTRY["rename_label"], "firmwares", frozenset({"13.6", "14.7"}))
     on136 = _compile(mcf_136, [("r", "rename_label", RENAME_136)])

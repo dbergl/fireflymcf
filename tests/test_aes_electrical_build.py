@@ -5,6 +5,7 @@ The `swap_aes_electrical` recipe op (Task 5) replaces the inline all-in-one AES 
 render path (object 5's mode switch, 830, 315, 795, 45, 486-488) may change: this file
 is the gate that proves it, byte-for-byte and pixel-for-pixel.
 """
+import pytest
 import json
 import struct
 
@@ -47,6 +48,7 @@ def test_ags_object_spans_byte_identical():
         assert _span(res.data, i) == _span(stock, i), f"AGS object {i} drifted"
 
 
+@pytest.mark.slow
 def test_ags_electrical_renders_pixel_identical():
     stock, res = _build()
     a = render.render_screen_image(stock, 5, slot_values={7: 1, 37: 1})

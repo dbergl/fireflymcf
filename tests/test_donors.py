@@ -63,6 +63,7 @@ def test_group_prefix_equals_136_old_pin(stocks, name):
     assert raw[guidata.GROUP_ENTRY_SIZE - 1] == 0      # the pad byte the clone writes
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", sorted(OLD_PINS_136))
 def test_template_on_147(stocks, name):
     raw, proof = donors.template(stocks["14.7"], name)
@@ -85,6 +86,7 @@ def test_readout_background_is_the_panel_cell(stocks, version):
         donors.TEMPLATES["readout.wt8"].raw, "readout.wt8")
 
 
+@pytest.mark.slow
 def test_templates_refuse_on_1123(stocks):
     data = stocks["11.23"]
     for name in donors.TEMPLATES:
@@ -245,6 +247,7 @@ def test_caption_font_must_cover_the_text(stocks, monkeypatch):
     assert e.value.code == "NO_TEMPLATE" and "'yo'" in str(e.value)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("char", list(donors.READOUT_CHARS))
 def test_readout_font_must_cover_digits_point_and_minus(stocks, monkeypatch, char):
     data = stocks["13.6"]
@@ -357,6 +360,7 @@ def test_custom_readout_donor_refuses_with_a_code(stocks):
     assert e.value.code == "GRAMMAR"
 
 
+@pytest.mark.slow
 def test_witnesses_come_from_the_recipe_stock_not_the_working_image(stocks):
     """The reviewer's sequence on 14.7: set_font puts font 24 on a wt-8 record (an ungated
     writer), then a pagedraw readout in font 24 must still refuse inside a recipe, because the

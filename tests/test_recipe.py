@@ -167,6 +167,7 @@ def test_cache_ignores_disabled_ops(stock, stock_hash):
     r = recipe.compile_cached(p, stock, cache)
     assert r.ok and r.data == stock
 
+@pytest.mark.slow
 def test_capability_gate_catches_unexpected_gain(stock, stock_hash, monkeypatch):
     # An op that lies: it adds a capability but declares no delta.
     from fireflymcf import guidata, newbutton, patch, statusbind

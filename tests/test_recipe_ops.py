@@ -330,6 +330,7 @@ def test_recolor_to_current_value_is_noop(stock, stock_hash):
     assert r.ok, r.errors
     assert r.data == stock
 
+@pytest.mark.slow
 def test_recolor_verify_catches_later_repoint(stock, stock_hash):
     # FINDING 2: Recolor.verify() used to only re-resolve find_button_box, which is
     # vacuous -- a later op repointing the SAME box's fillA (wire_button, on a shell
@@ -647,6 +648,7 @@ def test_add_button(stock, stock_hash):
     # capability gate accepted exactly (28, 5)
     assert recipe.capabilities(r.data) - recipe.capabilities(stock) == {(28, 5)}
 
+@pytest.mark.slow
 def test_add_button_commanded_channel_needs_acknowledge(stock, stock_hash):
     r = compile_ops(stock, stock_hash,
                     recipe.OpSpec(id="btn", type="add_button",
@@ -731,6 +733,7 @@ def test_wire_button_without_shell_fails_cleanly(stock, stock_hash):
                                           "off_colour": [65, 81, 163]}))
     assert not r.ok and r.errors[0]["code"] == "BAD_REF"
 
+@pytest.mark.slow
 def test_wire_button_indicator_refusal_is_wire_refused(stock, stock_hash, monkeypatch):
     # newbutton.retarget_indicator raises a bare ValueError for an out-of-range object
     # index or an object with no wtype-33 record (newbutton.py:520-527). That must not
@@ -1282,6 +1285,7 @@ def test_follow_channel_op_produces_a_sealed_gated_follower(stock, stock_hash):
     assert recipe.capabilities(out) == recipe.capabilities(stock)
 
 
+@pytest.mark.slow
 def test_add_option_follower_composes_toggle_row_and_gated_follower(stock, stock_hash):
     """B3.1: one op that builds the 0xEE toggle group, appends a 'Pump Link' OPTIONS
     checkbox row, and installs a follower routine gated on that row -- with Heat Pump

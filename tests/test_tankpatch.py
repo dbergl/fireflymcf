@@ -39,6 +39,7 @@ def test_a_bare_run_reports_and_writes_nothing(tmp_path, capsys):
     assert not list(tmp_path.iterdir())
 
 
+@pytest.mark.slow
 def test_the_report_runs_on_every_build_in_the_corpus(capsys):
     for name in CORPUS:
         assert run(REPO / name) == 0, name
@@ -109,6 +110,7 @@ def test_an_arbitrary_instance_can_be_named(tmp_path):
     assert tankbroadcast.suppressed_instances(out.read_bytes()) == [18]
 
 
+@pytest.mark.slow
 def test_every_corpus_build_patches_and_reseals(tmp_path):
     for name in CORPUS:
         out = tmp_path / f"mcf-{Path(name).parent.name}.bin"
@@ -132,6 +134,7 @@ def test_that_refusal_can_be_overridden(tmp_path):
     assert out.exists()
 
 
+@pytest.mark.slow
 def test_a_second_pass_is_refused_and_writes_nothing(tmp_path, capsys):
     once = tmp_path / "mcf-a.bin"
     assert run(STOCK, "--all-water", "-o", once) == 0
@@ -292,6 +295,7 @@ def test_extracting_over_an_existing_file_is_refused(tmp_path, capsys):
     assert "already exists" in capsys.readouterr().err
 
 
+@pytest.mark.slow
 def test_extraction_works_on_every_build_in_the_corpus(tmp_path):
     for i, name in enumerate(CORPUS):
         source = REPO / name

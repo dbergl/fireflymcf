@@ -1,10 +1,18 @@
 # Testing — commands, parallel runs, and the speed pass
 
 ```
+python3 -m pytest tests -q -n auto -m "not slow"  # the fast tier, the edit loop: ~77 s on 16 threads (2026-11-09); NOT the merge gate
 python3 -m pytest tests/ -q -n auto               # the whole suite: 4m22s-4m48s on 16 threads (2026-11-09, warm compile cache; a cold run after any src/ edit misses every compile and is slower)
 python3 -m pytest tests/test_x.py -v              # serial, one module; use it to see WHY something is red
 npm test --prefix studio/web                      # the web editor's tests
 ```
+
+**The fast tier is for the edit loop only.** `-m "not slow"` skips every test under `tests/emu/`
+(auto-marked in `tests/conftest.py`) and every test measured at 3 s or more (marked
+`@pytest.mark.slow`, or `pytestmark` on a module whose module-scoped fixture boots an emulation, so
+every worker pays the setup). About 420 of 3848 tests are slow. The full suite, without `-m`, is the
+gate before a merge and after any engine change. `tests/test_slow_marker.py` fails if a `tests/emu/`
+test loses the marker. A new test that takes 3 s or more should carry `@pytest.mark.slow`.
 
 `pytest-xdist` is installed with `sudo apt install python3-pytest-xdist`; PEP 668 blocks
 `pip install` into the system Python here.

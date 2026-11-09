@@ -368,6 +368,7 @@ _PIN_DECODER_START = 0x247BF8
 _PIN_DECODER_END = 0x24AB00
 
 
+@pytest.mark.slow
 def test_decoder_range(mcf_136, mcf_147, mcf_1123):
     """`decodeguards.decoder_range` is the located callee to its one epilogue (2026-11-08). On
     13.6 the guards over it equal the guards over the old 13.6 pin, on stock and on every grown

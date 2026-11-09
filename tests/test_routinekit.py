@@ -251,6 +251,7 @@ def _run_to(s, t):
     s.run(max(0.0, t - s.now))
 
 
+@pytest.mark.slow
 def test_tick_routine_runs_each_tick(mcf_136):
     ed, cell, _ = _install_counter(mcf_136)
     s = _scenario(ed.data)
@@ -261,6 +262,7 @@ def test_tick_routine_runs_each_tick(mcf_136):
     assert 0 < a < b, (a, b)
 
 
+@pytest.mark.slow
 def test_tick_routine_chains_after_existing(mcf_136):
     from fireflymcf.emu.canbus import Peer
 
@@ -288,6 +290,7 @@ def test_tick_routine_chains_after_existing(mcf_136):
     assert _u32(s, cell) > c0
 
 
+@pytest.mark.slow
 def test_emit_send_frame_transmits(mcf_136):
     tpl = routinekit.config_frame(0x2F, 0xFFFF, 0xD3)
     ed = userop.Editor(mcf_136)

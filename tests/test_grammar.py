@@ -403,6 +403,7 @@ def test_lcd_proof_is_memoised_and_immutable(stocks):
     assert grammar.prove_lcd(stocks["14.7"]) is p
 
 
+@pytest.mark.slow
 def test_group_prefix_gate_is_prove_lcd(stocks):
     """`donors.group_prefix` is gated on `prove_lcd` alone: it refuses LCD_GRAMMAR when the LCD's
     group handling is not 13.6's (even where the GuiCode grammar proves), and accepts 11.23,

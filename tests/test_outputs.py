@@ -159,6 +159,7 @@ BLANK_1123 = []
 @pytest.mark.parametrize("build, expected, blank", [
     ("136", PINNED_136, BLANK_136), ("147", PINNED_147, BLANK_147),
     ("1123", PINNED_1123, BLANK_1123)])
+@pytest.mark.slow
 def test_every_outputs_page_name_with_its_condition(build, expected, blank):
     data = BUILDS[build].read_bytes()
     got = outputs.output_name_variants(data)
@@ -204,6 +205,7 @@ def test_tank_rows_agree_with_the_hand_checked_gate_emulator(stock):
             assert got == want, (code, black)
 
 
+@pytest.mark.slow
 def test_the_widened_tank_gates_read_back_from_a_patched_image(stock):
     """`tankgates.widen` (flashed 2026-08-18, confirmed all four rows on WD, PC.18b): the same
     emulation reads the patched whitelists off the patched bytes."""

@@ -2144,6 +2144,7 @@ def test_a_line_of_only_spaces_still_counts_as_blank(mcf_136) -> None:
     assert render._label_lines("a\n\nb\n \n \n") == ["a", "", "b"], "only trailing blanks drop"
 
 
+@pytest.mark.slow
 def test_floorplan_slot_is_derived_per_build_not_hardcoded(mcf_136, mcf_147, mcf_1123) -> None:
     """The FLOORPLAN SELECTION highlight cascade reads the floorplan register, and that
     register's value-slot is NOT a fixed 5: it is slot 5 on 13.6 but slot 10 on 14.7, so a

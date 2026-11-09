@@ -54,3 +54,4 @@ fireflymcf = ["py.typed", "data/*.txt", "data/*.json", "emu/native/*.c", "emu/sy
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: takes 3 s or more (emulator tests and measured slow tests); deselect with -m \"not slow\""]

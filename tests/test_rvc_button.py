@@ -217,6 +217,7 @@ def _drawn_glyph(data, char):
     return (prim.x + dx, prim.y + dy, prim.x + dx + img.width - 1, prim.y + dy + img.height - 1)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("text", ["Pump", None])
 def test_the_glyph_draws_inside_its_button(text):
     """The rendered glyph's ink lies inside the inner box, centred in the area above the
@@ -263,6 +264,7 @@ def test_a_glyph_without_an_x_bearing_makes_no_class_claim():
     assert "class" not in line, line
 
 
+@pytest.mark.slow
 def test_glyph_too_big_for_the_box():
     assert "BAD_PARAMS" in _errors([GLYPH_OP, _glyph_op(text="Pump", h=40)])
 
@@ -278,6 +280,7 @@ def test_glyph_too_big_for_the_box():
     ([_op(x=102, y=281)], "TOUCH_OVERLAP"),                      # HOME's Fresh tank button
     ([_op(x=760)], "OFF_CANVAS"),
 ])
+@pytest.mark.slow
 def test_refusals(ops, code):
     assert code in _errors(ops)
 
@@ -300,6 +303,7 @@ def test_batt_heat_records_unchanged():
     (899, "4:8/899:4"),          # HOME's Climate parent: its first wtype-5 attach carries slot 0
     (905, "4:5/907:0"),          # a slot-free attach of its own, under HOME's slot-0 907 attach
 ])
+@pytest.mark.slow
 def test_parent_with_an_inherited_slot_refuses(parent, via):
     """The capsule (wtype 33) and caption (wtype 11) carry no value slot of their own, so under
     a wtype-5 attach that carries one they would inherit it (`_effective_slot`'s rule, the

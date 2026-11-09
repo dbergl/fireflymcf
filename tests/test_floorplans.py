@@ -41,6 +41,7 @@ def test_floorplan_families_match_the_selection_screen(mcf_136):
         assert by_family.get(family) == set(codes), f"{family} membership differs"
 
 
+@pytest.mark.slow
 def test_defaults_exist_for_every_floorplan(mcf_136):
     """The option list is shared; the defaults are per-floorplan. Every floorplan must
     therefore have a defaults entry covering the same six options."""
@@ -101,6 +102,7 @@ def test_a_table_read_off_a_selection_screen_is_marked_confirmed(mcf_136, mcf_14
         assert all(fp.confirmed for fp in table)
 
 
+@pytest.mark.slow
 def test_a_file_with_no_selection_screen_confirms_its_run_from_the_handlers(mcf_1123):
     """11.23 has the value anchor but no FLOORPLAN SELECTION screen and no type-6 name
     switch -- its codes live only as the anchor-indexed label run. The run's values are
