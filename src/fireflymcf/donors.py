@@ -609,7 +609,7 @@ class ButtonProof:
     box: TemplateProof
     caption: TemplateProof
     touch: TemplateProof
-    witnesses: frozenset
+    witnesses: frozenset[int]
     caption_label: bytes
     caption_width: int
 
@@ -619,19 +619,26 @@ def button_object(data: bytes) -> tuple[bytes, ButtonProof]:
     zero-padded to a multiple of 4 (13.6: equal to `insert.clone_object(data, 279)`). Each
     record is a proven template (`template`); refuses as it does (GRAMMAR, NO_TEMPLATE).
     Memoised on content."""
-    return _button_object(data, witness_image(data))
+    return _button_object(data, witness_image(data),
+                          tuple(_get(n) for n in _BUTTON_NAMES))
+
+
+_BUTTON_NAMES = ("button.box", "button.caption", "button.touch")
 
 
 @memo.content_cached(copy=None)
-def _button_object(data: bytes, base: bytes) -> tuple[bytes, ButtonProof]:
-    box, cap, touch = (template(data, n) for n in ("button.box", "button.caption",
-                                                   "button.touch"))
+def _button_object(data: bytes, base: bytes, templates: tuple) -> tuple[bytes, ButtonProof]:
+    # `templates` is an argument only so the cache key sees the module's TEMPLATES (memo trap)
+    box, cap, touch = (template(data, n) for n in _BUTTON_NAMES)
     body = b"\3" + box[0] + cap[0] + touch[0]
     body += bytes(-len(body) % 4)
     wit = (set(o for o, j in box[1].witnesses if j == 0)
            & set(o for o, j in cap[1].witnesses if j == 1)
            & set(o for o, j in touch[1].witnesses if j == 2))
     r = _decode(cap[0], "template button.caption")
+    label = r.label.encode("latin-1")
     width = cap[0][r.label_offset - 1]
-    return body, ButtonProof(box[1], cap[1], touch[1], frozenset(wit),
-                             bytes(cap[0][r.label_offset:r.label_offset + width]), width)
+    if width != len(label):
+        raise DonorError("NO_TEMPLATE", "template button.caption: its label does not fill its "
+                                        "length-prefixed field")
+    return body, ButtonProof(box[1], cap[1], touch[1], frozenset(wit), label, width)

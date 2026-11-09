@@ -640,15 +640,18 @@ def test_button_object_on_147(stocks):
     d = stocks["14.7"]
     obj, proof = donors.button_object(d)
     assert proof.witnesses == BUTTON_WITNESSES["14.7"]
-    # equal to twin 245 except the three rewritten words (fillA, box slot, caption slot)
+    # equal to twin 245 except three u16 words: box fillA, box value_slot, caption value_slot
     twin = insert.clone_object(d, 245)
     assert len(twin) == len(obj)
-    diff = [i for i in range(len(obj)) if obj[i] != twin[i]]
-    assert len({i // 2 for i in diff}) == 3, diff
-    masked = bytearray(twin)
-    for i in diff:
-        masked[i] = obj[i]
-    assert bytes(masked) == obj
+    box = records.decode_record(obj, 1)
+    cap = records.decode_record(obj, box.end)
+    words = [box.color_off[0], box.value_slot_off, cap.value_slot_off]
+    assert box.colors[0][:2] == ("fillA", 7) and None not in words
+    allowed = {o + k for o in words for k in (0, 1)}
+    diff = {i for i in range(len(obj)) if obj[i] != twin[i]}
+    assert diff and diff <= allowed, sorted(diff - allowed)
+    # the template's values (13.6 object 279: fillA 138, box slot 53, caption slot 59)
+    assert [int.from_bytes(obj[o:o + 2], "little") for o in words] == [0x8a, 0x35, 0x3b]
 
 
 @pytest.mark.slow
@@ -662,11 +665,13 @@ def test_button_object_refuses_on_1123(stocks):
 def test_button_caption_without_witness_refuses_on_147(stocks, monkeypatch, request):
     """Mutation check: with no witness the caption (a text template, drawers not twins on 14.7)
     refuses NO_TEMPLATE."""
-    for cached in (donors._template, donors._button_object):   # keyed on bytes, not the stub
+    # the memos key on bytes and arguments, not on the monkeypatched `_witnesses`
+    for cached in (donors._template, donors._button_object):
         cached.cache_clear()
         request.addfinalizer(cached.cache_clear)
     monkeypatch.setattr(donors, "_witnesses", lambda data, t: ())
     with pytest.raises(donors.DonorError) as e:
         donors.button_object(stocks["14.7"])
     assert e.value.code == "NO_TEMPLATE"
-    donors.button_object(stocks["13.6"])         # the twins' proof satisfies 13.6
+    _obj, proof = donors.button_object(stocks["13.6"])   # the twins' proof satisfies 13.6
+    assert proof.caption.witnesses == ()
