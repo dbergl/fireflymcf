@@ -604,13 +604,16 @@ def test_wire_button(wired):
     assert _near(_crop(wired["on"], GLYPH_BOX), OFF) < area // 4, "the button did not recolour"
     bbox = _diff_bbox(wired["off"], wired["on"])
     assert bbox is not None and _inside(bbox, wired["footprint"]), (bbox, wired["footprint"])
-    _same_but_caption(wired, "off", "off_again")
+    _same_but_caption(wired, "off", "off_again", max_pixels=193)
     _same_but_caption(wired, "on", "after_tap")
 
 
-def _same_but_caption(wired: dict, a: str, b: str) -> None:
+def _same_but_caption(wired: dict, a: str, b: str, max_pixels: int | None = None) -> None:
     """Shots `a` and `b` agree pixel for pixel in the button's box, and differ, if at all, only
-    in the carried caption's record."""
+    in the carried caption's record, by at most `max_pixels` pixels when given."""
+    if max_pixels is not None:
+        n = int((wired[a] != wired[b]).any(axis=2).sum())
+        assert n <= max_pixels, (a, b, n)
     bbox = _diff_bbox(wired[a], wired[b])
     assert bbox is None or _inside(bbox, wired["caption"]), (a, b, bbox)
     assert _diff_bbox(_crop(wired[a], GLYPH_BOX), _crop(wired[b], GLYPH_BOX)) is None, (a, b)

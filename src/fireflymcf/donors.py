@@ -59,11 +59,11 @@ necessarily together. Pixel evidence for pagedraw text on 14.7 is the emulator's
 every glyph drawn in its box).
 
 **Witnesses come from the stock image** (2026-11-08). Inside a recipe, `recipe` holds
-`stockscope.stock_scope(ctx.stock)` (here `witness_scope`) around every op's apply and verify, so a record an earlier op wrote
-(ungated writers such as `set_font` included) can never witness a later one. Outside a recipe, a
-direct caller's `data` is taken as the stock. A built image used as a compile base is that
-recipe's stock: its authored records count, which is acceptable because they passed their own
-build's gates.
+`stockscope.stock_scope(ctx.stock)` (here `witness_scope`) around every op's apply and verify, so a
+record an earlier op wrote (ungated writers such as `set_font` included) can never witness a later
+one. Outside a recipe, a direct caller's `data` is taken as the stock. A built image used as a
+compile base is that recipe's stock: its authored records count, which is acceptable because they
+passed their own build's gates.
 
 Witnesses are reported for every template, required or not (`TemplateProof.witnesses`). Several
 witnesses are corroboration only, since equal canonical bytes draw identically.
@@ -86,8 +86,9 @@ into a new gesture. Their meaning is read by the LCD firmware's group code, not 
 group-table loader `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`, the sender
 `FUN_0021B8B4`, `FUN_0021BAB4`/`FUN_0021AB88` and the gated setter's caller `FUN_0021A664`
 (GuiCode's own setter, `FUN_0021B678`, reads no prefix byte: `lcdgroups`). So the gate is
-`grammar.prove_lcd`, not `grammar.prove`: those are twins of 13.6's in the image's LCD Firmware section (code proof since 2026-11-08;
-before, the gate was the GuiCode grammar and the prefixes' cross-image equality data evidence).
+`grammar.prove_lcd`, not `grammar.prove`: those are twins of 13.6's in the image's LCD Firmware
+section (code proof since 2026-11-08; before, the gate was the GuiCode grammar and the prefixes'
+cross-image equality data evidence).
 11.23 and 14.7 carry one LCD, a relocation twin of 13.6's, so the prefixes are accepted on both,
 11.23 included though its GuiCode grammar does not prove. A container without its own LCD
 Firmware section refuses: the proof is of the LCD the image carries.
@@ -99,9 +100,10 @@ above the image's limit (MODE7_INDEX).
 
 **Refusals** (`DonorError`, with `code`): GRAMMAR (no grammar proof, or the wtype is not proven),
 LCD_GRAMMAR (a group prefix on an image whose LCD group handling is not proven), NO_TEMPLATE (no
-witness for a text template, an unknown name, a missing font, an unlocated colour cell), NO_DONOR (a caller-named donor record that does not exist or has the wrong form),
-MODE7_INDEX. `DonorError` is not a `ValueError`, so the builders' own `except ValueError`
-wrappers do not recode it; `recipe` surfaces the code as the op's refusal.
+witness for a text template, an unknown name, a missing font, an unlocated colour cell), NO_DONOR (a
+caller-named donor record that does not exist or has the wrong form), MODE7_INDEX. `DonorError` is
+not a `ValueError`, so the builders' own `except ValueError` wrappers do not recode it; `recipe`
+surfaces the code as the op's refusal.
 """
 from __future__ import annotations
 
