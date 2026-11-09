@@ -6598,8 +6598,8 @@ class AddRegisterReadout(Op):
         reg = _resolve_register_spec(data, ctx, self.register_spec, self.spec.id)
         if self.cell_slot is not None:
             # Feeding a STOCK readout's cell means knowing the per-tick decoder's stores and
-            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); the decoder's window
-            # is known on 13.6 only, so any other firmware refuses DECODER_RANGE_UNKNOWN.
+            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); an image whose
+            # decoder extent does not prove out refuses DECODER_RANGE_UNKNOWN.
             decodeguards.decoder_range(ctx.stock)
         silenced, remaining = [], []
         try:

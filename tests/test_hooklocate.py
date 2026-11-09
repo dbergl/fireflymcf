@@ -362,28 +362,28 @@ def test_manual_two_phase_passes_plan_sender(mcf_147):
     assert "sender_addr=plan.sender_addr" in str(e.value)
 
 
-# The decoder range as it stood before 2026-11-07, copied in as the oracle for 13.6 images.
+# The decoder range as it stood before 2026-11-07, copied in as the oracle for 13.6 images: the
+# located range ends at the callee's epilogue instead, and must find the same guards.
 _PIN_DECODER_START = 0x247BF8
 _PIN_DECODER_END = 0x24AB00
 
 
 def test_decoder_range(mcf_136, mcf_147, mcf_1123):
-    """`decodeguards.range_guards` starts at the located callee; its end is a 13.6 pin (it sits
-    inside the literal pool `0x24AAE4`-`0x24AB2F`, so no instruction marks it), and every other
-    firmware is refused rather than scanned over a 13.6 window."""
+    """`decodeguards.decoder_range` is the located callee to its one epilogue (2026-11-08). On
+    13.6 the guards over it equal the guards over the old 13.6 pin, on stock and on every grown
+    reference build used as stock: authored routines live outside the callee."""
     from fireflymcf import decodeguards
-    assert decodeguards.decoder_range(mcf_136) == (_PIN_DECODER_START, _PIN_DECODER_END)
+    located = decodeguards.decoder_range(mcf_136)
+    assert located == (_PIN_DECODER_START, 0x24EDB0)
     want = decodeguards.range_guards(mcf_136, _PIN_DECODER_START, _PIN_DECODER_END)
     assert decodeguards.range_guards(mcf_136) == want
     assert {g.cell for g in want} >= {0x20039F30}
     for name, img in _built_136_images(mcf_136):
+        assert decodeguards.decoder_range(img) == located, name
         assert decodeguards.range_guards(img) == decodeguards.range_guards(
             img, _PIN_DECODER_START, _PIN_DECODER_END), name
-    for other in (mcf_147, mcf_1123):
-        with pytest.raises(decodeguards.DecoderRangeUnknown, match="13.6"):
-            decodeguards.range_guards(other)
-        with pytest.raises(decodeguards.DecoderRangeUnknown):
-            decodeguards.guard_for_cell(other, 0x20039F30)
+    assert decodeguards.decoder_range(mcf_147) == (0x247CAC, 0x24F1FC)
+    assert decodeguards.decoder_range(mcf_1123) == (0x247590, 0x24CDFA)
 
 
 def test_decoder_range_unproven_hook_is_decoder_range_unknown(mcf_136):
@@ -403,12 +403,13 @@ def test_sender_slot_agrees_with_host_api_cells(stocks):
         assert sendmap.sender_slot(data)[0] == hooklocate.host_api_cells(data)[0x08], name
 
 
-def test_decoder_range_does_not_read_module_constants(mcf_136, monkeypatch):
-    """The cached scan takes its range as arguments: patching the pin after a call does not
-    serve the old range from the cache, and the default still resolves the same."""
-    from fireflymcf import decodeguards
+def test_decoder_range_is_not_served_from_a_stale_cache(mcf_136, monkeypatch):
+    """The range is re-derived from `tanknames.decoder_ranges` on every call: stubbing it to find
+    no region refuses even after a cached success, and the default resolves again after."""
+    from fireflymcf import decodeguards, tanknames
     want = decodeguards.range_guards(mcf_136)
-    monkeypatch.setattr(decodeguards, "DECODER_END_136", _PIN_DECODER_START + 0x100)
-    assert decodeguards.range_guards(mcf_136) != want
+    monkeypatch.setattr(tanknames, "decoder_ranges", lambda data: ())
+    with pytest.raises(decodeguards.DecoderRangeUnknown):
+        decodeguards.range_guards(mcf_136)
     monkeypatch.undo()
     assert decodeguards.range_guards(mcf_136) == want

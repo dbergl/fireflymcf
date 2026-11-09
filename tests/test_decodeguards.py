@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from fireflymcf import decodeguards
+from fireflymcf import decodeguards, tanknames, theme, thumb
 
 pytest.importorskip("capstone")
 
@@ -47,8 +47,111 @@ def test_enum_tests_are_not_reported_as_ranges(mcf_136):
         assert all(f[1] > decodeguards.MIN_RANGE_IMMEDIATE for f in guard.fences)
 
 
-def test_the_sibling_build_is_refused_not_scanned_over_a_13_6_window(mcf_1123):
-    """11.23's callee is `0x247590`; the 13.6 end pin means nothing there (2026-11-07)."""
-    with pytest.raises(decodeguards.DecoderRangeUnknown):
-        decodeguards.range_guards(mcf_1123)
+# Expectations only (research, 2026-11-08); `decoder_range` locates every one of them.
+RANGE_136 = (0x247BF8, 0x24EDB0)        # `push {r4-r7,lr}` .. `pop {r4-r7,pc}`
+RANGE_147 = (0x247CAC, 0x24F1FC)
+RANGE_1123 = (0x247590, 0x24CDFA)       # `pop.w {r4-r11,pc}`
+EPILOGUE_136 = 0x24EDB0
+TAIL_136 = (0x24EDB2, 0x24EDB8)         # flag clear, then `b 0x24eba4` back into the body
+
+
+def _patch(data: bytes, addr: int, code: bytes) -> bytes:
+    sec = theme.guicode_section(data)
+    out = bytearray(data)
+    at = sec.offset + addr - theme.guicode_base(sec)
+    out[at:at + len(code)] = code
+    return bytes(out)
+
+
+def test_the_range_is_the_callee_to_its_one_epilogue(mcf_136, mcf_147, mcf_1123):
+    assert decodeguards.decoder_range(mcf_136) == RANGE_136
+    assert decodeguards.decoder_range(mcf_147) == RANGE_147
+    assert decodeguards.decoder_range(mcf_1123) == RANGE_1123
+
+
+def test_the_proof_names_the_epilogue_and_the_tails(mcf_136):
+    proof = decodeguards.decoder_range_proof(mcf_136)
+    assert "0x24edb0" in proof and "pop {r4, r5, r6, r7, pc}" in proof
+    assert "5 out-of-line tail blocks" in proof and "0x24edb2" in proof
+
+
+def test_147_finds_the_seven_guards_and_the_absorb_float_fence(mcf_147):
+    """14.7's Absorb/Float fence sits at 0x24ABE0, past where 13.6's old window ended."""
+    guards = decodeguards.range_guards(mcf_147)
+    assert len(guards) == 7
+    absorb = [g for g in guards if set(g.variables) == {206, 207}]
+    assert len(absorb) == 1 and absorb[0].two_sided
+    assert absorb[0].fences[0][:2] == (0x24ABE0, 239)
+    assert {f[1] for f in absorb[0].fences} == {239, 362}
+    assert absorb[0].variables.index(207) < absorb[0].variables.index(206)
+
+
+def test_1123_locates(mcf_1123):
+    """11.23 locates; its guard variable lists leak (research 2026-11-08), which is why
+    `cell_slot` is not enabled there on the strength of the range alone."""
+    assert decodeguards.range_guards(mcf_1123)
     assert isinstance(decodeguards.range_guards(mcf_1123, 0x247590, 0x247600), list)
+
+
+def _refused(img, match):
+    with pytest.raises(decodeguards.DecoderRangeUnknown, match=match) as ei:
+        decodeguards.decoder_range(img)
+    assert ei.value.code == "DECODER_RANGE_UNKNOWN"
+    with pytest.raises(decodeguards.DecoderRangeUnknown):
+        decodeguards.range_guards(img)
+
+
+def test_a_nopped_epilogue_is_refused(mcf_136):
+    """The region then runs on into the next function, whose `push` is no epilogue."""
+    img = _patch(mcf_136, EPILOGUE_136, bytes.fromhex("00bf"))
+    _refused(img, "not the callee's epilogue")
+
+
+def test_a_second_return_is_refused(mcf_136):
+    img = _patch(mcf_136, 0x24A000, bytes.fromhex("7047"))          # `blx r3` -> `bx lr`
+    _refused(img, "another return")
+
+
+def test_a_computed_jump_is_refused(mcf_136):
+    """A `tbb` with no `cmp #N; bhi` bound in front of it is no switch this can follow."""
+    img = _patch(mcf_136, 0x24A00A, bytes.fromhex("dfe803f0"))      # `tbb [pc, r3]`
+    _refused(img, "computed jump")
+
+
+def test_a_branch_out_that_is_no_tail_is_refused(mcf_136):
+    img = _patch(mcf_136, 0x24A012, thumb.b_w(0x24A012, 0x247000))  # before the entry
+    _refused(img, "leaves the callee")
+
+
+def test_a_tail_that_does_not_rejoin_is_refused(mcf_136):
+    img = _patch(mcf_136, TAIL_136[1], thumb.b_n(TAIL_136[1], 0x24EE28))
+    _refused(img, "does not rejoin")
+
+
+@pytest.mark.parametrize("load", [thumb.ldrh_imm(2, 4, 0x10), bytes.fromhex("04cc")],
+                         ids=["ldrh [r4,#0x10]", "ldm r4!, {r2}"])
+def test_a_tail_that_loads_a_slot_is_refused(mcf_136, load):
+    img = _patch(mcf_136, TAIL_136[0] + 2, load)
+    _refused(img, "loads a receive slot")
+
+
+@pytest.mark.parametrize("regions", [(), (RANGE_136, RANGE_136)])
+def test_zero_or_two_regions_at_the_callee_are_refused(mcf_136, monkeypatch, regions):
+    monkeypatch.setattr(tanknames, "decoder_ranges", lambda data: regions)
+    _refused(mcf_136, "regions start at the callee")
+
+
+def test_no_region_at_all_is_refused(mcf_136, monkeypatch):
+    def none(data):
+        raise tanknames.TankNameError("no region")
+    monkeypatch.setattr(tanknames, "decoder_ranges", none)
+    _refused(mcf_136, "no region")
+
+
+def test_a_bounded_switch_is_followed_and_an_unbounded_one_refused(mcf_1123):
+    """11.23's decoder holds `cmp r3, #4; bhi; tbb [pc, r3]` at 0x24C412 (research 2026-11-08):
+    every arm lands inside the callee, so it stays in range. Without the `bhi` bound the table
+    could send any index anywhere, and the locator refuses."""
+    assert "1 bounded switch(es) (0x24c412)" in decodeguards.decoder_range_proof(mcf_1123)
+    img = _patch(mcf_1123, 0x24C410, bytes.fromhex("00bf"))          # `bhi` -> `nop`
+    _refused(img, "computed jump")

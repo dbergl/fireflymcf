@@ -910,25 +910,16 @@ def test_add_register_readout_first_frame(mcf_147):
 CHASSIS_VOLTS_SLOT = 176            # HOME's Chassis readout (object 374) value_slot on 14.7
 
 
-def test_add_register_readout_existing_cell_refuses(mcf_147):
-    """cell_slot (feeding a stock readout) needs the per-tick decoder's window, known on 13.6
-    only: 14.7 refuses it DECODER_RANGE_UNKNOWN."""
+def test_add_register_readout_existing_cell_compiles(mcf_147):
+    """cell_slot gates on the per-tick decoder's range, located on 14.7 since 2026-11-08
+    (`decodeguards.decoder_range`, GUICODE Finding 91): the op now compiles there. Static only;
+    the emulator proof that the cell repaints is the next step of the 14.x decoder-range plan."""
     project = recipe.Project(
         base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
         ops=[recipe.OpSpec(id="r", type="add_register_readout",
                            params={"register": REG, "cell_slot": CHASSIS_VOLTS_SLOT})])
     res = recipe.compile_project(project, mcf_147)
-    assert [e["code"] for e in res.errors] == ["DECODER_RANGE_UNKNOWN"], res.errors
-
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "DECODER_RANGE_UNKNOWN: the existing-cell mode feeds a stock readout's cell, which needs "
-    "the per-tick decoder's window (`decodeguards.decoder_range`); its end is a 13.6 pin, not "
-    "located on 14.7 (2026-11-08). The mode stays refused on 14.7."))
-def test_add_register_readout_existing_cell(mcf_147):
-    _build_refused_as(mcf_147, [("r", "add_register_readout",
-                                 {"register": REG, "cell_slot": CHASSIS_VOLTS_SLOT})],
-                      "DECODER_RANGE_UNKNOWN")
+    assert res.ok, res.errors
 
 
 ENUM = {"parent": HOME_ROOT, "x": 560, "y": 420, "w": 180, "h": 30, "font": 16,
