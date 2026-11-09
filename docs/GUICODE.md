@@ -6396,7 +6396,7 @@ the `readout`/`follow_register` routine shape, already coach-verified.
 power-on. Group 199's counter is `0x20006E6C + 199·16 + 0x0A = 0x20007AE6`, inside the `.bss` zero
 loop's range `0x20000228`–`0x2000AD98` (`raminit`), so it is **0 at power-on** — the whole state table
 is. A `0x80` group whose bindings are all variant 0 therefore fires normally from cold until the
-setter moves it (the LCD's `FUN_0021B5E8`, sole caller `0x21B002`, or GuiCode's `setVariant`,
+setter moves it (the LCD's `FUN_0021B5E8`, sole caller `0x21B002` in `FUN_0021A664`, or GuiCode's `setVariant`,
 `FUN_0021B678`: 199 is one of the groups GuiCode drives, `newbutton.guicode_selected_groups`,
 2026-11-08). PC.32's silence at power-on then needs
 either a setter write that never appeared, or the `[state+0x09]` phase-byte route; the counter

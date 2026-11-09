@@ -253,11 +253,12 @@ def test_text_drawer_mutation_clears_the_flag_only(stocks):
 
 # --- the LCD firmware's group handling (`grammar.prove_lcd`, 2026-11-08) --------------------------
 
-# Expectations only (Ghidra lcd136; research `groups.md` §3): every image carries the six at
-# 13.6's addresses, its LCD a relocation twin of 13.6's.
+# Expectations only (Ghidra lcd136; research `groups.md` §3): every image carries them at
+# 13.6's addresses, its LCD a relocation twin of 13.6's. FUN_0021A664 is two Ghidra ranges.
 LCD_FUNCTIONS_136 = {"FUN_0021B420": 0x21B420, "FUN_0021B5E8": 0x21B5E8,
                      "FUN_0021B678": 0x21B678, "FUN_0021B8B4": 0x21B8B4,
-                     "FUN_0021BAB4": 0x21BAB4, "FUN_0021AB88": 0x21AB88}
+                     "FUN_0021BAB4": 0x21BAB4, "FUN_0021AB88": 0x21AB88,
+                     "FUN_0021A664": 0x21A664, "FUN_0021A664_tail": 0x21AEA4}
 
 
 def _lcd_sec(data: bytes):
@@ -293,11 +294,12 @@ def test_lcd_136_proves_itself(stocks):
 def test_lcd_twins_with_relocations_reported(stocks, version):
     """11.23 and 14.7 share one LCD, a relocation twin of 13.6's (research `groups.md` §3: 17
     bytes differ in `0x21A000`-`0x21E124`, rodata pointers +4 and `bl` displacements +2). Inside
-    the six only the rodata shift shows: both LCD-flash pool words (`FUN_0021B420`'s deadline
-    table at pool `0x21B5E4`, `FUN_0021BAB4`'s at `0x21BDD4`) are +4. The six `bl` sites whose
+    the fingerprinted functions only the rodata shift shows: both LCD-flash pool words
+    (`FUN_0021B420`'s deadline table at pool `0x21B5E4`, `FUN_0021BAB4`'s at `0x21BDD4`) are +4. The six `bl` sites whose
     displacement grew by 2 (`0x21B1DC`, `0x21B218`, `0x21B288`, `0x21C23C`, `0x21D290`,
-    `0x21D3C0`) lie outside every one of the six Ghidra bodies, so each of the 22 callee
-    bindings is +0."""
+    `0x21D3C0`) lie outside every one of their Ghidra bodies, so each of the 30 callee
+    bindings is +0. FUN_0021A664's calls land on the located twins: `FUN_0021AB88` (`0x21A67A`),
+    its own second range (tail call `0x21A6B2`), and the gated setter (`0x21B002`)."""
     p = grammar.prove_lcd(stocks[version])
     assert dict(p.functions) == LCD_FUNCTIONS_136
     assert p.pool_shifts["LCD flash"] == frozenset({4})
@@ -305,7 +307,9 @@ def test_lcd_twins_with_relocations_reported(stocks, version):
     assert p.callee_shifts == frozenset({0})
     text = "\n".join(p.proof)
     assert "LCD flash pool values (1 distinct) shifted +0x4 x1" in text
-    assert "22 callee bindings over the six, shifted +0x0" in text
+    assert "30 callee bindings over the LCD functions, shifted +0x0" in text
+    assert "reference to FUN_0021B5E8 at 0x21b002 lands on the located twin 0x21b5e8" in text
+    assert "reference to FUN_0021A664_tail at 0x21a6b2 lands on the located twin 0x21aea4" in text
     assert "reference to FUN_0021B8B4 at 0x21bb9a lands on the located twin 0x21b8b4" in text
     for name, addr in LCD_FUNCTIONS_136.items():
         assert f"{name}" in text and f"{addr:#x}" in text
@@ -322,6 +326,25 @@ def test_lcd_flipped_immediate_refuses_naming_it(stocks):
     assert "0x21b686" in str(e.value) and "#0xc" in str(e.value)
 
 
+def test_lcd_retargeted_gated_setter_call_refuses(stocks):
+    """The record-field path: FUN_0021A664's second range calls the gated setter at `0x21B002`.
+    Retargeted to another helper (`0x21B694`), the cross-check refuses naming that call."""
+    data = stocks["14.7"]
+    assert _lcd_read(data, 0x21B002, 4) == _bl(0x21B002, 0x21B5E8)
+    with pytest.raises(grammar.LcdGrammarError) as e:
+        grammar.prove_lcd(_lcd_patch(data, 0x21B002, _bl(0x21B002, 0x21B694)))
+    assert "FUN_0021A664_tail" in str(e.value) and "0x21b002" in str(e.value)
+
+
+def _bl(pc: int, target: int) -> bytes:
+    """The Thumb-2 `bl` at `pc` to `target`."""
+    off = target - (pc + 4)
+    s, i1, i2 = (off >> 24) & 1, (off >> 23) & 1, (off >> 22) & 1
+    h1 = 0xF000 | s << 10 | (off >> 12) & 0x3FF
+    h2 = 0xD000 | ((~i1 ^ s) & 1) << 13 | ((~i2 ^ s) & 1) << 11 | (off >> 1) & 0x7FF
+    return struct.pack("<HH", h1, h2)
+
+
 def test_lcd_changed_rodata_word_refuses(stocks):
     """An LCD-flash pool word maps one-to-one: FUN_0021B420's deadline-table pointer (14.7 pool
     `0x21B5E4`, 13.6's `0x21F2A2` + 4) made another value refuses."""
@@ -332,7 +355,7 @@ def test_lcd_changed_rodata_word_refuses(stocks):
     assert "FUN_0021B420" in str(e.value) and "LCD flash" in str(e.value)
 
 
-def test_lcd_call_between_the_six_must_land_on_the_located_twin(stocks):
+def test_lcd_call_between_them_must_land_on_the_located_twin(stocks):
     """`FUN_0021BAB4` calls the sender `FUN_0021B8B4` once (`0x21BB9A`). Retargeted to another
     helper (`0x21B694`) the callee mapping alone is still one-to-one, so it is the cross-check
     that refuses."""

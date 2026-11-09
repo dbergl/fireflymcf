@@ -84,9 +84,9 @@ both from the theme-init block's stores) and refuses NO_TEMPLATE when the block 
 (103, `10 00 04 80`) and hold group (17, `10 00 0c 00`), which `rvcbutton.gesture_group` edits
 into a new gesture. Their meaning is read by the LCD firmware's group code, not GuiCode: the
 group-table loader `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`, the sender
-`FUN_0021B8B4` and `FUN_0021BAB4`/`FUN_0021AB88` (GuiCode's own setter, `FUN_0021B678`, reads no
-prefix byte: `lcdgroups`). So the gate is `grammar.prove_lcd`, not `grammar.prove`: those six
-functions are twins of 13.6's in the image's LCD Firmware section (code proof since 2026-11-08;
+`FUN_0021B8B4`, `FUN_0021BAB4`/`FUN_0021AB88` and the gated setter's caller `FUN_0021A664`
+(GuiCode's own setter, `FUN_0021B678`, reads no prefix byte: `lcdgroups`). So the gate is
+`grammar.prove_lcd`, not `grammar.prove`: those are twins of 13.6's in the image's LCD Firmware section (code proof since 2026-11-08;
 before, the gate was the GuiCode grammar and the prefixes' cross-image equality data evidence).
 11.23 and 14.7 carry one LCD, a relocation twin of 13.6's, so the prefixes are accepted on both,
 11.23 included though its GuiCode grammar does not prove. A container without its own LCD

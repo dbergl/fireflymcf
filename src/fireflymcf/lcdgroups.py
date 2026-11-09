@@ -22,7 +22,8 @@ gate and no variant bound. `0x20006E5C` is the group-table loader's state block 
 LCD-FIRMWARE Finding 14) and `+0x0F` is where it keeps the GuiData tag-0x10 directory `b3`; the
 records follow the block at `+0x10`. So when `b3` is 0 (every corpus image), GuiCode's `r0` is the
 group-table index. `FUN_0021B5E8`, the setter gated on byte 1 `0x80` and the variant nibble, is
-called only from the LCD's own `FUN_0021AB88` (`0x21B002`), never through the host table.
+called only from the LCD's own `FUN_0021A664` (`0x21B002`, in the second range of its Ghidra body,
+`0x21AEA4`-`0x21B105`), never through the host table. `grammar.prove_lcd` proves both twins.
 
 Every failure is a `HostWriterUnknown`; nothing here guesses. An image whose container has no LCD
 Firmware section (a GuiCode-only container) refuses: the proof is of the LCD the image carries.

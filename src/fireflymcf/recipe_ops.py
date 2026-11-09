@@ -7450,7 +7450,7 @@ class AddAesBattHeat(Op):
         layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
         renderer arm (`donors`).
       LCD_GRAMMAR -- the LCD firmware's group handling, which reads the gesture group's prefix,
-        is not proven 13.6's (`grammar.prove_lcd`: one of its six functions not a twin), or the
+        is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the
         container carries no LCD Firmware section (`donors.group_prefix`).
       NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
         record witnesses its form, or a font slot is missing or cannot draw the text.
@@ -9896,7 +9896,7 @@ class AddRvcButton(Op):
         layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
         renderer arm (`donors`).
       LCD_GRAMMAR -- the LCD firmware's group handling, which reads the gesture group's prefix,
-        is not proven 13.6's (`grammar.prove_lcd`: one of its six functions not a twin), or the
+        is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the
         container carries no LCD Firmware section (`donors.group_prefix`).
       NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
         record witnesses its form, or a font slot is missing or cannot draw the text.

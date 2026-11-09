@@ -445,7 +445,8 @@ drives two `0x00` groups, 5 and 17, 2026-11-08). A `0x80` group is therefore not
 an **externally-selected** control, authored that way.
 
 **One call site.** A BL scan of the whole image finds exactly one caller of `0x21B5E8`, at
-**`0x21B002`** inside `FUN_0021AB88`, and it passes `variant = ([r4+0x108] + sb)[2] >> 4` — a
+**`0x21B002`** inside `FUN_0021A664` (the second range of its Ghidra body, `0x21AEA4`-`0x21B105`,
+reached by a tail call; not `FUN_0021AB88` as first written; Ghidra `lcd136`, 2026-11-08), and it passes `variant = ([r4+0x108] + sb)[2] >> 4` — a
 runtime record field, not a constant. The bulk entry at `0x21B68C` has **zero** callers in 13.6.
 
 *Confirmed in passing:* the group entry's bytes 4-5 are the binding **base index** (u16) and byte 6

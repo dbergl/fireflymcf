@@ -69,20 +69,28 @@ On 14.7 they are not twins; `proof` names the first differing instruction. `dono
 flag for its witness gate.
 
 **The LCD firmware's group handling** (`prove_lcd`, 2026-11-08). The same comparison runs over
-the image's LCD Firmware section (`section(data, "lcd")`, base `0x210000`) against six whole
-functions of 13.6's LCD (`data/lcdgroups136.json`, the generator's exact extents from the Ghidra
-project `lcd136`): the group-table loader `FUN_0021B420`, the gated variant setter
-`FUN_0021B5E8`, GuiCode's ungated setter `FUN_0021B678` (host API `+0x04`, `lcdgroups`), the
-sender `FUN_0021B8B4`, and `FUN_0021BAB4` and `FUN_0021AB88`.
+the image's LCD Firmware section (`section(data, "lcd")`, base `0x210000`) against 13.6's LCD
+functions (`data/lcdgroups136.json`, the generator's exact extents from the Ghidra project
+`lcd136`): the group-table loader `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`,
+GuiCode's ungated setter `FUN_0021B678` (host API `+0x04`, `lcdgroups`), the sender
+`FUN_0021B8B4`, `FUN_0021BAB4`, `FUN_0021AB88`, and `FUN_0021A664`, which holds the gated
+setter's only call (`0x21B002`, the record-field variant path). FUN_0021A664's Ghidra body is
+two ranges with FUN_0021AB88 between them: the first ends in a tail call `b.w #0x21aea4`, and the
+second (`FUN_0021A664_tail`, `0x21AEA4`-`0x21B105`) opens with its own `push.w`. Each range is
+compared as a whole function.
 - A pool word inside the LCD section (code or rodata) is in the class `LCD flash`, mapped one to
   one like GuiCode's.
 - `FUN_0021B678` starts with a literal `ldr`, not a `push`, so its candidates are every halfword
   that decodes to that instruction (988 in 13.6's LCD).
-- A call or code pointer from one of the six to another must land on that one's located twin:
-  `FUN_0021BAB4`'s call to the sender at `0x21BB9A` does.
-- On 11.23 and 14.7, which carry one LCD, all six are twins at 13.6's addresses. The only shift
-  inside them is rodata: two LCD-flash pool words, +4 each. The 22 callee bindings are all +0,
-  because every `bl` whose displacement grew by 2 lies outside the six bodies.
+- A call or code pointer from one of them to another must land on that one's located twin:
+  `FUN_0021BAB4`'s call to the sender (`0x21BB9A`), FUN_0021A664's to `FUN_0021AB88`
+  (`0x21A67A`) and its tail call (`0x21A6B2`), and the tail's call to the gated setter
+  (`0x21B002`) all do.
+- On 11.23 and 14.7, which carry one LCD, every one is a twin at 13.6's address. The only shift
+  inside them is rodata: two LCD-flash pool words, +4 each. The 30 callee bindings are all +0.
+  The research of 2026-11-08 also found `bl` displacements grown by 2 across the region
+  `0x21A000`-`0x21E124`, but every such site (`0x21B1DC`, `0x21B218`, `0x21B288`, `0x21C23C`,
+  `0x21D290`, `0x21D3C0`) lies outside these bodies.
 - A container without its own LCD Firmware section refuses, because the proof is of the LCD
   the image carries.
 - Refusals are `LcdGrammarError`, code `LCD_GRAMMAR`.
@@ -111,8 +119,10 @@ from . import memo, theme
 FINGERPRINT_RESOURCE = "data/grammar136.json"
 LCD_FINGERPRINT_RESOURCE = "data/lcdgroups136.json"
 # The LCD firmware's group handling `prove_lcd` compares, by their 13.6 Ghidra (`lcd136`) names.
+# `FUN_0021A664_tail` is the second range of FUN_0021A664's Ghidra body (`0x21AEA4`-`0x21B105`,
+# reached by the first range's tail call); it holds the gated setter's only call, `0x21B002`.
 LCD_FUNCTIONS = ("FUN_0021B420", "FUN_0021B5E8", "FUN_0021B678", "FUN_0021B8B4",
-                 "FUN_0021BAB4", "FUN_0021AB88")
+                 "FUN_0021BAB4", "FUN_0021AB88", "FUN_0021A664", "FUN_0021A664_tail")
 # The pool-address class of a value inside the LCD Firmware section (its code and rodata).
 LCD_FLASH = "LCD flash"
 # The text drawers: fingerprinted and compared like the decoder, reported in
@@ -127,7 +137,7 @@ class GrammarError(ValueError):
 
 class LcdGrammarError(ValueError):
     """An image's LCD firmware group handling is not proven to be 13.6's (`prove_lcd`): one of
-    the six functions has no twin or several, a call between them does not land on the located
+    the `LCD_FUNCTIONS` has no twin or several, a call between them does not land on the located
     twin, or the container carries no LCD Firmware section."""
     code = "LCD_GRAMMAR"
 
@@ -136,9 +146,9 @@ class LcdGrammarError(ValueError):
 class LcdGrammarProof:
     # 13.6 Ghidra name (`lcd136`) -> this image's twin address, for each of `LCD_FUNCTIONS`
     functions: Mapping[str, int]
-    # address class (`SRAM`, `LCD flash`, ...) -> the shifts its pool values show, over the six
+    # address class (`SRAM`, `LCD flash`, ...) -> the shifts its pool values show, over them all
     pool_shifts: Mapping[str, frozenset[int]]
-    callee_shifts: frozenset[int]       # image callee - 13.6 callee, over every call in the six
+    callee_shifts: frozenset[int]       # image callee - 13.6 callee, over every call in them
     proof: tuple[str, ...]
 
 
@@ -866,7 +876,7 @@ def _prove_lcd(data: bytes, fp_text: str, names: tuple) -> LcdGrammarProof:
             raise LcdGrammarError("LCD_GRAMMAR: " + str(e).removeprefix("GRAMMAR: ")) from e
         found[name], maps[name] = addr, m
         proof += lines
-    # A call (or a code pointer) from one of the six to another must land on that one's twin:
+    # A call (or a code pointer) from one of them to another must land on that one's twin:
     # the mapping alone proves only that the image calls *some* helper consistently.
     entries = {fp[n]["entry"]: n for n in names}
     for name, m in maps.items():
@@ -889,7 +899,7 @@ def _prove_lcd(data: bytes, fp_text: str, names: tuple) -> LcdGrammarProof:
             pools.setdefault(cls, set()).update(c)
         callees |= {b - a for (kind, a), b in m.fwd.items() if kind == "callee"}
     ncall = sum(1 for m in maps.values() for (kind, _a) in m.fwd if kind == "callee")
-    proof.append(f"LCD: {ncall} callee bindings over the six, shifted "
+    proof.append(f"LCD: {ncall} callee bindings over the LCD functions, shifted "
                  + (", ".join(f"{d:+#x}" for d in sorted(callees)) or "none"))
     return LcdGrammarProof(MappingProxyType(found),
                            MappingProxyType({k: frozenset(v) for k, v in pools.items()}),
@@ -899,7 +909,8 @@ def _prove_lcd(data: bytes, fp_text: str, names: tuple) -> LcdGrammarProof:
 def prove_lcd(data: bytes) -> LcdGrammarProof:
     """Twins of 13.6's LCD group handling (`LCD_FUNCTIONS`: the group-table loader
     `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`, GuiCode's ungated setter
-    `FUN_0021B678`, the sender `FUN_0021B8B4`, and `FUN_0021BAB4`/`FUN_0021AB88`) in the image's
+    `FUN_0021B678`, the sender `FUN_0021B8B4`, `FUN_0021BAB4`/`FUN_0021AB88`, and both ranges of
+    `FUN_0021A664`, the gated setter's caller) in the image's
     LCD Firmware section, compared as `prove` compares GuiCode (module docstring), with the
     pool-value shifts per address class and the callee shifts reported. `LcdGrammarError`
     (code `LCD_GRAMMAR`) otherwise. Memoised on content; the proof is immutable."""

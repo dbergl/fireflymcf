@@ -38,7 +38,7 @@ mappings). Code targets hold their position, or a callee's 13.6 address. `guicod
 whole functions, like the decoder; `grammar.prove` reports whether both have a twin
 (`text_drawers_twin`) and never refuses on them.
 
-**The LCD group handling** (`build_lcd`, `lcdgroups136.json`): six whole functions of 13.6's LCD
+**The LCD group handling** (`build_lcd`, `lcdgroups136.json`): whole functions of 13.6's LCD (seven, FUN_0021A664 as its two body ranges)
 Firmware section (base `0x210000`), extents from the research repository's `lcd136` project,
 queried 2026-11-08 the same way on a copy of the project (`LCD_GHIDRA_BODIES`). Ghidra defines no
 function at `0x21B678`: it is reached only through the host-API table (its one reference is the
@@ -90,6 +90,12 @@ LCD_GHIDRA_BODIES = {
     "FUN_0021B8B4": [(0x21B8B4, 0x21B95F), (0x21B968, 0x21BA27), (0x21BA30, 0x21BAA9)],
     "FUN_0021BAB4": [(0x21BAB4, 0x21BC45), (0x21BC4E, 0x21BDCD), (0x21BDDC, 0x21BDF5)],
     "FUN_0021AB88": [(0x21AB88, 0x21AE8F)],
+    # FUN_0021A664's body is two ranges, (0x21A664, 0x21A6B5) and (0x21AEA4, 0x21B105), with
+    # FUN_0021AB88 between them: its first range ends in a tail call `b.w #0x21aea4`, and the
+    # second range opens with its own `push.w`. Each range is fingerprinted as its own whole
+    # function; `prove_lcd` requires the tail call to land on the second range's twin.
+    "FUN_0021A664": [(0x21A664, 0x21A6B5)],
+    "FUN_0021A664_tail": [(0x21AEA4, 0x21B105)],
 }
 BOUNDS = {"decoder": {"mode7_index": "cmp.w R, #0x298"}}
 BOUND_SITES = {"mode7_index": 13}
@@ -191,13 +197,14 @@ def build_lcd(data: bytes) -> dict:
     functions = {}
     for name, ranges in LCD_GHIDRA_BODIES.items():
         entry = ranges[0][0]
-        if entry != int(name[4:], 16):
-            _fail(f"{name}: its body starts at {entry:#x}")
+        ghidra = name.removesuffix("_tail")
+        if (entry != int(ghidra[4:], 16)) != name.endswith("_tail"):
+            _fail(f"{name}: its range starts at {entry:#x}")
         end = max(hi for _lo, hi in ranges) + 1
         items = list(grammar.sweep(code, base, entry, end=end, data={}))
         _check_against_ghidra(name, items, ranges)
         enc = grammar.encode([items], code, base)
-        functions[name] = {"ghidra": name, "entry": entry, "end": end,
+        functions[name] = {"ghidra": ghidra, "entry": entry, "end": end,
                            "segments": [_segment(entry, [], items, enc[0])]}
     return {"_generated_by": "scripts/gen_grammar_fingerprints.py from 13.6 stock; do not edit",
             "lcd_region": [base, base + len(code)], "functions": functions}
