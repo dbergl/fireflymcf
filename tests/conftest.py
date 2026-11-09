@@ -162,6 +162,11 @@ IMAGE_CACHE_DIR = REPO_ROOT / "build" / ".compiled-images"
 # broken rather than waited on -- the cache directory persists between runs, and a stale lock
 # left by one Ctrl-C must not stall every run after it.
 _STALE_LOCK_AFTER = 300.0
+# Pruning (`_prune_cache`, at session start): an entry written under another `src/` digest can
+# never be served again once nothing has used it for this long. A `.tmp` this old is a crash
+# leftover of `_write_atomic`.
+_PRUNE_ENTRY_AFTER = 86400.0
+_PRUNE_TMP_AFTER = 3600.0
 _MEMO: dict[str, "CompiledImage"] = {}
 
 
@@ -172,6 +177,18 @@ class _Entry(NamedTuple):
     unverified: tuple[str, ...]
     shifts: str          # `CompileResult.shifts` as JSON, so a served copy is never shared
     firmware: str | None = None
+
+
+class _FailedEntry(NamedTuple):
+    """A failed (`ok=False`) `compile_project` result as stored. The mutable fields are JSON, so
+    every caller is served fresh lists and dicts."""
+    data: bytes | None
+    errors: str
+    manifest: str
+    unverified: str
+    shifts: str
+    sends: str
+    firmware: str | None
 
 
 def _tools_digest(_cache: list = []) -> str:
@@ -198,7 +215,8 @@ class _Failed(Exception):
 def _read_cached(blob, meta):
     # `meta` is written last, so its presence is what commits an entry -- and its recorded
     # digest is what makes the entry trustworthy. Anything unreadable, incomplete or not
-    # matching its digest is a MISS, never a served value.
+    # matching its digest is a MISS, never a served value. A hit touches `meta`: its mtime is
+    # "last used", which `_prune_cache` reads.
     if not meta.exists() or not blob.exists():
         return None
     try:
@@ -209,9 +227,14 @@ def _read_cached(blob, meta):
     if hashlib.sha256(payload).hexdigest() != digest:   # corrupt, truncated, or tampered
         return None
     try:
-        return pickle.loads(payload)
+        value = pickle.loads(payload)
     except Exception:  # noqa: BLE001 - an unreadable entry is a miss
         return None
+    try:
+        os.utime(meta)
+    except OSError:
+        pass
+    return value
 
 
 def _write_atomic(path, payload: bytes) -> None:
@@ -226,7 +249,60 @@ def _write_atomic(path, payload: bytes) -> None:
 def _write_cached(blob, meta, value) -> None:
     payload = pickle.dumps(value, protocol=pickle.HIGHEST_PROTOCOL)
     _write_atomic(blob, payload)
-    _write_atomic(meta, json.dumps({"sha256": hashlib.sha256(payload).hexdigest()}).encode())
+    _write_atomic(meta, json.dumps({"sha256": hashlib.sha256(payload).hexdigest(),
+                                    "tools": _tools_digest()}).encode())
+
+
+def _prune_cache(cache_dir=None, current=None, now=None) -> tuple[int, int]:
+    """Delete the cache entries no run can be served any more: an entry pair whose meta records a
+    `src/` digest other than `current` (or none) and was last used more than
+    `_PRUNE_ENTRY_AFTER` ago, meta first so the entry is uncommitted before its blob goes; a
+    blob with no meta that old; and a `.tmp` older than `_PRUNE_TMP_AFTER`. Locks are left to
+    `_disk_memo`'s stale-lock rule. A run racing this one on another `src/` state can only lose
+    an entry to a recompile: a missing entry is a miss. Returns (files, bytes) deleted."""
+    cache_dir = IMAGE_CACHE_DIR if cache_dir is None else cache_dir
+    current = _tools_digest() if current is None else current
+    now = time.time() if now is None else now
+    files = size = 0
+
+    def unlink(path) -> None:
+        nonlocal files, size
+        try:
+            n = path.stat().st_size
+            path.unlink()
+        except OSError:
+            return
+        files += 1
+        size += n
+
+    try:
+        listing = list(os.scandir(cache_dir))
+    except OSError:
+        return 0, 0
+    names = {e.name for e in listing}
+    for e in listing:
+        try:
+            age = now - e.stat(follow_symlinks=False).st_mtime
+        except OSError:
+            continue
+        path = Path(e.path)
+        if e.name.endswith(".tmp"):
+            if age > _PRUNE_TMP_AFTER:
+                unlink(path)
+        elif e.name.endswith(".json"):
+            if age <= _PRUNE_ENTRY_AFTER:
+                continue
+            try:
+                tools = json.loads(path.read_text()).get("tools")
+            except (OSError, ValueError, AttributeError):
+                tools = None
+            if tools != current:
+                unlink(path)
+                unlink(path.with_suffix(".bin"))
+        elif e.name.endswith(".bin") and e.name[:-4] + ".json" not in names:
+            if age > _PRUNE_ENTRY_AFTER:
+                unlink(path)
+    return files, size
 
 
 def _disk_memo(kind: str, parts: list, produce):
@@ -278,43 +354,169 @@ def _disk_memo(kind: str, parts: list, produce):
     return value
 
 
+def _failed_entry(result):
+    """`result` (`ok=False`) as a `_FailedEntry`, or None when JSON would not hand back an equal
+    copy (a field that is not plain JSON), in which case it is not cached."""
+    try:
+        entry = _FailedEntry(result.data, json.dumps(result.errors), json.dumps(result.manifest),
+                             json.dumps(result.unverified), json.dumps(result.shifts),
+                             json.dumps(result.sends), result.firmware)
+    except (TypeError, ValueError):
+        return None
+    if _served_failure(entry) != result:
+        return None
+    return entry
+
+
+def _served_failure(entry: "_FailedEntry"):
+    return _recipe.CompileResult(False, entry.data, json.loads(entry.errors),
+                                 json.loads(entry.manifest), json.loads(entry.unverified),
+                                 json.loads(entry.shifts), json.loads(entry.sends),
+                                 entry.firmware)
+
+
 def _cached_entry(project, stock: bytes):
     """`compile_project(project, stock)` through `_disk_memo`. Returns `(_Entry, None)` for a
-    successful compile, or `(None, CompileResult)` for a failed one, which is never cached
-    (failures are fast and their errors are the test's subject)."""
+    successful compile, or `(None, CompileResult)` for a failed one. A failure is as pure a
+    function of the key as a success and is cached too (a fresh `CompileResult` per caller); one
+    whose fields do not survive JSON is returned uncached, and a compile that raises is never
+    cached."""
     def produce():
         result = _UNCACHED_COMPILE(project, stock)
         if not result.ok:
-            raise _Failed(result)
+            entry = _failed_entry(result)
+            if entry is None:
+                raise _Failed(result)
+            return entry
         return _Entry(result.data, tuple(result.manifest), tuple(result.unverified),
                       json.dumps(result.shifts), result.firmware)
 
     value = _disk_memo("compile", [hashlib.sha256(stock).hexdigest(), project.to_json()],
                        produce)
-    return (value, None) if isinstance(value, _Entry) else (None, value)
+    if isinstance(value, _Entry):
+        return value, None
+    if isinstance(value, _FailedEntry):
+        return None, _served_failure(value)
+    return None, value
 
 
 # ---------------------------------------------------------------------------------------
-# Every test's `recipe.compile_project` goes through the cache above, unless the test can
+# Every test's `recipe.compile_project` goes through the cache above, unless something live can
 # change what a compile does. A full recipe compile is 10-60 s and one run of the suite asked
 # for 292 compiles of 198 distinct (recipe, stock) pairs, so a quarter of the suite's CPU went
 # to compiling something another test, often on another worker, had already compiled.
 #
-# A test that requests `monkeypatch`, or a module that uses `pytest.MonkeyPatch` directly,
-# compiles for real: a patched engine must not be served an unpatched result (the memo trap in
-# CLAUDE.md). Outside a test's setup/call/teardown (collection, session fixtures) it compiles
-# for real too. The key carries the digest of `src/`, so any library edit misses.
+# A patched engine must not be served an unpatched result (the memo trap in CLAUDE.md). The
+# check is made per compile, against what is live at that moment, so it sees a patch made in any
+# file and by a fixture of any scope:
+# - every `pytest.MonkeyPatch` made from session start on is tracked (its `__init__` is wrapped;
+#   collection, and so a test module's import-time code, comes after session start, while pytest's
+#   own configure-time instances, which patch pytest internals for the whole session, come
+#   before); a compile runs for real if any live one has an attribute patch on an object
+#   outside `fireflymcf.emu*` (which the compile path never imports), or any
+#   `setitem`/`setenv`/`delenv`, `syspath_prepend` or `chdir`;
+# - every `unittest.mock` patch is tracked while active (`_patch.__enter__`/`__exit__`,
+#   `_patch_dict._patch_dict`/`_unpatch_dict`); any active one sends the compile through for real.
+# Before session start nothing is tracked, so every compile runs for real. Outside a test's
+# setup/call/teardown (collection, session fixtures) it compiles for real too, as does a compile
+# with user ops loaded, one naming an op type that is not a `fireflymcf` op (one a test
+# registered), or one with extra arguments. The key carries the digest of `src/`, so any library
+# edit misses.
 # ---------------------------------------------------------------------------------------
+
+import types  # noqa: E402
+import weakref  # noqa: E402
+from unittest import mock as _mock  # noqa: E402
 
 from fireflymcf import recipe as _recipe  # noqa: E402
 
 _UNCACHED_COMPILE = _recipe.compile_project
 _CACHE_ACTIVE = [False]
+_TRACKING = [False]
+_LIVE_MONKEYPATCHES: "weakref.WeakSet" = weakref.WeakSet()
+_ACTIVE_MOCK_PATCHES: list = []
+
+
+def _install_patch_tracking() -> None:
+    mp_cls = pytest.MonkeyPatch
+    probe = mp_cls()
+    for field in ("_setattr", "_setitem", "_cwd", "_savesyspath"):
+        # Fail loudly if pytest renames what `_engine_patched` reads.
+        assert hasattr(probe, field), f"pytest.MonkeyPatch has no {field}"
+    if getattr(mp_cls.__init__, "_cache_tracked", False):
+        return
+    mp_init = mp_cls.__init__
+
+    def init(self, *args, **kwargs):
+        mp_init(self, *args, **kwargs)
+        if _TRACKING[0]:
+            _LIVE_MONKEYPATCHES.add(self)
+
+    def entered(enter):
+        def wrapper(self, *args, **kwargs):
+            result = enter(self, *args, **kwargs)
+            _ACTIVE_MOCK_PATCHES.append(self)
+            return result
+        return wrapper
+
+    def exited(exit_):
+        def wrapper(self, *args, **kwargs):
+            try:
+                _ACTIVE_MOCK_PATCHES.remove(self)
+            except ValueError:
+                pass
+            return exit_(self, *args, **kwargs)
+        return wrapper
+
+    init._cache_tracked = True
+    mp_cls.__init__ = init
+    # `start`/`stop` and decoration go through these for `patch`, `patch.object` and
+    # `patch.multiple`; `patch.dict`'s decorator bypasses its `__enter__`, so its inner pair.
+    _mock._patch.__enter__ = entered(_mock._patch.__enter__)
+    _mock._patch.__exit__ = exited(_mock._patch.__exit__)
+    _mock._patch_dict._patch_dict = entered(_mock._patch_dict._patch_dict)
+    _mock._patch_dict._unpatch_dict = exited(_mock._patch_dict._unpatch_dict)
+
+
+_install_patch_tracking()
+
+
+def _emu_object(obj) -> bool:
+    try:
+        name = obj.__name__ if isinstance(obj, types.ModuleType) else obj.__module__
+    except Exception:  # noqa: BLE001 - an object we cannot place is not an emulator object
+        return False
+    return isinstance(name, str) and (name == "fireflymcf.emu"
+                                      or name.startswith("fireflymcf.emu."))
+
+
+def _engine_patched() -> bool:
+    """True if anything live could change what a compile does (see the comment above)."""
+    if not _TRACKING[0] or _ACTIVE_MOCK_PATCHES:
+        return True
+    for mp in list(_LIVE_MONKEYPATCHES):
+        if mp._setitem or mp._cwd is not None or mp._savesyspath is not None:
+            return True
+        if any(not _emu_object(obj) for obj, _name, _old in mp._setattr):
+            return True
+    return False
+
+
+def _foreign_ops(project) -> bool:
+    """True if an op the project names is not a `fireflymcf` op: one a test registered (its code
+    is not in `src/`, so not in the key), or one not registered at all (its failure would be wrong
+    in a process that has registered it)."""
+    for spec in project.ops:
+        cls = _recipe.REGISTRY.get(spec.type)
+        if cls is None or not str(getattr(cls, "__module__", "")).startswith("fireflymcf."):
+            return True
+    return False
 
 
 def _compile_through_cache(project, stock, *args, **kwargs):
     # A compile with user ops loaded (`userop.registered`) reads op folders the key cannot see.
-    if args or kwargs or not _CACHE_ACTIVE[0] or _recipe._user_ops() or \
+    if args or kwargs or not _CACHE_ACTIVE[0] or _engine_patched() or _recipe._user_ops() or \
+            _foreign_ops(project) or \
             hashlib.sha256(stock).hexdigest() != project.base_sha256:
         return _UNCACHED_COMPILE(project, stock, *args, **kwargs)
     entry, failed = _cached_entry(project, stock)
@@ -328,18 +530,17 @@ def _compile_through_cache(project, stock, *args, **kwargs):
 _recipe.compile_project = _compile_through_cache
 
 
-def _may_patch(item) -> bool:
-    if "monkeypatch" in getattr(item, "fixturenames", ()):
-        return True
-    try:
-        return "MonkeyPatch" in Path(str(item.fspath)).read_text()
-    except OSError:
-        return True
+@pytest.hookimpl(tryfirst=True)
+def pytest_sessionstart(session):
+    _TRACKING[0] = True
+    # The controller only: xdist workers start together and would race one another.
+    if not os.environ.get("PYTEST_XDIST_WORKER"):
+        _prune_cache()
 
 
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item):
-    _CACHE_ACTIVE[0] = not _may_patch(item)
+    _CACHE_ACTIVE[0] = True
 
 
 @pytest.hookimpl(trylast=True)

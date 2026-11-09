@@ -31,9 +31,14 @@ A hazard when running in parallel, inert today:
 `recipe.compile_project` goes through a disk cache shared by all xdist workers, keyed on the digest
 of `src/`, the canonical project JSON and the stock hash, so a recipe compiles once per code
 version, not once per test or per worker. Editing anything under `src/` invalidates it, which is
-why the first run after an edit is the slow one. A test that requests `monkeypatch` (or a module
-using `pytest.MonkeyPatch`) always compiles for real: a patched engine must never be served an
-unpatched result. Delete the directory to force a cold run.
+why the first run after an edit is the slow one. Failed compiles (`ok=False`) are cached too; a
+compile that raises is not. A compile runs for real whenever something live could change it: any
+live `pytest.MonkeyPatch` with an attribute patch outside `fireflymcf.emu*` (which the compile path
+never imports) or any `setitem`/`setenv`/`delenv`/`syspath_prepend`/`chdir`, made from any file or
+fixture; any active `unittest.mock` patch; loaded user ops; or an op type a test registered. A
+patched engine must never be served an unpatched result. Each session start (the xdist controller
+only) prunes entries for another `src/` digest unused for a day, and crash-left `.tmp` files older
+than an hour. Delete the directory to force a cold run.
 
 Two test-hygiene rules from `CLAUDE.md` that apply here:
 
