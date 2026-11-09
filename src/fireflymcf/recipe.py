@@ -374,9 +374,10 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     reboot never fired, on the coach 2026-09-30. Edits that keep a group's slice (a gesture or a
     binding byte on an existing control) are not reuse and are not gated.
 
-    Where the GuiCode-driven groups are not known (`newbutton.VariantSetterUnknown`: 14.7,
-    2026-11-08) a build that reuses no group has nothing to check and passes; one that reuses
-    any group is refused VARIANT_SETTER_UNKNOWN, since it cannot be shown to miss them."""
+    Where the GuiCode-driven groups are not known (`newbutton.VariantSetterUnknown`: the setter
+    cell or the LCD's writer does not prove out) a build that reuses no group has nothing to
+    check and passes; one that reuses any group is refused VARIANT_SETTER_UNKNOWN, since it
+    cannot be shown to miss them. 11.23, 13.6 and 14.7 all locate (2026-11-08)."""
     from fireflymcf import newbutton
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
     try:

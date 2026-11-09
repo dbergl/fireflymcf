@@ -26,9 +26,10 @@ whose hook already reaches a link.
 table) and copies each entry to an SRAM cell: `ldr r2,[r4,#k]; ldr r3,=CELL; str r2,[r3]`.
 `+0x04` is the group-variant setter (13.6 `0x20039908`), `+0x08` the CAN-frame sender
 (13.6 `0x2003986C`). That `+0x08` is the CAN-frame sender is proven on 14.7 in the emulator
-(2026-11-07, `tests/emu/test_hook147.py`); the rest is inferred: 14.7's `+0x04`, and both of
-11.23's, mean the same functions by position (the same entry0 shape, and 11.23 and 14.7 share one
-LCD firmware), not read from their LCD firmware.
+(2026-11-07, `tests/emu/test_hook147.py`). That `+0x04` is the ungated group-variant writer is
+proven from each image's own LCD firmware by `lcdgroups.host_writer` (11.23, 13.6 and 14.7,
+2026-11-08); 11.23's `+0x08` means the CAN-frame sender by position (the same entry0 shape, and
+11.23 and 14.7 share one LCD firmware), not read from its LCD firmware.
 
 Between entry1's `push` and the hook `bl`, conditional early-out branches are allowed, because
 all three stock images have one (13.6 `cbz` at `0x24EE2E`, 14.7 `0x24F27A`, 11.23 `bne` at

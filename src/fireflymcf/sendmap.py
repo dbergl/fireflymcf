@@ -53,7 +53,8 @@ touch regions name it, and a class:
 
 `guicode_variant` says GuiCode selects the group's variant by immediate (`newbutton.
 guicode_selected_groups`, the `setVariant` pointer): the touch still sends, GuiCode picks which
-copy (`GUICODE.md` Finding 57). It is not a send by GuiCode.
+copy (`GUICODE.md` Finding 57). It is not a send by GuiCode. It is `None` (unknown), not
+`False`, on an image where `guicode_selected_groups` refuses VARIANT_SETTER_UNKNOWN.
 
 `GuiCodeSend` -- one per `blx` through the sender slot: the frame (a `.rodata` template copied by
 `ldm`/`stm`, or a frame built in place on the stack) and what drives it:
@@ -247,7 +248,8 @@ class BindingGroup:
     kinds: dict                  # {variant: gestures kind}
     entries: tuple               # BindingSend
     controls: tuple              # Control
-    guicode_variant: bool        # GuiCode passes this group to setVariant by immediate
+    guicode_variant: bool | None  # GuiCode passes this group to setVariant by immediate;
+                                  # None where that is not known (VARIANT_SETTER_UNKNOWN)
     cls: str                     # "reached" | "unattached" | "dead" | "stub"
 
     @property
@@ -1041,8 +1043,8 @@ def binding_groups(data: bytes, names: bool = True) -> tuple:
     regions = touch_regions(data)
     try:
         selected = newbutton.guicode_selected_groups(data)
-    except Exception:                          # pragma: no cover
-        selected = frozenset()
+    except newbutton.VariantSetterUnknown:
+        selected = None                        # not known: every group's flag is None
     out = []
     for g in groups:
         end = min(g.start + g.count, len(bindings))
@@ -1059,7 +1061,8 @@ def binding_groups(data: bytes, names: bool = True) -> tuple:
             cls = "dead"
         beh = gestures.describe_group(data, g.index)
         out.append(BindingGroup(g.index, g.raw, g.start, g.count, g.raw[7], beh.hold_ms,
-                                dict(beh.kinds), entries, controls, g.index in selected, cls))
+                                dict(beh.kinds), entries, controls,
+                                None if selected is None else g.index in selected, cls))
     return tuple(out)
 
 

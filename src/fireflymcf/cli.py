@@ -1733,7 +1733,8 @@ def _print_send_map(m, detail: bool, rows: bool = True, name: str | None = None)
             what["%05X %s" % (e.dgn, e.describe().split(" level")[0] if e.dgn == 0x1FEDB
                                else e.describe())] += 1
         summary = "; ".join(("%s x%d" % (k, n)) if n > 1 else k for k, n in what.items())
-        flag = " [GuiCode sets the variant]" if g.guicode_variant else ""
+        flag = (" [GuiCode sets the variant]" if g.guicode_variant
+                else " [GuiCode variant unknown]" if g.guicode_variant is None else "")
         print("%4d %-10s %-50s %s%s" % (g.group, g.cls, _ctl_text(g.controls)[:50],
                                         summary[:160] if not detail else "", flag))
         if detail:

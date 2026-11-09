@@ -83,7 +83,8 @@ both from the theme-init block's stores) and refuses NO_TEMPLATE when the block 
 **Group prefixes** (`GROUP_PREFIXES`, `group_prefix`): the 4-byte prefix of a stock tap group
 (103, `10 00 04 80`) and hold group (17, `10 00 0c 00`), which `rvcbutton.gesture_group` edits
 into a new gesture. Their meaning is read by the LCD firmware's group code (`FUN_0021B420`, the
-variant setter `FUN_0021B5E8`, the sender `FUN_0021B8B4`), not GuiCode, so `grammar.prove` does
+gated variant setter `FUN_0021B5E8`, the sender `FUN_0021B8B4`; GuiCode's own setter,
+`FUN_0021B678`, reads no prefix byte: `lcdgroups`), not GuiCode, so `grammar.prove` does
 not cover it; it is the only gate. That the prefixes mean the same on another image is data
 evidence, not code proof: groups 17 and 103 hold the same prefix bytes on 11.23, 13.6 and 14.7
 (measured 2026-11-07).

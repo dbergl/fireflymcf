@@ -468,9 +468,11 @@ GATE_CODES: dict[str, str] = {
                     "out (another op may have rewritten it).",
     "VARIANT_SETTER_UNKNOWN": "the build reuses a command group (moves its binding slice), and "
                               "which groups GuiCode drives by number is not known on this image: "
-                              "its variant-setter cell is not 13.6's "
-                              "(`newbutton.guicode_selected_groups`; 14.7, 2026-11-08). A build "
-                              "that reuses no group passes.",
+                              "the variant-setter cell does not locate, the LCD does not prove "
+                              "it holds the ungated variant writer (`lcdgroups.host_writer`), "
+                              "or a use of it does not resolve to a constant group "
+                              "(`newbutton.guicode_selected_groups`). A build that reuses no "
+                              "group passes.",
 }
 
 

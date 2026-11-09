@@ -6396,7 +6396,9 @@ the `readout`/`follow_register` routine shape, already coach-verified.
 power-on. Group 199's counter is `0x20006E6C + 199·16 + 0x0A = 0x20007AE6`, inside the `.bss` zero
 loop's range `0x20000228`–`0x2000AD98` (`raminit`), so it is **0 at power-on** — the whole state table
 is. A `0x80` group whose bindings are all variant 0 therefore fires normally from cold until the
-setter (`FUN_0021B5E8`, sole caller `0x21B002`) moves it. PC.32's silence at power-on then needs
+setter moves it (the LCD's `FUN_0021B5E8`, sole caller `0x21B002`, or GuiCode's `setVariant`,
+`FUN_0021B678`: 199 is one of the groups GuiCode drives, `newbutton.guicode_selected_groups`,
+2026-11-08). PC.32's silence at power-on then needs
 either a setter write that never appeared, or the `[state+0x09]` phase-byte route; the counter
 alone no longer explains a cold-boot failure. The cell is an LCD-RAM address a GuiCode routine can
 read, so `add_register_readout` could show it live if its register spec grew an `addr` form — the
@@ -8051,7 +8053,9 @@ closes it, and the answer is that the silence is *intended* — just not for thi
 
 Group 199 is `11 80 04 00 76 02 03 00`: byte 1 `0x80` = **externally selected** (§5a of
 `CONTROL-BEHAVIOR.md`: the press never cycles its counter, only the setter can), byte 0's low
-nibble = 1 (the setter accepts variants 0 and 1, `FUN_0021B5E8` `0x21B606`-`0x21B610`). Its three
+nibble = 1 (the LCD's gated setter `FUN_0021B5E8` accepts variants 0 and 1, `0x21B606`-`0x21B610`;
+GuiCode's own `setVariant` is the ungated `FUN_0021B678`, which does not read the nibble:
+`CONTROL-BEHAVIOR.md` §5a, corrected 2026-11-08). Its three
 bindings all carry variant 0 (byte-2 high nibble; the sender `FUN_0021B8B4` matches
 `counter == byte2 >> 4` at `0x21B944`-`0x21B94A`). So **variant 1 is a state with nothing to
 send** — the group's "disabled" arm, a shape 74 other `11 80` groups share.

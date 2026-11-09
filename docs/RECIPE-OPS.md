@@ -36,7 +36,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 - `CAPABILITY_GATE` — the (channel, command) pairs the image can send differ from stock by other than the ops declared.
 - `NOT_SEALED` — the image is not sealed after verify.
 - `HOOK_REFUSED` — an op's verify found that the per-tick hook or its chain no longer proves out (another op may have rewritten it).
-- `VARIANT_SETTER_UNKNOWN` — the build reuses a command group (moves its binding slice), and which groups GuiCode drives by number is not known on this image: its variant-setter cell is not 13.6's (`newbutton.guicode_selected_groups`; 14.7, 2026-11-08). A build that reuses no group passes.
+- `VARIANT_SETTER_UNKNOWN` — the build reuses a command group (moves its binding slice), and which groups GuiCode drives by number is not known on this image: the variant-setter cell does not locate, the LCD does not prove it holds the ungated variant writer (`lcdgroups.host_writer`), or a use of it does not resolve to a constant group (`newbutton.guicode_selected_groups`). A build that reuses no group passes.
 
 ## Summary
 

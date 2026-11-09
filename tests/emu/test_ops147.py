@@ -981,27 +981,20 @@ STATES_BUTTON = ("b", "add_rvc_button", {
     "dgn": DC_DIMMER_COMMAND_2, "tap": {"payload": "03ffc805ff00ffff"}})
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "add_button_status lights an add_rvc_button (or a 13.6 preset); add_rvc_button allocates "
-    "its group from pools GuiCode's variant setter decides (newbutton.hold_safe_groups), read "
-    "from 13.6's setter cell 0x20039908. 14.7's located setter cell is 0x200395FC, so the pool "
-    "refuses VARIANT_SETTER_UNKNOWN (observed 2026-11-08 with both ops admitted on 14.7). "
-    "Both stay off 14.7 until the group pools are located."))
-def test_add_button_status(mcf_147, monkeypatch):
+def test_add_button_status_compiles_once_admitted(mcf_147, monkeypatch):
+    """The pool refusal these two ops met on 14.7 (VARIANT_SETTER_UNKNOWN, observed 2026-11-08:
+    the driven-group scan read only 13.6's setter cell) is gone: the scan reads the located cell
+    and the LCD proves what it holds (`tests/test_groups_locate.py`). With both ops admitted the
+    build compiles. They stay off 14.7 until the emulator proves them (Plan 6, Task 5)."""
     _admit(monkeypatch, "add_rvc_button", "add_button_status")
-    _build_refused_as(mcf_147, [STATUS_BUTTON, ("s", "add_button_status", {"buttons": [
-        {"button": {"ref": "b"}, "source": {"var": 232}, "compare": {"eq": 1}}]})],
-        "VARIANT_SETTER_UNKNOWN")
+    _build(mcf_147, [STATUS_BUTTON, ("s", "add_button_status", {"buttons": [
+        {"button": {"ref": "b"}, "source": {"var": 232}, "compare": {"eq": 1}}]})])
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "add_button_states draws the states of an add_rvc_button, whose group pool refuses "
-    "VARIANT_SETTER_UNKNOWN on 14.7 (observed 2026-11-08 with both ops admitted): see "
-    "test_add_button_status."))
-def test_add_button_states(mcf_147, monkeypatch):
+def test_add_button_states_compiles_once_admitted(mcf_147, monkeypatch):
+    """See `test_add_button_status_compiles_once_admitted`."""
     _admit(monkeypatch, "add_rvc_button", "add_button_states")
-    _build_refused_as(mcf_147, [STATES_BUTTON, ("s", "add_button_states", {"buttons": [
+    _build(mcf_147, [STATES_BUTTON, ("s", "add_button_states", {"buttons": [
         {"button": {"ref": "b"}, "states": [
             {"match": {"source": {"var": 232}, "eq": 0}},
-            {"match": {"source": {"var": 232}, "eq": 1}, "lit": True}]}]})],
-        "VARIANT_SETTER_UNKNOWN")
+            {"match": {"source": {"var": 232}, "eq": 1}, "lit": True}]}]})])

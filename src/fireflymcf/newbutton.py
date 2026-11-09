@@ -22,7 +22,9 @@ is the *only* object->group reference; a naive "any wtype-12 record" scan mis-at
 """
 from __future__ import annotations
 
+import re
 import struct
+from dataclasses import dataclass
 
 from . import firmware, guidata, insert, memo, patch, records, relocate
 from .cli import _resolve_page_root
@@ -146,80 +148,246 @@ def unused_command_groups(data: bytes) -> list[int]:
     return out
 
 
-# GuiCode's group-variant setter is reached through the function pointer at this SRAM word
-# (`GUICODE.md`: 41 of 41 distinct call ids are group-setter calls).
+# 13.6's setter cell (`hooklocate.host_api_cells` +0x04 on 13.6). A test expectation and a docs
+# anchor only: the scan reads the located cell on every image.
 SET_VARIANT_PTR = 0x20039908
+
+# The scan's bounds, passed to the cached scan as arguments (`memo`'s rule). How many
+# instructions the paths from one load of the cell may visit while it is live (the corpus's
+# most is 1586, 11.23; exhausting it refuses); how many instructions a deref may take to reach
+# its `blx`; how many unconditional `b`s that path may follow (14.7 `0x2490D0` reaches its
+# `blx` through `b 0x249164`).
+SETTER_LOAD_WINDOW = 4096
+SETTER_CALL_WINDOW = 16
+SETTER_BRANCH_HOPS = 1
 
 
 class VariantSetterUnknown(ValueError):
-    """VARIANT_SETTER_UNKNOWN: `guicode_selected_groups` scans for loads of 13.6's variant-setter
-    cell (`SET_VARIANT_PTR`), and this image's setter cell (`hooklocate.host_api_cells` +0x04)
-    is another word or does not locate. The scan would find nothing there, and "GuiCode drives
-    no group" is not known; on 14.7 the located cell is 0x200395FC (2026-11-08), and the scan
-    for it is the group-pool locator `add_rvc_button` still needs."""
+    """VARIANT_SETTER_UNKNOWN: which groups GuiCode drives by number is not known on this
+    image. The variant setter's cell (`hooklocate.host_api_cells` +0x04) did not locate, the
+    LCD did not prove that cell's function the ungated variant writer
+    (`lcdgroups.host_writer`), or a use of the cell did not resolve: a deref that reaches no
+    `blx` of its register, a call whose `r0` is not a constant, another store to the cell, a
+    use other than a deref, or a `ldr.w`/`movw`+`movt` form of it the scan does not follow."""
     code = "VARIANT_SETTER_UNKNOWN"
 
 
+@dataclass(frozen=True)
+class SetterCall:
+    load: int           # the `ldr rN,[pc,#]` of the cell
+    deref: int          # the `ldr rX,[rN]`
+    blx: int            # the `blx rX` it reaches
+    group: int          # the constant in r0 there
+
+
+@dataclass(frozen=True)
+class SetterScan:
+    cell: int
+    n_literal_loads: int
+    n_derefs: int
+    n_calls: int        # == n_derefs: every deref resolved to a call (the completeness claim)
+    calls: tuple        # `SetterCall`, in address order
+    writer: object      # `lcdgroups.HostWriter`: the LCD proof of what the cell holds
+
+    @property
+    def groups(self) -> frozenset:
+        return frozenset(c.group for c in self.calls)
+
+
 def guicode_selected_groups(data: bytes) -> frozenset:
-    """Group indices GuiCode passes BY IMMEDIATE to `setVariant(group, v)`. A pointer load
-    `ldr rN,[pc,#imm]` of `0x20039908` is followed (within 512 bytes) by calls of the shape
-    `ldr r3,[rN]` ... `movs r0,#group` / `blx r3` (up to three halfwords apart), or by
-    `ldr r3,[r3]` when N is 3 itself. These groups are driven from outside the screen.
+    """Group indices GuiCode passes to `setVariant(group, v)`: every group GuiCode drives by
+    number, from outside the screen (`setter_calls`).
 
     Why an allocator must avoid them (coach, 2026-09-30): 13.6 sets the variant of groups
     130-139 (`0x82`-`0x8B`) as a block (`0x24AC66`-`0x24ACB0`, `0x24AF1A`-`0x24AF64`); no stock
     touch region uses 136-139, and `free_group_slots` listed them. A Track + on group 136
     sent a tap but never repeated on a hold, and the APS-500 reboot (137, hold-only) sent
-    nothing, while the identically built 96/126/127 worked. How the block's other input
-    cancels a screen hold is NOT established (inference); that GuiCode drives these groups is.
+    nothing, while the identically built 96/126/127 worked. The setter GuiCode calls
+    (`lcdgroups.host_writer`, 13.6 `FUN_0021B678`) rewrites both variant counters of the group's
+    record with no gate, and the after-hold path reads one of them (inference: a per-tick
+    writer clobbers a hold's state); that GuiCode drives these groups is established.
 
-    Refuses `VariantSetterUnknown` when the image's located setter cell is not
-    `SET_VARIANT_PTR` (or does not locate): an empty answer there would be a guess.
+    Refuses `VariantSetterUnknown` rather than answer with fewer groups than GuiCode drives.
     """
-    from . import followchannel, hooklocate
+    return setter_calls(data).groups
+
+
+def setter_calls(data: bytes) -> SetterScan:
+    """Every call GuiCode makes through the variant setter's cell, with its proof.
+
+    1. The cell is `hooklocate.host_api_cells(data)[0x04]`, which refuses a second entry0 store.
+    2. `lcdgroups.host_writer` proves the word in it is the LCD's ungated variant writer and
+       that GuiCode's `r0` is the group-table index.
+    3. A linear sweep of GuiCode visits every `ldr rN,[pc,#]` whose pool word is the cell, and
+       every `ldr rX,[rN]` on every path while `rN` still holds it: the fall-through, each
+       conditional branch's target and each unconditional `b` followed, up to a write of `rN`,
+       a return, or a call when `rN` is caller-saved. A walk that exhausts
+       `SETTER_LOAD_WINDOW` instructions, or branches to an undecoded address, refuses.
+    4. Each deref must reach `blx rX` within `SETTER_CALL_WINDOW` instructions, following at
+       most `SETTER_BRANCH_HOPS` unconditional `b`, with `r0` a constant by propagation from the
+       deref (`movs r0,#k`, or `mov r0,rY` after `movs rY,#k`).
+
+    The cell's only other use allowed is the one store (entry0's copy). A `ldr.w` or
+    `movw`/`movt` of the cell is counted and refused, since the sweep does not follow those.
+    On 13.6: 76 loads, 105 derefs, 105 calls, 49 groups; 14.7 86/113/113, 47 groups; 11.23
+    90 calls, 39 groups (2026-11-08)."""
+    from . import followchannel, hooklocate, lcdgroups
     try:
         cell = hooklocate.host_api_cells(data)[0x04]
     except (followchannel.FollowChannelError, KeyError) as e:
         raise VariantSetterUnknown(
             f"the variant setter's cell does not locate on this image ({e}), so which groups "
             f"GuiCode drives by number is not known") from e
-    if cell != SET_VARIANT_PTR:
+    try:
+        writer = lcdgroups.host_writer(data)
+    except lcdgroups.HostWriterUnknown as e:
         raise VariantSetterUnknown(
-            f"this image's variant setter is reached through {cell:#x}, not {SET_VARIANT_PTR:#x} "
-            f"(13.6's), which is the cell the group scan reads; which groups GuiCode drives by "
-            f"number is not known here")
-    return _selected_groups(data, SET_VARIANT_PTR)
+            f"the LCD does not prove the setter cell {cell:#x} holds the variant writer ({e}), "
+            f"so which groups GuiCode drives by number is not known") from e
+    return _setter_calls(data, cell, writer, SETTER_LOAD_WINDOW, SETTER_CALL_WINDOW,
+                         SETTER_BRANCH_HOPS)
 
 
-@memo.content_cached
-def _selected_groups(data: bytes, setter_cell: int) -> frozenset:
-    """`guicode_selected_groups`' scan, for loads of `setter_cell`."""
+_LIT_RE = re.compile(r"(r\d+), \[pc, #(-?0x[0-9a-f]+|-?\d+)\]")
+_DEREF_RE = re.compile(r"(r\d+), \[(r\d+)\]")
+_IMM_RE = re.compile(r"(\w+), #(0x[0-9a-f]+|\d+)")
+_CALLER_SAVED = frozenset({"r0", "r1", "r2", "r3", "r12", "ip"})
+_COND_BRANCH = re.compile(r"b(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)(\.w)?|cbn?z")
+
+
+def _ends_flow(ins) -> bool:
+    """An unconditional transfer: the walk cannot continue past it linearly."""
+    m, o = ins.mnemonic, ins.op_str
+    return (m in ("b", "b.w", "bx", "tbb", "tbh")
+            or (m.startswith("pop") and "pc" in o)
+            or (m.startswith(("ldr", "mov")) and o.startswith("pc,")))
+
+
+def _reads_writes(ins) -> tuple:
+    read, written = ins.regs_access()
+    return ({ins.reg_name(r) for r in read}, {ins.reg_name(r) for r in written})
+
+
+@memo.content_cached(copy=None)
+def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window: int,
+                  branch_hops: int) -> SetterScan:
     from . import theme
     gc = theme.guicode_section(data)
     img = data[gc.offset:gc.offset + gc.length]
     base = theme.GUICODE_BASE_DEFAULT
+    ins = [i for _s, _e, run in theme.detail_runs(img, base) for i in run]
+    index = {i.address: k for k, i in enumerate(ins)}
 
-    def hw(pc):
-        return img[pc] | (img[pc + 1] << 8)
+    def pool(i, disp):
+        la = ((i.address + 4) & ~3) + int(disp, 0) - base
+        return struct.unpack_from("<I", img, la)[0] if 0 <= la <= len(img) - 4 else None
 
-    ptr_lits = {base + i for i in range(0, len(img) - 3, 4)
-                if struct.unpack_from("<I", img, i)[0] == setter_cell}
-    out = set()
-    for pc in range(0, len(img) - 1, 2):
-        h = hw(pc)
-        if h >> 11 != 0b01001 or (((base + pc + 4) & ~3) + (h & 0xFF) * 4) not in ptr_lits:
-            continue
-        n = (h >> 8) & 7
-        deref = 0x6800 | (n << 3) | 3                 # ldr r3,[rN]
-        for q in range(pc + 2, min(pc + 512, len(img) - 8), 2):
-            if hw(q) != deref:
-                continue
-            for k in range(1, 4):
-                a = q + 2 * k
-                if hw(a) >> 8 == 0x20 and hw(a + 2) == 0x4798:   # movs r0,#imm8 ; blx r3
-                    out.add(hw(a) & 0xFF)
+    def resolve(q, fn):
+        """From the deref at `ins[q]` loading `fn`: `(blx address, r0)` or a refusal."""
+        consts: dict = {}
+        j, steps, hops = q + 1, 0, 0
+        while j < len(ins) and steps < call_window:
+            i = ins[j]
+            if i.mnemonic == "blx" and i.op_str == fn:
+                if consts.get("r0") is None:
+                    raise VariantSetterUnknown(
+                        f"the setter call at {i.address:#x} (deref {ins[q].address:#x}): r0 is "
+                        f"not a constant")
+                return i.address, consts["r0"]
+            if i.mnemonic in ("b", "b.w") and hops < branch_hops:
+                j = index.get(int(i.op_str.lstrip("#"), 0), -1)
+                hops += 1
+                if j < 0:
                     break
-    return frozenset(out)
+                continue
+            if _ends_flow(i) or i.mnemonic in ("bl", "blx"):
+                break
+            _r, w = _reads_writes(i)
+            imm = _IMM_RE.fullmatch(i.op_str)
+            src = i.op_str.split(", ")[1] if i.op_str.count(", ") == 1 else None
+            for reg in w:
+                consts[reg] = None
+            if i.mnemonic in ("movs", "mov", "mov.w", "movw") and imm:
+                consts[imm.group(1)] = int(imm.group(2), 0)
+            elif i.mnemonic in ("movs", "mov") and src in consts and len(w) == 1:
+                consts[next(iter(w))] = consts[src]
+            if fn in w:
+                break
+            steps += 1
+            j += 1
+        raise VariantSetterUnknown(
+            f"the setter deref at {ins[q].address:#x} reaches no blx {fn} within "
+            f"{call_window} instructions")
+
+    n_loads, derefs, stored, calls, movw = 0, set(), set(), [], {}
+    for k, i in enumerate(ins):
+        if i.mnemonic == "movw" and (imm := _IMM_RE.fullmatch(i.op_str)):
+            movw[imm.group(1)] = int(imm.group(2), 0)
+        elif i.mnemonic == "movt" and (imm := _IMM_RE.fullmatch(i.op_str)):
+            lo = movw.get(imm.group(1))
+            if lo is not None and (int(imm.group(2), 0) << 16 | lo) == cell:
+                raise VariantSetterUnknown(
+                    f"{i.address:#x} builds the setter cell {cell:#x} with movw/movt, a form the "
+                    f"scan does not follow")
+        lit = _LIT_RE.fullmatch(i.op_str) if i.mnemonic.startswith("ldr") else None
+        if not lit or pool(i, lit.group(2)) != cell:
+            continue
+        if i.mnemonic != "ldr" or i.size != 2:
+            raise VariantSetterUnknown(
+                f"{i.address:#x} loads the setter cell {cell:#x} with {i.mnemonic}, a form the "
+                f"scan does not follow")
+        n_loads += 1
+        r = lit.group(1)
+        # Every path from the load while `r` holds the cell: the fall-through, every conditional
+        # branch's target, and an unconditional `b` followed, each instruction visited once.
+        work, seen = [k + 1], set()
+        while work:
+            q = work.pop()
+            while q < len(ins) and q not in seen:
+                if len(seen) >= load_window:
+                    raise VariantSetterUnknown(
+                        f"the setter cell loaded at {i.address:#x} is still live after "
+                        f"{load_window} instructions; its uses are not all visited")
+                seen.add(q)
+                j = ins[q]
+                reads, writes = _reads_writes(j)
+                dm = _DEREF_RE.fullmatch(j.op_str)
+                if r in reads:
+                    if j.mnemonic in ("ldr", "ldr.w") and dm and dm.group(2) == r:
+                        if j.address not in derefs:
+                            derefs.add(j.address)
+                            blx, group = resolve(q, dm.group(1))
+                            calls.append(SetterCall(i.address, j.address, blx, group))
+                    elif j.mnemonic in ("str", "str.w") and dm and dm.group(2) == r:
+                        stored.add(j.address)
+                    else:
+                        raise VariantSetterUnknown(
+                            f"{j.address:#x} uses the setter cell {cell:#x} other than by a "
+                            f"deref: {j.mnemonic} {j.op_str}")
+                if r in writes or (j.mnemonic in ("bl", "blx") and r in _CALLER_SAVED):
+                    break
+                cond = _COND_BRANCH.fullmatch(j.mnemonic)
+                if cond or j.mnemonic in ("b", "b.w"):
+                    tgt = index.get(int(j.op_str.split("#")[-1], 0))
+                    if tgt is None:
+                        raise VariantSetterUnknown(
+                            f"{j.address:#x} branches while the setter cell is live to "
+                            f"{j.op_str}, which the sweep did not decode")
+                    if cond:
+                        work.append(tgt)
+                        q += 1
+                    else:
+                        q = tgt
+                    continue
+                if _ends_flow(j):
+                    break
+                q += 1
+    if len(stored) != 1:
+        raise VariantSetterUnknown(
+            f"{len(stored)} stores to the setter cell {cell:#x} "
+            f"({[hex(a) for a in sorted(stored)]}); entry0's copy should be the only one")
+    calls.sort(key=lambda c: c.deref)
+    return SetterScan(cell, n_loads, len(derefs), len(calls), tuple(calls), writer)
 
 
 def hold_safe_groups(data: bytes, reserved=frozenset()) -> list[int]:

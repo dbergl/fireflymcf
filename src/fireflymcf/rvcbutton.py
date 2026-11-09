@@ -19,10 +19,11 @@ binding on DGN `d` puts `(6 << 26) | (d << 8) | 0x9F` on the wire (`newbutton.bi
   on `0x04` (`altreboot.group_entry`'s shape).
 - ``toggle``: the tap prefix with byte 1 `0x80` (no variant cycle on release) and byte 0's low
   nibble 1; variant 0 sends `on`, variant 1 sends `off`, both on `0x06`. Something else must
-  drive the variant: the setter `FUN_0021B5E8` writes it only while the variant is at most
-  that nibble (`and r3,#0xf` / `cmp r3,r4` / `blo` @`0x21B60A`-`0x21B610`), so the tap donor's
-  0 would refuse variant 1. Stock's setter-driven two-variant groups carry 1 (129, the Low
-  Volts toggle, `11 80 0c 80`; 143 and 146).
+  drive the variant: GuiCode's `setVariant` (host API `+0x04`, the ungated `FUN_0021B678`,
+  `lcdgroups.host_writer`). The nibble bounds only the LCD's gated setter `FUN_0021B5E8`
+  (`and r3,#0xf` / `cmp r3,r4` / `blo` @`0x21B60A`-`0x21B610`), which GuiCode does not call
+  (corrected 2026-11-08); it is 1 because stock's setter-driven two-variant groups carry 1
+  (129, the Low Volts toggle, `11 80 0c 80`; 143 and 146).
 - ``cycle``: the toggle's shape with N bindings (2-16): variant k sends payload k, every one on
   `0x06`, and byte 0's low nibble N-1 so the setter accepts every variant. `add_button_states`
   drives it (the state after the one the unit reports). *Emulator*: each variant sends its own
@@ -82,7 +83,10 @@ HOLD_MASK = 0x04                 # held, past the threshold; repeat clear, so it
 TAP_PREFIX = "group.tap"         # `10 00 04 80`
 HOLD_PREFIX = "group.hold"       # `10 00 0c 00`
 NO_CYCLE = 0x80                  # group byte 1: the variant is not cycled on release
-TOGGLE_VARIANT_MAX = 1           # group byte 0 low nibble: the highest variant the setter takes
+# Group byte 0 low nibble: the highest variant the LCD's gated setter `FUN_0021B5E8` takes. GuiCode's
+# `setVariant` is the ungated `FUN_0021B678` (host API +0x04, `lcdgroups`), which does not read it;
+# 1 is what stock's setter-driven two-variant groups carry (129, 143, 146).
+TOGGLE_VARIANT_MAX = 1
 HELD_REPEAT_INDEX = 0x0C         # group byte 2 bits 2-3: the held-phase repeat-rate index
 MAX_HOLD_SECONDS = 15            # one nibble
 

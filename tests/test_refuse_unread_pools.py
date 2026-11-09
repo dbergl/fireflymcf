@@ -4,11 +4,11 @@ values or with nothing (2026-11-08):
 - `statusbind.bind_pin` names a pin's colour cell from the committed 13.6 GuiCode bridge dump
   (`status_map.load_bridge("136")`). On another firmware those cells are not that image's, so
   it refuses BRIDGE_UNKNOWN, and so do `add_button` and `wire_button` through it.
-- `newbutton.guicode_selected_groups` scans for loads of 13.6's variant-setter cell
-  (`SET_VARIANT_PTR`). On an image whose located setter cell (`hooklocate.host_api_cells`
-  +0x04) is another word, the scan finds nothing and "no group is GuiCode-driven" would be a
-  guess, so it refuses VARIANT_SETTER_UNKNOWN. The finish gate that reads it on every compile
-  refuses only a build that reuses a group; a build that moves no group slice is not gated.
+- `newbutton.guicode_selected_groups` refuses VARIANT_SETTER_UNKNOWN where the setter cell's
+  uses do not resolve (it read only 13.6's cell until 2026-11-08; it now reads the located cell
+  on every image, `tests/test_groups_locate.py`). The finish gate that reads it on every compile
+  refuses, on such an image, only a build that reuses a group; a build that moves no group
+  slice is not gated.
 """
 import dataclasses
 import hashlib
@@ -62,14 +62,12 @@ def test_add_button_refuses_bridge_unknown_on_147(mcf_147, monkeypatch):
 
 # --- guicode_selected_groups --------------------------------------------------------------------
 
-def test_selected_groups_refuse_when_the_setter_cell_is_not_13_6s(mcf_147):
+def test_selected_groups_read_the_located_cell_on_147(mcf_147):
+    """14.7's cell is not 13.6's, and the scan reads it rather than refusing (2026-11-08)."""
     assert hooklocate.host_api_cells(mcf_147)[0x04] != newbutton.SET_VARIANT_PTR
-    with pytest.raises(newbutton.VariantSetterUnknown) as ei:
-        newbutton.guicode_selected_groups(mcf_147)
-    assert ei.value.code == "VARIANT_SETTER_UNKNOWN"
+    assert newbutton.guicode_selected_groups(mcf_147)
     for reader in (newbutton.hold_safe_groups, newbutton.assignable_groups):
-        with pytest.raises(newbutton.VariantSetterUnknown):
-            reader(mcf_147)
+        reader(mcf_147)
 
 
 def test_selected_groups_on_13_6_unchanged(mcf_136):
@@ -78,7 +76,8 @@ def test_selected_groups_on_13_6_unchanged(mcf_136):
 
 
 def test_selected_groups_refuse_a_13_6_image_whose_setter_moved(mcf_136, monkeypatch):
-    """The check can fail: 13.6 with its located setter cell stubbed to another word refuses."""
+    """The check can fail: 13.6 with its located setter cell stubbed to another word refuses
+    (no store to that word is entry0's copy)."""
     cells = dict(hooklocate.host_api_cells(mcf_136))
     cells[0x04] += 4
     monkeypatch.setattr(hooklocate, "host_api_cells", lambda _d: cells)
@@ -96,7 +95,9 @@ def test_gate_skips_a_147_build_that_reuses_no_group(mcf_147):
     recipe._assert_no_guicode_selected_group_reused(mcf_147, mcf_147)
 
 
-def test_gate_refuses_a_147_build_that_moves_a_group_slice(mcf_147, monkeypatch):
+def test_gate_refuses_a_group_reuse_where_the_driven_groups_are_unknown(mcf_147, monkeypatch):
+    """Where `guicode_selected_groups` refuses, a build that moves a group slice is refused
+    VARIANT_SETTER_UNKNOWN (14.7 itself now locates: `test_groups_locate.py`)."""
     real = guidata.group_table
     stock = mcf_147
     built = bytearray(mcf_147)
@@ -109,7 +110,11 @@ def test_gate_refuses_a_147_build_that_moves_a_group_slice(mcf_147, monkeypatch)
             gt[5] = dataclasses.replace(gt[5], start=gt[5].start + 1)
         return gt
 
+    def unknown(_data):
+        raise newbutton.VariantSetterUnknown("stubbed: not known")
+
     monkeypatch.setattr(guidata, "group_table", moved)
+    monkeypatch.setattr(newbutton, "guicode_selected_groups", unknown)
     with pytest.raises(recipe.GateError) as ei:
         recipe._assert_no_guicode_selected_group_reused(mcf_147, bytes(built))
     assert ei.value.code == "VARIANT_SETTER_UNKNOWN"
