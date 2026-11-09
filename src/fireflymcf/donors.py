@@ -12,7 +12,7 @@ object 829 has two records (an `IndexError`), measured 2026-11-07.
 
 So each donor is now the library's own bytes: `TEMPLATES[name].raw` is 13.6's record at the old
 pin (`source`), byte for byte, and a 13.6 build is unchanged by construction (`tests/test_donors.py`
-asserts all twelve). `template(data, name)` returns those bytes once two gates pass on `data`:
+asserts all fifteen). `template(data, name)` returns those bytes once two gates pass on `data`:
 
 1. **Grammar.** `grammar.prove(data)` succeeds: the image's record decoder, layout engine and
    shape-renderer dispatch are twins of 13.6's. The template's wtype must also be proven in the
@@ -179,6 +179,16 @@ TEMPLATES: dict[str, Template] = {
                          _BOX + ("fillA", "fillA2", "fillB", "fillB2", "align", "b1"), text=False),
     "pd.touch": Template((186, 1), _h("0c500f0000000000610218014b0034002000"),
                          _BOX + ("align", "touch"), text=False),
+    # newbutton.clone_onto_home (add_button): 13.6 object 279, one of four byte-identical
+    # unattached "... Tank Heater" objects (278-281). Every mode-7 index, value slot, the group
+    # tail and the label are rewritten; the kept bytes are grammar and layout constants.
+    "button.box": Template((279, 0), _h("21550d07200010008a0087005400320005003500"),
+                           ("fillA", "value_slot"), text=False),
+    "button.caption": Template(
+        (279, 1), _h("0b550c02200000005400320001ffff3b00020212001146726573682054616e6b2048656174657200"),
+        ("value_slot", "label"), text=True),
+    "button.touch": Template((279, 2), _h("0c550c0000000000540032000500"), ("touch",),
+                             text=False),
 }
 
 
@@ -589,3 +599,39 @@ def glyph_button(data: bytes, donor: int | None = None) -> tuple[int, ContentPro
                          + ("; pass `donor` explicitly with one of these indices (a wired "
                             "shell from an earlier build has the same shape)" if hits else ""))
     return hits[0].object, hits[0]
+
+
+@dataclass(frozen=True)
+class ButtonProof:
+    """Why `button_object` is add_button's object on this image: the three template proofs, the
+    objects (`witnesses`) whose records 0..2 each have the three templates' canonical forms, and
+    the caption template's label (bytes) and field width, which `newbutton` checks and rewrites."""
+    box: TemplateProof
+    caption: TemplateProof
+    touch: TemplateProof
+    witnesses: frozenset
+    caption_label: bytes
+    caption_width: int
+
+
+def button_object(data: bytes) -> tuple[bytes, ButtonProof]:
+    """`(object bytes, proof)` of add_button's object on `data`: `[3] + box + caption + touch`,
+    zero-padded to a multiple of 4 (13.6: equal to `insert.clone_object(data, 279)`). Each
+    record is a proven template (`template`); refuses as it does (GRAMMAR, NO_TEMPLATE).
+    Memoised on content."""
+    return _button_object(data, witness_image(data))
+
+
+@memo.content_cached(copy=None)
+def _button_object(data: bytes, base: bytes) -> tuple[bytes, ButtonProof]:
+    box, cap, touch = (template(data, n) for n in ("button.box", "button.caption",
+                                                   "button.touch"))
+    body = b"\3" + box[0] + cap[0] + touch[0]
+    body += bytes(-len(body) % 4)
+    wit = (set(o for o, j in box[1].witnesses if j == 0)
+           & set(o for o, j in cap[1].witnesses if j == 1)
+           & set(o for o, j in touch[1].witnesses if j == 2))
+    r = _decode(cap[0], "template button.caption")
+    width = cap[0][r.label_offset - 1]
+    return body, ButtonProof(box[1], cap[1], touch[1], frozenset(wit),
+                             bytes(cap[0][r.label_offset:r.label_offset + width]), width)
