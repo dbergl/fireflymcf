@@ -286,7 +286,8 @@ def test_lcd_136_proves_itself(stocks):
     assert dict(p.functions) == LCD_FUNCTIONS_136
     assert set(p.pool_shifts) == {"SRAM", "GuiData", "LCD flash"}
     assert all(s == frozenset({0}) for s in p.pool_shifts.values())
-    assert p.callee_shifts <= frozenset({0})
+    assert p.callee_shifts == frozenset({0})
+    assert "30 callee bindings over the LCD functions, shifted +0x0" in "\n".join(p.proof)
     assert len(p.proof) >= len(LCD_FUNCTIONS_136)
 
 
@@ -366,6 +367,20 @@ def test_lcd_call_between_them_must_land_on_the_located_twin(stocks):
         grammar.prove_lcd(bad)
     assert "FUN_0021B8B4" in str(e.value) and "0x21bb9a" in str(e.value)
     assert "not the located twin 0x21b8b4" in str(e.value)
+
+
+def test_lcd_a_call_onto_a_located_twin_must_be_that_function_in_13_6(stocks):
+    """The reverse direction: `FUN_0021B5E8` calls the helper `0x21A06C` once (`0x21B63C`), a
+    function outside the set. Retargeted onto the located twin of `FUN_0021B678`, the callee
+    mapping is still one-to-one within the function and the forward check sees no listed
+    callee, so it is the reverse check that refuses."""
+    data = stocks["14.7"]
+    assert _lcd_read(data, 0x21B63C, 4) == _bl(0x21B63C, 0x21A06C)
+    with pytest.raises(grammar.LcdGrammarError) as e:
+        grammar.prove_lcd(_lcd_patch(data, 0x21B63C, _bl(0x21B63C, 0x21B678)))
+    assert e.value.code == "LCD_GRAMMAR"
+    assert "FUN_0021B5E8" in str(e.value) and "0x21b63c" in str(e.value)
+    assert "FUN_0021B678" in str(e.value)
 
 
 def test_lcd_a_container_without_an_lcd_section_refuses_cleanly(stocks):

@@ -85,7 +85,9 @@ compared as a whole function.
 - A call or code pointer from one of them to another must land on that one's located twin:
   `FUN_0021BAB4`'s call to the sender (`0x21BB9A`), FUN_0021A664's to `FUN_0021AB88`
   (`0x21A67A`) and its tail call (`0x21A6B2`), and the tail's call to the gated setter
-  (`0x21B002`) all do.
+  (`0x21B002`) all do. The reverse holds too: a call or code pointer that lands on a located
+  twin must be a call to that same function in 13.6, so a helper outside the set swapped for
+  one of them refuses.
 - On 11.23 and 14.7, which carry one LCD, every one is a twin at 13.6's address. The only shift
   inside them is rodata: two LCD-flash pool words, +4 each. The 30 callee bindings are all +0.
   The research of 2026-11-08 also found `bl` displacements grown by 2 across the region
@@ -878,11 +880,20 @@ def _prove_lcd(data: bytes, fp_text: str, names: tuple) -> LcdGrammarProof:
         proof += lines
     # A call (or a code pointer) from one of them to another must land on that one's twin:
     # the mapping alone proves only that the image calls *some* helper consistently.
+    # And the reverse: a call (or code pointer) that lands on a located twin must be a call to
+    # that function in 13.6, or a helper outside the set has been swapped for one of them.
     entries = {fp[n]["entry"]: n for n in names}
+    located = {addr: n for n, addr in found.items()}
     for name, m in maps.items():
         for (kind, a), b in m.fwd.items():
             if kind not in ("callee", f"{LCD_FLASH} value"):
                 continue
+            twin = located.get(b & ~1)
+            if twin is not None and (a & ~1) != fp[twin]["entry"]:
+                raise LcdGrammarError(
+                    f"LCD_GRAMMAR: this image's {name} reaches the located twin of {twin} "
+                    f"({b & ~1:#x}) at {m.where[(kind, a)]:#x}, where 13.6's reaches "
+                    f"{a & ~1:#x}, not {twin}")
             callee = entries.get(a & ~1)
             if callee is not None and (b & ~1) != found[callee]:
                 raise LcdGrammarError(
