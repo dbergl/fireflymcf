@@ -198,7 +198,16 @@ def _coded_refusals_by_op() -> dict:
     # or falls back. A handler that re-raises (a bare `raise`) catches nothing, and neither does
     # one that raises the caught error's own code (`except statusbind.BridgeUnknown as err:
     # raise RecipeError(err.code, ...)`, `add_button`/`wire_button`): the code passes through.
+    # Handlers match in order, so a pass-through handler ahead of a broader one (`except
+    # newbutton.VariantSetterUnknown as err: raise RecipeError(err.code, ...)` then `except
+    # ValueError`) exempts its class from the later one: the mask entry is then
+    # `(caught, passed)`, which catches a class of `caught` that is none of `passed`.
     is_a = {c.__name__: {k.__name__ for k in c.__mro__} for c in recipe._CODED}
+
+    def masked(klass, mask):
+        bases = is_a[klass]
+        return any(e in bases if isinstance(e, str) else e[0] in bases and not e[1] & bases
+                   for e in mask)
 
     def passes_code(h):
         return h.name is not None and any(
@@ -209,14 +218,17 @@ def _coded_refusals_by_op() -> dict:
             for x in ast.walk(h))
 
     def caught(handlers):
-        out = set()
+        out, passed = set(), set()
         for h in handlers:
-            if any(isinstance(x, ast.Raise) and x.exc is None for x in ast.walk(h)) \
-                    or passes_code(h):
-                continue
             ts = (h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]) if h.type else []
-            out |= {getattr(t, "attr", getattr(t, "id", None)) for t in ts} if ts \
+            names_ = {getattr(t, "attr", getattr(t, "id", None)) for t in ts} if ts \
                 else {"BaseException"}
+            if any(isinstance(x, ast.Raise) and x.exc is None for x in ast.walk(h)):
+                continue
+            if passes_code(h):
+                passed |= names_
+                continue
+            out |= {(n, frozenset(passed)) if passed else n for n in names_}
         return frozenset(out)
 
     graph, raised, unread = {}, {}, []
@@ -276,7 +288,7 @@ def _coded_refusals_by_op() -> dict:
                 seen.add((k, mask))
                 todo += [(c, mask | cm) for c, cm in graph.get(k, ())]
         codes = {code for k, mask in seen for code, klass, site in raised[k]
-                 if not is_a[klass] & (mask | site)}
+                 if not masked(klass, mask | site)}
         if codes:
             result[name] = codes
     assert not unread, f"coded refusals whose code is not a literal: {unread}"
@@ -296,8 +308,8 @@ def test_coded_refusals_are_documented():
                                                   "DECODER_RANGE_UNKNOWN"}),
                         ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN", "LCD_GRAMMAR"}),
                         ("follow_register", {"SPARE_ROWS_UNKNOWN"}),
-                        ("add_button", {"BRIDGE_UNKNOWN"}),
-                        ("wire_button", {"BRIDGE_UNKNOWN"})):
+                        ("add_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"}),
+                        ("wire_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"})):
         assert codes <= reach.get(name, set()), (name, reach.get(name))
     missing = {name: sorted(c for c in codes - {c for c, _ in
                                                   ops_doc._error_codes(recipe.REGISTRY[name])}

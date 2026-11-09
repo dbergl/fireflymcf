@@ -1819,6 +1819,9 @@ class AddButton(Op):
                          allow_commanded_channel=True once they've confirmed (as the
                          docstring above describes) that those bindings belong to
                          unreachable controls
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the new button's command group cannot be shown not to be one
+        (`newbutton.unused_command_groups`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
       NO_FONT_SELECTOR — font was given but the new caption's R38 selector isn't the
                          expected 0xff inherit byte
@@ -1873,6 +1876,8 @@ class AddButton(Op):
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
                 colour_index=cell, label=self.label)
+        except newbutton.VariantSetterUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             # Match only the specific "already commanded by" refusal wording
             # (newbutton.py:354-358). A bare "command" substring also appears in the
@@ -2123,6 +2128,9 @@ class WireButton(Op):
                          commanded by an existing binding; offers=["acknowledge"] —
                          the caller may retry with allow_commanded_channel=True once
                          they've confirmed those bindings belong to unreachable controls
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the fresh command group cannot be shown not to be one
+        (`newbutton.unused_command_groups`)
       WIRE_REFUSED — any other newbutton.retarget_command refusal, OR
                      newbutton.retarget_indicator refusing the target (out-of-range
                      object index, or an object with no wtype-33 indicator record --
@@ -2191,6 +2199,8 @@ class WireButton(Op):
             data, e = newbutton.retarget_command(
                 data, idx, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded)
+        except newbutton.VariantSetterUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             if "already commanded by" in str(err) and not self.allow_commanded:
                 raise RecipeError("COMMANDED_CHANNEL",

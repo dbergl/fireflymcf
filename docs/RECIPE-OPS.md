@@ -695,6 +695,7 @@ Error codes:
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control — a narrower check than build_home_button's own, see statusbind.py)
 - `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the new button's command group cannot be shown not to be one (`newbutton.unused_command_groups`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
@@ -1293,6 +1294,7 @@ Error codes:
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control)
 - `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — retarget_command refused because the channel is already commanded by an existing binding; offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed those bindings belong to unreachable controls
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the fresh command group cannot be shown not to be one (`newbutton.unused_command_groups`)
 - `WIRE_REFUSED` — any other newbutton.retarget_command refusal, OR newbutton.retarget_indicator refusing the target (out-of-range object index, or an object with no wtype-33 indicator record -- e.g. a target that isn't a button shell at all)
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)

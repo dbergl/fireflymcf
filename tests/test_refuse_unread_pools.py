@@ -132,3 +132,39 @@ def test_gate_refuses_a_group_reuse_where_the_driven_groups_are_unknown(mcf_147,
         recipe._assert_no_guicode_selected_group_reused(mcf_147, bytes(built))
     assert ei.value.code == "VARIANT_SETTER_UNKNOWN"
     assert "5" in str(ei.value)
+
+
+@pytest.fixture
+def setter_unknown(monkeypatch, request):
+    """The setter scan refusing, as on an image whose cell's uses do not resolve."""
+    def refuse(data):
+        raise newbutton.VariantSetterUnknown("test: the setter scan refuses")
+    caches = (newbutton.unused_command_groups, newbutton.assignable_groups)
+    for c in caches:
+        c.cache_clear()
+    request.addfinalizer(lambda: [c.cache_clear() for c in caches])
+    monkeypatch.setattr(newbutton, "setter_calls", refuse)
+
+
+def test_add_button_refuses_variant_setter_unknown(mcf_136, monkeypatch, setter_unknown):
+    """`add_button` allocates its group through `unused_command_groups`, which reads the driven
+    groups; a refusal there surfaces under its own code, not BUILD_REFUSED."""
+    res = _build(mcf_136, [("b", "add_button", {"channel": 17, "label": "X",
+                                                 "off_colour": [65, 81, 163],
+                                                 "allow_named_output": True})],
+                 monkeypatch, [])
+    assert not res.ok
+    assert [e["code"] for e in res.errors] == ["VARIANT_SETTER_UNKNOWN"], res.errors
+
+
+def test_wire_button_refuses_variant_setter_unknown(mcf_136, monkeypatch, setter_unknown):
+    """`wire_button`'s `retarget_command` allocates the same way: VARIANT_SETTER_UNKNOWN, not
+    WIRE_REFUSED."""
+    res = _build(mcf_136, [
+        ("shell", "add_glyph_button", {"page": "home", "donor": 247, "x": 630, "y": 388,
+                                       "w": 120, "h": 60, "fill_cell": 164}),
+        ("wire", "wire_button", {"target": {"ref": "shell"}, "channel": 29,
+                                 "off_colour": [65, 81, 163],
+                                 "allow_commanded_channel": True})], monkeypatch, [])
+    assert not res.ok
+    assert [e["code"] for e in res.errors] == ["VARIANT_SETTER_UNKNOWN"], res.errors
