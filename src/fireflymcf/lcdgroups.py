@@ -144,7 +144,7 @@ def _host_writer(data: bytes, lcd_base: int) -> HostWriter:
     from . import raminit
     try:
         body = raminit._lcd_body(data)
-    except ValueError as e:
+    except (ValueError, IndexError, struct.error) as e:
         raise HostWriterUnknown(f"this container carries no LCD Firmware section ({e}), so "
                                 f"the variant writer GuiCode calls cannot be proven") from e
     found = _builders(body, lcd_base)

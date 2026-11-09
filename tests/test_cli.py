@@ -369,3 +369,17 @@ def test_pins_on_a_grown_image_reports_spares_unknown(tmp_path, mcf_136):
     out = json.loads(r.stdout)
     assert out["pins"] and out["spare_cell_indices"] is None
     assert out["spare_cell_indices_unknown"].startswith("SPARE_ROWS_UNKNOWN")
+
+
+def test_pins_survives_a_bridge_refusal_in_state_loads(mcf_136, tmp_path, monkeypatch, capsys):
+    """`state_loads` refuses BRIDGE_UNKNOWN (no longer a `StatusBindError`); `pins` leaves that
+    pin's states blank instead of crashing."""
+    from fireflymcf import cli, statusbind
+
+    def refuse(data, var):
+        raise statusbind.BridgeUnknown("test: the bridge does not derive")
+    monkeypatch.setattr(statusbind, "state_loads", refuse)
+    path = tmp_path / "mcf.bin"
+    path.write_bytes(mcf_136)
+    assert cli.main(["pins", str(path)]) == 0
+    assert capsys.readouterr().out

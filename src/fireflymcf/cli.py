@@ -1494,7 +1494,7 @@ def _cmd_pins(args: argparse.Namespace) -> int:
         b = bindings[p]
         try:
             loads = statusbind.state_loads(data, b.var) if b.bridged else {}
-        except statusbind.StatusBindError:
+        except (statusbind.StatusBindError, statusbind.BridgeUnknown):
             loads = {}
         off = loads.get(statusbind.OFF_STATE)
         on = loads.get(statusbind.ON_STATE)

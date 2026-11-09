@@ -189,7 +189,7 @@ class SetterCall:
 class SetterScan:
     cell: int
     n_literal_loads: int  # `ldr rN,[pc,#]` of the cell in the decode the walk runs on
-    n_raw_loads: int    # the same, by a raw halfword scan (0x48xx): the census, which must agree
+    n_raw_loads: int    # the same by a raw halfword scan (0x48xx and ldr.w): must agree
     n_derefs: int
     n_calls: int        # == n_derefs by construction (an unresolved deref refuses)
     calls: tuple        # `SetterCall`, in address order
@@ -247,10 +247,16 @@ def setter_calls(data: bytes) -> SetterScan:
     resolve refuses. The completeness check is the load census: a raw halfword scan for
     `ldr rN,[pc,#]` (`0x48xx`) whose pool word is the cell must count exactly the loads the
     resyncing decode saw (`n_raw_loads == n_literal_loads`), so no load hides inside an
-    instruction the decode misaligned on. While the cell is live, a conditional write of its
-    register does not end the walk (the other arm still holds it), a return (`bx lr`,
-    `pop {..., pc}`) ends it, and any other indirect transfer (`tbb`/`tbh`, `bx rX`, a write to
-    `pc`) refuses: the paths past it are not followed.
+    instruction the decode misaligned on; the census also counts 32-bit `ldr.w Rt,[pc,#imm]`
+    (`0xF8DF`/`0xF85F`), which the decode refuses wherever it sees one. **Assumption:** the
+    cell is reached only by a pc-relative literal load of its own pool word (or `movw`/`movt`,
+    refused). A base-plus-offset load through a neighbouring pool word (a pool word holding
+    `cell - 8`, then `ldr r1,[r0,#8]`) is invisible to the census and the walk; none is known.
+
+    While the cell is live, a conditional write of its register does not end the walk (the
+    other arm still holds it), a return (`bx lr`, `pop {..., pc}`) ends it, and any other
+    indirect transfer (`tbb`/`tbh`, `bx rX`, a write to `pc`) refuses: the paths past it are not
+    followed.
 
     The cell's only other use allowed is the one store (entry0's copy). A `ldr.w` or
     `movw`/`movt` of the cell is counted and refused, since the sweep does not follow those.
@@ -460,15 +466,24 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
         raise VariantSetterUnknown(
             f"{len(stored)} stores to the setter cell {cell:#x} "
             f"({[hex(a) for a in sorted(stored)]}); entry0's copy should be the only one")
+    # The census counts both literal-load encodings at every halfword: `ldr rN,[pc,#imm8*4]`
+    # (`0x48xx`) and `ldr.w Rt,[pc,#±imm12]` (`0xF8DF`/`0xF85F`). The decode refuses any `ldr.w`
+    # it sees, so a 32-bit one found here was hidden from it and fails the comparison.
     raw = 0
     for pc in range(0, len(img) - 1, 2):
         h = img[pc] | (img[pc + 1] << 8)
-        if h >> 11 == 0b01001 and pool_at(((base + pc + 4) & ~3) + (h & 0xFF) * 4) == cell:
+        lit = ((base + pc + 4) & ~3)
+        if h >> 11 == 0b01001 and pool_at(lit + (h & 0xFF) * 4) == cell:
             raw += 1
+        elif h in (0xF8DF, 0xF85F) and pc + 3 < len(img):
+            imm = (img[pc + 2] | (img[pc + 3] << 8)) & 0xFFF
+            if pool_at(lit + imm if h == 0xF8DF else lit - imm) == cell:
+                raw += 1
     if raw != n_loads:
         raise VariantSetterUnknown(
-            f"a raw halfword scan finds {raw} `ldr rN,[pc,#]` of the setter cell {cell:#x} and "
-            f"the decode {n_loads}; a load the decode does not see is not walked")
+            f"a raw halfword scan finds {raw} pc-relative loads of the setter cell {cell:#x} "
+            f"and the decode {n_loads} `ldr rN,[pc,#]`; a load the decode does not see is not "
+            f"walked")
     calls.sort(key=lambda c: c.deref)
     return SetterScan(cell, n_loads, raw, len(derefs), len(calls), tuple(calls), writer)
 

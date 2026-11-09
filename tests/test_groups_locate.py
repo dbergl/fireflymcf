@@ -85,6 +85,21 @@ def test_a_container_without_an_lcd_section_refuses_cleanly(mcf_147):
         newbutton.guicode_selected_groups(bytes(renamed))
 
 
+@pytest.mark.parametrize("exc", [IndexError, struct.error])
+def test_a_malformed_lcd_section_refuses_cleanly(mcf_147, monkeypatch, exc):
+    """A truncated or malformed LCD section raises `IndexError`/`struct.error` in the body
+    reader, not `ValueError`; it refuses HostWriterUnknown like an absent one (as
+    `grammar._lcd_section` does). The image is changed by one byte so the content cache keys
+    afresh."""
+    from fireflymcf import raminit
+
+    def broken(_data):
+        raise exc("test: malformed LCD section")
+    monkeypatch.setattr(raminit, "_lcd_body", broken)
+    with pytest.raises(lcdgroups.HostWriterUnknown, match="LCD"):
+        lcdgroups.host_writer(mcf_147 + bytes([len(exc.__name__)]))
+
+
 # --- the driven-group scan ----------------------------------------------------------------------
 
 def test_13_6_returns_todays_49_groups(mcf_136):
@@ -234,6 +249,21 @@ def test_a_load_hidden_from_the_decode_fails_the_census(mcf_147):
     assert struct.unpack_from("<H", mcf_147, at)[0] >> 11 in (0b11101, 0b11110, 0b11111)
     broken = bytearray(mcf_147)
     broken[at:at + 4] = b"\x00\xbf\x00\xf0"              # nop ; first half of a 32-bit insn
+    with pytest.raises(newbutton.VariantSetterUnknown, match="raw halfword scan"):
+        newbutton.guicode_selected_groups(bytes(broken))
+
+
+def test_a_hidden_ldr_w_of_the_cell_fails_the_census(mcf_147):
+    """The same hiding trick on a 32-bit `ldr.w rN,[pc,#imm12]` of the cell: the decode loses
+    one 16-bit load and never sees the `ldr.w`; only a census that counts `0xF8DF` notices."""
+    s = newbutton.setter_calls(mcf_147)
+    load = s.calls[0].load
+    at = _guicode_offset(mcf_147, load)
+    h = struct.unpack_from("<H", mcf_147, at)[0]
+    assert h >> 11 == 0b01001
+    broken = bytearray(mcf_147)
+    broken[at - 4:at] = b"\x00\xbf\x00\xf0"           # nop ; first half of a 32-bit insn
+    struct.pack_into("<HH", broken, at, 0xF8DF, ((h >> 8) & 7) << 12 | (h & 0xFF) * 4)
     with pytest.raises(newbutton.VariantSetterUnknown, match="raw halfword scan"):
         newbutton.guicode_selected_groups(bytes(broken))
 
