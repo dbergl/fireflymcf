@@ -156,6 +156,40 @@ def test_a_non_constant_r0_refuses(mcf_147):
         newbutton.guicode_selected_groups(bytes(broken))
 
 
+def _call_shaped(data):
+    """A call laid out `ldr r3,[r3]; movs r1,#v; movs r0,#group; blx r3` (13.6 `0x248E92`)."""
+    for c in newbutton.setter_calls(data).calls:
+        h = [struct.unpack_from("<H", data, _guicode_offset(data, c.blx - k))[0]
+             for k in (6, 4, 2, 0)]
+        if h[0] == 0x681B and h[1] >> 8 == 0x21 and h[2] == 0x2000 | c.group \
+                and h[3] == 0x4798:
+            return c
+    pytest.fail("no call shaped ldr r3,[r3]; movs r1; movs r0; blx r3")
+
+
+def test_a_conditional_branch_past_r0_refuses(mcf_136):
+    """`ldr r3,[r3]; cbz r2,L; movs r0,#g; L: blx r3`: on the taken arm r0 is not g, so the
+    call has two groups and a linear walk would report one. Any conditional branch between the
+    deref and its `blx` refuses."""
+    call = _call_shaped(mcf_136)
+    broken = bytearray(mcf_136)
+    struct.pack_into("<H", broken, _guicode_offset(mcf_136, call.blx - 4), 0xB102)  # cbz r2,blx
+    with pytest.raises(newbutton.VariantSetterUnknown, match="conditional") as ei:
+        newbutton.guicode_selected_groups(bytes(broken))
+    assert ei.value.code == "VARIANT_SETTER_UNKNOWN"
+
+
+def test_a_conditional_call_refuses(mcf_136):
+    """`movs r0,#g; it eq; blxeq r3`: a conditional call is not the unconditional `blx` the
+    walk resolves, and the walk must not step past it."""
+    call = _call_shaped(mcf_136)
+    broken = bytearray(mcf_136)
+    at = _guicode_offset(mcf_136, call.blx)
+    struct.pack_into("<HH", broken, at - 4, 0x2000 | call.group, 0xBF08)   # movs r0; it eq
+    with pytest.raises(newbutton.VariantSetterUnknown, match="conditional"):
+        newbutton.guicode_selected_groups(bytes(broken))
+
+
 def test_another_store_to_the_cell_refuses(mcf_147):
     """The cell has one writer (entry0's copy); a second `str` through a register holding it
     would make the scan's answer depend on what that store wrote."""

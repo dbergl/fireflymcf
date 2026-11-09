@@ -231,7 +231,10 @@ def setter_calls(data: bytes) -> SetterScan:
        `SETTER_LOAD_WINDOW` instructions, or branches to an undecoded address, refuses.
     4. Each deref must reach `blx rX` within `SETTER_CALL_WINDOW` instructions, following at
        most `SETTER_BRANCH_HOPS` unconditional `b`, with `r0` a constant by propagation from the
-       deref (`movs r0,#k`, or `mov r0,rY` after `movs rY,#k`).
+       deref (`movs r0,#k`, or `mov r0,rY` after `movs rY,#k`). The path is linear: a
+       conditional branch (`b<cc>`, `cbz`/`cbnz`), or a conditional call or write of `r0`, the
+       call register or `pc`, between the deref and its `blx` refuses (none on the corpus,
+       2026-11-08).
 
     **Completeness.** `n_derefs == n_calls` holds by construction: a deref that does not
     resolve refuses. The completeness check is the load census: a raw halfword scan for
@@ -274,6 +277,12 @@ def _conditional(ins) -> bool:
     """Executed under a condition (an IT block, or a conditional branch)."""
     from capstone.arm import ARM_CC_AL, ARM_CC_INVALID
     return ins.cc not in (ARM_CC_AL, ARM_CC_INVALID)
+
+
+def _transfers(ins) -> bool:
+    """A jump or a call (capstone's groups), whatever its condition."""
+    from capstone import CS_GRP_CALL, CS_GRP_JUMP
+    return ins.group(CS_GRP_JUMP) or ins.group(CS_GRP_CALL)
 
 
 def _both_arms(conds: set) -> bool:
@@ -323,6 +332,15 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
         j, steps, hops = q + 1, 0, 0
         while j < len(ins) and steps < call_window:
             i = ins[j]
+            # The walk is linear: a conditional branch would leave r0 two values (`movs r0,#5;
+            # cbz r1,L; movs r0,#6; L: blx r3`), and a conditional call or write of r0 or `fn`
+            # (`it eq; blxeq r3`) is not the unconditional call it resolves. Refuse both.
+            _r, w = _reads_writes(i)
+            if _COND_BRANCH.fullmatch(i.mnemonic) or (_conditional(i) and (
+                    _transfers(i) or w & {"r0", fn, "pc"})):
+                raise VariantSetterUnknown(
+                    f"{i.address:#x} is conditional ({i.mnemonic} {i.op_str}) between the "
+                    f"setter deref at {ins[q].address:#x} and its call; the walk is linear")
             if i.mnemonic == "blx" and i.op_str == fn:
                 if consts.get("r0") is None:
                     raise VariantSetterUnknown(
@@ -337,9 +355,6 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
                 continue
             if _ends_flow(i) or i.mnemonic in ("bl", "blx"):
                 break
-            # Linear propagation is safe on a conditional path: an IT-block `movs r0,#k` decodes
-            # as `moveq r0,#k` (not in the set below), so it nulls r0 and the call refuses.
-            _r, w = _reads_writes(i)
             imm = _IMM_RE.fullmatch(i.op_str)
             src = i.op_str.split(", ")[1] if i.op_str.count(", ") == 1 else None
             for reg in w:
