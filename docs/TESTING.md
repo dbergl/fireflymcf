@@ -1,7 +1,7 @@
 # Testing — commands, parallel runs, and the speed pass
 
 ```
-python3 -m pytest tests/ -q -n auto               # the whole suite: ~4 min after a src/ edit, ~80 s otherwise
+python3 -m pytest tests/ -q -n auto               # the whole suite: 4m22s on 16 threads (2026-11-09, warm compile cache)
 python3 -m pytest tests/test_x.py -v              # serial, one module; use it to see WHY something is red
 npm test --prefix studio/web                      # the web editor's tests
 ```
@@ -67,12 +67,17 @@ and the GIL would serialise it. Install with `sudo apt install python3-pytest-xd
 blocks `pip install` into the system Python here. Plain `-n auto` is the fastest mode: `--dist
 loadscope` looks better on paper (many modules have expensive module-scoped fixtures, which
 plain `load` re-runs per worker) and measured **slower**, 4m53s, because finer-grained balancing
-wins by more than the duplicated fixtures cost. `--dist worksteal` is no better either (3m57s):
-it rebalances a worker's *queue*, and the tail here is one irreducible 60s test
-(`test_statusbind`), not a queue. That test is the floor, so there is little left without
-splitting it.
+wins by more than the duplicated fixtures cost. (That was measured when the suite had 1062 tests; the 2026-08-21 `worksteal` result is superseded below.)
 
-Deliberately **not** in a `pytest.ini` `addopts`: xdist interleaves output, disables `pdb` and
+**Distribution, 2026-11-09** (3843 passed, 2 skipped, 2 xfailed, `-n 16`, warm cache): `--dist load`
+(xdist's default) took **8m31s**, `--dist worksteal` **4m22s**, `--dist load --maxschedchunk 1`
+**5m33s**. Under `load` each worker is handed a contiguous initial chunk of `len/16/4` tests and
+never gives any back; `tests/emu/` sorts first, so its ~1000 s of emulator work all landed on
+four workers and one ran alone for minutes. `pyproject.toml` `addopts` now sets `--dist
+worksteal`, so a bare `-n auto` uses it; a run without `-n` ignores it. `loadscope` keeps
+modules whole, which leaves a floor of the slowest module; do not use it.
+
+Not in `addopts` are the worker count and `-x`/`pdb` options: xdist interleaves output, disables `pdb` and
 makes `-x` unpredictable. Parallel answers *"is it green"*; run serial to find out *why it is
 red*. A shared-path hazard, inert today but worth knowing before trusting a green run:
 - `test_static_mount_never_shadows_api` creates `studio/web/dist/index.html` when the web bundle
