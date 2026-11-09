@@ -99,6 +99,12 @@ class RenameLabel(Op):
       LABEL_TOO_LONG — `new` does not fit the field and `allow_grow` was not set;
                        offers=["grow", "shorten"]
       GROW_REFUSED — `labels.grow_label` refused the relocating grow
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Returns sealed image with the label field updated (and, on a grow, the image
     relocated) and edits logged to context.
@@ -1209,6 +1215,12 @@ class RemapChannel(Op):
                       the destination has no GuiCode bridge block, or the image is not
                       13.6 (the only build with a bridge dump). The PatchError's message
                       names which
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     The declared capability delta moves pairs, it never invents them: a pair is only
     declared LOST if this group is its SOLE producer on the old channel(s)
@@ -1804,6 +1816,10 @@ class AddButton(Op):
       BUILD_REFUSED — any other newbutton.build_home_button refusal
       NO_FONT_SELECTOR — font was given but the new caption's R38 selector isn't the
                          expected 0xff inherit byte
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     This is a relocating op (clone_onto_home inserts a new object). Registers
     ctx.handles[op_id] = {"object": idx, "cell": cell, "group": gid} so later ops
@@ -2098,6 +2114,10 @@ class WireButton(Op):
                      newbutton.retarget_indicator refusing the target (out-of-range
                      object index, or an object with no wtype-33 indicator record --
                      e.g. a target that isn't a button shell at all)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     **One-group discipline:** this op calls `retarget_command` exactly once per
     compile, on a shell that has never been wired -- so only one group is ever
@@ -2569,6 +2589,15 @@ class AddVoltageBattery(Op):
                         `cnt` > 1) on a build whose donor differs from 13.6's
       REPOSITION_REFUSED — `relocate.replace_object_records` refused the rebuilt
                         object-902 record stream (a structural gate failed)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
 
     Registers ctx.handles[op_id] = {"object": idx, "value_cell": addr, "color_cell":
     addr, "level_cell": addr} where idx is the new object's top-level index (the
@@ -5434,6 +5463,12 @@ class FollowChannel(Op):
                      descriptor field did not hold the expected pre-grow value)
       DETOUR_REFUSED — the bytes at the detour's file offset were not the stock `bl`
                        this plan expects (the grow shifted something it should not have)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Declares no capability delta: the follower is GuiCode code and touches no G12
     group/binding table, so `_finish`'s capability gate expects the image's
@@ -5685,6 +5720,12 @@ class AddOptionFollower(Op):
       GROW_REFUSED -- `growsection.grow_section` refused
       DETOUR_REFUSED -- the bytes at the detour's file offset were not the stock `bl` the
                         plan expects (the grows shifted something they should not have)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Capability delta `(set(), set())`: the toggle's four bindings are 0x1FED9 config writes
     (channel None), which are outside `recipe.capabilities`'s (channel, command) set
@@ -6228,7 +6269,15 @@ class FollowRegister(Op):
     generalized inputs; a coach check is warranted the first time a NEW watch register is used.
     On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): the first
     report is a silent baseline, each later edge sends the target on or off while the gates
-    hold, and nothing while they do not."""
+    hold, and nothing while they do not.
+
+    Error codes:
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)"""
     firmwares = frozenset({"13.6", "14.7"})
     emulated_on = frozenset({"14.7"})
     PARAMS = {
@@ -6365,7 +6414,11 @@ class AddRegisterReadout(Op):
     On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): drawn and
     `draw` false, a published value repaints the digits, and a cell poisoned before boot is
     written stale before the readout first draws. The existing-cell mode (`cell_slot`) refuses
-    DECODER_RANGE_UNKNOWN beyond 13.6: the per-tick decoder's window is known only there.
+    DECODER_RANGE_UNKNOWN beyond 13.6: the per-tick decoder's window is known only there. With
+    `draw` true the cell may be a stock display-cell index `statusbind.spare_cell_indices`
+    calls spare (tier 1 or 2), its type byte set to the readout's width. That no stock reader
+    uses such an index is inferred-from-data on 14.7 (no record and no other object table
+    names it), not proven from code, and no 14.7 coach has run it.
 
     Error codes:
       DECODER_RANGE_UNKNOWN -- `cell_slot` on a firmware whose per-tick decoder window is not
@@ -6388,6 +6441,15 @@ class AddRegisterReadout(Op):
         `donors.READOUT_CHARS`.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
     hardware_verified = True
     firmwares = frozenset({"13.6", "14.7"})
@@ -6627,12 +6689,6 @@ class AddRegisterReadout(Op):
         }
         return sealed
 
-    def _verified_here(self, ctx) -> bool:
-        """The manifest's HARDWARE-VERIFIED: this instance's flag, on a firmware a coach has run
-        it on (`verified_on`); on 14.7 the op is emulated only."""
-        fw = getattr(ctx, "firmware", None)
-        return bool(self.hardware_verified) and (fw is None or fw in self.verified_on)
-
     def _refuse_directive_leak(self, before, after, root, object_index):
         """Any stock readout on the page's screen whose directive-in-force changed is a leak."""
         old = {(e[1], e[2]): e[3] for e in readout.directive_in_force(before, root) if e[0] == "readout"}
@@ -6679,7 +6735,7 @@ class AddRegisterReadout(Op):
                 % (h["display_slot"], h["display_addr"], h["var_index"], h["slot_addr"],
                    self.add, self.shift, h["entry"], [hex(a) for a in h["silenced"]],
                    [hex(a) for a in h["remaining_writers"]],
-                   "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
+                   "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
@@ -6723,12 +6779,12 @@ class AddRegisterReadout(Op):
             return ("add_register_readout: cell %d @ %#x (tier %d, fresh=%s), routine @ %#x, "
                     "sub %d, mul %d; no widget (drawn by another op) -- HARDWARE-%s"
                     % (h["display_slot"], h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                       self.sub, self.mul, "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
+                       self.sub, self.mul, "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
         return ("add_register_readout: object %d at (%d,%d) on root %d (of %s), cell %d @ %#x "
                 "(tier %d, fresh=%s), routine @ %#x -- HARDWARE-%s"
                 % (h["object_index"], self.x, self.y, h["root"], h["roots"], h["display_slot"],
                    h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                   "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
+                   "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
 
 
 @op("swap_aes_electrical")
@@ -7199,6 +7255,10 @@ class AddAesLowVoltsTrigger(Op):
                      misaligned (beyond it, from earlier appends, the routine chains).
       BRIDGE_REFUSED / GROW_REFUSED / DETOUR_REFUSED -- the bridge could not be authored,
                      appended, or the detour site was not the stock `bl`.
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
     """
 
     hardware_verified = True     # coach-verified 2026-09-01
@@ -7382,6 +7442,12 @@ class AddAesBattHeat(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-09-21: hold->enable / tap->off captured on
@@ -7595,6 +7661,8 @@ class AddAltReboot(Op):
       GROW_REFUSED  -- the binding table could not be grown (padding arena / gates), or the hold
                        donor group is not the verified shape.
       REPLACE_REFUSED -- the page's record stream could not be relocated.
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-10-05: one 197F809F#0100FF.. per
@@ -7739,6 +7807,15 @@ class AddAesBattHeatStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     # COACH-VERIFIED 2026-09-22, both halves. RECEIVE: both appended subscriptions
@@ -8262,6 +8339,15 @@ class AddAesBmsButtonStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
@@ -8437,6 +8523,15 @@ class AddButtonStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
@@ -8773,6 +8868,15 @@ class AddEnumLabel(_LabelBox, Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
@@ -9031,6 +9135,10 @@ class AddTextLabel(_LabelBox, Op):
         the recipe's stock image; one that does not is refused here.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     On 14.7, emulated only (2026-11-08, tests/emu/test_ops147.py): its text drawers are not twins
     of 13.6's (`grammar.prove`), so the pixels are the evidence. White "FAN SPEED" in font 16 on
@@ -9295,6 +9403,15 @@ class AddButtonStates(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
@@ -9760,6 +9877,12 @@ class AddRvcButton(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
     """
 
     hardware_verified = False
@@ -10448,6 +10571,12 @@ class AddPumpAutoOff(Op):
       GROW_REFUSED -- `growsection.grow_section` refused.
       DETOUR_REFUSED -- the bytes at the detour's file offset were not the plan's expected
                      stock/chained `bl`; a grow shifted something it should not have.
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     `hardware_verified = True` again as of 2026-09-04: a later task shortened the routine by 4
     bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach, flashed and
@@ -11485,6 +11614,17 @@ class AddLevelPage(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
     """
 
     # Nothing of this page has been on the coach: a live readout inside a switch arm has no
@@ -12073,6 +12213,12 @@ class SetTheme(Op):
                    not a role with a static index
       WRONG_BUILD — the GuiCode theme-init is not located in its stock form
                     (`themeswap.locate_theme_init`: another build, or a theme already applied)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Hardware status: verified on the coach 2026-11-02 (owner): a reference build with the six
     roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.

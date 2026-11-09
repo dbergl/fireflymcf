@@ -30,6 +30,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 
 **Hardware status** says whether the op's mechanism has run on the reference coach (Jayco B-Van, firmware 13.6). "Verified" is the op's default: `no` means the compile manifest lists it under `unverified` and the build needs a coach check with stock on the stick; some ops narrow it by parameter. **Firmware** lists the firmware each op may compile on (`11.23`, `13.6`, `14.7`); compile refuses it on any other with `UNSUPPORTED_FIRMWARE`. A firmware marked `(unverified)` has not run the op on a coach, and `--allow-unverified` applies per firmware; `(emulated)` is information only and never verifies. `fireflymcf ops` prints this reference from the installed package.
 
+**Whole-image gates** run after every op and name no op. They refuse a build with these codes; an op's own verify that hits a locator's coded refusal surfaces under that locator's code instead.
+
+- `STRUCTURAL_GATE` — a structural check of the finished image failed: the GuiData record boundaries or geometry, an unclaimed differing byte run, a stale GuiCode-to-GuiData pointer, a pointer into the LCD firmware stranded by an insertion, a reused stock display cell, a changed reserved group, or a reused group GuiCode drives by number (`newbutton.guicode_selected_groups`).
+- `CAPABILITY_GATE` — the (channel, command) pairs the image can send differ from stock by other than the ops declared.
+- `NOT_SEALED` — the image is not sealed after verify.
+- `HOOK_REFUSED` — an op's verify found that the per-tick hook or its chain no longer proves out (another op may have rewritten it).
+- `VARIANT_SETTER_UNKNOWN` — the build reuses a command group (moves its binding slice), and which groups GuiCode drives by number is not known on this image: its variant-setter cell is not 13.6's (`newbutton.guicode_selected_groups`; 14.7, 2026-11-08). A build that reuses no group passes.
+
 ## Summary
 
 | op | class | purpose | hardware status | verified | Firmware |
@@ -285,6 +293,9 @@ Error codes:
 - `AMBIGUOUS_LABEL` — more than one located control has that label
 - `CAPABILITY_CHANGE` — set_channel's I8 check refused (a dimmable control moved to a channel this file never dims/commands) and allow_capability_change was not set; offers=["acknowledge"]
 - `REMAP_REFUSED` — any other set_channel check (I5-I7) refused the remap, or the default indicator retarget did: the control's indicator names none of its own pin's cells (it does not follow its command channel), the destination has no GuiCode bridge block, or the image is not 13.6 (the only build with a bridge dump). The PatchError's message names which
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### remove_control
 
@@ -344,6 +355,9 @@ Error codes:
 - `AMBIGUOUS_LABEL` — object has more than one label field containing `old`
 - `LABEL_TOO_LONG` — `new` does not fit the field and `allow_grow` was not set; offers=["grow", "shorten"]
 - `GROW_REFUSED` — `labels.grow_label` refused the relocating grow
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### retarget_inverter_gear
 
@@ -489,6 +503,9 @@ Error codes:
 
 - `BAD_PARAMS` — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is not a role with a static index
 - `WRONG_BUILD` — the GuiCode theme-init is not located in its stock form (`themeswap.locate_theme_init`: another build, or a theme already applied)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### show_nav_slides_icon
 
@@ -546,6 +563,9 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
 
 ### add_aes_batt_heat_status
 
@@ -570,6 +590,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_aes_bms_button_status
 
@@ -595,6 +619,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_alt_reboot
 
@@ -614,6 +642,7 @@ Error codes:
 - `NO_FREE_GROUP` — no empty group-table slot, outside the reserved 68/69, to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates), or the hold donor group is not the verified shape.
 - `REPLACE_REFUSED` — the page's record stream could not be relocated.
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
 
 ### add_batt_heat_battery_glyph
 
@@ -663,6 +692,8 @@ Error codes:
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### add_button_states
 
@@ -691,6 +722,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_button_status
 
@@ -718,6 +753,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_card_readouts
 
@@ -813,6 +852,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_glyph_button
 
@@ -880,6 +923,11 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
 
 ### add_low_volts_control
 
@@ -954,6 +1002,9 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
 
 ### add_text_label
 
@@ -988,6 +1039,8 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`). Where the text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font, alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of the recipe's stock image; one that does not is refused here.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### aes_card_layout
 
@@ -1232,6 +1285,8 @@ Error codes:
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control)
 - `COMMANDED_CHANNEL` — retarget_command refused because the channel is already commanded by an existing binding; offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed those bindings belong to unreachable controls
 - `WIRE_REFUSED` — any other newbutton.retarget_command refusal, OR newbutton.retarget_indicator refusing the target (out-of-range object index, or an object with no wtype-33 indicator record -- e.g. a target that isn't a button shell at all)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ## GuiCode-growing edits (authored ARM code)
 
@@ -1254,6 +1309,8 @@ Error codes:
 
 - `NO_SUCH_REGISTER` — the 0x2F DGN_CONFIG subscription is not in the variable table.
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is below stock's 0x00259BB4 or misaligned (beyond it, from earlier appends, the routine chains). BRIDGE_REFUSED / GROW_REFUSED / DETOUR_REFUSED -- the bridge could not be authored, appended, or the detour site was not the stock `bl`.
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### add_option_follower
 
@@ -1283,6 +1340,9 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is not the pinned 13.6 address (0x00259BB4); refuses rather than build against an image this op was never proven on (as `follow_channel` does)
 - `GROW_REFUSED` — `growsection.grow_section` refused
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the stock `bl` the plan expects (the grows shifted something they should not have)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### add_pump_auto_off
 
@@ -1306,6 +1366,9 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is below stock 13.6's own append point or misaligned; refuses rather than build against an image this op was not proven on.
 - `GROW_REFUSED` — `growsection.grow_section` refused.
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the plan's expected stock/chained `bl`; a grow shifted something it should not have.
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### add_register_readout
 
@@ -1345,6 +1408,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_voltage_battery
 
@@ -1376,6 +1443,10 @@ Error codes:
 - `NO_SUCH_RECORD` — `parent` does not carry the expected container / 'Chassis' label / attach-440 / attach-clone record shape (`_reposition_pair`)
 - `BAD_LABEL_FRAMING` — the 'Chassis' label's on-disk framing is not the single length-prefixed, NUL-terminated string shape this op's retext assumes (`_reposition_label`) -- e.g. a multi-part label (R37 `cnt` > 1) on a build whose donor differs from 13.6's
 - `REPOSITION_REFUSED` — `relocate.replace_object_records` refused the rebuilt object-902 record stream (a structural gate failed)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### follow_channel
 
@@ -1402,6 +1473,9 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode section's append point is below the stock 13.6 address (0x00259BB4) or misaligned; refuses rather than build against an image this op was never proven on. A point BEYOND it (earlier appends) is fine: the routine chains
 - `GROW_REFUSED` — `growsection.grow_section` refused (misaligned payload, or a descriptor field did not hold the expected pre-grow value)
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the stock `bl` this plan expects (the grow shifted something it should not have)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### follow_register
 
@@ -1417,6 +1491,12 @@ Watch any register for an edge and drive a channel, gated by register conditions
 | `target_channel` | integer | yes |  |  |
 | `on_level` | integer |  | 200 |  |
 | `gates` | array |  | [] | list of {ref\|dgn+..., mask?, value?}; all must hold |
+
+Error codes:
+
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ## G12 section edits
 

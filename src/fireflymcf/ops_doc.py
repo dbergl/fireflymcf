@@ -375,21 +375,38 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
 
 
 def _error_codes(cls) -> list[tuple[str, str]]:
-    """Parse the `Error codes:` section of an op docstring into (code, text) pairs."""
+    """Parse the `Error codes:` section of an op docstring into (code, text) pairs. A line may
+    name several codes that share one meaning (`A, B — text`); each gets its own pair."""
     doc = inspect.getdoc(cls) or ""
     m = re.search(r"Error codes?:\n(.*?)(?:\n\n|\Z)", doc, re.S)
     if not m:
         return []
     out: list[tuple[str, str]] = []
+    last: list[int] = []
     for line in m.group(1).splitlines():
         s = line.strip()
         if not s:
             continue
-        mm = re.match(r"([A-Z][A-Z0-9_]+)\s*[—–-]+\s*(.*)", s)
+        mm = re.match(r"([A-Z][A-Z0-9_]+(?:,\s*[A-Z][A-Z0-9_]+)*)\s*[—–-]+\s*(.*)", s)
         if mm:
-            out.append((mm.group(1), mm.group(2).strip()))
+            last = []
+            for code in re.split(r",\s*", mm.group(1)):
+                last.append(len(out))
+                out.append((code, mm.group(2).strip()))
         elif out:
-            out[-1] = (out[-1][0], (out[-1][1] + " " + s).strip())
+            for i in last:
+                out[i] = (out[i][0], (out[i][1] + " " + s).strip())
+    return out
+
+
+def _grouped(errs: list[tuple[str, str]]) -> list[tuple[list[str], str]]:
+    """Consecutive codes that share one meaning, as one entry (the docstring's `A, B — text`)."""
+    out: list[tuple[list[str], str]] = []
+    for code, text in errs:
+        if out and out[-1][1] == text:
+            out[-1][0].append(code)
+        else:
+            out.append(([code], text))
     return out
 
 
@@ -433,6 +450,28 @@ def _firmware_cell(e: dict) -> str:
             notes.append("emulated")
         parts.append(fw + (" (%s)" % ", ".join(notes) if notes else ""))
     return ", ".join(parts)
+
+
+# The codes a whole-image gate refuses a build with after every op has run (`recipe._finish`):
+# they name no op. `tests/test_ops_doc.py` pins this to the gates `recipe.py` holds.
+GATE_CODES: dict[str, str] = {
+    "STRUCTURAL_GATE": "a structural check of the finished image failed: the GuiData record "
+                       "boundaries or geometry, an unclaimed differing byte run, a stale "
+                       "GuiCode-to-GuiData pointer, a pointer into the LCD firmware stranded by "
+                       "an insertion, a reused stock display cell, a changed reserved group, or "
+                       "a reused group GuiCode drives by number "
+                       "(`newbutton.guicode_selected_groups`).",
+    "CAPABILITY_GATE": "the (channel, command) pairs the image can send differ from stock by "
+                       "other than the ops declared.",
+    "NOT_SEALED": "the image is not sealed after verify.",
+    "HOOK_REFUSED": "an op's verify found that the per-tick hook or its chain no longer proves "
+                    "out (another op may have rewritten it).",
+    "VARIANT_SETTER_UNKNOWN": "the build reuses a command group (moves its binding slice), and "
+                              "which groups GuiCode drives by number is not known on this image: "
+                              "its variant-setter cell is not 13.6's "
+                              "(`newbutton.guicode_selected_groups`; 14.7, 2026-11-08). A build "
+                              "that reuses no group passes.",
+}
 
 
 def entries(registry: dict | None = None) -> list[dict]:
@@ -502,6 +541,13 @@ def render(registry: dict | None = None) -> str:
                "information only and never verifies. `fireflymcf ops` prints this reference from "
                "the installed package.")
     out.append("")
+    out.append("**Whole-image gates** run after every op and name no op. They refuse a build "
+               "with these codes; an op's own verify that hits a locator's coded refusal "
+               "surfaces under that locator's code instead.")
+    out.append("")
+    for code, text in GATE_CODES.items():
+        out.append("- `%s` — %s" % (code, text))
+    out.append("")
     out.append("## Summary")
     out.append("")
     out.append("| op | class | purpose | hardware status | verified | Firmware |")
@@ -537,8 +583,8 @@ def render(registry: dict | None = None) -> str:
                 out.append("")
                 out.append("Error codes:")
                 out.append("")
-                for code, text in errs:
-                    out.append("- `%s` — %s" % (code, text))
+                for codes, text in _grouped(errs):
+                    out.append("- %s — %s" % (", ".join("`%s`" % c for c in codes), text))
             out.append("")
     return "\n".join(out).rstrip() + "\n"
 

@@ -39,7 +39,8 @@ class RecipeError(ValueError):
 
 
 class GateError(RecipeError, AssertionError):
-    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`).
+    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`,
+    `HOOK_REFUSED`, `VARIANT_SETTER_UNKNOWN`; `ops_doc.GATE_CODES` documents each).
     Raised explicitly, never by `assert`, so `python -O` cannot remove a gate. It is also an
     AssertionError, the type these gates raised before they were explicit."""
 

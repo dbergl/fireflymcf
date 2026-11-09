@@ -384,6 +384,12 @@ in mind:
   `0x2003A8B8`): stock 13.6's longest is 44 bytes, and a build already carrying many routine
   ops can be down to under 20 (*library*: `sramreach.free_runs` on such a build). Keep state
   in bytes, not words, and ask for it in one call; `NO_SRAM` means it does not fit.
+- Where the area itself does not prove out, the refusal is `sramreach`'s, under its own code:
+  `RENDER_STATE_BASES` (not exactly one literal SRAM base is addressed through `movw` offsets),
+  `CELL_AREA_NO_CEILING` (no register-indexed base lies above the render state to bound the
+  area) or `CELL_OUTSIDE_AREA` (a display-cell table row names SRAM outside the area). On 13.6,
+  14.7 and 11.23 the area locates (*library*, 2026-11-08), so these mean an image unlike all
+  three.
 - Power-on contents are garbage, because the C runtime initialises SRAM only up to `0x2000AD98`
   (*proven-from-code*: the reset handler's `.data` copy and `.bss` zero loops, bounded by the
   literals after them; 13.6). Initialise what you read.
