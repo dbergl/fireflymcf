@@ -6412,6 +6412,84 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 91 — the per-tick decoder runs from its entry to its one epilogue, and only one of its seven "range fences" refuses a value — `proven-from-code` (the extent; the classification), checked `observed-in-emulation` (Absorb/Float on 14.7), 2026-11-08
+
+**The question.** `decodeguards` scans the per-tick decoder (13.6 `FUN_00247BF8`) for magnitude
+tests that fence a received value's store (`BUS-BASELINE.md` PC.55). Its window ended at 13.6
+`0x24AB00`, a pin with no recorded rationale: a word inside the literal pool
+`0x24AAE4`-`0x24AB2F`, with no instruction boundary there. No structural rule returns it, so the
+scan was refused on every other firmware.
+
+**The extent.** The decoder is the per-tick callee (`hooklocate.stock_callee`; 13.6 `0x247BF8
+push {r4,r5,r6,r7,lr}; sub sp,#0x14; mov r4,r0`) up to its one epilogue, 13.6 `0x24EDB0
+pop {r4,r5,r6,r7,pc}`, the first r4 write after `mov r4,r0` and so exactly the
+`tanknames.decoder_ranges` region that starts at the callee. Between them a decode finds no other
+instruction that writes pc but direct branches and calls. Five branches leave the body, all to
+out-of-line tail blocks after the epilogue (`0x24EDB2`-`0x24EDDE`), each ending in an
+unconditional `b` back inside (`0x24EDB8 b 0x24EBA4`, `0x24EDBC b 0x24EBBC`, `0x24EDD0 b 0x24EBDC`,
+`0x24EDD4 b 0x24EC58`, `0x24EDDE b 0x24EDAE`) and none loading `[r4,#imm]`: a flag clear, two
+`movs r3,#1`, a pair of indirect calls, and `0x24EDDA strb.w r3,[r4,#0x21f]`. A literal pool and
+the next function, `0x24EE28 push {r3,r4,r5,lr}`, follow. So no decode lives outside
+`[0x247BF8, 0x24EDB0)`. The tail rule's limit: it refuses a tail that loads `[r4,#imm]` or
+`ldm r4`, and sees nothing else through r4 -- not a store (that `0x24EDDA strb.w` passes it),
+not an indexed load `[r4, rN]`, and not a load through a copy of r4 (the guard scanner's own
+limit). None of the three appears in 13.6's five tails, which the listing above gives whole. 14.7 has the same shape, `0x247CAC`-`0x24F1FC pop {r4-r7,pc}` with five
+tails `0x24F1FE`-`0x24F22A`; 11.23 runs `0x247590`-`0x24CDFA pop.w {r4-r11,pc}`, with no tails and
+one bounded switch (`0x24C40E cmp r3,#4; bhi 0x24C44C; tbb [pc,r3]`, every arm inside).
+`decodeguards.decoder_range` locates the extent by these rules and refuses `DECODER_RANGE_UNKNOWN`
+when any fails; `decoder_range_proof` cites the addresses.
+
+**The old end hid nothing on 13.6.** Scanning to the epilogue reports the same seven guards as
+the `0x24AB00` window. `[0x24AB00, 0x24EDB0)` holds two `cmp #imm>16` + branch pairs, and the
+scanner rightly reports neither: `0x24B09C cmp.w r3,#0x3E8; bls.w` tests SRAM `0x2003A73C`, not a
+receive slot, and gates a call sequence (a timer, inference); `0x24B9DE cmp.w r2,#0x7F8` is one
+rung of a compare ladder over ids `0x7ED`-`0x800` whose arms store `strb.w r3,[r4,#0x20A]`, screen
+state (touch or screen dispatch, inference from Finding 83's dispatcher shape).
+
+**14.7's Absorb/Float fence lies past the old end**: `0x24ABE0 cmp r2,#0xEF; ble 0x24AC34` (after
+`0x24ABDE adds r2,r3,#1`) and `0x24ABEC #362; bge`, gating cell `0x20039B3C`. 14.7's decode
+section is longer (it adds, for one, a decode of var 335 at `0x24AC46 ldrsh.w r2,[r4,#0x29e]`).
+The located range finds 14.7's seven guards, the same variables as 13.6's.
+
+**What the seven guards do (13.6 cited; 14.7 the same shape).**
+
+| var(s) | fence | out of range |
+|---|---|---|
+| 207 gating 206 (Float, Absorb) | `0x24A818 adds r2,r3,#1; cmp r2,#0xEF; ble 0x24A86E`; `0x24A824 adds r3,#1; cmp.w r3,#0x16A; bge 0x24A86E` | **skips** to `0x24A86E`, past the Absorb store `0x24A844 strh r2,[r1]` |
+| 51 | `0x24993C #98 bhi` | substitutes 100 (`0x2499FA movs r3,#0x64; b 0x249942`) |
+| 52 | `0x24994E #98 bhi` (`subs #1`, admits 1..99) | substitutes 100; 14.7 `0x249E04 uxth r2,r3; cmp r2,#0x63` admits 0..99 |
+| 47, 48 | `0x24A05C`, `0x24A07A #59 ble` | substitute 1000 (`0x24A3B0`, `0x24A3B6 mov.w r3,#0x3E8`) |
+| 211 | `0x24A0CC #29 bhi` | substitutes 60 outside 30..59 (`0x24A3C0 movs r3,#0x3C`) |
+| 271 | `0x247CB8 cmp r1,#0x63; bls` | **a scanner artefact**: the test is on a config byte (`0x247CB2 ldrb r2,[r3,#0x1e]`), it skips only `0x247CBC movs r2,#0x50`, and the following store of GuiCodeState byte `+0x21F` is unconditional; "var 271" is that byte, not a slot (inference from the listing) |
+
+**Two corrections to what `decodeguards` said.** Both are `observed-in-emulation` on stock 14.7
+(`0x1FECC` from SA `0x42`, Absorb at payload[3..4], Float at payload[5..6]) and follow from code
+on 13.6, whose instructions are the same:
+
+- The admitted Float range is raw **239-360**, not 239-361: `(raw+1) > 239` and `(raw+1) < 362`.
+  Float 239 and 360 stored `(absorb+1)>>1`; 238 and 361 did not.
+- A rejected decode does **not** keep the old value. The cell is rewritten every tick from a
+  config byte (14.7 `0x247CE4 ldrb r1,[r3,#4]; 0x247CE8 strh r1,[r2]`, 13.6 `0x247C34`), so after
+  a rejection it reads that byte (255 on the emulated image), not the last good value. A good
+  Absorb sent with an out-of-range Float is discarded the same way.
+
+So only Absorb/Float truly refuses a value; five guards substitute a fixed value and one is an
+artefact. The scanner is unchanged (its 13.6 output is pinned); its docstring carries this list.
+
+Tests: `tests/test_decodeguards.py` (the three ranges, 14.7's seven guards and its fence at
+`0x24ABE0`, and a refusal for each rule: a NOP'd epilogue, a planted `bx lr`, an unbounded `tbb`,
+a branch out, a tail that does not rejoin, a tail that loads a slot, zero or two regions);
+`tests/test_hooklocate.py::test_decoder_range` (13.6's guards over the located range equal those
+over the old pin, on stock and on every grown reference build used as stock). The switch rule:
+`test_a_bounded_switch_is_followed_and_an_unbounded_one_refused`, `test_a_bounded_tbh_is_followed`,
+and refusals for an arm outside the callee, an arm into its own table and a table that does not
+end on an instruction (all on 11.23), plus `test_an_in_range_branch_off_an_instruction_boundary_is_refused`
+and `test_a_conditional_epilogue_is_not_the_epilogue` (13.6). In the emulator
+(`tests/emu/test_ops147.py`): `test_decoder_range_147_fence` (239 and 360 stored, 238, 361 and
+1080 reverted), `test_add_register_readout_existing_cell` and
+`test_add_register_readout_existing_cell_repaints` (`cell_slot` on 14.7's Absorb and Chassis
+cells), and `test_absorb_readout_is_unattached_on_147` (stock 14.7 draws no Absorb row).
+
 ## Finding 90 — GuiCode's `setVariant` is the LCD's ungated `FUN_0021B678`, and every group GuiCode drives by number is located on 11.23, 13.6 and 14.7 — `proven-from-code`, 2026-11-08
 
 **The question.** GuiCode calls one pointer as `setVariant(group, v)` (13.6 cell `0x20039908`;

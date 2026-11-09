@@ -6442,16 +6442,39 @@ class AddRegisterReadout(Op):
 
     On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): drawn and
     `draw` false, a published value repaints the digits, and a cell poisoned before boot is
-    written stale before the readout first draws. The existing-cell mode (`cell_slot`) refuses
-    DECODER_RANGE_UNKNOWN beyond 13.6: the per-tick decoder's window is known only there. With
-    `draw` true the cell may be a stock display-cell index `statusbind.spare_cell_indices`
-    calls spare (tier 1 or 2), its type byte set to the readout's width. That no stock reader
-    uses such an index is inferred-from-data on 14.7 (no record and no other object table
-    names it), not proven from code, and no 14.7 coach has run it.
+    written stale before the readout first draws. The existing-cell mode (`cell_slot`) is
+    emulated there too (2026-11-08): `cell_slot` 147 (the Absorb readout, cell 0x20039B3C) with
+    the config-byte copy 0x247CE8 silenced holds 576 for Absorb 1152 / Float 1080, where stock
+    reverts to the config byte. Unlike 13.6, stock 14.7 shows no Absorb/Float row on any page:
+    their drawer, object 268, is no container's child (`fireflymcf bus-map --name Absorb` lists
+    its groups unattached), so that proof is cell-level. The pixels are proven on HOME's Chassis
+    readout (`cell_slot` 176, its one stock writer, the unfenced var-5 store 0x24A706,
+    silenced): each published value repaints the digits, and on both pages that draw it (HOME,
+    ELECTRICAL) nothing outside its box changes. With `draw` true the cell may be a stock
+    display-cell index `statusbind.spare_cell_indices` calls spare (tier 1 or 2), its type byte
+    set to the readout's width. That no stock reader uses such an index is inferred-from-data on
+    14.7 (no record and no other object table names it), not proven from code, and no 14.7 coach
+    has run it.
+
+    **What `silence` must cover (`cell_slot`).** The routine writes the cell from the per-tick
+    hook chain, which runs before the per-tick decoder (13.6 `0x247BF8`, 14.7 `0x247CAC`), so
+    every stock store to the same cell that still fires afterwards overwrites the fed value on
+    that tick. `fireflymcf slot-source IMAGE --slot N` lists every one of them on the stock
+    image (`readout.stock_writers`); after a compile, the op's manifest line (printed by
+    `compile`, kept in the sidecar's `manifest`) names what it silenced and the "stock writers
+    left". For the Absorb cell there are two. The per-tick
+    config-byte copy (13.6 `0x247C34`, 14.7 `0x247CE8`) is unconditional and must be silenced.
+    The fenced decode store (13.6 `0x24A844`, 14.7 `0x24AC0A`) fires only for a Float in raw
+    239-360, writing `(absorb + 1) >> 1`, which the recipe's `add 1, shift 1` also writes, so it
+    is left in place (GUICODE Finding 91). A remaining store that is unfenced, or whose fence
+    admits a value the routine computes differently, fights the routine every tick: name it in
+    `silence`. The op does not refuse such a store; read the "stock writers left" in its
+    manifest line.
 
     Error codes:
-      DECODER_RANGE_UNKNOWN -- `cell_slot` on a firmware whose per-tick decoder window is not
-        known (`decodeguards.decoder_range`: 13.6 only).
+      DECODER_RANGE_UNKNOWN -- `cell_slot` on an image whose per-tick decoder extent does not
+        prove out from its own code (`decodeguards.decoder_range`; located on 13.6, 14.7 and
+        11.23 since 2026-11-08, GUICODE Finding 91).
       BAD_PARAMS -- a malformed param: drawing params with `draw` false or with `cell_slot`, a
         non-integer `cell_slot`, `silence` that is not a list of addresses or comes without
         `cell_slot`, a missing page/x/y, or a bad `format`.
@@ -6519,7 +6542,11 @@ class AddRegisterReadout(Op):
             "silence": {"type": "array", "items": {"type": "integer"},
                         "description": "with cell_slot: runtime addresses of stock 2-byte "
                                        "stores to that cell to replace with nop, so the fed "
-                                       "value is not overwritten each tick"},
+                                       "value is not overwritten each tick. `fireflymcf "
+                                       "slot-source IMAGE --slot N` lists every stock store "
+                                       "to the cell; the compile manifest line names the "
+                                       "stock writers left. Silence every one that would "
+                                       "fight the routine"},
         },
         "required": ["register"],
     }
@@ -6598,8 +6625,8 @@ class AddRegisterReadout(Op):
         reg = _resolve_register_spec(data, ctx, self.register_spec, self.spec.id)
         if self.cell_slot is not None:
             # Feeding a STOCK readout's cell means knowing the per-tick decoder's stores and
-            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); the decoder's window
-            # is known on 13.6 only, so any other firmware refuses DECODER_RANGE_UNKNOWN.
+            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); an image whose
+            # decoder extent does not prove out refuses DECODER_RANGE_UNKNOWN.
             decodeguards.decoder_range(ctx.stock)
         silenced, remaining = [], []
         try:

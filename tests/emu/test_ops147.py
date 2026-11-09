@@ -28,10 +28,10 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from fireflymcf import (aescompact, buildcheck, celltables, container,  # noqa: E402
+from fireflymcf import (aescompact, buildcheck, celltables, container, decodeguards,  # noqa: E402
                         coverage, donors, followchannel, glyphs, guidata, insert, layout,
-                        lcdgroups, metrics, newbutton, pagewalk, patch, recipe, records, rvcbutton,
-                        status_map, themeswap)
+                        lcdgroups, metrics, newbutton, pagewalk, patch, readout, recipe, records,
+                        rvcbutton, status_map, themeswap)
 from fireflymcf.emu import g12, peers  # noqa: E402
 from fireflymcf.emu.canbus import Peer  # noqa: E402
 from fireflymcf.emu.scenario import PANEL_SA, Scenario  # noqa: E402
@@ -907,28 +907,188 @@ def test_add_register_readout_first_frame(mcf_147):
     assert differ == [], f"the poison is drawn at {differ[:5]}"
 
 
-CHASSIS_VOLTS_SLOT = 176            # HOME's Chassis readout (object 374) value_slot on 14.7
+# 0x1FECC: Absorb (var 206) at payload[3..4], Float (var 207) at payload[5..6], 0.05 V. On 14.7
+# the Absorb readout's value_slot is 147 (object 268, record 17), cell 0x20039B3C; its stock
+# writers are the per-tick config-byte copy 0x247CE8 and the fenced decode store 0x24AC0A.
+# Test expectations only (2026-11-08).
+CHARGER_DGN = 0x1FECC
+ABSORB_VAR, FLOAT_VAR = 206, 207
+ABSORB_SLOT = 147
+ABSORB_CELL = 0x20039B3C
+ABSORB_CONFIG_STORE, ABSORB_FENCED_STORE = 0x247CE8, 0x24AC0A
 
 
-def test_add_register_readout_existing_cell_refuses(mcf_147):
-    """cell_slot (feeding a stock readout) needs the per-tick decoder's window, known on 13.6
-    only: 14.7 refuses it DECODER_RANGE_UNKNOWN."""
+def _publish_charger(s: Scenario, host, absorb: int, flt: int) -> None:
+    data = bytes([1, 0xFF, 0xFF]) + absorb.to_bytes(2, "little") + flt.to_bytes(2, "little") \
+        + b"\xff"
+    for _ in range(3):
+        host.send(CHARGER_DGN, data)
+        s.run(0.5)
+
+
+def _stock_guicode_end(img: bytes) -> int:
+    """The runtime address just past stock GuiCode (its checksum excluded): a writer at or
+    beyond it is code a build appended, not a stock store."""
+    sec = themeswap.theme.guicode_section(img)
+    return themeswap.theme.guicode_base(sec) + sec.length - 4
+
+
+def _u16(s: Scenario, addr: int) -> int:
+    return int.from_bytes(s.read_mem(addr, 2), "little")
+
+
+def test_decoder_range_147_fence(mcf_147):
+    """The scanned fence on Float is the decoder's behaviour (2026-11-08, GUICODE Finding 91):
+    Float raw 239 and 360 store `(absorb + 1) >> 1` into the Absorb cell; 238, 361 and 1080
+    skip the store, and the cell holds the per-tick config-byte copy it held before anything was
+    published."""
+    [guard] = [g for g in decodeguards.range_guards(mcf_147) if FLOAT_VAR in g.variables]
+    assert guard.cell == ABSORB_CELL and ABSORB_VAR in guard.variables
+    # both test raw + 1 (14.7 `0x24ABDE adds r2, r3, #1`, `0x24ABEA adds r3, #1`): ble 239 skips
+    # raw <= 238 and bge 362 skips raw >= 361, so raw Float 239..360 is admitted (Finding 91)
+    assert [(v, b) for _a, v, b in guard.fences] == [(239, "ble"), (362, "bge")]
+    s = _settled(mcf_147)
+    host = s._m.canbus.add_peer(_Host())
+    config = _u16(s, guard.cell)
+    absorb = 290
+    stored = (absorb + 1) >> 1
+    assert config != stored
+    for flt, admitted in ((239, True), (238, False), (360, True), (361, False), (1080, False)):
+        _publish_charger(s, host, absorb, flt)
+        got = _u16(s, guard.cell)
+        assert got == (stored if admitted else config), (flt, got)
+
+
+def test_add_register_readout_existing_cell(mcf_147):
+    """cell_slot 147 with the config-byte copy silenced: Absorb 1152 / Float 1080 (57.6 /
+    54.0 V, past the fence) puts 576 in the Absorb cell, where stock leaves the config byte
+    (255) (2026-11-08)."""
+    cell = readout.existing_display_cell(mcf_147, ABSORB_SLOT, 2)
+    assert cell.addr == ABSORB_CELL
+    assert readout.stock_writers(mcf_147, cell) == [ABSORB_CONFIG_STORE, ABSORB_FENCED_STORE]
     project = recipe.Project(
         base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
-        ops=[recipe.OpSpec(id="r", type="add_register_readout",
-                           params={"register": REG, "cell_slot": CHASSIS_VOLTS_SLOT})])
+        ops=[recipe.OpSpec(id="r", type="add_register_readout", params={
+            "register": {"dgn": CHARGER_DGN, "index": ABSORB_VAR}, "add": 1, "shift": 1,
+            "cell_slot": ABSORB_SLOT, "silence": [ABSORB_CONFIG_STORE]})])
     res = recipe.compile_project(project, mcf_147)
-    assert [e["code"] for e in res.errors] == ["DECODER_RANGE_UNKNOWN"], res.errors
+    assert res.ok, res.errors
+    # the fenced decode store stays (it fires for an in-range Float, the same scaling); the
+    # other writer left is the op's own routine, appended past stock GuiCode
+    stock_end = _stock_guicode_end(mcf_147)
+    left = readout.stock_writers(res.data, cell)
+    assert left[0] == ABSORB_FENCED_STORE and all(w >= stock_end for w in left[1:]), left
+    for img, want in ((mcf_147, 255), (res.data, 576)):
+        s = _settled(img)
+        host = s._m.canbus.add_peer(_Host())
+        _publish_charger(s, host, 1152, 1080)
+        assert _u16(s, ABSORB_CELL) == want, (img is mcf_147, _u16(s, ABSORB_CELL))
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "DECODER_RANGE_UNKNOWN: the existing-cell mode feeds a stock readout's cell, which needs "
-    "the per-tick decoder's window (`decodeguards.decoder_range`); its end is a 13.6 pin, not "
-    "located on 14.7 (2026-11-08). The mode stays refused on 14.7."))
-def test_add_register_readout_existing_cell(mcf_147):
-    _build_refused_as(mcf_147, [("r", "add_register_readout",
-                                 {"register": REG, "cell_slot": CHASSIS_VOLTS_SLOT})],
-                      "DECODER_RANGE_UNKNOWN")
+def test_absorb_readout_is_unattached_on_147(mcf_147):
+    """Stock 14.7 draws no Absorb/Float row: the only object whose wtype-8 names slot 147
+    (object 268) is no container's child, where 13.6's object 303 is obj 17 record 11's switch
+    arm (GUICODE Finding 63). Checked 2026-11-08; why the pixel proof uses the Chassis cell."""
+    sc = layout.Screen(mcf_147)
+    drawers, parents = set(), set()
+    for obj in range(len(guidata.object_tables(mcf_147)[1])):
+        off = sc._obj_offset(obj)
+        if not 0 < off < sc.ge - sc.gs:
+            continue
+        try:
+            recs = records.object_records(mcf_147, sc.gs + off)
+        except (IndexError, ValueError):
+            continue
+        for rec in recs:
+            if rec.wtype == 8 and rec.value_slot == ABSORB_SLOT:
+                drawers.add(obj)
+            if rec.child_index is not None:
+                parents.update(range(rec.child_index, rec.child_index + max(rec.count or 1, 1)))
+    assert drawers == {268}
+    assert not drawers & parents
+    assert not drawers & set(layout.screen_object_map(mcf_147).values())
+
+
+# HOME's Chassis readout (object 374, record 5) on 14.7: value_slot 176, cell 0x20039DEC, one
+# stock writer -- the decoder's store of var 5 at 0x24A706, unfenced (it skips only the stale
+# 0xFFFF and a negative), so it overwrites the cell every tick the G12 reports chassis volts.
+# Drawn by roots 9 (HOME) and 10 (ELECTRICAL) through a 4-wide, 1-place directive. Test
+# expectations only (2026-11-08).
+CHASSIS_SLOT = 176
+CHASSIS_CELL = 0x20039DEC
+CHASSIS_STORE = 0x24A706
+CHASSIS_PAGES = {9: "HOME", 10: "ELECTRICAL"}
+CHASSIS_FIELD = 4
+
+
+def _readout_box(img: bytes, root: int, slot: int, field: int):
+    """The box a right-aligned wtype-8 of `field` characters on `slot` can paint under `root`:
+    the widest fill `metrics.worst_fill_width` bounds, ending at the placed x, one font height
+    ending at the placed y (both drawn inclusively)."""
+    [q] = [q for q in layout_walk(img, root) if q.wtype == 8 and q.value_slot == slot]
+    assert q.align == 3
+    trace, fmt = [], None
+    layout.Screen(img).walk(root, trace=trace)
+    for entry in trace:                       # the wtype-9 directive in force (Finding 65)
+        rec = entry[3]
+        if rec.wtype == 9:
+            fmt = rec.fmt
+        elif rec.wtype == 8 and rec.value_slot == slot:
+            break
+    assert fmt is not None and fmt[2] == field, (root, fmt)
+    width = metrics.worst_fill_width(img, q.font, field)
+    height = metrics.font_metrics(img, q.font).height
+    return q.x0 - width, q.y0 - height + 1, q.x0, q.y0
+
+
+def test_add_register_readout_existing_cell_repaints(mcf_147, tmp_path):
+    """cell_slot on a readout stock 14.7 draws: HOME's Chassis volts fed from var 232, its one
+    (unfenced) stock writer silenced. 123 then 136 each repaint the digits, differently, and on
+    every page that draws the readout (HOME, ELECTRICAL) every pixel that differs from stock at
+    the same moment lies inside the readout's box (2026-11-08)."""
+    cell = readout.existing_display_cell(mcf_147, CHASSIS_SLOT, 2)
+    assert cell.addr == CHASSIS_CELL
+    assert readout.stock_writers(mcf_147, cell) == [CHASSIS_STORE]
+    assert decodeguards.guard_for_cell(mcf_147, CHASSIS_CELL) is None     # unfenced
+    roots = {r for r in layout.screen_object_map(mcf_147).values()
+             if any(q.wtype == 8 and q.value_slot == CHASSIS_SLOT for q in layout_walk(mcf_147, r))}
+    assert roots == set(CHASSIS_PAGES)
+    project = recipe.Project(
+        base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
+        ops=[recipe.OpSpec(id="r", type="add_register_readout", params={
+            "register": REG, "cell_slot": CHASSIS_SLOT, "silence": [CHASSIS_STORE]})])
+    res = recipe.compile_project(project, mcf_147)
+    assert res.ok, res.errors
+    assert all(w >= _stock_guicode_end(mcf_147) for w in readout.stock_writers(res.data, cell)), \
+        "a stock writer is left to fight the routine"
+    boxes = {r: _readout_box(mcf_147, r, CHASSIS_SLOT, CHASSIS_FIELD) for r in roots}
+
+    def shots(img, tag):
+        s = _settled(img)
+        host = s._m.canbus.add_peer(_Host())
+        out = {}
+        for v in (123, 136):
+            _publish(s, host, v)
+            out[(v, "cell")] = _u16(s, CHASSIS_CELL)
+            for root, page in CHASSIS_PAGES.items():
+                s.goto("CLIMATE CONTROL")
+                s.run(1.0)
+                s.goto(page)
+                s.run(2.0)
+                assert s._root() == root, (page, s._root())
+                out[(v, root)] = _shot(s, tmp_path, f"{tag}{v}{root}")
+        return out
+
+    stock, built = shots(mcf_147, "s"), shots(res.data, "b")
+    assert (built[(123, "cell")], built[(136, "cell")]) == (123, 136)
+    assert stock[(123, "cell")] == stock[(136, "cell")] != 123, "stock does not overwrite the cell"
+    for root, box in boxes.items():
+        a, b = built[(123, root)], built[(136, root)]
+        whole = (box[0], box[1], box[2] + 1, box[3] + 1)          # `_crop` is end-exclusive
+        assert not np.array_equal(_crop(a, whole), _crop(b, whole)), (root, "digits unchanged")
+        for v in (123, 136):
+            bbox = _diff_bbox(stock[(v, root)], built[(v, root)])
+            assert _inside(bbox, box), (root, v, bbox, box)
 
 
 ENUM = {"parent": HOME_ROOT, "x": 560, "y": 420, "w": 180, "h": 30, "font": 16,

@@ -2805,7 +2805,7 @@
                     "items": {
                       "type": "integer"
                     },
-                    "description": "with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick"
+                    "description": "with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick. `fireflymcf slot-source IMAGE --slot N` lists every stock store to the cell; the compile manifest line names the stock writers left. Silence every one that would fight the routine"
                   }
                 },
                 "required": [
