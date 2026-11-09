@@ -275,7 +275,10 @@ def test_hold_safe_on_13_6_is_todays_list(mcf_136):
     assert newbutton.hold_safe_groups(mcf_136) == HOLD_SAFE_136
 
 
-def test_hold_safe_on_14_7_has_no_driven_reserved_or_externally_selected_group(mcf_147):
+def test_hold_safe_on_14_7_has_no_driven_reserved_or_byte1_flagged_group(mcf_147):
+    """The driven and reserved exclusions are located; the byte-1 bits 6-7 filter is the
+    inferred-from-data rule carried over from 13.6's hold observations (no 14.7 hold has been
+    observed, 2026-11-08)."""
     gt = guidata.group_table(mcf_147)
     safe = newbutton.hold_safe_groups(mcf_147)
     assert len(safe) == 44                          # research 2026-11-08: 88 free, 44 hold-safe
@@ -346,6 +349,27 @@ def test_the_finish_gate_guards_every_located_template(mcf_136):
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _GROWN_BUILDS = sorted((REPO_ROOT / "builds").glob("*.bin"))
+
+
+def test_the_reference_builds_are_linked():
+    """The build-as-stock cases below parametrise over `builds/*.bin`; an unlinked `builds/`
+    would leave them with nothing to run, so it fails here instead."""
+    assert _GROWN_BUILDS, "no builds/*.bin: run scripts/link-research.sh"
+
+
+def test_the_stepper_pool_on_14_7_is_neither_driven_nor_reserved(mcf_147):
+    """`optionrow.build_config_stepper`'s two groups: `free_group_slots` would hand 14.7's
+    driven group 0 first."""
+    from fireflymcf import optionrow
+    assert newbutton.free_group_slots(mcf_147)[0] in GROUPS_147
+    two = optionrow.stepper_group_pool(mcf_147)[:2]
+    assert len(two) == 2
+    assert not set(two) & GROUPS_147 and not set(two) & set(RESERVED_ALL)
+
+
+def test_the_stepper_pool_on_13_6_starts_15_36(mcf_136):
+    from fireflymcf import optionrow
+    assert optionrow.stepper_group_pool(mcf_136)[:2] == [15, 36]
 
 
 def _added_groups(stock, data):

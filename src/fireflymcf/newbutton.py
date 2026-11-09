@@ -504,7 +504,9 @@ def reserved_groups(data: bytes) -> dict[int, int]:
 
     11.23, 13.6 and 14.7: `{68: 0x1FFD3, 69: 0x1FFC5}`, and those four bindings (two per
     group) are the only ones carrying either DGN (2026-11-08). Refuses `ReservedGroupUnknown`
-    when a DGN has no such group or several."""
+    when a DGN has no such group or several. So a build that adds its own group whose slice is
+    wholly `1FFD3` or `1FFC5` makes every later allocating op refuse RESERVED_GROUP_UNKNOWN on
+    it, by design: which group is the stock template is then not known."""
     out = {}
     for dgn, hits in _template_groups(data, RESERVED_DGNS):
         if len(hits) != 1:
@@ -518,13 +520,18 @@ def reserved_groups(data: bytes) -> dict[int, int]:
 
 def hold_safe_groups(data: bytes) -> list[int]:
     """Free group slots fit for a control whose HOLD must work: not a reserved template
-    (`reserved_groups`), not driven by GuiCode (`guicode_selected_groups`), and still carrying a
-    press-cycled header (byte 1 bits 6-7 == 0). Every hold proven on the coach sits on such a
-    slot (Batt Heat 46; the wheelbase and track - on 96/126/127); the 2026-09-30 failures
-    (136/137) were externally selected (`11 80`) and GuiCode-driven. The byte-1 rule is the
-    conservative half: 61/77-82 were `0x80` slots whose TAPS work, and no hold on one has been
-    seen. 13.6: 26 slots; 14.7: 44 (2026-11-08). Refuses `ReservedGroupUnknown` and
-    `VariantSetterUnknown` rather than offer a group either might be."""
+    (`reserved_groups`), not driven by GuiCode (`guicode_selected_groups`), and with byte 1 bits
+    6-7 clear.
+
+    The GuiCode-driven exclusion is proven (the setter scan). The byte-1 rule is
+    **inferred-from-data**, a conservative filter: every hold proven on a coach sits on a slot
+    with those bits clear (Batt Heat 46; the wheelbase and track - on 96/126/127, 13.6), and the
+    2026-09-30 failures (136/137, 13.6) carried `11 80` and were also GuiCode-driven, so the
+    observations do not separate the two causes. 61/77-82 were `0x80` slots whose TAPS work;
+    no hold on one has been seen. All of this is 13.6: no hold on 14.7 has been observed, so on
+    14.7 the rule is carried over, not checked. 13.6: 26 slots; 14.7: 44 (2026-11-08). Refuses
+    `ReservedGroupUnknown` and `VariantSetterUnknown` rather than offer a group either might
+    be."""
     reserved = reserved_groups(data)
     selected = guicode_selected_groups(data)
     gt = guidata.group_table(data)

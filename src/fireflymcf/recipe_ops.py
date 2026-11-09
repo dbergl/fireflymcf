@@ -7517,12 +7517,14 @@ class AddAesBattHeat(Op):
     def apply(self, data, ctx):
         binding_start = len(guidata.binding_table(data))
 
-        # the pool as the preset always chose it (`rvcbutton.allocate` also drops the reserved
-        # templates from the free pool, which this op never did; byte identity keeps the old
-        # list). The free pool skips the groups GuiCode drives (`newbutton.assignable_groups`):
-        # the finish gate refuses those anyway. The hold-safe pool drops the located templates.
-        free = (newbutton.assignable_groups(data) if self.group_pool == "free"
-                else newbutton.hold_safe_groups(data))
+        # The free pool skips the groups GuiCode drives (`newbutton.assignable_groups`: the
+        # finish gate refuses those anyway) and the located inverter/charger templates
+        # (`newbutton.reserved_groups`). Dropping the templates changes no succeeding build: an
+        # allocation that reached 68/69 was already refused by the reserved-group gate. The
+        # hold-safe pool drops both itself.
+        reserved = newbutton.reserved_groups(data)
+        free = ([g for g in newbutton.assignable_groups(data) if g not in reserved]
+                if self.group_pool == "free" else newbutton.hold_safe_groups(data))
         if not free:
             raise RecipeError("NO_FREE_GROUP",
                               "no empty group-table slot to host the Batt Heat command group",
@@ -10589,6 +10591,8 @@ class AddPumpAutoOff(Op):
         rows are spare is not known (`statusbind.spare_cell_indices`)
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
         so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
     `hardware_verified = True` again as of 2026-09-04: a later task shortened the routine by 4
     bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach, flashed and

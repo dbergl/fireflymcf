@@ -1375,6 +1375,7 @@ Error codes:
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_register_readout
 
