@@ -976,6 +976,103 @@ def test_add_register_readout_existing_cell(mcf_147):
         assert _u16(s, ABSORB_CELL) == want, (img is mcf_147, _u16(s, ABSORB_CELL))
 
 
+def test_absorb_readout_is_unattached_on_147(mcf_147):
+    """Stock 14.7 draws no Absorb/Float row: the only object whose wtype-8 names slot 147
+    (object 268) is no container's child, where 13.6's object 303 is obj 17 record 11's switch
+    arm (GUICODE Finding 63). Checked 2026-11-08; why the pixel proof uses the Chassis cell."""
+    sc = layout.Screen(mcf_147)
+    drawers, parents = set(), set()
+    for obj in range(len(guidata.object_tables(mcf_147)[1])):
+        off = sc._obj_offset(obj)
+        if not 0 < off < sc.ge - sc.gs:
+            continue
+        try:
+            recs = records.object_records(mcf_147, sc.gs + off)
+        except (IndexError, ValueError):
+            continue
+        for rec in recs:
+            if rec.wtype == 8 and rec.value_slot == ABSORB_SLOT:
+                drawers.add(obj)
+            if rec.child_index is not None:
+                parents.update(range(rec.child_index, rec.child_index + max(rec.count or 1, 1)))
+    assert drawers == {268}
+    assert not drawers & parents
+    assert not drawers & set(layout.screen_object_map(mcf_147).values())
+
+
+# HOME's Chassis readout (object 374, record 5) on 14.7: value_slot 176, cell 0x20039DEC, one
+# stock writer -- the decoder's store of var 5 at 0x24A706, unfenced (it skips only the stale
+# 0xFFFF and a negative), so it overwrites the cell every tick the G12 reports chassis volts.
+# Drawn by roots 9 (HOME) and 10 (ELECTRICAL) through a 4-wide, 1-place directive. Test
+# expectations only (2026-11-08).
+CHASSIS_SLOT = 176
+CHASSIS_CELL = 0x20039DEC
+CHASSIS_STORE = 0x24A706
+CHASSIS_PAGES = {9: "HOME", 10: "ELECTRICAL"}
+CHASSIS_FIELD = 4
+
+
+def _readout_box(img: bytes, root: int, slot: int, field: int):
+    """The box a right-aligned wtype-8 of `field` characters on `slot` can paint under `root`:
+    the widest fill `metrics.worst_fill_width` bounds, ending at the placed x, one font height
+    ending at the placed y (both drawn inclusively)."""
+    [q] = [q for q in layout_walk(img, root) if q.wtype == 8 and q.value_slot == slot]
+    assert q.align == 3
+    width = metrics.worst_fill_width(img, q.font, field)
+    height = metrics.font_metrics(img, q.font).height
+    return q.x0 - width, q.y0 - height + 1, q.x0, q.y0
+
+
+def test_add_register_readout_existing_cell_repaints(mcf_147, tmp_path):
+    """cell_slot on a readout stock 14.7 draws: HOME's Chassis volts fed from var 232, its one
+    (unfenced) stock writer silenced. 123 then 136 each repaint the digits, differently, and on
+    every page that draws the readout (HOME, ELECTRICAL) every pixel that differs from stock at
+    the same moment lies inside the readout's box (2026-11-08)."""
+    cell = readout.existing_display_cell(mcf_147, CHASSIS_SLOT, 2)
+    assert cell.addr == CHASSIS_CELL
+    assert readout.stock_writers(mcf_147, cell) == [CHASSIS_STORE]
+    assert decodeguards.guard_for_cell(mcf_147, CHASSIS_CELL) is None     # unfenced
+    roots = {r for r in layout.screen_object_map(mcf_147).values()
+             if any(q.wtype == 8 and q.value_slot == CHASSIS_SLOT for q in layout_walk(mcf_147, r))}
+    assert roots == set(CHASSIS_PAGES)
+    project = recipe.Project(
+        base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
+        ops=[recipe.OpSpec(id="r", type="add_register_readout", params={
+            "register": REG, "cell_slot": CHASSIS_SLOT, "silence": [CHASSIS_STORE]})])
+    res = recipe.compile_project(project, mcf_147)
+    assert res.ok, res.errors
+    assert all(w > CHASSIS_STORE for w in readout.stock_writers(res.data, cell)), \
+        "a stock writer is left to fight the routine"
+    boxes = {r: _readout_box(mcf_147, r, CHASSIS_SLOT, CHASSIS_FIELD) for r in roots}
+
+    def shots(img, tag):
+        s = _settled(img)
+        host = s._m.canbus.add_peer(_Host())
+        out = {}
+        for v in (123, 136):
+            _publish(s, host, v)
+            out[(v, "cell")] = _u16(s, CHASSIS_CELL)
+            for root, page in CHASSIS_PAGES.items():
+                s.goto("CLIMATE CONTROL")
+                s.run(1.0)
+                s.goto(page)
+                s.run(2.0)
+                assert s._root() == root, (page, s._root())
+                out[(v, root)] = _shot(s, tmp_path, f"{tag}{v}{root}")
+        return out
+
+    stock, built = shots(mcf_147, "s"), shots(res.data, "b")
+    assert (built[(123, "cell")], built[(136, "cell")]) == (123, 136)
+    assert stock[(123, "cell")] == stock[(136, "cell")] != 123, "stock does not overwrite the cell"
+    for root, box in boxes.items():
+        a, b = built[(123, root)], built[(136, root)]
+        whole = (box[0], box[1], box[2] + 1, box[3] + 1)          # `_crop` is end-exclusive
+        assert not np.array_equal(_crop(a, whole), _crop(b, whole)), (root, "digits unchanged")
+        for v in (123, 136):
+            bbox = _diff_bbox(stock[(v, root)], built[(v, root)])
+            assert _inside(bbox, box), (root, v, bbox, box)
+
+
 ENUM = {"parent": HOME_ROOT, "x": 560, "y": 420, "w": 180, "h": 30, "font": 16,
         "background": [39, 40, 98], "source": {"var": 232},
         "values": {"0": "Off", "1": "Cool", "2": "Heat"}}

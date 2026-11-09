@@ -6445,10 +6445,12 @@ class AddRegisterReadout(Op):
     written stale before the readout first draws. The existing-cell mode (`cell_slot`) is
     emulated there too (2026-11-08): `cell_slot` 147 (the Absorb readout, cell 0x20039B3C) with
     the config-byte copy 0x247CE8 silenced holds 576 for Absorb 1152 / Float 1080, where stock
-    reverts to the config byte. That is a cell-level proof: stock 14.7's screen tree reaches no
-    object that draws slot 147 (object 268 is unattached, `fireflymcf bus-map --name Absorb`),
-    so no pixel is shown; that a wtype-8 repaints from a routine-written cell is the drawn
-    mode's proof. With `draw` true the cell may be a stock display-cell index
+    reverts to the config byte. Unlike 13.6, stock 14.7 shows no Absorb/Float row on any page:
+    their drawer, object 268, is no container's child (`fireflymcf bus-map --name Absorb` lists
+    its groups unattached), so that proof is cell-level. The pixels are proven on HOME's Chassis
+    readout (`cell_slot` 176, its one stock writer, the unfenced var-5 store 0x24A706,
+    silenced): each published value repaints the digits, and on both pages that draw it (HOME,
+    ELECTRICAL) nothing outside its box changes. With `draw` true the cell may be a stock display-cell index
     `statusbind.spare_cell_indices` calls spare (tier 1 or 2), its type byte set to the
     readout's width. That no stock reader uses such an index is inferred-from-data on 14.7 (no record and no other object table
     names it), not proven from code, and no 14.7 coach has run it.
