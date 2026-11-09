@@ -1455,12 +1455,15 @@ def _cmd_slot_source(args) -> int:
     for e in slotsource.slot_sources(data):
         counts[e.kind] = counts.get(e.kind, 0) + 1
     print(f"{'slot':>5} {'address':>12} {'type':>4}  {'kind':<13} sites")
+    # the table shows a slot's first three sites; `--slot` shows every one, the list a
+    # `cell_slot` readout's `silence` is chosen from (`add_register_readout`)
+    keep = None if args.slot is not None else 3
     for e in rows:
         sites = ""
         if e.writes:
-            sites = "w " + ",".join(hex(a) for a in e.writes[:3])
+            sites = "w " + ",".join(hex(a) for a in e.writes[:keep])
         elif e.reads:
-            sites = "r " + ",".join(hex(a) for a in e.reads[:3])
+            sites = "r " + ",".join(hex(a) for a in e.reads[:keep])
         print(f"{e.slot:>5} {e.address:#012x} {e.vtype:>4}  {e.kind:<13} {sites}")
     print("\ntotals: " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())))
     return 0
@@ -2268,7 +2271,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("slot-source",
                        help="classify how each widget value slot is driven (see slotsource.py)")
     p.add_argument("image")
-    p.add_argument("--slot", type=int, help="report one slot instead of the whole table")
+    p.add_argument("--slot", type=int,
+                   help="report one slot, with every stock store to it, instead of the table")
     p.add_argument("--unexplained", action="store_true",
                    help="list only the slots no instruction reaches")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")

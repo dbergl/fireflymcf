@@ -161,3 +161,41 @@ def test_cell_slot_refuses_on_11_23(mcf_1123) -> None:
                                          params=absorb_params(silence=[])))
     assert not r.ok
     assert [e["code"] for e in r.errors] == ["UNSUPPORTED_FIRMWARE"], r.errors
+
+
+# --- where a user reads the cell's stock writers -------------------------------------------------
+# `remaining_writers` is a handle (internal); a CLI or Studio user reads the same lists from
+# `fireflymcf slot-source IMAGE --slot N` (before the build: every stock store) and from the op's
+# manifest line, printed by `compile` and kept in the sidecar's `manifest` (after: what is left).
+
+def test_the_manifest_line_names_the_stock_writers_left(data) -> None:
+    r = _compile(data, recipe.OpSpec(id="absorb", type="add_register_readout",
+                                     params=absorb_params()))
+    assert r.ok, r.errors
+    line = next(m for m in r.manifest if "add_register_readout" in m)
+    assert "silenced ['0x247c34']" in line, line
+    assert "stock writers left ['0x24a844']" in line, line
+    r = _compile(data, recipe.OpSpec(id="absorb", type="add_register_readout",
+                                     params=absorb_params(silence=[])))
+    assert r.ok, r.errors
+    line = next(m for m in r.manifest if "add_register_readout" in m)
+    assert "stock writers left ['0x247c34', '0x24a844']" in line, line
+
+
+@pytest.mark.parametrize("image,slot,writers", [
+    ("firefly-13.6/mcf.bin", ABSORB_CELL, ["0x247c34", "0x24a844"]),
+    ("firefly-14.7 (Terrain)/mcf.bin", 176, ["0x24a706"]),        # HOME's Chassis readout
+    ("firefly-14.7 (Terrain)/mcf.bin", 147, ["0x247ce8", "0x24ac0a"]),   # Absorb
+    ("firefly-13.6/mcf.bin", 41, None),                           # 15 writers: none dropped
+])
+def test_slot_source_lists_every_stock_writer_of_one_cell(image, slot, writers) -> None:
+    import subprocess
+    import sys
+    from tests.conftest import REPO_ROOT
+    with open(REPO_ROOT / image, "rb") as fh:
+        want = writers or [hex(a) for a in slotsource.slot_source(fh.read(), slot).writes]
+    r = subprocess.run([sys.executable, "-m", "fireflymcf.cli", "slot-source", image,
+                        "--slot", str(slot)], cwd=REPO_ROOT, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    row = next(ln for ln in r.stdout.splitlines() if ln.split()[:1] == [str(slot)])
+    assert row.split()[-2:] == ["w", ",".join(want)], row

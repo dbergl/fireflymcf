@@ -6459,14 +6459,17 @@ class AddRegisterReadout(Op):
     **What `silence` must cover (`cell_slot`).** The routine writes the cell from the per-tick
     hook chain, which runs before the per-tick decoder (13.6 `0x247BF8`, 14.7 `0x247CAC`), so
     every stock store to the same cell that still fires afterwards overwrites the fed value on
-    that tick. `readout.stock_writers` lists those stores; the handle's `remaining_writers`
-    reports the ones left after `silence`. For the Absorb cell there are two. The per-tick
+    that tick. `fireflymcf slot-source IMAGE --slot N` lists every one of them on the stock
+    image (`readout.stock_writers`); after a compile, the op's manifest line (printed by
+    `compile`, kept in the sidecar's `manifest`) names what it silenced and the "stock writers
+    left". For the Absorb cell there are two. The per-tick
     config-byte copy (13.6 `0x247C34`, 14.7 `0x247CE8`) is unconditional and must be silenced.
     The fenced decode store (13.6 `0x24A844`, 14.7 `0x24AC0A`) fires only for a Float in raw
     239-360, writing `(absorb + 1) >> 1`, which the recipe's `add 1, shift 1` also writes, so it
     is left in place (GUICODE Finding 91). A remaining store that is unfenced, or whose fence
     admits a value the routine computes differently, fights the routine every tick: name it in
-    `silence`. The op does not refuse such a store; read `remaining_writers`.
+    `silence`. The op does not refuse such a store; read the "stock writers left" in its
+    manifest line.
 
     Error codes:
       DECODER_RANGE_UNKNOWN -- `cell_slot` on an image whose per-tick decoder extent does not
@@ -6539,9 +6542,11 @@ class AddRegisterReadout(Op):
             "silence": {"type": "array", "items": {"type": "integer"},
                         "description": "with cell_slot: runtime addresses of stock 2-byte "
                                        "stores to that cell to replace with nop, so the fed "
-                                       "value is not overwritten each tick; see the "
-                                       "handle's remaining_writers, and silence every stock "
-                                       "writer that would fight the routine"},
+                                       "value is not overwritten each tick. `fireflymcf "
+                                       "slot-source IMAGE --slot N` lists every stock store "
+                                       "to the cell; the compile manifest line names the "
+                                       "stock writers left. Silence every one that would "
+                                       "fight the routine"},
         },
         "required": ["register"],
     }
