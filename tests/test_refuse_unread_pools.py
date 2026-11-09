@@ -1,9 +1,11 @@
 """Two 13.6 readings refuse on an image they cannot read, instead of answering with 13.6's
 values or with nothing (2026-11-08):
 
-- `statusbind.bind_pin` names a pin's colour cell from the committed 13.6 GuiCode bridge dump
-  (`status_map.load_bridge("136")`). On another firmware those cells are not that image's, so
-  it refuses BRIDGE_UNKNOWN, and so do `add_button` and `wire_button` through it.
+- `statusbind.bind_pin` names a pin's colour cell from the status bridge. Until 2026-11-08 that
+  was the committed 13.6 GuiCode bridge dump, and every other firmware refused BRIDGE_UNKNOWN;
+  the bridge is now derived per image (`status_map.derived_bridge`, `tests/test_groups_locate.py`)
+  and refuses only where the receive-slot base is not followed. `add_button` and `wire_button`
+  refuse under that code through it.
 - `newbutton.guicode_selected_groups` refuses VARIANT_SETTER_UNKNOWN where the setter cell's
   uses do not resolve (it read only 13.6's cell until 2026-11-08; it now reads the located cell
   on every image, `tests/test_groups_locate.py`). The finish gate that reads it on every compile
@@ -22,23 +24,32 @@ NEEDS_RESEARCH_DATA = "reads the 13.6 and 14.7 corpus images"
 
 # --- bind_pin ----------------------------------------------------------------------------------
 
-def test_bind_pin_refuses_an_image_the_bridge_dump_is_not(mcf_147):
+@pytest.fixture
+def leaky_base(monkeypatch, request):
+    """The receive-slot base escaping the trace, so the status bridge does not derive."""
+    from fireflymcf import slottrace, status_map
+    real = slottrace.state_reach
+
+    def leaky(data):
+        sr = real(data)
+        return slottrace.StateReach(sr.functions, sr.loads, ((0x240000, "test"),))
+    monkeypatch.setattr(slottrace, "state_reach", leaky)
+    status_map._derived_bridge.cache_clear()
+    request.addfinalizer(status_map._derived_bridge.cache_clear)
+
+
+def test_bind_pin_refuses_where_the_bridge_does_not_derive(mcf_147, leaky_base):
     with pytest.raises(statusbind.BridgeUnknown) as ei:
         statusbind.bind_pin(mcf_147, 3)
     assert ei.value.code == "BRIDGE_UNKNOWN"
-    assert "13.6" in str(ei.value)
-    assert isinstance(ei.value, statusbind.StatusBindError)
+    assert "escapes" in str(ei.value)
 
 
-def test_bind_pin_still_binds_on_13_6(mcf_136):
-    pin = statusbind.free_pins(mcf_136)[0]
-    try:
-        out, index, _edits = statusbind.bind_pin(mcf_136, pin)
-    except statusbind.BridgeUnknown:                       # pragma: no cover
-        pytest.fail("13.6 is the bridge dump's own image")
-    except statusbind.StatusBindError:
-        return                                             # a pin-specific refusal, not ours
-    assert isinstance(index, int)
+def test_bind_pin_binds_on_both_firmwares(mcf_136, mcf_147):
+    for data in (mcf_136, mcf_147):
+        pin = statusbind.free_pins(data)[0]
+        _out, index, _edits = statusbind.bind_pin(data, pin)
+        assert isinstance(index, int)
 
 
 def _build(stock, specs, monkeypatch, admit):
@@ -49,13 +60,12 @@ def _build(stock, specs, monkeypatch, admit):
     return recipe.compile_project(project, stock)
 
 
-def test_add_button_refuses_bridge_unknown_on_147(mcf_147, monkeypatch):
-    """`add_button` admitted on 14.7 for this test only: it reaches `bind_pin` and refuses
-    under the bridge's own code."""
-    res = _build(mcf_147, [("b", "add_button", {"channel": 3, "label": "X",
+def test_add_button_refuses_bridge_unknown(mcf_136, monkeypatch, leaky_base):
+    """`add_button` reaches `bind_pin` and refuses under the bridge's own code."""
+    res = _build(mcf_136, [("b", "add_button", {"channel": 17, "label": "X",
                                                  "off_colour": [65, 81, 163],
                                                  "allow_named_output": True})],
-                 monkeypatch, ["add_button"])
+                 monkeypatch, [])
     assert not res.ok
     assert [e["code"] for e in res.errors] == ["BRIDGE_UNKNOWN"], res.errors
 

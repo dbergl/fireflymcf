@@ -7065,6 +7065,19 @@ not written between. The dump also gives var 138 two stores (`0x24853C`, `0x2485
 var 3's (`cmp r2,#0x4e` on var 3's percentage, `0x248532`) — the LP tank's level decides them —
 and gives var 206 var 207's Float store. `test_ghidra_bridge_dump_reproduced` pins all of it.
 
+**The status bridge is derived from it (2026-11-08).** `status_map.derived_bridge` keeps a base
+read of a var's slot whose every sink is a display-cell store (`0x2003xxxx`) made before the next
+base slot read, to exactly two cells, one word or halfword (colour) and one byte (bool). On 13.6
+it equals the dump on all 42 bridged `DC_DIMMER_STATUS_3` vars, read address included; it leaves
+out var 124 (the dump's error above) and var 42 (its re-read gives it a third sink), neither a
+status var. On 14.7 it bridges 43 status vars (pins 1-43). In the emulator on stock 14.7, the
+G12 reporting pins 3, 17, 30 and 43 on sets each derived colour cell to its ON master (and the
+bool of 3 and 30, whose cells nothing else loads, to 1); reporting them off restores both, and
+the cells 13.6's dump names never move there (pin 3, var 20: derived `0x20039854`/`0x20039D50`,
+13.6's `0x20039BB0`). `backbone`, `pin_bindings`, `state_loads` and `bind_pin` read it; the dump
+(`load_bridge("136")`) stays as the tests' positive control. It refuses `BRIDGE_UNKNOWN` only
+where the base is not followed (`state_reach` does not locate, or the base escapes).
+
 ### 3. What it reaches, and the names
 
 A sink cell is joined to widgets through the `+0x44BC8` cell table (§5.4b) and table 1's record

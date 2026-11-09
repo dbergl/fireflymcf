@@ -1212,9 +1212,12 @@ class RemapChannel(Op):
       REMAP_REFUSED — any other set_channel check (I5-I7) refused the remap, or the
                       default indicator retarget did: the control's indicator names none
                       of its own pin's cells (it does not follow its command channel),
-                      the destination has no GuiCode bridge block, or the image is not
-                      13.6 (the only build with a bridge dump). The PatchError's message
-                      names which
+                      the destination has no GuiCode bridge block, or the status bridge
+                      does not derive on this image (`status_map.derived_bridge`). The
+                      PatchError's message names which
+      BRIDGE_UNKNOWN — verifying the default indicator retarget, the status bridge does not
+        derive on this image (`status_map.derived_bridge`: the receive-slot base is not
+        followed); apply refuses that case first, as REMAP_REFUSED
       CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
         table does not locate on this image (`celltables.locate`)
       TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
@@ -1807,6 +1810,9 @@ class AddButton(Op):
       BIND_REFUSED — statusbind.bind_pin refused (unwatched pin, no bridge block,
                      or the pin is already commanded by a LOCATED control — a
                      narrower check than build_home_button's own, see statusbind.py)
+      BRIDGE_UNKNOWN — the status bridge does not derive on this image
+        (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's
+        colour cell is known
       COMMANDED_CHANNEL — build_home_button refused because the channel is already
                          commanded by an existing binding (its own, broader scan);
                          offers=["acknowledge"] — the caller may retry with
@@ -2106,6 +2112,9 @@ class WireButton(Op):
                 resolve_target)
       BIND_REFUSED — statusbind.bind_pin refused (unwatched pin, no bridge block, or
                      the pin is already commanded by a LOCATED control)
+      BRIDGE_UNKNOWN — the status bridge does not derive on this image
+        (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's
+        colour cell is known
       COMMANDED_CHANNEL — retarget_command refused because the channel is already
                          commanded by an existing binding; offers=["acknowledge"] —
                          the caller may retry with allow_commanded_channel=True once

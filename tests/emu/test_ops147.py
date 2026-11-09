@@ -499,7 +499,7 @@ def test_every_147_op_is_tested_here():
 
 GLYPH_DONOR = 214               # `donors.glyph_button` on 14.7: the Bath Fan button
 DONOR_GROUP = 40                # its group: two 1FEDB bindings on output 40 (commands 5 and 3)
-WIRE_PIN = 3                    # a free output whose 13.6 bridge row binds without refusing
+WIRE_PIN = 3                    # a free output, bridged on 14.7 (var 20)
 OFF = (65, 81, 163)
 SHELL = {"page": "climate", "x": 100, "y": 380, "w": 120, "h": 60, "fill_cell": 164}
 
@@ -526,14 +526,13 @@ def test_unwired_glyph_button_clone_carries_the_donors_live_group(mcf_147, monke
 
 
 @pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "wire_button carries a 13.6 pin: statusbind.bind_pin reads status_map.load_bridge('136'), "
-    "the committed 13.6 GuiCode bridge dump (data/slot_bridge_136.txt), for the SRAM colour "
-    "cell each status var drives. Observed 2026-11-08 with both ops admitted on 14.7: the "
-    "clone draws at its place and a tap sends 1FEDB pin 3 command 5, but pin 3's var 20 bound "
-    "to 13.6's cell 0x20039BB0, which stays 0x004151A3 when the G12 reports pin 3 on, so the "
-    "button never recoloured. bind_pin now refuses BRIDGE_UNKNOWN on any image the dump was "
-    "not read from (2026-11-08), so the build is refused. Both ops stay off 14.7 until the "
-    "bridge is located per build."))
+    "add_glyph_button and wire_button are not admitted on 14.7, so the compile refuses the "
+    "firmware. Their status bridge is derived per image since 2026-11-08 "
+    "(status_map.derived_bridge); before that bind_pin read the committed 13.6 dump, and "
+    "observed 2026-11-08 with both ops admitted: the clone drew at its place and a tap sent "
+    "1FEDB pin 3 command 5, but pin 3's var 20 bound to 13.6's cell 0x20039BB0, which stays "
+    "0x004151A3 when the G12 reports pin 3 on, so the button never recoloured. 14.7 derives "
+    "var 20's cells as 0x20039854/0x20039D50 (tests/test_groups_locate.py)."))
 def test_add_glyph_button_and_wire_button(mcf_147, tmp_path):
     """A glyph button cloned from 14.7's donor, wired to output 3: it draws at its new place,
     a tap sends that output's toggle (and nothing to the donor's output 40), and the G12

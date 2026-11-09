@@ -195,13 +195,24 @@ def _coded_refusals_by_op() -> dict:
     # A reference inside a `try` whose handler catches the class (by its own name or a base's,
     # `CellTableError` is a `VariableTableNotFound`, a `ValueError`) does not surface the code
     # through that edge: the handler converts it (e.g. `readout._located` to NO_DISPLAY_CELL)
-    # or falls back. A handler that re-raises (a bare `raise`) catches nothing.
+    # or falls back. A handler that re-raises (a bare `raise`) catches nothing, and neither does
+    # one that raises the caught error's own code (`except statusbind.BridgeUnknown as err:
+    # raise RecipeError(err.code, ...)`, `add_button`/`wire_button`): the code passes through.
     is_a = {c.__name__: {k.__name__ for k in c.__mro__} for c in recipe._CODED}
+
+    def passes_code(h):
+        return h.name is not None and any(
+            isinstance(x, ast.Raise) and x.exc is not None and any(
+                isinstance(a, ast.Attribute) and a.attr == "code"
+                and isinstance(a.value, ast.Name) and a.value.id == h.name
+                for a in ast.walk(x.exc))
+            for x in ast.walk(h))
 
     def caught(handlers):
         out = set()
         for h in handlers:
-            if any(isinstance(x, ast.Raise) and x.exc is None for x in ast.walk(h)):
+            if any(isinstance(x, ast.Raise) and x.exc is None for x in ast.walk(h)) \
+                    or passes_code(h):
                 continue
             ts = (h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]) if h.type else []
             out |= {getattr(t, "attr", getattr(t, "id", None)) for t in ts} if ts \
@@ -284,7 +295,9 @@ def test_coded_refusals_are_documented():
                                                   "CELL_TABLE_BOUND_FORM", "RENDER_STATE_BASES",
                                                   "DECODER_RANGE_UNKNOWN"}),
                         ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN"}),
-                        ("follow_register", {"SPARE_ROWS_UNKNOWN"})):
+                        ("follow_register", {"SPARE_ROWS_UNKNOWN"}),
+                        ("add_button", {"BRIDGE_UNKNOWN"}),
+                        ("wire_button", {"BRIDGE_UNKNOWN"})):
         assert codes <= reach.get(name, set()), (name, reach.get(name))
     missing = {name: sorted(c for c in codes - {c for c, _ in
                                                   ops_doc._error_codes(recipe.REGISTRY[name])}

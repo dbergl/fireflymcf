@@ -70,3 +70,11 @@ def guidata_checksum_label(image: bytes) -> str:
         if s.name.endswith("GuiData"):
             return f"section-checksum:{s.name}"
     raise ValueError("no GuiData section")
+
+
+def guicode_checksum_label(image: bytes) -> str:
+    """The reseal label of the image's own GuiCode section (13.6 `Lyra 13v6 GuiCode`)."""
+    for s in container.parse_container(image).sections:
+        if s.name.endswith("GuiCode"):
+            return f"section-checksum:{s.name}"
+    raise ValueError("no GuiCode section")

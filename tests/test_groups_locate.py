@@ -400,3 +400,135 @@ def test_a_build_used_as_stock_never_offers_its_own_groups(mcf_136, path):
     for pool in (newbutton.free_group_slots, newbutton.unused_command_groups,
                  newbutton.assignable_groups, newbutton.hold_safe_groups):
         assert not added & set(pool(data)), (pool.__name__, sorted(added & set(pool(data))))
+
+
+# --- the status bridge, derived from GuiCode on any image (2026-11-08) ---------------------------
+
+def _status_vars(data):
+    return {v.index for v in guidata.variable_table(data)
+            if v.dgn_low == guidata.DGN_DC_DIMMER_STATUS_3}
+
+
+def _with_dump(monkeypatch):
+    """Today's readers: the bridge is the committed 13.6 dump (`status_map.load_bridge`)."""
+    from fireflymcf import status_map
+    monkeypatch.setattr(status_map, "derived_bridge", lambda _d: status_map.load_bridge("136"))
+
+
+def test_bridge_readers_on_13_6_equal_the_dump(mcf_136, monkeypatch):
+    """`backbone`, `pin_bindings`, `state_loads` and `bind_pin` on 13.6 give exactly the values
+    they gave on the committed dump, so every 13.6 build stays byte-identical."""
+    from fireflymcf import status_map, statusbind
+    bridge = status_map.derived_bridge(mcf_136)
+    vars_ = sorted(set(bridge) & _status_vars(mcf_136))
+    pins = statusbind.free_pins(mcf_136)
+
+    def readings():
+        out = {"backbone": status_map.backbone(mcf_136),
+               "pins": statusbind.pin_bindings(mcf_136),
+               "loads": {v: statusbind.state_loads(mcf_136, v) for v in vars_}}
+        for pin in pins:
+            try:
+                out[pin] = statusbind.bind_pin(mcf_136, pin, off_colour=(65, 81, 163))
+            except statusbind.StatusBindError as err:
+                out[pin] = str(err)
+        return out
+    derived = readings()
+    _with_dump(monkeypatch)
+    assert readings() == derived
+    assert any(isinstance(derived[p], tuple) and derived[p][2] for p in pins)
+
+
+def test_pin_bindings_on_14_7_name_the_derived_cells(mcf_147):
+    """14.7's pins 1-43 are bridged, each on the cells the derivation names (research
+    2026-11-08); none on 13.6's dump cells."""
+    from fireflymcf import status_map, statusbind
+    bridge = status_map.derived_bridge(mcf_147)
+    pb = statusbind.pin_bindings(mcf_147)
+    assert sorted(p for p, b in pb.items()
+                  if b.bridged and statusbind.PIN_MIN <= p <= statusbind.PIN_MAX) \
+        == list(range(1, 44))
+    for b in pb.values():
+        if b.bridged:
+            assert (b.colour_cell, b.bool_cell) == (bridge[b.var]["colour_cell"],
+                                                    bridge[b.var]["bool_cell"])
+    rows = {r.var: r for r in status_map.backbone(mcf_147)}
+    assert sum(r.bridged for r in rows.values()) == 43
+
+
+def test_state_loads_resolve_every_14_7_status_var(mcf_147):
+    from fireflymcf import status_map, statusbind
+    for var in status_map.derived_bridge(mcf_147):
+        loads = statusbind.state_loads(mcf_147, var)
+        assert {statusbind.OFF_STATE, statusbind.ON_STATE} <= set(loads), var
+
+
+def test_bind_pin_binds_on_14_7(mcf_147):
+    from fireflymcf import celltables, statusbind
+    pin = statusbind.free_pins(mcf_147)[0]
+    b = statusbind.pin_bindings(mcf_147)[pin]
+    out, index, _edits = statusbind.bind_pin(mcf_147, pin, off_colour=(65, 81, 163))
+    gs, _ = guidata.guidata_extent(out)
+    at = gs + celltables.cell_table_off(out) + index * 4
+    assert struct.unpack_from("<I", out, at)[0] == b.colour_cell
+    assert statusbind.state_loads(out, b.var)[statusbind.OFF_STATE].rgb == (65, 81, 163)
+
+
+# 14.7 pins the emulator drives (a sample of the 43 bridged). 17's and 43's bool cells are also
+# loaded elsewhere in GuiCode (17's: a conditional `strb` of 0 at 0x249A7C/0x249A80), so the
+# bool is checked only where the block is its cell's one loader (3, 30).
+EMU_PINS_147 = (3, 17, 30, 43)
+
+
+def _bridge_follows_the_g12(s, data, pins):
+    """For each pin: the G12 reporting it at 200 sets its derived colour cell to the ON master's
+    value and its bool cell to 1, reporting 0 restores both (the colour to the OFF master's), and the cell 13.6's dump names for
+    that var never moves. Asserts; the bridge is read through `status_map.derived_bridge`. The
+    bool is checked only where the block's own load is the one GuiCode load of its cell."""
+    from fireflymcf import slottrace, status_map, statusbind
+    bridge = status_map.derived_bridge(data)
+    dump = status_map.load_bridge("136")
+    pb = statusbind.pin_bindings(data)
+    lits = slottrace.literal_loads(data)
+    sole = 0
+    for pin in pins:
+        var = pb[pin].var
+        assert var in bridge, f"pin {pin} (var {var}) is not bridged"
+        colour, flag = bridge[var]["colour_cell"], bridge[var]["bool_cell"]
+        loads = statusbind.state_loads(data, var)
+        on, off = loads[statusbind.ON_STATE].master, loads[statusbind.OFF_STATE].master
+        old = dump[var]["colour_cell"] if var in dump else None
+
+        def snap():
+            return (s.read_mem(colour, 4), s.read_mem(flag, 1),
+                    s.read_mem(old, 4) if old is not None else None)
+        s.set_g12_output(pin, 0)                 # a pin the emulated G12 boots reporting on
+        s.run(3.0)
+        before = snap()
+        assert before[0] == s.read_mem(off, 4), (pin, before)
+        s.set_g12_output(pin, 200)
+        s.run(3.0)
+        lit = snap()
+        assert lit[0] == s.read_mem(on, 4) and lit[0] != before[0], (pin, lit, before)
+        if len(lits.get(flag, ())) == 1:
+            sole += 1
+            assert lit[1] == b"\x01", (pin, lit)
+        assert lit[2] == before[2], f"13.6's cell {old:#x} moved on pin {pin}"
+        s.set_g12_output(pin, 0)
+        s.run(3.0)
+        assert snap() == before, (pin, snap(), before)
+    assert sole or len(pins) == 1, "no sampled pin's bool cell was checked"
+
+
+def test_the_derived_bridge_follows_the_g12_on_14_7(mcf_147, monkeypatch):
+    """The emulator on stock 14.7 (research 2026-11-08, pin 3 by hand). Can fail: with the
+    derivation stubbed to `{}` the same check fails."""
+    pytest.importorskip("unicorn")
+    from fireflymcf import status_map
+    from fireflymcf.emu.scenario import Scenario
+    s = Scenario(mcf_147, timeout_s=240)
+    s.boot()
+    _bridge_follows_the_g12(s, mcf_147, EMU_PINS_147)
+    monkeypatch.setattr(status_map, "derived_bridge", lambda _d: {})
+    with pytest.raises(AssertionError, match="not bridged"):
+        _bridge_follows_the_g12(s, mcf_147, EMU_PINS_147[:1])

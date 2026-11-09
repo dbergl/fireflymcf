@@ -115,7 +115,7 @@ def _group_pairs(gt, bt, gid: int) -> set:
             for j in range(g.start, g.start + g.count) if 0 <= j < len(bt)}
 
 
-def describe_pin(data: bytes, pin: int, build: str = "136") -> PinConfig:
+def describe_pin(data: bytes, pin: int) -> PinConfig:
     """Gather every MCF reference to `pin`. Read-only; nothing is modified."""
     cfg = PinConfig(pin=pin)
     gt = guidata.group_table(data)
@@ -152,14 +152,14 @@ def describe_pin(data: bytes, pin: int, build: str = "136") -> PinConfig:
     except Exception:
         pass
 
-    pb = statusbind.pin_bindings(data, build).get(pin)
+    pb = statusbind.pin_bindings(data).get(pin)
     if pb is not None:
         cfg.var, cfg.bridged = pb.var, pb.bridged
         cfg.colour_cell, cfg.colour_index = pb.colour_cell, pb.colour_index
         cfg.bool_index, cfg.consumers = pb.bool_index, list(pb.colour_consumers)
         if pb.bridged:
             try:
-                loads = statusbind.state_loads(data, pb.var, build)
+                loads = statusbind.state_loads(data, pb.var)
                 cfg.off_rgb = getattr(loads.get("off"), "rgb", None)
                 on = loads.get(1) or loads.get("on")
                 cfg.on_rgb = getattr(on, "rgb", None)

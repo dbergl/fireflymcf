@@ -54,8 +54,6 @@ SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
 # The G12 drives 44 outputs (`g12_config`: 8 relay + 12 half-bridge + 24 high-current).
 PIN_MIN, PIN_MAX = 1, 44
 
-GUICODE_CHECKSUM = "section-checksum:Lyra 13v6 GuiCode"
-
 
 class StatusBindError(ValueError):
     """A premise this module refuses to guess past.
@@ -73,29 +71,18 @@ class SpareRowsUnknown(StatusBindError):
     code = "SPARE_ROWS_UNKNOWN"
 
 
-class BridgeUnknown(StatusBindError):
-    """BRIDGE_UNKNOWN: the GuiCode bridge dump that names a status variable's colour and bool
-    cells (`status_map.load_bridge`) is committed for one firmware only, 13.6
-    (`data/slot_bridge_136.txt`), and this image is another. Its cells would be 13.6's, which
-    on another image are words nothing writes (observed on 14.7 2026-11-08: pin 3's 13.6 cell
-    0x20039BB0 never changes when the G12 reports the pin on), so a pin is never bound there."""
-    code = "BRIDGE_UNKNOWN"
+# BRIDGE_UNKNOWN: the status bridge is derived from each image's GuiCode
+# (`status_map.derived_bridge`, 2026-11-08), and refuses where the receive-slot base is not
+# followed. Until then it was the committed 13.6 Ghidra dump (`status_map.load_bridge`), and
+# every other image refused: 14.7's pin 3 bound to 13.6's cell 0x20039BB0, which never changes
+# there when the G12 reports the pin on (observed 2026-11-08).
+BridgeUnknown = status_map.BridgeUnknown
 
 
-# The firmware (`firmware.KNOWN` key) each committed bridge dump was read from.
-BRIDGE_FIRMWARE = {"136": "13.6"}
-
-
-def require_bridge(data: bytes, build: str = "136") -> None:
-    """Refuse `BridgeUnknown` unless the bridge dump `build` was read from this image's
-    firmware (`firmware.identify`)."""
-    which = firmware.identify(data)
-    want = BRIDGE_FIRMWARE.get(build)
-    if want is None or which != want:
-        raise BridgeUnknown(
-            f"the GuiCode bridge dump {build!r} names {want or 'no known firmware'}'s status "
-            f"cells and this image is {which or firmware.describe(data)}: its pins' colour "
-            f"cells are not located, so none is bound")
+def require_bridge(data: bytes) -> dict:
+    """The derived status bridge of `data` (`status_map.derived_bridge`); refuses
+    `BridgeUnknown` where it does not locate."""
+    return status_map.derived_bridge(data)
 
 
 # --------------------------------------------------------------------------------------
@@ -127,13 +114,13 @@ class PinBinding:
         return self.bridged and self.colour_index is None
 
 
-def pin_bindings(data: bytes, build: str = "136") -> dict:
+def pin_bindings(data: bytes) -> dict:
     """`{pin: PinBinding}` for every G12 output that a `DC_DIMMER_STATUS_3` filter entry watches.
 
     A pin watched by more than one entry keeps the **bridged** one (a duplicate entry with no
     GuiCode block cannot drive anything); ties break to the lowest var, deterministically.
     """
-    rows = status_map.backbone(data, build)
+    rows = status_map.backbone(data)
     commanded = status_map.commanded_instances(data)
     best: dict = {}
     for r in rows:
@@ -153,13 +140,13 @@ def pin_bindings(data: bytes, build: str = "136") -> dict:
     return best
 
 
-def free_pins(data: bytes, build: str = "136") -> list:
+def free_pins(data: bytes) -> list:
     """G12 outputs no located control commands, sorted — the candidates for a new button.
 
     Restricted to `PIN_MIN..PIN_MAX`: the filter table also watches instances well above 44
     (other RV-C devices on the bus), and those are not outputs this panel can drive.
     """
-    return sorted(p for p, b in pin_bindings(data, build).items()
+    return sorted(p for p, b in pin_bindings(data).items()
                   if not b.commanded and PIN_MIN <= p <= PIN_MAX)
 
 
@@ -669,7 +656,7 @@ def _code_index(code: bytes, base: int) -> tuple:
     return tuple(loads), {k: tuple(v) for k, v in branches.items()}
 
 
-def state_loads(data: bytes, var: int, build: str = "136") -> dict:
+def state_loads(data: bytes, var: int) -> dict:
     """`{OFF_STATE | <cmp value>: StateLoad}` for `var`'s GuiCode block.
 
     Located structurally, not by address: find the `ldr rX,[pc,#..]` whose pool word holds the
@@ -688,7 +675,7 @@ def state_loads(data: bytes, var: int, build: str = "136") -> dict:
 
     A state whose shape does not match is omitted rather than guessed.
     """
-    bridge = status_map.load_bridge(build)
+    bridge = require_bridge(data)
     if var not in bridge:
         raise StatusBindError(
             f"var {var} has no clean GuiCode bridge block; its colour is not firmware-driven "
@@ -786,8 +773,7 @@ def colour_masters(data: bytes) -> dict:
     return out
 
 
-def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
-                     build: str = "136") -> tuple:
+def set_state_colour(data: bytes, var: int, state: str, rgb: tuple) -> tuple:
     """Give `var`'s `state` ("off" or "on") the colour `rgb` — a 2-byte GuiCode edit.
 
     Repoints that one `ldr`'s `imm8` at a pool word holding a master that already carries `rgb`.
@@ -799,7 +785,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
     LDR-literal range (`Align(pc,4)+4+imm8*4`, `imm8 <= 255`) of this instruction.
     """
     key = _resolve_state(state)
-    loads = state_loads(data, var, build)
+    loads = state_loads(data, var)
     if key not in loads:
         raise StatusBindError(
             f"var {var}'s GuiCode block has no recognised {key!r} colour load "
@@ -842,7 +828,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
         file_off, old, bytes(out[file_off:file_off + 2]), "guicode-state-colour",
         f"var {var} {state} colour master {load.master:#010x} {load.rgb} -> "
         f"{_word(code, base, origin + choice * 4):#010x} {wanted}")]
-    return _reseal_with(bytes(out), edits, [GUICODE_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guicode_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -850,8 +836,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
 # --------------------------------------------------------------------------------------
 
 def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
-             on_colour: tuple | None = None, index: int | None = None,
-             build: str = "136") -> tuple:
+             on_colour: tuple | None = None, index: int | None = None) -> tuple:
     """Make `pin`'s live status paintable, and return the table index a widget should name.
 
     Returns `(new_data, colour_index, edits)`. `colour_index` is what to write into a box
@@ -867,10 +852,10 @@ def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
     already watched, so doing so would silently steal another pin's watcher. Call
     `set_filter_instance` explicitly when that trade is what you want.
 
-    Refuses `BridgeUnknown` on an image the bridge dump was not read from (`require_bridge`).
+    Refuses `BridgeUnknown` where the status bridge does not derive (`require_bridge`).
     """
-    require_bridge(data, build)
-    b = pin_bindings(data, build).get(pin)
+    require_bridge(data)
+    b = pin_bindings(data).get(pin)
     if b is None:
         raise StatusBindError(f"no DC_DIMMER_STATUS_3 filter entry watches pin {pin}")
     if not b.bridged:
@@ -899,7 +884,7 @@ def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
     for state, rgb in (("off", off_colour), ("on", on_colour)):
         if rgb is None:
             continue
-        data, e = set_state_colour(data, b.var, state, rgb, build)
+        data, e = set_state_colour(data, b.var, state, rgb)
         edits += e
 
     return data, colour_index, edits

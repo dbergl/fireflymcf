@@ -55,8 +55,8 @@ _FLAGGED_INTS = {0x44BC8, 0x4492C}
 _ALLOW = {
     ("src/fireflymcf/layout.py", 280): "VAR_DPTR_TABLE_136's own definition (the stock constant)",
     ("src/fireflymcf/layout.py", 281): "VAR_TYPE_TABLE_136's own definition (the stock constant)",
-    ("src/fireflymcf/status_map.py", 37): "CELL_TABLE_OFF's own definition (the stock constant)",
-    ("src/fireflymcf/status_map.py", 38): "CELL_TABLE_LEN's own definition (13.6's 665 rows; "
+    ("src/fireflymcf/status_map.py", 39): "CELL_TABLE_OFF's own definition (the stock constant)",
+    ("src/fireflymcf/status_map.py", 40): "CELL_TABLE_LEN's own definition (13.6's 665 rows; "
                                           "the live count is celltables.row_count)",
     ("src/fireflymcf/statusbind.py", 51):
         "CELL_TABLE_OFF re-exports status_map.CELL_TABLE_OFF -- kept, per the task brief, because "
