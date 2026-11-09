@@ -369,8 +369,11 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     GuiCode drives by number (`newbutton.guicode_selected_groups`). A build of 2026-09-30 reused 136
     and 137 from
     13.6's 130-139 block: a tap on 136 worked, but its hold never repeated, and 137's hold-only
-    reboot never fired, on the coach 2026-09-30. Edits that keep a group's slice (a gesture or a
-    binding byte on an existing control) are not reuse and are not gated.
+    reboot never fired, on the coach 2026-09-30. Driven is sufficient to refuse, not proof a
+    hold is dead: a hold on driven group 129 (Low Volts) works on the coach (2026-10-19), and
+    what separates it from 136/137 is not established (`newbutton.guicode_selected_groups`).
+    Edits that keep a group's slice (a gesture or a binding byte on an existing control) are not
+    reuse and are not gated.
 
     Where the GuiCode-driven groups are not known (`newbutton.VariantSetterUnknown`: the setter
     cell or the LCD's writer does not prove out) a build that reuses no group has nothing to
@@ -389,7 +392,8 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     bad = [g for g in selected if g < len(sg) and g < len(dg) and dg[g].start != sg[g].start]
     _gate(not bad, "STRUCTURAL_GATE",
           "group(s) %s were reused, but GuiCode drives them by number "
-          "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
+          "(newbutton.guicode_selected_groups); holds on driven 136/137 died on a coach "
+          "(2026-09-30), so a reused group must not be one" % bad)
 
 
 def _assert_authored_cells_fresh(ctx: Ctx) -> None:

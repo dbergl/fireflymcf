@@ -231,8 +231,10 @@ comes from the template), which settles that `+0x08` is the frame sender on 14.7
 the `send_frame` test op compiles on 14.7 and sends. No 14.7 tick routine has run on a coach.
 `fresh_sram` works on 14.7 since 2026-11-08: `sramreach` locates the render state from GuiCode
 (`0x200301B4` on 14.7) instead of naming 13.6's, and on 14.7 it returns `0x20039F20`, the cell the
-emulator tests count in. One gap remains on 14.7: the variant setter (host API `+0x04`) is located
-but unproven there.
+emulator tests count in. The variant setter (host API `+0x04`) is proven on 11.23, 13.6 and 14.7
+(2026-11-08): `lcdgroups.host_writer` proves from each LCD firmware that the word in the cell is the
+ungated variant writer (13.6 `FUN_0021B678`) and that GuiCode's group number is the group-table
+index.
 
 **`tick_install_plan(data) -> (data, TickPlan)`** (read-only). Returns where the next routine
 loads and what it must tail-branch to. `TickPlan` has these fields:

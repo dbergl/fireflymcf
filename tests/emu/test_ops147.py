@@ -741,10 +741,15 @@ def test_drop_from_master(mcf_147):
     "repeat; a tap sends nothing (as intended) and holds of 1.5, 3.5 and 6 s send nothing "
     "either. Stock 14.7 sends Star Link's toggle on a tap, and a stock held-repeat binding "
     "(Awning EXT, group 3) sends on hold, so the held phase itself runs; a held-only mask "
-    "without the repeat bit does not, with the hold threshold left at 1 s as well. 14.7 runs "
-    "a different LCD Firmware from 13.6 (sha256 cbed1028...), whose sender has not been "
-    "read; whether 13.6's emulator fires the same edit was not checked (13.6 stock reaches "
-    "no single-toggle group)."))
+    "without the repeat bit does not, with the hold threshold left at 1 s as well. Group 17 "
+    "is GuiCode-driven on 14.7 (newbutton.guicode_selected_groups, 2026-11-08), and 14.7's "
+    "LCD Firmware (sha256 cbed1028...) is proven a relocation twin of 13.6's group handling, "
+    "its sender FUN_0021B8B4 included (grammar.prove_lcd). Inference: the same symptom as the "
+    "hold on driven group 136 (test_add_rvc_button_on_driven_group_136_sends_nothing), not an "
+    "LCD difference. Driven is not sufficient by itself: Awning EXT's group 3 is driven on "
+    "14.7 and its stock held repeat sends, and a hold on driven 129 works on a coach "
+    "(2026-10-19). Whether 13.6's emulator fires the same edit was not checked (13.6 stock "
+    "reaches no single-toggle group)."))
 def test_set_gesture(mcf_147):
     """Star Link (shown with the Starlink Power option on): a tap no longer toggles it, a 3 s
     hold does."""
@@ -1112,10 +1117,11 @@ def test_add_rvc_button_never_on_a_driven_group(mcf_147, monkeypatch):
     assert ei.value.code == "STRUCTURAL_GATE"
 
 
-def test_add_rvc_button_hold_on_a_driven_group_is_dead(mcf_147, monkeypatch):
-    """What the gate refuses does not work: with the gate stubbed out, the same hold button on
-    driven group 136 builds, and neither a short tap nor a 4 or 6 s hold sends anything, as
-    13.6's holds on its driven 136/137 did on the coach (2026-09-30); emulated 2026-11-08."""
+def test_add_rvc_button_on_driven_group_136_sends_nothing(mcf_147, monkeypatch):
+    """A hold button on 14.7's driven group 136, with the gate stubbed out, builds, and neither
+    a short tap nor a 4 or 6 s hold sends anything in the emulator (2026-11-08), as 13.6's holds
+    on its driven 136/137 did on the coach (2026-09-30). This shows group 136, not every driven
+    group: a hold on driven group 129 works on the coach (2026-10-19)."""
     monkeypatch.setattr(newbutton, "hold_safe_groups", lambda _data: [DRIVEN_GROUP])
     monkeypatch.setattr(recipe, "_assert_no_guicode_selected_group_reused", lambda *_a: None)
     img = _build(mcf_147, [HOLD_BUTTON])

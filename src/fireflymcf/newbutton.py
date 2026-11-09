@@ -204,14 +204,21 @@ def guicode_selected_groups(data: bytes) -> frozenset:
     """Group indices GuiCode passes to `setVariant(group, v)`: every group GuiCode drives by
     number, from outside the screen (`setter_calls`).
 
-    Why an allocator must avoid them (coach, 2026-09-30): 13.6 sets the variant of groups
-    130-139 (`0x82`-`0x8B`) as a block (`0x24AC66`-`0x24ACB0`, `0x24AF1A`-`0x24AF64`); no stock
-    touch region uses 136-139, and `free_group_slots` listed them. A Track + on group 136
-    sent a tap but never repeated on a hold, and the APS-500 reboot (137, hold-only) sent
-    nothing, while the identically built 96/126/127 worked. The setter GuiCode calls
-    (`lcdgroups.host_writer`, 13.6 `FUN_0021B678`) rewrites both variant counters of the group's
-    record with no gate, and the after-hold path reads one of them (inference: a per-tick
-    writer clobbers a hold's state); that GuiCode drives these groups is established.
+    Why an allocator avoids them (coach, 2026-09-30): 13.6 sets the variant of groups 130-139
+    (`0x82`-`0x8B`) as a block (`0x24AC66`-`0x24ACB0`, `0x24AF1A`-`0x24AF64`); no stock touch
+    region uses 136-139, and `free_group_slots` listed them. A Track + on group 136 sent a tap
+    but never repeated on a hold, and the APS-500 reboot (137, hold-only) sent nothing, while
+    the identically built 96/126/127 worked. The setter GuiCode calls (`lcdgroups.host_writer`,
+    13.6 `FUN_0021B678`) rewrites both variant counters of the group's record with no gate, and
+    the after-hold path reads one of them; that GuiCode drives these groups is established.
+
+    **Driven is sufficient to exclude, not proof that a hold is dead.** Group 129 (Low Volts) is
+    driven on 13.6 and 14.7, and a hold on it works on the coach (2026-10-19 and every build
+    since); holds died on 13.6's 136/137 (coach) and on 14.7's 17 and 136 (emulated,
+    2026-11-08). What separates the two is not established (inference: a per-tick unconditional
+    write clobbers a hold's state, an event-driven write does not). The allocators exclude every
+    driven group as a conservative superset; an op that adds a hold to an existing control
+    (`set_gesture`) is not refused on a driven group.
 
     Refuses `VariantSetterUnknown` rather than answer with fewer groups than GuiCode drives.
     """

@@ -1116,7 +1116,7 @@
                       "free",
                       "hold_safe"
                     ],
-                    "description": "where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 were dead on a coach)"
+                    "description": "where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 died on a coach, 2026-09-30)"
                   }
                 },
                 "required": []

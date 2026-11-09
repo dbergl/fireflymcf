@@ -7508,8 +7508,8 @@ class AddAesBattHeat(Op):
                            "description": "where the command group comes from: the first free "
                                           "slot (the heater, byte-stable), or "
                                           "newbutton.hold_safe_groups (a group GuiCode does not "
-                                          "drive; holds on GuiCode-driven 136/137 were dead on "
-                                          "a coach)"},
+                                          "drive; holds on GuiCode-driven 136/137 died on a "
+                                          "coach, 2026-09-30)"},
         },
         "required": [],
     }
@@ -9850,8 +9850,8 @@ class AddRvcButton(Op):
     binding on mask 0x06 (one frame per press of any length); `hold` alone is `add_alt_reboot`'s
     group-17 clone with the hold nibble at `seconds` and one binding on 0x04; `tap` + `hold` is
     Batt Heat's group-17 clone with the hold nibble at `seconds`, the hold binding (0x04) first
-    and the tap (0x02) after. The group is the pool's first slot, never 68/69; a hold on a
-    GuiCode-driven group is dead (coach, 2026-09-30), so a hold takes the `hold_safe` pool.
+    and the tap (0x02) after. The group is the pool's first slot, never 68/69; holds on
+    GuiCode-driven 136/137 died (coach, 2026-09-30), so a hold takes the `hold_safe` pool.
 
     The records are Batt Heat's body (`rvcbutton.button_records`): a filled box at `x, y` `w` x
     `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
@@ -10095,8 +10095,8 @@ class AddRvcButton(Op):
             raise self._bad("group_pool must be one of %s, got %r"
                             % (list(rvcbutton.POOLS), self.group_pool))
         if self.hold is not None and self.group_pool == "free":
-            raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
-                            "is dead (coach, 2026-09-30)")
+            raise self._bad("a hold needs the hold_safe pool: holds on GuiCode-driven groups "
+                            "136/137 died (coach, 2026-09-30)")
         if (toggle is not None or self.cycle is not None) and self.group_pool == "free":
             raise self._bad("a %s needs the hold_safe pool: GuiCode drives its own groups' "
                             "variants, and would fight the status op's setVariant"

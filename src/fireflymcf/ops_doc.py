@@ -332,8 +332,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). "
         "On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame "
         "after the threshold and a short tap none; a tap button sends once per press; the same "
-        "hold forced onto a GuiCode-driven group is refused by the finish gate, and with the "
-        "gate stubbed it never sends.", "`rvcbutton.py`, `enumlabel.py`"),
+        "hold forced onto GuiCode-driven group 136 is refused by the finish gate, and with the "
+        "gate stubbed neither a tap nor a hold on it sends. A driven group is excluded as a "
+        "conservative superset, not because every hold on one is dead: a hold on driven group "
+        "129 works on the coach (2026-10-19).", "`rvcbutton.py`, `enumlabel.py`"),
     "add_button_status": ("structural",
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
