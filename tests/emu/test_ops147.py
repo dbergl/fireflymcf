@@ -926,6 +926,13 @@ def _publish_charger(s: Scenario, host, absorb: int, flt: int) -> None:
         s.run(0.5)
 
 
+def _stock_guicode_end(img: bytes) -> int:
+    """The runtime address just past stock GuiCode (its checksum excluded): a writer at or
+    beyond it is code a build appended, not a stock store."""
+    sec = themeswap.theme.guicode_section(img)
+    return themeswap.theme.guicode_base(sec) + sec.length - 4
+
+
 def _u16(s: Scenario, addr: int) -> int:
     return int.from_bytes(s.read_mem(addr, 2), "little")
 
@@ -937,6 +944,8 @@ def test_decoder_range_147_fence(mcf_147):
     published."""
     [guard] = [g for g in decodeguards.range_guards(mcf_147) if FLOAT_VAR in g.variables]
     assert guard.cell == ABSORB_CELL and ABSORB_VAR in guard.variables
+    # both test raw + 1 (14.7 `0x24ABDE adds r2, r3, #1`, `0x24ABEA adds r3, #1`): ble 239 skips
+    # raw <= 238 and bge 362 skips raw >= 361, so raw Float 239..360 is admitted (Finding 91)
     assert [(v, b) for _a, v, b in guard.fences] == [(239, "ble"), (362, "bge")]
     s = _settled(mcf_147)
     host = s._m.canbus.add_peer(_Host())
@@ -966,9 +975,9 @@ def test_add_register_readout_existing_cell(mcf_147):
     assert res.ok, res.errors
     # the fenced decode store stays (it fires for an in-range Float, the same scaling); the
     # other writer left is the op's own routine, appended past stock GuiCode
-    stock_end = max(readout.stock_writers(mcf_147, cell))
+    stock_end = _stock_guicode_end(mcf_147)
     left = readout.stock_writers(res.data, cell)
-    assert left[0] == ABSORB_FENCED_STORE and all(w > stock_end for w in left[1:]), left
+    assert left[0] == ABSORB_FENCED_STORE and all(w >= stock_end for w in left[1:]), left
     for img, want in ((mcf_147, 255), (res.data, 576)):
         s = _settled(img)
         host = s._m.canbus.add_peer(_Host())
@@ -1018,6 +1027,15 @@ def _readout_box(img: bytes, root: int, slot: int, field: int):
     ending at the placed y (both drawn inclusively)."""
     [q] = [q for q in layout_walk(img, root) if q.wtype == 8 and q.value_slot == slot]
     assert q.align == 3
+    trace, fmt = [], None
+    layout.Screen(img).walk(root, trace=trace)
+    for entry in trace:                       # the wtype-9 directive in force (Finding 65)
+        rec = entry[3]
+        if rec.wtype == 9:
+            fmt = rec.fmt
+        elif rec.wtype == 8 and rec.value_slot == slot:
+            break
+    assert fmt is not None and fmt[2] == field, (root, fmt)
     width = metrics.worst_fill_width(img, q.font, field)
     height = metrics.font_metrics(img, q.font).height
     return q.x0 - width, q.y0 - height + 1, q.x0, q.y0
@@ -1041,7 +1059,7 @@ def test_add_register_readout_existing_cell_repaints(mcf_147, tmp_path):
             "register": REG, "cell_slot": CHASSIS_SLOT, "silence": [CHASSIS_STORE]})])
     res = recipe.compile_project(project, mcf_147)
     assert res.ok, res.errors
-    assert all(w > CHASSIS_STORE for w in readout.stock_writers(res.data, cell)), \
+    assert all(w >= _stock_guicode_end(mcf_147) for w in readout.stock_writers(res.data, cell)), \
         "a stock writer is left to fight the routine"
     boxes = {r: _readout_box(mcf_147, r, CHASSIS_SLOT, CHASSIS_FIELD) for r in roots}
 

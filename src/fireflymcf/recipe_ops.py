@@ -6450,22 +6450,23 @@ class AddRegisterReadout(Op):
     its groups unattached), so that proof is cell-level. The pixels are proven on HOME's Chassis
     readout (`cell_slot` 176, its one stock writer, the unfenced var-5 store 0x24A706,
     silenced): each published value repaints the digits, and on both pages that draw it (HOME,
-    ELECTRICAL) nothing outside its box changes. With `draw` true the cell may be a stock display-cell index
-    `statusbind.spare_cell_indices` calls spare (tier 1 or 2), its type byte set to the
-    readout's width. That no stock reader uses such an index is inferred-from-data on 14.7 (no record and no other object table
-    names it), not proven from code, and no 14.7 coach has run it.
+    ELECTRICAL) nothing outside its box changes. With `draw` true the cell may be a stock
+    display-cell index `statusbind.spare_cell_indices` calls spare (tier 1 or 2), its type byte
+    set to the readout's width. That no stock reader uses such an index is inferred-from-data on
+    14.7 (no record and no other object table names it), not proven from code, and no 14.7 coach
+    has run it.
 
     **What `silence` must cover (`cell_slot`).** The routine writes the cell from the per-tick
-    hook chain, which runs before the per-tick decoder (13.6 `0x247BF8`, 14.7 `0x247CAC`), so every stock
-    store to the same cell that still fires afterwards overwrites the fed value on that tick.
-    `readout.stock_writers` lists those stores; the handle's `remaining_writers` reports the ones
-    left after `silence`. For the Absorb cell there are two. The per-tick config-byte copy
-    (13.6 `0x247C34`, 14.7 `0x247CE8`) is unconditional and must be silenced. The fenced decode
-    store (13.6 `0x24A844`, 14.7 `0x24AC0A`) fires only for a Float in raw 239-360, writing
-    `(absorb + 1) >> 1`, which the recipe's `add 1, shift 1` also writes, so it is left in place
-    (GUICODE Finding 91). A remaining store that is unfenced, or whose fence admits a value the
-    routine computes differently, fights the routine every tick: name it in `silence`. The op
-    does not refuse such a store; read `remaining_writers`.
+    hook chain, which runs before the per-tick decoder (13.6 `0x247BF8`, 14.7 `0x247CAC`), so
+    every stock store to the same cell that still fires afterwards overwrites the fed value on
+    that tick. `readout.stock_writers` lists those stores; the handle's `remaining_writers`
+    reports the ones left after `silence`. For the Absorb cell there are two. The per-tick
+    config-byte copy (13.6 `0x247C34`, 14.7 `0x247CE8`) is unconditional and must be silenced.
+    The fenced decode store (13.6 `0x24A844`, 14.7 `0x24AC0A`) fires only for a Float in raw
+    239-360, writing `(absorb + 1) >> 1`, which the recipe's `add 1, shift 1` also writes, so it
+    is left in place (GUICODE Finding 91). A remaining store that is unfenced, or whose fence
+    admits a value the routine computes differently, fights the routine every tick: name it in
+    `silence`. The op does not refuse such a store; read `remaining_writers`.
 
     Error codes:
       DECODER_RANGE_UNKNOWN -- `cell_slot` on an image whose per-tick decoder extent does not
@@ -6538,7 +6539,9 @@ class AddRegisterReadout(Op):
             "silence": {"type": "array", "items": {"type": "integer"},
                         "description": "with cell_slot: runtime addresses of stock 2-byte "
                                        "stores to that cell to replace with nop, so the fed "
-                                       "value is not overwritten each tick"},
+                                       "value is not overwritten each tick; see the "
+                                       "handle's remaining_writers, and silence every stock "
+                                       "writer that would fight the routine"},
         },
         "required": ["register"],
     }

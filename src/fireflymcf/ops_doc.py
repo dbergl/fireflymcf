@@ -227,8 +227,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "digits in the readout's box, and a cell poisoned before reset is never drawn; "
         "`cell_slot` feeds the Absorb cell past its fence (cell-level: stock 14.7 draws no "
         "Absorb row) and repaints HOME's Chassis readout, only in its box, on both pages that "
-        "draw it. `silence` must name every stock store to the cell that is not fenced off the "
-        "fed values.",
+        "draw it. `silence` must name every remaining stock store to the cell that is unfenced, "
+        "or whose fence admits a value the routine computes differently.",
         "`readout.py`, `BUS-BASELINE.md` PC.59, PC.60"),
     "swap_aes_electrical": ("structural",
         "Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, "

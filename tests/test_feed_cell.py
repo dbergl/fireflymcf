@@ -149,3 +149,15 @@ def test_the_op_refuses_mixed_modes_and_a_wrong_silence_site(data) -> None:
     r = _compile(data, recipe.OpSpec(id="ro", type="add_register_readout", params={
         "register": {"dgn": "DGN_CONFIG", "selector": 0xEE}, "page": 4}))
     assert not r.ok and r.errors[0]["code"] == "BAD_PARAMS"
+
+
+def test_cell_slot_refuses_on_11_23(mcf_1123) -> None:
+    """11.23's per-tick decoder range now locates (`decodeguards.decoder_range`, 2026-11-08),
+    so the op's `firmwares` (13.6, 14.7) is the only barrier left: a `cell_slot` compile there
+    refuses UNSUPPORTED_FIRMWARE before any param is read."""
+    from fireflymcf import decodeguards
+    decodeguards.decoder_range(mcf_1123)                  # no DECODER_RANGE_UNKNOWN to lean on
+    r = _compile(mcf_1123, recipe.OpSpec(id="absorb", type="add_register_readout",
+                                         params=absorb_params(silence=[])))
+    assert not r.ok
+    assert [e["code"] for e in r.errors] == ["UNSUPPORTED_FIRMWARE"], r.errors

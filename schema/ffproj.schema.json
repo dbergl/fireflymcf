@@ -2805,7 +2805,7 @@
                     "items": {
                       "type": "integer"
                     },
-                    "description": "with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick"
+                    "description": "with cell_slot: runtime addresses of stock 2-byte stores to that cell to replace with nop, so the fed value is not overwritten each tick; see the handle's remaining_writers, and silence every stock writer that would fight the routine"
                   }
                 },
                 "required": [
