@@ -166,6 +166,8 @@ patched file.
   Progressive Inverter on 13.6, mode ↔ Lithionics on 14.7 (`remove_option_interlocks` refuses 14.7).
 - The panel's **receive filter is blind to the sender.** Two publishers of one DGN alternate; the
   panel shows whichever frame arrived last (PC.46).
-- **Seven readouts are fenced** by value-range tests in GuiCode (`src/fireflymcf/decodeguards.py`).
-  `Absorb`/`Float` cannot show a value outside 12-18 V without `add_register_readout`'s `cell_slot`
-  path.
+- **One readout pair truly rejects out-of-range values**: `Absorb`/`Float`, fenced to Float raw
+  239-360 (12-18 V); out of range the cell reverts to a config byte. It cannot show a value outside
+  that window without `add_register_readout`'s `cell_slot` path. `src/fireflymcf/decodeguards.py`
+  reports seven guards, but the other six substitute a fixed value (vars 51, 52, 47, 48, 211) or
+  are a scanner artefact (var 271) (`docs/GUICODE.md` Finding 91, 2026-11-08).

@@ -229,8 +229,10 @@ twice been read as contradicting it and was wrong both times.
   `allow_capability_change`.
 - A new glyph needs `y = (cell - height) / 2` unless its record uses v-align 1.
 - The receive filter is blind to the sender; with two publishers the last frame wins (PC.46).
-- Seven readouts are fenced by magnitude tests (`decodeguards.py`); `Absorb`/`Float` are fenced to
-  12-18 V. Check before concluding an injection did not land.
+- `decodeguards.py` reports seven range "guards", but only `Absorb`/`Float` truly rejects a value
+  (Float raw 239-360, 12-18 V; out of range the cell reverts to a config byte); vars 51, 52, 47,
+  48 and 211 substitute a fixed value, and var 271 is a scanner artefact (GUICODE Finding 91).
+  Check before concluding an injection did not land.
 - The C runtime initialises SRAM only to `0x2000AD98` (`raminit.py`); every GuiCode widget slot lives
   above it and holds a value only if something writes it. 210 of 13.6's 664 slots are written by
   nothing (`slotsource.py`, `indirectwrites.py`, `GUICODE.md` Finding 67).

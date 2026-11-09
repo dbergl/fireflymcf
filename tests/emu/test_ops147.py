@@ -28,10 +28,10 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from fireflymcf import (aescompact, buildcheck, celltables, container,  # noqa: E402
+from fireflymcf import (aescompact, buildcheck, celltables, container, decodeguards,  # noqa: E402
                         coverage, donors, followchannel, glyphs, guidata, insert, layout,
-                        lcdgroups, metrics, newbutton, pagewalk, patch, recipe, records, rvcbutton,
-                        status_map, themeswap)
+                        lcdgroups, metrics, newbutton, pagewalk, patch, readout, recipe, records,
+                        rvcbutton, status_map, themeswap)
 from fireflymcf.emu import g12, peers  # noqa: E402
 from fireflymcf.emu.canbus import Peer  # noqa: E402
 from fireflymcf.emu.scenario import PANEL_SA, Scenario  # noqa: E402
@@ -907,19 +907,73 @@ def test_add_register_readout_first_frame(mcf_147):
     assert differ == [], f"the poison is drawn at {differ[:5]}"
 
 
-CHASSIS_VOLTS_SLOT = 176            # HOME's Chassis readout (object 374) value_slot on 14.7
+# 0x1FECC: Absorb (var 206) at payload[3..4], Float (var 207) at payload[5..6], 0.05 V. On 14.7
+# the Absorb readout's value_slot is 147 (object 268, record 17), cell 0x20039B3C; its stock
+# writers are the per-tick config-byte copy 0x247CE8 and the fenced decode store 0x24AC0A.
+# Test expectations only (2026-11-08).
+CHARGER_DGN = 0x1FECC
+ABSORB_VAR, FLOAT_VAR = 206, 207
+ABSORB_SLOT = 147
+ABSORB_CELL = 0x20039B3C
+ABSORB_CONFIG_STORE, ABSORB_FENCED_STORE = 0x247CE8, 0x24AC0A
 
 
-def test_add_register_readout_existing_cell_compiles(mcf_147):
-    """cell_slot gates on the per-tick decoder's range, located on 14.7 since 2026-11-08
-    (`decodeguards.decoder_range`, GUICODE Finding 91): the op now compiles there. Static only;
-    the emulator proof that the cell repaints is the next step of the 14.x decoder-range plan."""
+def _publish_charger(s: Scenario, host, absorb: int, flt: int) -> None:
+    data = bytes([1, 0xFF, 0xFF]) + absorb.to_bytes(2, "little") + flt.to_bytes(2, "little") \
+        + b"\xff"
+    for _ in range(3):
+        host.send(CHARGER_DGN, data)
+        s.run(0.5)
+
+
+def _u16(s: Scenario, addr: int) -> int:
+    return int.from_bytes(s.read_mem(addr, 2), "little")
+
+
+def test_decoder_range_147_fence(mcf_147):
+    """The scanned fence on Float is the decoder's behaviour (2026-11-08, GUICODE Finding 91):
+    Float raw 239 and 360 store `(absorb + 1) >> 1` into the Absorb cell; 238, 361 and 1080
+    skip the store, and the cell holds the per-tick config-byte copy it held before anything was
+    published."""
+    [guard] = [g for g in decodeguards.range_guards(mcf_147) if FLOAT_VAR in g.variables]
+    assert guard.cell == ABSORB_CELL and ABSORB_VAR in guard.variables
+    assert [(v, b) for _a, v, b in guard.fences] == [(239, "ble"), (362, "bge")]
+    s = _settled(mcf_147)
+    host = s._m.canbus.add_peer(_Host())
+    config = _u16(s, guard.cell)
+    absorb = 290
+    stored = (absorb + 1) >> 1
+    assert config != stored
+    for flt, admitted in ((239, True), (238, False), (360, True), (361, False), (1080, False)):
+        _publish_charger(s, host, absorb, flt)
+        got = _u16(s, guard.cell)
+        assert got == (stored if admitted else config), (flt, got)
+
+
+def test_add_register_readout_existing_cell(mcf_147):
+    """cell_slot 147 with the config-byte copy silenced: Absorb 1152 / Float 1080 (57.6 /
+    54.0 V, past the fence) puts 576 in the Absorb cell, where stock leaves the config byte
+    (255) (2026-11-08)."""
+    cell = readout.existing_display_cell(mcf_147, ABSORB_SLOT, 2)
+    assert cell.addr == ABSORB_CELL
+    assert readout.stock_writers(mcf_147, cell) == [ABSORB_CONFIG_STORE, ABSORB_FENCED_STORE]
     project = recipe.Project(
         base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
-        ops=[recipe.OpSpec(id="r", type="add_register_readout",
-                           params={"register": REG, "cell_slot": CHASSIS_VOLTS_SLOT})])
+        ops=[recipe.OpSpec(id="r", type="add_register_readout", params={
+            "register": {"dgn": CHARGER_DGN, "index": ABSORB_VAR}, "add": 1, "shift": 1,
+            "cell_slot": ABSORB_SLOT, "silence": [ABSORB_CONFIG_STORE]})])
     res = recipe.compile_project(project, mcf_147)
     assert res.ok, res.errors
+    # the fenced decode store stays (it fires for an in-range Float, the same scaling); the
+    # other writer left is the op's own routine, appended past stock GuiCode
+    stock_end = max(readout.stock_writers(mcf_147, cell))
+    left = readout.stock_writers(res.data, cell)
+    assert left[0] == ABSORB_FENCED_STORE and all(w > stock_end for w in left[1:]), left
+    for img, want in ((mcf_147, 255), (res.data, 576)):
+        s = _settled(img)
+        host = s._m.canbus.add_peer(_Host())
+        _publish_charger(s, host, 1152, 1080)
+        assert _u16(s, ABSORB_CELL) == want, (img is mcf_147, _u16(s, ABSORB_CELL))
 
 
 ENUM = {"parent": HOME_ROOT, "x": 560, "y": 420, "w": 180, "h": 30, "font": 16,

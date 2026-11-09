@@ -4432,7 +4432,9 @@ consistent with everything observed and nothing here proves the gate's intent.
 
 **Shipped so the class is not missed again — `src/fireflymcf/decodeguards.py`.** It scans the
 per-tick decoder for stores fenced by a magnitude test and reports the cell, the variables read and
-the fences. Seven sites on 13.6; `Absorb`/`Float` is the only **two-sided** one. The scanning trap
+the fences. Seven sites on 13.6; `Absorb`/`Float` is the only **two-sided** one. *(2026-11-08:
+it is also the only one that skips its store; five substitute a fixed value and one is a scanner
+artefact, `GUICODE.md` Finding 91.)* The scanning trap
 is recorded in the module: a fence belongs to the **block**, not the last field loaded, and the
 first cut reset its guard list on every `[r4,#imm]` load — which, because `Absorb`'s load sits
 between the fence and the store, dropped the fence and reported this very site as unguarded.
