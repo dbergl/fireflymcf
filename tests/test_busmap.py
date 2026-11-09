@@ -28,7 +28,9 @@ def image(name):
 
 
 def _clear():
-    for mod in (busmap, slottrace):
+    # status_map and outputs memoise the status bridge and the captions joined through it, so a
+    # patched trace (an escape) must not leave them cached for a later test
+    for mod in (busmap, slottrace, status_map, outputs):
         for v in vars(mod).values():
             if callable(getattr(v, "cache_clear", None)):
                 v.cache_clear()
@@ -138,6 +140,81 @@ def test_ghidra_bridge_dump_reproduced():
             assert not any("r2" in tanknames._writes(i) for i in seg)
             continue
         assert got == want, var
+
+
+def _dd3(data):
+    from fireflymcf import guidata
+    return {v.index for v in guidata.variable_table(data)
+            if v.dgn_low == guidata.DGN_DC_DIMMER_STATUS_3}
+
+
+def test_derived_bridge_equals_the_dump_on_every_status_var():
+    """`status_map.derived_bridge` on 13.6 equals Ghidra's dump cell for cell (read address
+    included) on every `DC_DIMMER_STATUS_3` var it bridges, and bridges no status var the dump
+    does not. The two vars it leaves out are not status vars: 124 (the dump is wrong, above) and
+    42, whose block re-reads its own store and so has a third sink (2026-11-08)."""
+    data = image(B136)
+    dump = status_map.load_bridge("136")
+    got = status_map.derived_bridge(data)
+    dd3 = _dd3(data)
+    assert {v: b for v, b in got.items() if v in dd3} == {v: b for v, b in dump.items() if v in dd3}
+    assert len(set(got) & dd3) == 42
+    assert set(dump) - set(got) == {42, 124} and not set(got) - set(dump)
+    assert not {42, 124} & dd3
+
+
+def test_derived_bridge_on_14_7_bridges_43_status_vars():
+    data = image(B147)
+    got = status_map.derived_bridge(data)
+    assert len(set(got) & _dd3(data)) == 43 == len(got)
+
+
+def test_derived_bridge_refuses_where_the_base_escapes(clean_caches, monkeypatch):
+    real = slottrace.state_reach
+
+    def leaky(data):
+        sr = real(data)
+        return slottrace.StateReach(sr.functions, sr.loads, ((0x240000, "test"),))
+    monkeypatch.setattr(slottrace, "state_reach", leaky)
+    status_map._derived_bridge.cache_clear()
+    try:
+        with pytest.raises(status_map.BridgeUnknown) as ei:
+            status_map.derived_bridge(image(B136))
+    finally:
+        status_map._derived_bridge.cache_clear()
+    assert ei.value.code == "BRIDGE_UNKNOWN" and "0x240000" in str(ei.value)
+
+
+def test_derived_bridge_refuses_where_the_decoder_does_not_locate(clean_caches, monkeypatch):
+    def none(_data):
+        raise tanknames.TankNameError("stubbed: no decoder")
+    monkeypatch.setattr(slottrace, "state_reach", none)
+    status_map._derived_bridge.cache_clear()
+    try:
+        with pytest.raises(status_map.BridgeUnknown):
+            status_map.derived_bridge(image(B147))
+    finally:
+        status_map._derived_bridge.cache_clear()
+
+
+def test_derived_bridge_refuses_two_blocks_naming_different_cells(clean_caches, monkeypatch):
+    """A var with a second clean block to other cells is not guessed between."""
+    data = image(B136)
+    real = slottrace.slot_reads
+    r = next(x for x in real(data, 22) if x.how == "base")
+    late = 0x10000000                  # after every real read: its own block, no boundary
+    fake = slottrace.SlotRead(r.at + late, "base", tuple(
+        slottrace.Sink(s.at + late, s.kind, s.target + 0x100, s.flow, s.width) for s in r.sinks))
+
+    def twice(d, var):
+        return real(d, var) + ((fake,) if var == 22 else ())
+    monkeypatch.setattr(slottrace, "slot_reads", twice)
+    status_map._derived_bridge.cache_clear()
+    try:
+        with pytest.raises(status_map.BridgeUnknown, match="variable 22"):
+            status_map.derived_bridge(data)
+    finally:
+        status_map._derived_bridge.cache_clear()
 
 
 @pytest.mark.parametrize("name", [B136, B1123, B147])
@@ -268,6 +345,35 @@ def test_an_escape_voids_every_negative(clean_caches, monkeypatch):
     monkeypatch.setattr(slottrace, "state_reach", leaky)
     m = busmap.receive_map(image(B136))
     assert not any(e.cls == "write-only" for e in m)
+    assert outputs.status_join_refusal(image(B136)).startswith("BRIDGE_UNKNOWN")
+
+
+def test_an_escape_leaves_no_cached_captions_behind(monkeypatch):
+    """The escape case, then the real trace restored: the status-joined captions are back at
+    their full count (a cached refusal would leave only the command-joined ones)."""
+    data = image(B136)
+    _clear()
+    full = len(outputs._captions(data))
+    real = slottrace.state_reach
+    with monkeypatch.context() as m:
+        m.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
+            real(d).functions, real(d).loads, ((0x240000, "test"),)))
+        _clear()
+        assert len(outputs._captions(data)) < full
+    _clear()
+    assert len(outputs._captions(data)) == full
+    assert outputs.status_join_refusal(data) is None
+
+
+def test_bus_map_says_when_the_status_join_is_unavailable(clean_caches, monkeypatch, capsys):
+    real = slottrace.state_reach
+    monkeypatch.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
+        real(d).functions, real(d).loads, ((0x240000, "test"),)))
+    assert cli.main(["bus-map", str(REPO / B136)]) == 0
+    assert "status join unavailable" in capsys.readouterr().out
+    assert cli.main(["bus-map", "--json", str(REPO / B136)]) == 0
+    assert json.loads(capsys.readouterr().out)["status_join_unavailable"].startswith(
+        "BRIDGE_UNKNOWN")
 
 
 # ------------------------------------------------------------------------------ spot checks

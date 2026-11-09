@@ -129,13 +129,14 @@ def test_the_firmware_set_check_can_fail():
     assert len(_firmware_set_problems({"sv": StrayVerified})) == 2
 
 
-# --- the coded refusals of the locators an op builds on (`donors`, `grammar`) are documented.
-# `recipe._CODED` surfaces a DonorError under its own code and a GrammarError as GRAMMAR, so an
-# op that can reach one must list the code in its `Error codes:`. Which ops reach which codes is
-# derived, not hand-listed: a static call graph over the package (module-alias attribute
-# references, same-module names, `from .m import f`, `self.` methods through same-module bases),
-# from each op class's methods to every function that raises `DonorError("CODE", ...)` or (in
-# `grammar`) `GrammarError`. It over-approximates (a referenced function counts as called);
+# --- the coded refusals of the locators an op builds on are documented. `recipe._CODED` surfaces
+# each of its classes (`DonorError`, `GrammarError`, `CellTableError`, `SramReachError`, ...)
+# under its code, so an op that can reach one must list the code in its `Error codes:`. Which ops
+# reach which codes is derived, not hand-listed: a static call graph over the package
+# (module-alias attribute references, same-module names, `from .m import f`, `self.` methods
+# through same-module bases), from each op class's methods to every function that constructs a
+# `_CODED` class: `CellTableError("CODE", ...)` by its literal first argument, a class with a
+# class-level `code` (`GrammarError`, `SpareRowsUnknown`, ...) by that code. It over-approximates (a referenced function counts as called);
 # `_UNREACHABLE` holds the over-approximations checked by hand.
 
 _UNREACHABLE = {
@@ -186,50 +187,111 @@ def _coded_refusals_by_op() -> dict:
                 todo += [b.id for b in classes[(m, c)].bases if isinstance(b, ast.Name)]
         return out
 
-    graph, raised = {}, {}
+    # Every class `recipe._CODED` surfaces under its code: one with a class-level `code` raises
+    # that code wherever it is constructed; any other takes its code as the first argument,
+    # which must be a literal, or the code could not be read and the site is reported.
+    class_code = {c.__name__: vars(c)["code"] for c in recipe._CODED if "code" in vars(c)}
+    first_arg = {c.__name__ for c in recipe._CODED} - set(class_code)
+    # A reference inside a `try` whose handler catches the class (by its own name or a base's,
+    # `CellTableError` is a `VariableTableNotFound`, a `ValueError`) does not surface the code
+    # through that edge: the handler converts it (e.g. `readout._located` to NO_DISPLAY_CELL)
+    # or falls back. A handler that re-raises (a bare `raise`) catches nothing, and neither does
+    # one that raises the caught error's own code (`except statusbind.BridgeUnknown as err:
+    # raise RecipeError(err.code, ...)`, `add_button`/`wire_button`): the code passes through.
+    # Handlers match in order, so a pass-through handler ahead of a broader one (`except
+    # newbutton.VariantSetterUnknown as err: raise RecipeError(err.code, ...)` then `except
+    # ValueError`) exempts its class from the later one: the mask entry is then
+    # `(caught, passed)`, which catches a class of `caught` that is none of `passed`.
+    is_a = {c.__name__: {k.__name__ for k in c.__mro__} for c in recipe._CODED}
+
+    def masked(klass, mask):
+        bases = is_a[klass]
+        return any(e in bases if isinstance(e, str) else e[0] in bases and not e[1] & bases
+                   for e in mask)
+
+    def passes_code(h):
+        return h.name is not None and any(
+            isinstance(x, ast.Raise) and x.exc is not None and any(
+                isinstance(a, ast.Attribute) and a.attr == "code"
+                and isinstance(a.value, ast.Name) and a.value.id == h.name
+                for a in ast.walk(x.exc))
+            for x in ast.walk(h))
+
+    def caught(handlers):
+        out, passed = set(), set()
+        for h in handlers:
+            ts = (h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]) if h.type else []
+            names_ = {getattr(t, "attr", getattr(t, "id", None)) for t in ts} if ts \
+                else {"BaseException"}
+            if any(isinstance(x, ast.Raise) and x.exc is None for x in ast.walk(h)):
+                continue
+            if passes_code(h):
+                passed |= names_
+                continue
+            out |= {(n, frozenset(passed)) if passed else n for n in names_}
+        return frozenset(out)
+
+    graph, raised, unread = {}, {}, []
     for (m, q), node in funcs.items():
         cls = q.split(".")[0] if "." in q else None
         out, codes = set(), set()
-        for n in ast.walk(node):
+
+        def visit(n, mask, m=m, q=q, cls=cls, out=out, codes=codes):
+            if isinstance(n, ast.Try):
+                inner = mask | caught(n.handlers)
+                for b in n.body:
+                    visit(b, inner)
+                for b in [*n.handlers, *n.orelse, *n.finalbody]:
+                    visit(b, mask)
+                return
             if isinstance(n, ast.Name):
                 if (m, n.id) in funcs:
-                    out.add((m, n.id))
+                    out.add(((m, n.id), mask))
                 if names[m].get(n.id) in funcs:
-                    out.add(names[m][n.id])
+                    out.add((names[m][n.id], mask))
                 if (m, n.id) in classes:
-                    out |= methods(m, n.id)
+                    out |= {(k, mask) for k in methods(m, n.id)}
             elif isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name):
                 v = n.value.id
                 if v in aliases[m]:
                     tm = aliases[m][v]
                     if (tm, n.attr) in funcs:
-                        out.add((tm, n.attr))
+                        out.add(((tm, n.attr), mask))
                     if (tm, n.attr) in classes:
-                        out |= methods(tm, n.attr)
+                        out |= {(k, mask) for k in methods(tm, n.attr)}
                 elif v in ("self", "cls") and cls:
                     hit = [(m, f"{c}.{n.attr}") for c in mro(m, cls)
                            if (m, f"{c}.{n.attr}") in funcs]
-                    out |= set(hit[:1])
-            if (isinstance(n, ast.Call) and n.args and isinstance(n.args[0], ast.Constant)
-                    and getattr(n.func, "attr", getattr(n.func, "id", None)) == "DonorError"):
-                codes.add(n.args[0].value)
-            if m == "grammar" and isinstance(n, ast.Raise) and isinstance(n.exc, ast.Call):
-                if getattr(n.exc.func, "attr", getattr(n.exc.func, "id", None)) == "GrammarError":
-                    codes.add("GRAMMAR")
+                    out |= {(k, mask) for k in hit[:1]}
+            if isinstance(n, ast.Call):
+                fn = getattr(n.func, "attr", getattr(n.func, "id", None))
+                if fn in class_code:
+                    codes.add((class_code[fn], fn, mask))
+                elif fn in first_arg:
+                    if n.args and isinstance(n.args[0], ast.Constant):
+                        codes.add((n.args[0].value, fn, mask))
+                    else:
+                        unread.append(f"{m}.{q}:{n.lineno}")
+            for c in ast.iter_child_nodes(n):
+                visit(c, mask)
+
+        visit(node, frozenset())
         graph[(m, q)], raised[(m, q)] = out, codes
 
     result = {}
     for name, op_cls in recipe.REGISTRY.items():
         m = Path(inspect.getsourcefile(op_cls)).stem
-        seen, todo = set(), list(methods(m, op_cls.__name__))
+        seen, todo = set(), [(k, frozenset()) for k in methods(m, op_cls.__name__)]
         while todo:
-            k = todo.pop()
-            if k not in seen:
-                seen.add(k)
-                todo += graph.get(k, ())
-        codes = set().union(*(raised[k] for k in seen))
+            k, mask = todo.pop()
+            if (k, mask) not in seen:
+                seen.add((k, mask))
+                todo += [(c, mask | cm) for c, cm in graph.get(k, ())]
+        codes = {code for k, mask in seen for code, klass, site in raised[k]
+                 if not masked(klass, mask | site)}
         if codes:
             result[name] = codes
+    assert not unread, f"coded refusals whose code is not a literal: {unread}"
     return result
 
 
@@ -241,7 +303,13 @@ def test_coded_refusals_are_documented():
                         ("add_rvc_button", {"GRAMMAR", "NO_TEMPLATE", "MODE7_INDEX"}),
                         ("set_record_color", {"MODE7_INDEX"}),
                         ("add_glyph_button", {"NO_DONOR"}),
-                        ("add_register_readout", {"NO_DONOR"})):
+                        ("add_register_readout", {"NO_DONOR", "CELL_TABLE_NO_BOUND",
+                                                  "CELL_TABLE_BOUND_FORM", "RENDER_STATE_BASES",
+                                                  "DECODER_RANGE_UNKNOWN"}),
+                        ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN", "LCD_GRAMMAR"}),
+                        ("follow_register", {"SPARE_ROWS_UNKNOWN"}),
+                        ("add_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"}),
+                        ("wire_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"})):
         assert codes <= reach.get(name, set()), (name, reach.get(name))
     missing = {name: sorted(c for c in codes - {c for c, _ in
                                                   ops_doc._error_codes(recipe.REGISTRY[name])}
@@ -250,3 +318,46 @@ def test_coded_refusals_are_documented():
     assert not {k: v for k, v in missing.items() if v}, missing
     for name, code in _UNREACHABLE:
         assert code in reach.get(name, set()), f"stale _UNREACHABLE entry {(name, code)}"
+
+
+def test_a_line_may_name_several_codes_that_share_one_meaning():
+    class Fake(recipe.Op):
+        """Fake.
+
+        Error codes:
+          ONE — its own
+          TWO, THREE — shared
+            meaning
+          FOUR — last
+        """
+    assert ops_doc._error_codes(Fake) == [("ONE", "its own"), ("TWO", "shared meaning"),
+                                          ("THREE", "shared meaning"), ("FOUR", "last")]
+    assert ops_doc._grouped(ops_doc._error_codes(Fake)) == [
+        (["ONE"], "its own"), (["TWO", "THREE"], "shared meaning"), (["FOUR"], "last")]
+
+
+def _gate_codes_in_recipe() -> set:
+    """Every code a whole-image gate in `recipe.py` refuses with: the literal second argument of
+    each `_gate(...)` and first argument of each `GateError(...)`. A non-literal code is the
+    `_CODED` class's own (`e.code`); `test_every_gate_code_is_documented` names those."""
+    import ast
+    tree = ast.parse(Path(recipe.__file__).read_text())
+    out = set()
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+            arg = {"_gate": 1, "GateError": 0}.get(n.func.id)
+            if arg is not None and len(n.args) > arg and isinstance(n.args[arg], ast.Constant):
+                out.add(n.args[arg].value)
+    return out
+
+
+def test_every_gate_code_is_documented():
+    from fireflymcf import newbutton
+    found = _gate_codes_in_recipe()
+    assert {"STRUCTURAL_GATE", "CAPABILITY_GATE", "NOT_SEALED", "HOOK_REFUSED"} <= found
+    # the reuse gate refuses with the locator's own code where the driven groups are unknown
+    found.add(newbutton.VariantSetterUnknown.code)
+    assert found <= set(ops_doc.GATE_CODES), found - set(ops_doc.GATE_CODES)
+    doc = ops_doc.render()
+    for code in ops_doc.GATE_CODES:
+        assert "`%s`" % code in doc, code

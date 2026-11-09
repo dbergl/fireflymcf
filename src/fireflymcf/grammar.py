@@ -68,6 +68,35 @@ both have exactly one twin, else False with the reason in `proof`. It never make
 On 14.7 they are not twins; `proof` names the first differing instruction. `donors` uses the
 flag for its witness gate.
 
+**The LCD firmware's group handling** (`prove_lcd`, 2026-11-08). The same comparison runs over
+the image's LCD Firmware section (`section(data, "lcd")`, base `0x210000`) against 13.6's LCD
+functions (`data/lcdgroups136.json`, the generator's exact extents from the Ghidra project
+`lcd136`): the group-table loader `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`,
+GuiCode's ungated setter `FUN_0021B678` (host API `+0x04`, `lcdgroups`), the sender
+`FUN_0021B8B4`, `FUN_0021BAB4`, `FUN_0021AB88`, and `FUN_0021A664`, which holds the gated
+setter's only call (`0x21B002`, the record-field variant path). FUN_0021A664's Ghidra body is
+two ranges with FUN_0021AB88 between them: the first ends in a tail call `b.w #0x21aea4`, and the
+second (`FUN_0021A664_tail`, `0x21AEA4`-`0x21B105`) opens with its own `push.w`. Each range is
+compared as a whole function.
+- A pool word inside the LCD section (code or rodata) is in the class `LCD flash`, mapped one to
+  one like GuiCode's.
+- `FUN_0021B678` starts with a literal `ldr`, not a `push`, so its candidates are every halfword
+  that decodes to that instruction (988 in 13.6's LCD).
+- A call or code pointer from one of them to another must land on that one's located twin:
+  `FUN_0021BAB4`'s call to the sender (`0x21BB9A`), FUN_0021A664's to `FUN_0021AB88`
+  (`0x21A67A`) and its tail call (`0x21A6B2`), and the tail's call to the gated setter
+  (`0x21B002`) all do. The reverse holds too: a call or code pointer that lands on a located
+  twin must be a call to that same function in 13.6, so a helper outside the set swapped for
+  one of them refuses.
+- On 11.23 and 14.7, which carry one LCD, every one is a twin at 13.6's address. The only shift
+  inside them is rodata: two LCD-flash pool words, +4 each. The 30 callee bindings are all +0.
+  The research of 2026-11-08 also found `bl` displacements grown by 2 across the region
+  `0x21A000`-`0x21E124`, but every such site (`0x21B1DC`, `0x21B218`, `0x21B288`, `0x21C23C`,
+  `0x21D290`, `0x21D3C0`) lies outside these bodies.
+- A container without its own LCD Firmware section refuses, because the proof is of the LCD
+  the image carries.
+- Refusals are `LcdGrammarError`, code `LCD_GRAMMAR`.
+
 **What is not proven.** A callee's own code: the mapping proves only that the twin calls
 corresponding helpers in the same pattern. Fingerprinted code is compared, not executed.
 
@@ -84,11 +113,20 @@ import struct
 from collections import Counter
 from dataclasses import dataclass
 from importlib import resources
-from typing import Iterator
+from types import MappingProxyType
+from typing import Iterator, Mapping
 
 from . import memo, theme
 
 FINGERPRINT_RESOURCE = "data/grammar136.json"
+LCD_FINGERPRINT_RESOURCE = "data/lcdgroups136.json"
+# The LCD firmware's group handling `prove_lcd` compares, by their 13.6 Ghidra (`lcd136`) names.
+# `FUN_0021A664_tail` is the second range of FUN_0021A664's Ghidra body (`0x21AEA4`-`0x21B105`,
+# reached by the first range's tail call); it holds the gated setter's only call, `0x21B002`.
+LCD_FUNCTIONS = ("FUN_0021B420", "FUN_0021B5E8", "FUN_0021B678", "FUN_0021B8B4",
+                 "FUN_0021BAB4", "FUN_0021AB88", "FUN_0021A664", "FUN_0021A664_tail")
+# The pool-address class of a value inside the LCD Firmware section (its code and rodata).
+LCD_FLASH = "LCD flash"
 # The text drawers: fingerprinted and compared like the decoder, reported in
 # `GrammarProof.text_drawers_twin`, never refused on.
 TEXT_DRAWERS = ("text11", "text8")
@@ -97,6 +135,23 @@ TEXT_DRAWERS = ("text11", "text8")
 class GrammarError(ValueError):
     """An image's record grammar is not proven to be 13.6's."""
     code = "GRAMMAR"
+
+
+class LcdGrammarError(ValueError):
+    """An image's LCD firmware group handling is not proven to be 13.6's (`prove_lcd`): one of
+    the `LCD_FUNCTIONS` has no twin or several, a call between them does not land on the located
+    twin, or the container carries no LCD Firmware section."""
+    code = "LCD_GRAMMAR"
+
+
+@dataclass(frozen=True)
+class LcdGrammarProof:
+    # 13.6 Ghidra name (`lcd136`) -> this image's twin address, for each of `LCD_FUNCTIONS`
+    functions: Mapping[str, int]
+    # address class (`SRAM`, `LCD flash`, ...) -> the shifts its pool values show, over them all
+    pool_shifts: Mapping[str, frozenset[int]]
+    callee_shifts: frozenset[int]       # image callee - 13.6 callee, over every call in them
+    proof: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -333,13 +388,38 @@ def reaches(enc_items: list[str], next_segment: int | None, exits: list[int]) ->
     return out
 
 
-def section(data: bytes) -> tuple[bytes, int]:
-    """The GuiCode bytes and runtime base, or GrammarError."""
+SECTIONS = ("guicode", "lcd")
+
+
+def section(data: bytes, which: str = "guicode") -> tuple[bytes, int]:
+    """The bytes and runtime base of the section `which` selects: `guicode` (GrammarError when
+    absent) or `lcd`, the LCD Firmware section at `raminit.LCD_BASE` (`0x210000`;
+    LcdGrammarError when the container carries none)."""
+    if which == "lcd":
+        return _lcd_section(data)
+    if which != "guicode":
+        raise ValueError(f"section {which!r} is not one of {SECTIONS}")
+    return _guicode_section(data)
+
+
+def _guicode_section(data: bytes) -> tuple[bytes, int]:
     try:
         sec = theme.guicode_section(data)
     except ValueError as e:
         raise GrammarError(f"GRAMMAR: {e}") from e
     return bytes(data[sec.offset:sec.offset + sec.length]), theme.guicode_base(sec)
+
+
+def _lcd_section(data: bytes) -> tuple[bytes, int]:
+    from . import raminit
+    try:
+        body = raminit._lcd_body(data)
+    except (ValueError, IndexError, struct.error) as e:
+        raise LcdGrammarError(
+            f"LCD_GRAMMAR: this container carries no LCD Firmware section ({e}), so the LCD's "
+            f"group handling cannot be proven: the proof is of the LCD the image carries"
+        ) from e
+    return bytes(body), raminit.LCD_BASE
 
 
 # ---------------------------------------------------------------------------------------------
@@ -363,10 +443,14 @@ def fingerprints() -> dict:
 
 
 def _prologue_candidates(code: bytes, base: int, first: str) -> list[int]:
+    """Every halfword whose instruction abstracts to `first`. A `push` first item (every
+    fingerprint but the LCD's `FUN_0021B678`, which starts `ldr r3, [pc, #]`) pre-filters on the
+    push encodings; any other decodes every halfword."""
+    push = abstract(first).startswith("push")
     out = []
     for off in range(0, len(code) - 4, 2):
         hw = code[off] | code[off + 1] << 8
-        if (hw & 0xFE00) != 0xB400 and hw != 0xE92D:
+        if push and (hw & 0xFE00) != 0xB400 and hw != 0xE92D:
             continue
         ins = _instruction(code, base, base + off)
         if ins is not None and abstract(ins.text) == abstract(first):
@@ -374,9 +458,11 @@ def _prologue_candidates(code: bytes, base: int, first: str) -> list[int]:
     return out
 
 
-def _value_class(v: int, region: tuple[int, int]) -> str:
+def _value_class(v: int, region: tuple[int, int], label: str = "GuiCode") -> str:
+    """The address class of pool value `v`: `label` inside the swept section (`GuiCode`, or
+    `LCD flash` for the LCD firmware), SRAM, GuiData, else a constant."""
     if region[0] <= (v & ~1) < region[1]:
-        return "GuiCode"
+        return label
     if v >> 28 == 0x2:
         return "SRAM"
     if v >> 28 == 0x9:
@@ -388,11 +474,13 @@ class _Maps:
     """One consistent injective mapping per kind (registers, callees, each address class),
     13.6 -> image, over one scope (a function, or a renderer segment)."""
 
-    def __init__(self, ref_region: tuple[int, int], img_region: tuple[int, int]):
+    def __init__(self, ref_region: tuple[int, int], img_region: tuple[int, int],
+                 region_class: str = "GuiCode"):
         self.fwd: dict[tuple[str, object], object] = {}
         self.inv: dict[tuple[str, object], object] = {}
         self.where: dict[tuple[str, object], int] = {}    # where each binding was first made
         self.ref_region, self.img_region = ref_region, img_region
+        self.region_class = region_class
 
     def bind(self, kind: str, a, b, at: int) -> str | None:
         f, r = self.fwd.get((kind, a)), self.inv.get((kind, b))
@@ -408,7 +496,8 @@ class _Maps:
         return None
 
     def bind_value(self, a: int, b: int, at: int) -> str | None:
-        ca, cb = _value_class(a, self.ref_region), _value_class(b, self.img_region)
+        ca = _value_class(a, self.ref_region, self.region_class)
+        cb = _value_class(b, self.img_region, self.region_class)
         if ca == "constant":
             return None if a == b else f"constant {a:#x} is {b:#x} here"
         if ca != cb:
@@ -525,9 +614,12 @@ def _shift_lines(name: str, maps: list[_Maps]) -> list[str]:
     return out
 
 
-def _whole(code: bytes, base: int, name: str, fn: dict, regions: tuple
-           ) -> tuple[int, dict[str, tuple[int, int, list[int]]], list[str]]:
-    """Locate the one twin of a whole-function fingerprint."""
+def _whole(code: bytes, base: int, name: str, fn: dict, regions: tuple, *,
+           where: str = "GuiCode", region_class: str = "GuiCode", label: str | None = None
+           ) -> tuple[int, dict[str, tuple[int, int, list[int]]], list[str], _Maps]:
+    """Locate the one twin of a whole-function fingerprint in the section `code` (`where` names
+    it in messages, `region_class` its pool-address class). Returns (address, bounds, proof
+    lines, the twin's mappings)."""
     want = fn["segments"][0]["items"]
     bidx = _bound_index(fn).get(0, {})
     cands = _prologue_candidates(code, base, text_part(want[0]))
@@ -535,20 +627,20 @@ def _whole(code: bytes, base: int, name: str, fn: dict, regions: tuple
     for c in cands:
         items = _take(sweep(code, base, c), len(want))
         seen: dict = {}
-        maps = _Maps(*regions)
+        maps = _Maps(*regions, region_class)
         d = _compare(want, items, encode([items], code, base)[0], maps, bidx, seen)
         if d is None:
             twins.append((c, seen, maps))
         elif best is None or d.matched > best[1].matched:
             best = (c, d)
-    label = f"13.6's {name} {fn['ghidra']}"
+    label = label or f"13.6's {name} {fn['ghidra']}"
     if len(twins) != 1:
         if twins:
             raise GrammarError(f"GRAMMAR: {len(twins)} twins of {label} "
                                f"({', '.join(f'{t[0]:#x}' for t in twins)}); refusing to choose")
         if best is None:
             raise GrammarError(f"GRAMMAR: no twin of {label}: no prologue `{text_part(want[0])}` "
-                               f"in this GuiCode")
+                               f"in this {where}")
         c, d = best
         raise GrammarError(f"GRAMMAR: no twin of {label} ({len(want)} items): of "
                            f"{len(cands)} prologue candidates the closest, {c:#x}, matches "
@@ -564,7 +656,7 @@ def _whole(code: bytes, base: int, name: str, fn: dict, regions: tuple
         proof.append(f"{name} bound {bname}: `cmp.w #{want_value:#x}` on 13.6, `#{value:#x}` "
                      f"here, one value at {len(sites)} sites "
                      f"({', '.join(f'{s:#x}' for s in sites[:3])}, ...)")
-    return addr, bounds, proof
+    return addr, bounds, proof, maps
 
 
 def default_segment(fn: dict) -> int | None:
@@ -717,16 +809,16 @@ def _copy(p: GrammarProof) -> GrammarProof:
 def _prove(data: bytes, fp_text: str, text_drawers: tuple) -> GrammarProof:
     whole = json.loads(fp_text)
     fp = whole["functions"]
-    code, base = section(data)
+    code, base = _guicode_section(data)
     regions = (tuple(whole["guicode_region"]), (base, base + len(code)))
-    dec, dec_bounds, proof = _whole(code, base, "decoder", fp["decoder"], regions)
-    lay, lay_bounds, p2 = _whole(code, base, "layout", fp["layout"], regions)
+    dec, dec_bounds, proof, _m = _whole(code, base, "decoder", fp["decoder"], regions)
+    lay, lay_bounds, p2, _m = _whole(code, base, "layout", fp["layout"], regions)
     ren, wtypes, defaults, p3 = _renderer(code, base, fp["renderer"], regions)
     bounds = {n: (a, b) for n, (a, b, _s) in {**dec_bounds, **lay_bounds}.items() if a != b}
     texts, p4 = True, []
     for name in text_drawers:
         try:
-            _addr, _b, lines = _whole(code, base, name, fp[name], regions)
+            _addr, _b, lines, _m = _whole(code, base, name, fp[name], regions)
             p4 += lines
         except GrammarError as e:
             texts = False
@@ -743,3 +835,98 @@ def prove(data: bytes) -> GrammarProof:
     except ImportError as e:                                    # pragma: no cover
         raise theme.CapstoneUnavailable(str(e)) from e
     return _prove(data, _fingerprint_text(), TEXT_DRAWERS)
+
+
+# ---------------------------------------------------------------------------------------------
+# The LCD firmware's group handling
+# ---------------------------------------------------------------------------------------------
+
+_LCD_FP_TEXT: str | None = None
+
+
+def _lcd_fingerprint_text() -> str:
+    global _LCD_FP_TEXT
+    if _LCD_FP_TEXT is None:
+        _LCD_FP_TEXT = resources.files("fireflymcf").joinpath(
+            LCD_FINGERPRINT_RESOURCE).read_text(encoding="utf-8")
+    return _LCD_FP_TEXT
+
+
+def lcd_fingerprints() -> dict:
+    """The shipped LCD fingerprints (a fresh parse)."""
+    return json.loads(_lcd_fingerprint_text())
+
+
+@memo.content_cached(copy=None)
+def _prove_lcd(data: bytes, fp_text: str, names: tuple) -> LcdGrammarProof:
+    whole = json.loads(fp_text)
+    fp = whole["functions"]
+    missing = [n for n in names if n not in fp]
+    if missing:                                                 # pragma: no cover - packaging
+        raise LcdGrammarError(f"LCD_GRAMMAR: no shipped fingerprint for {missing}")
+    code, base = _lcd_section(data)
+    regions = (tuple(whole["lcd_region"]), (base, base + len(code)))
+    found: dict[str, int] = {}
+    maps: dict[str, _Maps] = {}
+    proof: list[str] = []
+    for name in names:
+        fn = fp[name]
+        try:
+            addr, _b, lines, m = _whole(code, base, name, fn, regions, where="LCD firmware",
+                                        region_class=LCD_FLASH, label=f"13.6's LCD {name}")
+        except GrammarError as e:
+            raise LcdGrammarError("LCD_GRAMMAR: " + str(e).removeprefix("GRAMMAR: ")) from e
+        found[name], maps[name] = addr, m
+        proof += lines
+    # A call (or a code pointer) from one of them to another must land on that one's twin:
+    # the mapping alone proves only that the image calls *some* helper consistently.
+    # And the reverse: a call (or code pointer) that lands on a located twin must be a call to
+    # that function in 13.6, or a helper outside the set has been swapped for one of them.
+    entries = {fp[n]["entry"]: n for n in names}
+    located = {addr: n for n, addr in found.items()}
+    for name, m in maps.items():
+        for (kind, a), b in m.fwd.items():
+            if kind not in ("callee", f"{LCD_FLASH} value"):
+                continue
+            twin = located.get(b & ~1)
+            if twin is not None and (a & ~1) != fp[twin]["entry"]:
+                raise LcdGrammarError(
+                    f"LCD_GRAMMAR: this image's {name} reaches the located twin of {twin} "
+                    f"({b & ~1:#x}) at {m.where[(kind, a)]:#x}, where 13.6's reaches "
+                    f"{a & ~1:#x}, not {twin}")
+            callee = entries.get(a & ~1)
+            if callee is not None and (b & ~1) != found[callee]:
+                raise LcdGrammarError(
+                    f"LCD_GRAMMAR: 13.6's LCD {name} reaches {callee} ({a & ~1:#x}) at "
+                    f"{m.where[(kind, a)]:#x}, but this image's twin reaches {b & ~1:#x}, not "
+                    f"the located twin {found[callee]:#x}")
+            if callee is not None:
+                proof.append(f"{name}: its reference to {callee} at {m.where[(kind, a)]:#x} "
+                             f"lands on the located twin {found[callee]:#x}")
+    pools: dict[str, set[int]] = {}
+    callees: set[int] = set()
+    for m in maps.values():
+        for cls, c in m.shifts().items():
+            pools.setdefault(cls, set()).update(c)
+        callees |= {b - a for (kind, a), b in m.fwd.items() if kind == "callee"}
+    ncall = sum(1 for m in maps.values() for (kind, _a) in m.fwd if kind == "callee")
+    proof.append(f"LCD: {ncall} callee bindings over the LCD functions, shifted "
+                 + (", ".join(f"{d:+#x}" for d in sorted(callees)) or "none"))
+    return LcdGrammarProof(MappingProxyType(found),
+                           MappingProxyType({k: frozenset(v) for k, v in pools.items()}),
+                           frozenset(callees), tuple(proof))
+
+
+def prove_lcd(data: bytes) -> LcdGrammarProof:
+    """Twins of 13.6's LCD group handling (`LCD_FUNCTIONS`: the group-table loader
+    `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`, GuiCode's ungated setter
+    `FUN_0021B678`, the sender `FUN_0021B8B4`, `FUN_0021BAB4`/`FUN_0021AB88`, and both ranges of
+    `FUN_0021A664`, the gated setter's caller) in the image's
+    LCD Firmware section, compared as `prove` compares GuiCode (module docstring), with the
+    pool-value shifts per address class and the callee shifts reported. `LcdGrammarError`
+    (code `LCD_GRAMMAR`) otherwise. Memoised on content; the proof is immutable."""
+    try:
+        import capstone  # noqa: F401 -- before the cache, so a bare install fails the same way
+    except ImportError as e:                                    # pragma: no cover
+        raise theme.CapstoneUnavailable(str(e)) from e
+    return _prove_lcd(data, _lcd_fingerprint_text(), LCD_FUNCTIONS)

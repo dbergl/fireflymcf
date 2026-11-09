@@ -649,6 +649,17 @@ def append_row(data: bytes, parent_obj: int, donor_switch_obj: int, donor_switch
 
 
 # ======================================================================================
+def stepper_group_pool(data: bytes) -> list[int]:
+    """The slots `build_config_stepper` takes its two groups from, in order:
+    `newbutton.assignable_groups` (free, never GuiCode-driven) minus `newbutton.reserved_groups`
+    (the located inverter/charger templates). It used to be `free_group_slots`, which offers
+    14.7's driven group 0 first and could reach 13.6's reserved 68/69; 13.6's first two stay 15
+    and 36 (2026-11-08). Refuses `VariantSetterUnknown` / `ReservedGroupUnknown` rather than
+    offer a group either might be."""
+    reserved = newbutton.reserved_groups(data)
+    return [g for g in newbutton.assignable_groups(data) if g not in reserved]
+
+
 # build_config_stepper -- clone the stock 0x0E +/-300 arrow groups (103/104) onto any
 # selector with a +/-step delta, reusing `_grow_bindings`.
 # ======================================================================================
@@ -778,7 +789,7 @@ def build_config_stepper(data: bytes, selector: int, step: int) -> ConfigStepper
         _retarget_arrow(minus_donor[2], selector, None),
     ]
 
-    free = newbutton.free_group_slots(data)
+    free = stepper_group_pool(data)
     if len(free) < 2:
         raise OptionRowError(
             f"need 2 free group slots for a stepper, this image has {len(free)}: {free}")

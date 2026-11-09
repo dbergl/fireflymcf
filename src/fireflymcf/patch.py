@@ -474,9 +474,6 @@ def find_button_box(data: bytes, obj_index: int, role: str = "fillA") -> records
     return chosen[0]
 
 
-# The only build with a committed GuiCode bridge dump (`status_map.load_bridge`): the map from
-# a status variable to the cells its block writes. The indicator retarget needs it.
-BRIDGE_DUMP_BUILD = "section-checksum:Lyra 13v6 GuiCode"
 
 
 def indicator_sites(data: bytes, obj: int,
@@ -782,14 +779,17 @@ class McfPatcher:
         """
         from . import celltables, status_map, statusbind      # statusbind imports this module
         data = self._original
-        if not any(f.label == BRIDGE_DUMP_BUILD for f in checksum_fields(data)):
+        try:
+            rows = status_map.backbone(data)
+            pins = statusbind.pin_bindings(data)
+        except status_map.BridgeUnknown as err:
             raise PatchError(
-                "the GuiCode bridge dump that names a status variable's cells is 13.6's alone "
-                "(src/fireflymcf/data/slot_bridge_136.txt) and this image is another build, "
-                "so its indicator cells cannot be named. Pass move_display_list=True to move "
-                "the status variable instead, or move_status=False to move the commands only")
+                f"the status bridge that names a status variable's cells does not derive on "
+                f"this image ({err}), so its indicator cells cannot be named. Pass "
+                f"move_display_list=True to move the status variable instead, or "
+                f"move_status=False to move the commands only") from err
         old: dict[int, str] = {}
-        for row in status_map.backbone(data):
+        for row in rows:
             if row.instance == was and row.bridged:
                 old[row.colour_cell] = "colour"
                 old[row.bool_cell] = "bool"
@@ -801,7 +801,7 @@ class McfPatcher:
                 f"status cells, so it does not follow its command channel in this file and "
                 f"there is nothing to retarget; pass move_status=False to move the commands "
                 f"only")
-        new = statusbind.pin_bindings(data).get(channel)
+        new = pins.get(channel)
         if new is None or not new.bridged:
             raise PatchError(
                 f"channel {channel} has no GuiCode bridge block (or no status variable watches "

@@ -326,7 +326,14 @@ def fresh_sram(data: bytes, nbytes: int, *,
     The scan sees only what the image references, so two allocations made before the routine
     that uses them is installed must pass the first in `taken` (`list(range(a, a + n))`). Once
     the routine is installed, its pool word makes the cell referenced and later calls avoid it.
-    Power-on contents are garbage (the C runtime initialises SRAM only up to 0x2000AD98)."""
+    Power-on contents are garbage (the C runtime initialises SRAM only up to 0x2000AD98).
+
+    Refuses NO_SRAM when `nbytes` is not 1..256 or no free run fits it. Where the SRAM it
+    allocates from does not prove out, `sramreach` refuses with its own code, which the build
+    reports as the op's: RENDER_STATE_BASES (not exactly one literal SRAM base is addressed
+    through `movw` offsets, the render state), CELL_AREA_NO_CEILING (no register-indexed base
+    above the render state bounds the cell area) or CELL_OUTSIDE_AREA (a display-cell table row
+    names SRAM outside the area). On 14.7 it allocates (2026-11-08); it no longer refuses there."""
     if not isinstance(nbytes, int) or not 1 <= nbytes <= 0x100:
         raise RoutineKitError("NO_SRAM", f"nbytes {nbytes!r} is not in 1..256")
     avoid = set(taken)

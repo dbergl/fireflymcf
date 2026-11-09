@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Regenerate `src/fireflymcf/data/grammar136.json`, the fingerprints `grammar.prove` searches
-for, from 13.6 stock.
+"""Regenerate `src/fireflymcf/data/grammar136.json` and `src/fireflymcf/data/lcdgroups136.json`,
+the fingerprints `grammar.prove` and `grammar.prove_lcd` search for, from 13.6 stock.
 
     python scripts/gen_grammar_fingerprints.py [firefly-13.6/mcf.bin]
 
@@ -38,6 +38,15 @@ mappings). Code targets hold their position, or a callee's 13.6 address. `guicod
 whole functions, like the decoder; `grammar.prove` reports whether both have a twin
 (`text_drawers_twin`) and never refuses on them.
 
+**The LCD group handling** (`build_lcd`, `lcdgroups136.json`): whole functions of 13.6's LCD (seven, FUN_0021A664 as its two body ranges)
+Firmware section (base `0x210000`), extents from the research repository's `lcd136` project,
+queried 2026-11-08 the same way on a copy of the project (`LCD_GHIDRA_BODIES`). Ghidra defines no
+function at `0x21B678`: it is reached only through the host-API table (its one reference is the
+data reference from `0x21C196`). Its extent is the run of instructions Ghidra disassembled there,
+`0x21B678`-`0x21B689` (`listing.getInstructionAt` from the entry: eight instructions ending
+`bx lr`, then the pad and the pool at `0x21B68C`). `lcd_region` is 13.6's LCD span, used to
+classify LCD-flash pointers (code and rodata).
+
 **Bounds.** `BOUNDS` names the `cmp.w R, #imm` sites whose immediate may differ: the decoder's
 `mode7_index`, every `cmp.w R, #0x298` in it, 13 sites (`BOUND_SITES`).
 """
@@ -53,6 +62,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from fireflymcf import firmware, grammar  # noqa: E402
 
 OUT = ROOT / "src" / "fireflymcf" / "data" / "grammar136.json"
+LCD_OUT = ROOT / "src" / "fireflymcf" / "data" / "lcdgroups136.json"
 
 # Ghidra `guicode136` function bodies, inclusive (min, max) ranges, queried 2026-11-08.
 GHIDRA_BODIES = {
@@ -70,6 +80,22 @@ GHIDRA_BODIES = {
     # `GrammarProof.text_drawers_twin`, never a refusal.
     "text11": ("FUN_002559A0", 0x2559A0, [(0x2559A0, 0x255C55), (0x255C5C, 0x255E8B)]),
     "text8": ("FUN_002557C0", 0x2557C0, [(0x2557C0, 0x25599B)]),
+}
+# Ghidra `lcd136` bodies, inclusive ranges, queried 2026-11-08 (module docstring). FUN_0021B678
+# has no Ghidra function; its range is Ghidra's disassembled instruction run from the entry.
+LCD_GHIDRA_BODIES = {
+    "FUN_0021B420": [(0x21B420, 0x21B5D5)],
+    "FUN_0021B5E8": [(0x21B5E8, 0x21B66F)],
+    "FUN_0021B678": [(0x21B678, 0x21B689)],
+    "FUN_0021B8B4": [(0x21B8B4, 0x21B95F), (0x21B968, 0x21BA27), (0x21BA30, 0x21BAA9)],
+    "FUN_0021BAB4": [(0x21BAB4, 0x21BC45), (0x21BC4E, 0x21BDCD), (0x21BDDC, 0x21BDF5)],
+    "FUN_0021AB88": [(0x21AB88, 0x21AE8F)],
+    # FUN_0021A664's body is two ranges, (0x21A664, 0x21A6B5) and (0x21AEA4, 0x21B105), with
+    # FUN_0021AB88 between them: its first range ends in a tail call `b.w #0x21aea4`, and the
+    # second range opens with its own `push.w`. Each range is fingerprinted as its own whole
+    # function; `prove_lcd` requires the tail call to land on the second range's twin.
+    "FUN_0021A664": [(0x21A664, 0x21A6B5)],
+    "FUN_0021A664_tail": [(0x21AEA4, 0x21B105)],
 }
 BOUNDS = {"decoder": {"mode7_index": "cmp.w R, #0x298"}}
 BOUND_SITES = {"mode7_index": 13}
@@ -160,12 +186,37 @@ def build(data: bytes) -> dict:
             "guicode_region": [base, base + len(code)], "functions": functions}
 
 
+def build_lcd(data: bytes) -> dict:
+    """The LCD group-handling fingerprints, from 13.6 stock's LCD Firmware section."""
+    if firmware.identify(data) != "13.6":
+        _fail("the fingerprints derive from 13.6 stock; this image is "
+              f"{firmware.identify(data) or firmware.describe(data)}")
+    if tuple(LCD_GHIDRA_BODIES) != grammar.LCD_FUNCTIONS:
+        _fail("LCD_GHIDRA_BODIES does not list grammar.LCD_FUNCTIONS in order")
+    code, base = grammar.section(data, "lcd")
+    functions = {}
+    for name, ranges in LCD_GHIDRA_BODIES.items():
+        entry = ranges[0][0]
+        ghidra = name.removesuffix("_tail")
+        if (entry != int(ghidra[4:], 16)) != name.endswith("_tail"):
+            _fail(f"{name}: its range starts at {entry:#x}")
+        end = max(hi for _lo, hi in ranges) + 1
+        items = list(grammar.sweep(code, base, entry, end=end, data={}))
+        _check_against_ghidra(name, items, ranges)
+        enc = grammar.encode([items], code, base)
+        functions[name] = {"ghidra": ghidra, "entry": entry, "end": end,
+                           "segments": [_segment(entry, [], items, enc[0])]}
+    return {"_generated_by": "scripts/gen_grammar_fingerprints.py from 13.6 stock; do not edit",
+            "lcd_region": [base, base + len(code)], "functions": functions}
+
+
 def main(argv: list[str]) -> int:
     path = Path(argv[1]) if len(argv) > 1 else ROOT / "firefly-13.6" / "mcf.bin"
-    fp = build(path.read_bytes())
-    OUT.write_text(json.dumps(fp, indent=1) + "\n", encoding="utf-8")
-    n = sum(len(s["items"]) for f in fp["functions"].values() for s in f["segments"])
-    print(f"wrote {OUT.relative_to(ROOT)}: {n} items")
+    data = path.read_bytes()
+    for out, fp in ((OUT, build(data)), (LCD_OUT, build_lcd(data))):
+        out.write_text(json.dumps(fp, indent=1) + "\n", encoding="utf-8")
+        n = sum(len(s["items"]) for f in fp["functions"].values() for s in f["segments"])
+        print(f"wrote {out.relative_to(ROOT)}: {n} items")
     return 0
 
 

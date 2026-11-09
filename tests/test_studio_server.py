@@ -1369,3 +1369,19 @@ def test_compile_render_export_round_trip_on_other_builds(other_client):
     ex = other_client.post("/api/projects/t/export")
     assert ex.status_code == 200
     assert other_client.get("/api/projects/t/export/file").status_code == 200
+
+
+def test_pins_reference_refuses_with_the_bridge_code(client, monkeypatch, request):
+    """Where the status bridge does not derive, the pins reference is a coded refusal (422,
+    BRIDGE_UNKNOWN), not an internal error."""
+    from fireflymcf import status_map
+    from studio.server import reference
+
+    def unknown(_data):
+        raise status_map.BridgeUnknown("BRIDGE_UNKNOWN: stubbed")
+    reference._stock_facts.cache_clear()
+    request.addfinalizer(reference._stock_facts.cache_clear)
+    monkeypatch.setattr(status_map, "derived_bridge", unknown)
+    r = client.get("/api/reference/pins")
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "BRIDGE_UNKNOWN"

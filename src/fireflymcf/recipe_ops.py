@@ -32,6 +32,7 @@ from fireflymcf import bitcombine
 from fireflymcf import cardlayout
 from fireflymcf import cardreadouts
 from fireflymcf import cornermark
+from fireflymcf import decodeguards
 from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
@@ -98,6 +99,12 @@ class RenameLabel(Op):
       LABEL_TOO_LONG — `new` does not fit the field and `allow_grow` was not set;
                        offers=["grow", "shorten"]
       GROW_REFUSED — `labels.grow_label` refused the relocating grow
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Returns sealed image with the label field updated (and, on a grow, the image
     relocated) and edits logged to context.
@@ -1205,9 +1212,18 @@ class RemapChannel(Op):
       REMAP_REFUSED — any other set_channel check (I5-I7) refused the remap, or the
                       default indicator retarget did: the control's indicator names none
                       of its own pin's cells (it does not follow its command channel),
-                      the destination has no GuiCode bridge block, or the image is not
-                      13.6 (the only build with a bridge dump). The PatchError's message
-                      names which
+                      the destination has no GuiCode bridge block, or the status bridge
+                      does not derive on this image (`status_map.derived_bridge`). The
+                      PatchError's message names which
+      BRIDGE_UNKNOWN — verifying the default indicator retarget, the status bridge does not
+        derive on this image (`status_map.derived_bridge`: the receive-slot base is not
+        followed); apply refuses that case first, as REMAP_REFUSED
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     The declared capability delta moves pairs, it never invents them: a pair is only
     declared LOST if this group is its SOLE producer on the old channel(s)
@@ -1794,15 +1810,25 @@ class AddButton(Op):
       BIND_REFUSED — statusbind.bind_pin refused (unwatched pin, no bridge block,
                      or the pin is already commanded by a LOCATED control — a
                      narrower check than build_home_button's own, see statusbind.py)
+      BRIDGE_UNKNOWN — the status bridge does not derive on this image
+        (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's
+        colour cell is known
       COMMANDED_CHANNEL — build_home_button refused because the channel is already
                          commanded by an existing binding (its own, broader scan);
                          offers=["acknowledge"] — the caller may retry with
                          allow_commanded_channel=True once they've confirmed (as the
                          docstring above describes) that those bindings belong to
                          unreachable controls
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the new button's command group cannot be shown not to be one
+        (`newbutton.unused_command_groups`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
       NO_FONT_SELECTOR — font was given but the new caption's R38 selector isn't the
                          expected 0xff inherit byte
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     This is a relocating op (clone_onto_home inserts a new object). Registers
     ctx.handles[op_id] = {"object": idx, "cell": cell, "group": gid} so later ops
@@ -1840,6 +1866,8 @@ class AddButton(Op):
         try:
             data, cell, e = statusbind.bind_pin(data, self.channel,
                                                 off_colour=self.off_colour)
+        except statusbind.BridgeUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except statusbind.StatusBindError as err:
             raise RecipeError("BIND_REFUSED", str(err))
         ctx.edits.extend(e)
@@ -1848,6 +1876,8 @@ class AddButton(Op):
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
                 colour_index=cell, label=self.label)
+        except newbutton.VariantSetterUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             # Match only the specific "already commanded by" refusal wording
             # (newbutton.py:354-358). A bare "command" substring also appears in the
@@ -1953,6 +1983,10 @@ class AddGlyphButton(Op):
     ctx.handles[op_id] = {"object": idx, "cell": fill_cell, "group": None} — group is
     None until a later `wire_button` gives the shell a command group.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "page": {"type": ["string", "integer"],
@@ -2087,14 +2121,24 @@ class WireButton(Op):
                 resolve_target)
       BIND_REFUSED — statusbind.bind_pin refused (unwatched pin, no bridge block, or
                      the pin is already commanded by a LOCATED control)
+      BRIDGE_UNKNOWN — the status bridge does not derive on this image
+        (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's
+        colour cell is known
       COMMANDED_CHANNEL — retarget_command refused because the channel is already
                          commanded by an existing binding; offers=["acknowledge"] —
                          the caller may retry with allow_commanded_channel=True once
                          they've confirmed those bindings belong to unreachable controls
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the fresh command group cannot be shown not to be one
+        (`newbutton.unused_command_groups`)
       WIRE_REFUSED — any other newbutton.retarget_command refusal, OR
                      newbutton.retarget_indicator refusing the target (out-of-range
                      object index, or an object with no wtype-33 indicator record --
                      e.g. a target that isn't a button shell at all)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     **One-group discipline:** this op calls `retarget_command` exactly once per
     compile, on a shell that has never been wired -- so only one group is ever
@@ -2106,6 +2150,10 @@ class WireButton(Op):
     wiring adds. Updates the target handle's cell/group if the target is a ref, so a
     later op can address the now-wired button by the same id.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -2136,6 +2184,8 @@ class WireButton(Op):
         try:
             data, cell, e = statusbind.bind_pin(data, self.channel,
                                                 off_colour=self.off_colour)
+        except statusbind.BridgeUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except statusbind.StatusBindError as err:
             raise RecipeError("BIND_REFUSED", str(err))
         ctx.edits.extend(e)
@@ -2149,6 +2199,8 @@ class WireButton(Op):
             data, e = newbutton.retarget_command(
                 data, idx, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded)
+        except newbutton.VariantSetterUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             if "already commanded by" in str(err) and not self.allow_commanded:
                 raise RecipeError("COMMANDED_CHANNEL",
@@ -2564,6 +2616,15 @@ class AddVoltageBattery(Op):
                         `cnt` > 1) on a build whose donor differs from 13.6's
       REPOSITION_REFUSED — `relocate.replace_object_records` refused the rebuilt
                         object-902 record stream (a structural gate failed)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
 
     Registers ctx.handles[op_id] = {"object": idx, "value_cell": addr, "color_cell":
     addr, "level_cell": addr} where idx is the new object's top-level index (the
@@ -5429,6 +5490,12 @@ class FollowChannel(Op):
                      descriptor field did not hold the expected pre-grow value)
       DETOUR_REFUSED — the bytes at the detour's file offset were not the stock `bl`
                        this plan expects (the grow shifted something it should not have)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Declares no capability delta: the follower is GuiCode code and touches no G12
     group/binding table, so `_finish`'s capability gate expects the image's
@@ -5680,6 +5747,14 @@ class AddOptionFollower(Op):
       GROW_REFUSED -- `growsection.grow_section` refused
       DETOUR_REFUSED -- the bytes at the detour's file offset were not the stock `bl` the
                         plan expects (the grows shifted something they should not have)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
     Capability delta `(set(), set())`: the toggle's four bindings are 0x1FED9 config writes
     (channel None), which are outside `recipe.capabilities`'s (channel, command) set
@@ -6220,7 +6295,20 @@ class FollowRegister(Op):
     on-screen checkbox. Watch/gate refs name a resolve_register op id (or inline
     {dgn, instance|selector}). The authored routine is the hardware-verified Pump Link follower
     (2026-08-31) with
-    generalized inputs; a coach check is warranted the first time a NEW watch register is used."""
+    generalized inputs; a coach check is warranted the first time a NEW watch register is used.
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): the first
+    report is a silent baseline, each later edge sends the target on or off while the gates
+    hold, and nothing while they do not.
+
+    Error codes:
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)"""
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "watch": {"type": "object", "description": "{ref|dgn+instance/selector, mask?, value?}"},
@@ -6352,7 +6440,18 @@ class AddRegisterReadout(Op):
     per instance (`apply`, when `cell.fresh`): a coach photo of one tier does not vouch for an
     address nothing has ever touched.
 
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): drawn and
+    `draw` false, a published value repaints the digits, and a cell poisoned before boot is
+    written stale before the readout first draws. The existing-cell mode (`cell_slot`) refuses
+    DECODER_RANGE_UNKNOWN beyond 13.6: the per-tick decoder's window is known only there. With
+    `draw` true the cell may be a stock display-cell index `statusbind.spare_cell_indices`
+    calls spare (tier 1 or 2), its type byte set to the readout's width. That no stock reader
+    uses such an index is inferred-from-data on 14.7 (no record and no other object table
+    names it), not proven from code, and no 14.7 coach has run it.
+
     Error codes:
+      DECODER_RANGE_UNKNOWN -- `cell_slot` on a firmware whose per-tick decoder window is not
+        known (`decodeguards.decoder_range`: 13.6 only).
       BAD_PARAMS -- a malformed param: drawing params with `draw` false or with `cell_slot`, a
         non-integer `cell_slot`, `silence` that is not a list of addresses or comes without
         `cell_slot`, a missing page/x/y, or a bad `format`.
@@ -6371,8 +6470,19 @@ class AddRegisterReadout(Op):
         `donors.READOUT_CHARS`.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
     hardware_verified = True
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "register": {"type": "object", "description": "{ref} | {dgn, instance|selector}"},
@@ -6486,6 +6596,11 @@ class AddRegisterReadout(Op):
 
     def apply(self, data, ctx):
         reg = _resolve_register_spec(data, ctx, self.register_spec, self.spec.id)
+        if self.cell_slot is not None:
+            # Feeding a STOCK readout's cell means knowing the per-tick decoder's stores and
+            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); the decoder's window
+            # is known on 13.6 only, so any other firmware refuses DECODER_RANGE_UNKNOWN.
+            decodeguards.decoder_range(ctx.stock)
         silenced, remaining = [], []
         try:
             if self.cell_slot is not None:
@@ -6506,7 +6621,15 @@ class AddRegisterReadout(Op):
                     data, [(self.width_bytes, readout._TYPE_FOR_WIDTH[self.width_bytes])])
                 cell = cells[0]
             else:
-                out, cell, cell_edits = readout.allocate_display_cell(data, self.width_bytes)
+                try:
+                    out, cell, cell_edits = readout.allocate_display_cell(data,
+                                                                          self.width_bytes)
+                except statusbind.SpareRowsUnknown:
+                    # A grown stock: no stock index is known spare, so mint a fresh one (as
+                    # draw:false does). Fresh, so this instance is unverified below.
+                    out, cells, cell_edits = readout.allocate_fresh_cells(
+                        data, [(self.width_bytes, readout._TYPE_FOR_WIDTH[self.width_bytes])])
+                    cell = cells[0]
             plan = readout.resolve(out, register=reg, cell=cell, mask=self.mask,
                                    add=self.add, shift=self.shift, sub=self.sub,
                                    mul=self.mul, stock=ctx.stock)
@@ -6641,7 +6764,7 @@ class AddRegisterReadout(Op):
                 % (h["display_slot"], h["display_addr"], h["var_index"], h["slot_addr"],
                    self.add, self.shift, h["entry"], [hex(a) for a in h["silenced"]],
                    [hex(a) for a in h["remaining_writers"]],
-                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                   "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
@@ -6685,12 +6808,12 @@ class AddRegisterReadout(Op):
             return ("add_register_readout: cell %d @ %#x (tier %d, fresh=%s), routine @ %#x, "
                     "sub %d, mul %d; no widget (drawn by another op) -- HARDWARE-%s"
                     % (h["display_slot"], h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                       self.sub, self.mul, "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                       self.sub, self.mul, "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
         return ("add_register_readout: object %d at (%d,%d) on root %d (of %s), cell %d @ %#x "
                 "(tier %d, fresh=%s), routine @ %#x -- HARDWARE-%s"
                 % (h["object_index"], self.x, self.y, h["root"], h["roots"], h["display_slot"],
                    h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                   "VERIFIED" if self.is_verified(ctx.firmware) else "UNVERIFIED"))
 
 
 @op("swap_aes_electrical")
@@ -7161,6 +7284,10 @@ class AddAesLowVoltsTrigger(Op):
                      misaligned (beyond it, from earlier appends, the routine chains).
       BRIDGE_REFUSED / GROW_REFUSED / DETOUR_REFUSED -- the bridge could not be authored,
                      appended, or the detour site was not the stock `bl`.
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
     """
 
     hardware_verified = True     # coach-verified 2026-09-01
@@ -7340,10 +7467,21 @@ class AddAesBattHeat(Op):
       GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
         layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
         renderer arm (`donors`).
+      LCD_GRAMMAR -- the LCD firmware's group handling, which reads the gesture group's prefix,
+        is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the
+        container carries no LCD Firmware section (`donors.group_prefix`).
       NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-09-21: hold->enable / tap->off captured on
@@ -7370,8 +7508,8 @@ class AddAesBattHeat(Op):
                            "description": "where the command group comes from: the first free "
                                           "slot (the heater, byte-stable), or "
                                           "newbutton.hold_safe_groups (a group GuiCode does not "
-                                          "drive; holds on GuiCode-driven 136/137 were dead on "
-                                          "a coach)"},
+                                          "drive; holds on GuiCode-driven 136/137 died on a "
+                                          "coach, 2026-09-30)"},
         },
         "required": [],
     }
@@ -7409,11 +7547,14 @@ class AddAesBattHeat(Op):
     def apply(self, data, ctx):
         binding_start = len(guidata.binding_table(data))
 
-        # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
-        # this op never did; byte identity keeps the old list). The free pool skips the groups
-        # GuiCode drives (`newbutton.assignable_groups`): the finish gate refuses those anyway.
-        free = (newbutton.assignable_groups(data) if self.group_pool == "free"
-                else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
+        # The free pool skips the groups GuiCode drives (`newbutton.assignable_groups`: the
+        # finish gate refuses those anyway) and the located inverter/charger templates
+        # (`newbutton.reserved_groups`). Dropping the templates changes no succeeding build: an
+        # allocation that reached 68/69 was already refused by the reserved-group gate. The
+        # hold-safe pool drops both itself.
+        reserved = newbutton.reserved_groups(data)
+        free = ([g for g in newbutton.assignable_groups(data) if g not in reserved]
+                if self.group_pool == "free" else newbutton.hold_safe_groups(data))
         if not free:
             raise RecipeError("NO_FREE_GROUP",
                               "no empty group-table slot to host the Batt Heat command group",
@@ -7557,6 +7698,10 @@ class AddAltReboot(Op):
       GROW_REFUSED  -- the binding table could not be grown (padding arena / gates), or the hold
                        donor group is not the verified shape.
       REPLACE_REFUSED -- the page's record stream could not be relocated.
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-10-05: one 197F809F#0100FF.. per
@@ -7583,9 +7728,10 @@ class AddAltReboot(Op):
 
         gt = guidata.group_table(data)
         binding_start = len(guidata.binding_table(data))
-        # a hold-only control: `newbutton.hold_safe_groups` (never 68/69, never GuiCode-driven --
-        # 137 never fired on a hold on the coach, 2026-09-30 -- and only a press-cycled slot)
-        free = newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
+        # a hold-only control: `newbutton.hold_safe_groups` (never a reserved template, never
+        # GuiCode-driven -- 137 never fired on a hold on the coach, 2026-09-30 -- and only a
+        # press-cycled slot)
+        free = newbutton.hold_safe_groups(data)
         if not free:
             raise RecipeError("NO_FREE_GROUP",
                               "no empty group-table slot to host the reboot command group",
@@ -7701,6 +7847,15 @@ class AddAesBattHeatStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     # COACH-VERIFIED 2026-09-22, both halves. RECEIVE: both appended subscriptions
@@ -8224,6 +8379,15 @@ class AddAesBmsButtonStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
@@ -8399,7 +8563,20 @@ class AddButtonStatus(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
+
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     hardware_verified = False
 
@@ -8695,6 +8872,10 @@ class AddEnumLabel(_LabelBox, Op):
     so does any arm record inheriting a value slot from a wtype-5 attach above it
     (`_pasted_inherited_slots`, the rule `add_rvc_button` and `move_control` apply).
 
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): each value
+    draws its text, stale and unlisted values the default. Without a `background` the arms
+    draw over each other in the emulator, on 13.6 as on 14.7 (2026-11-08).
+
     Params:
       parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
               attach record to clone).
@@ -8731,9 +8912,20 @@ class AddEnumLabel(_LabelBox, Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
 
     hardware_verified = False
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {
@@ -8987,6 +9179,10 @@ class AddTextLabel(_LabelBox, Op):
         the recipe's stock image; one that does not is refused here.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
 
     On 14.7, emulated only (2026-11-08, tests/emu/test_ops147.py): its text drawers are not twins
     of 13.6's (`grammar.prove`), so the pixels are the evidence. White "FAN SPEED" in font 16 on
@@ -9251,7 +9447,20 @@ class AddButtonStates(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
     """
+
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     hardware_verified = False
 
@@ -9641,8 +9850,8 @@ class AddRvcButton(Op):
     binding on mask 0x06 (one frame per press of any length); `hold` alone is `add_alt_reboot`'s
     group-17 clone with the hold nibble at `seconds` and one binding on 0x04; `tap` + `hold` is
     Batt Heat's group-17 clone with the hold nibble at `seconds`, the hold binding (0x04) first
-    and the tap (0x02) after. The group is the pool's first slot, never 68/69; a hold on a
-    GuiCode-driven group is dead (coach, 2026-09-30), so a hold takes the `hold_safe` pool.
+    and the tap (0x02) after. The group is the pool's first slot, never 68/69; holds on
+    GuiCode-driven 136/137 died (coach, 2026-09-30), so a hold takes the `hold_safe` pool.
 
     The records are Batt Heat's body (`rvcbutton.button_records`): a filled box at `x, y` `w` x
     `h`, the capsule in `colour`, the caption, the glyph if given (centred, above the caption),
@@ -9712,11 +9921,26 @@ class AddRvcButton(Op):
       GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
         layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
         renderer arm (`donors`).
+      LCD_GRAMMAR -- the LCD firmware's group handling, which reads the gesture group's prefix,
+        is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the
+        container carries no LCD Firmware section (`donors.group_prefix`).
       NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`): no stock
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
+
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     hardware_verified = False
 
@@ -9871,8 +10095,8 @@ class AddRvcButton(Op):
             raise self._bad("group_pool must be one of %s, got %r"
                             % (list(rvcbutton.POOLS), self.group_pool))
         if self.hold is not None and self.group_pool == "free":
-            raise self._bad("a hold needs the hold_safe pool: a hold on a GuiCode-driven group "
-                            "is dead (coach, 2026-09-30)")
+            raise self._bad("a hold needs the hold_safe pool: holds on GuiCode-driven groups "
+                            "136/137 died (coach, 2026-09-30)")
         if (toggle is not None or self.cycle is not None) and self.group_pool == "free":
             raise self._bad("a %s needs the hold_safe pool: GuiCode drives its own groups' "
                             "variants, and would fight the status op's setVariant"
@@ -10404,6 +10628,16 @@ class AddPumpAutoOff(Op):
       GROW_REFUSED -- `growsection.grow_section` refused.
       DETOUR_REFUSED -- the bytes at the detour's file offset were not the plan's expected
                      stock/chained `bl`; a grow shifted something it should not have.
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
     `hardware_verified = True` again as of 2026-09-04: a later task shortened the routine by 4
     bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach, flashed and
@@ -11399,8 +11633,8 @@ class AddLevelPage(Op):
 
     Controls (`controls` true): the
     Blocks-carried stepper (- / +) and the Zero Level button. Three free group slots
-    (`newbutton.free_group_slots` minus `levelcontrols.RESERVED_GROUPS` -- 68/69, the
-    inverter/charger templates the PD-inverter bridge will drive -- taken in order minus, plus,
+    (`newbutton.free_group_slots` minus `newbutton.reserved_groups` -- located; 68/69 on 13.6,
+    the inverter/charger templates the PD-inverter bridge will drive -- taken in order minus, plus,
     zero) get
     `levelcontrols.group_entry` entries, and ONE `optionrow._grow_bindings` call appends their
     four bindings (`levelcontrols.bindings`: minus, plus, zero pitch, zero roll) at
@@ -11425,7 +11659,7 @@ class AddLevelPage(Op):
                          accent, orientation not in `levelpage.ORIENTATIONS`, controls not a
                          bool).
       NO_FREE_GROUP   -- `controls`: fewer than three free group-table slots outside
-                         `levelcontrols.RESERVED_GROUPS`.
+                         the reserved templates (`newbutton.reserved_groups`).
       GROW_REFUSED    -- `controls`: the binding table could not be grown (arena, gates) or a
                          donor group is not the stock shape `levelcontrols` expects.
       NO_ARROW_GLYPH  -- `arrow` names a character that still falls back to the placeholder.
@@ -11441,6 +11675,19 @@ class AddLevelPage(Op):
         record witnesses its form, or a font slot is missing or cannot draw the text.
       MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     # Nothing of this page has been on the coach: a live readout inside a switch arm has no
@@ -11654,18 +11901,19 @@ class AddLevelPage(Op):
         # take
         # `newbutton.hold_safe_groups` only; the rest keep their earlier allocation.
         selected = newbutton.guicode_selected_groups(data)
+        reserved = newbutton.reserved_groups(data)
         free = [g for g in newbutton.free_group_slots(data)
-                if g not in levelcontrols.RESERVED_GROUPS and g not in selected]
+                if g not in reserved and g not in selected]
         names = self._control_names()
         held = [n for n in names if n in levelcontrols.GEOMETRY_CONTROLS]
         plain = [n for n in names if n not in held]
         if len(free) < len(plain):
             raise RecipeError("NO_FREE_GROUP", "the LEVEL controls need %d free group slots, "
                               "%d are free outside the reserved %s (%s)"
-                              % (len(plain), len(free), sorted(levelcontrols.RESERVED_GROUPS),
+                              % (len(plain), len(free), sorted(reserved),
                                  free),
                               op_id=self.spec.id)
-        safe = [g for g in newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
+        safe = [g for g in newbutton.hold_safe_groups(data)
                 if g not in free[:len(plain)]]
         if len(safe) < len(held):
             raise RecipeError("NO_FREE_GROUP", "the geometry steppers need %d hold-safe group "
@@ -12029,6 +12277,12 @@ class SetTheme(Op):
                    not a role with a static index
       WRONG_BUILD — the GuiCode theme-init is not located in its stock form
                     (`themeswap.locate_theme_init`: another build, or a theme already applied)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
+        rows are spare is not known (`statusbind.spare_cell_indices`)
 
     Hardware status: verified on the coach 2026-11-02 (owner): a reference build with the six
     roles, `extra`, `tank_fills` and `tank_wells`, flashed and the palette change confirmed.

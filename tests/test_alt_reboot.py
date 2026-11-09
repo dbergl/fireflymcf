@@ -109,8 +109,7 @@ def test_the_reserved_inverter_groups_gate_refuses_a_build_that_claims_them(monk
     op's own
     exclusion removed and 68 first in the free list (as it was then) it would again, and the
     compile-time gate must refuse it."""
-    from fireflymcf import levelcontrols
-    monkeypatch.setattr(levelcontrols, "RESERVED_GROUPS", frozenset())
+    monkeypatch.setattr(newbutton, "reserved_groups", lambda data: {})
     monkeypatch.setattr(newbutton, "free_group_slots", lambda data: [68])
     with pytest.raises(AssertionError, match="reserved group 68"):
         recipe.compile_project(_project(), open(STOCK, "rb").read())

@@ -11,10 +11,12 @@ colour cell (and/or its `value_slot` resolves to the bool cell).
 This module joins two halves:
   * GuiData (this package): the variable table, the `0x44BC8` value/colour cell table,
     control groups, per-object records, and the per-floorplan screen walk (`layout.Screen`).
-  * GuiCode: the `FUN_00247BF8` slot->cell bridge, extracted once by
-    `ghidra/extract_slot_bridge.py` and committed as `data/slot_bridge_<build>.txt` (read here,
-    not re-disassembled). Only CLEAN 2-dest blocks (one word colour store + one byte bool store)
-    are trusted; multi-dest latch-master fan-outs are excluded because they over-attribute.
+  * GuiCode: the `FUN_00247BF8` slot->cell bridge, derived from each image's own GuiCode by
+    `derived_bridge` (2026-11-08; `slottrace` follows the receive-slot base). Only CLEAN 2-dest
+    blocks (one word colour store + one byte bool store) are trusted; multi-dest latch-master
+    fan-outs are excluded because they over-attribute. The 13.6 Ghidra dump it replaced
+    (`ghidra/extract_slot_bridge.py`, committed as `data/slot_bridge_136.txt`, `load_bridge`)
+    stays as the tests' positive control: the derivation equals it on every status var.
 
 `build_report()` renders `docs/STATUS-INDICATOR-MAP.md`. Run as a script to regenerate it.
 
@@ -31,18 +33,19 @@ import re
 import struct
 from dataclasses import dataclass, field
 
-from . import guidata, records, statusjoin, layout, options, cli
+from . import celltables, guidata, memo, records, statusjoin, layout, options, cli
 
 DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 CELL_TABLE_OFF = 0x44BC8            # GuiData-relative base of the DAT_00253D04 pointer table
 CELL_TABLE_LEN = 665               # entries (MCF-FORMAT §5.5 / GUICODE Finding 17)
-# ...but BOTH of those are 13.6's values, and this table MOVES between builds: 11.23 puts it at
-# 0x44B60 (26 entries lower) and 14.7 at 0x42B74. Using the 13.6 constants on another build reads
-# the right table at the wrong base, so every index resolves to a cell ~26 entries away -- which
-# looks plausible (they are all SRAM addresses in the same region) and is silently wrong. That
-# produced a confident cross-build claim in session on 2026-08-23 before a control caught it.
-# `cell_table()` below locates the base per build; the constants remain for 13.6-pinned callers
-# (`statusbind.index_cell`, whose edits are all 13.6 same-size patches).
+# ...but BOTH of those are 13.6's stock values, and this table MOVES between builds: 11.23 puts
+# it at 0x44B60 (26 entries lower, 562 rows) and 14.7 at 0x42B74 (505 rows). Using the 13.6
+# constants on another build reads the right table at the wrong base, so every index resolves to
+# a cell ~26 entries away -- which looks plausible (they are all SRAM addresses in the same
+# region) and is silently wrong. That produced a confident cross-build claim in session on
+# 2026-08-23 before a control caught it. Nothing here reads them any more: the base and the row
+# count come from `celltables.locate` (2026-11-08); they remain as the documented 13.6 values
+# tests cite.
 SRAM_LOW, SRAM_HIGH = 0x20030000, 0x20040000
 
 # Floorplans are driven via layout switch slot 5 (GUICODE Finding 16; floorplan value -> the
@@ -62,8 +65,11 @@ def _bridge_path(build: str) -> str:
     return os.path.join(_DATA_DIR, "slot_bridge_%s.txt" % build)
 
 
-def load_bridge(build: str = "136") -> dict[int, dict]:
+def load_bridge(build: str) -> dict[int, dict]:
     """Parse the committed GuiCode bridge dump into `{var: {...}}` for CLEAN 2-dest blocks.
+
+    The tests' positive control for `derived_bridge` (`"136"`, the one dump committed); no
+    library reader takes its cells, since they are one image's.
 
     Returns per var: `colour_cell` (word store), `bool_cell` (byte store), `read_addr`.
     Vars with no clean 2-dest block are absent (i.e. not cleanly bridged).
@@ -84,6 +90,91 @@ def load_bridge(build: str = "136") -> dict[int, dict]:
             byte = [c for c, mn in cells if mn.startswith("strb")]
             if len(word) == 1 and len(byte) == 1:
                 out[var] = {"colour_cell": word[0], "bool_cell": byte[0], "read_addr": raddr}
+    return out
+
+
+class BridgeUnknown(ValueError):
+    """BRIDGE_UNKNOWN: the status bridge (`derived_bridge`) cannot be derived on this image.
+    The receive-slot base is followed from `GuiCode_entry1` (`slottrace.state_reach`); where
+    the entry or the per-tick decoder does not locate, or the base escapes the analysis, which
+    var's block writes which cell is not known, so no pin is bound to a cell there."""
+    code = "BRIDGE_UNKNOWN"
+
+
+def derived_bridge(data: bytes) -> dict[int, dict]:
+    """`{var: {"colour_cell", "bool_cell", "read_addr"}}`: the receive-slot -> display-cell
+    status bridge, derived from this image's GuiCode (2026-11-08). The shape is `load_bridge`'s,
+    the committed 13.6 Ghidra dump it replaces, which stays as the tests' positive control.
+
+    A var is bridged by a base read of its slot (`slottrace.slot_reads`, `how == "base"`: the
+    13.6 `FUN_00247BF8` `ldrsh.w rD,[r4,#2*var]`) when every sink the trace finds is
+    (a) a store to an absolute display cell in `SRAM_LOW..SRAM_HIGH`, (b) made before the next
+    base slot read of any var (the block boundary the dump drew), and (c) to exactly two cells,
+    one stored word- or halfword-wide (the colour) and one byte-wide (the bool). Each rule was
+    tested against the dump: without (a) 13.6 var 86 enters (its block ends in a variant-setter
+    call), without (b) vars 9 and 232 enter (arm stores `0x2C0` bytes away). With all three the
+    derivation equals the dump cell for cell on every `DC_DIMMER_STATUS_3` var of 13.6; it
+    differs only on two other vars, 124 (the dump attributes a neighbour's store by position,
+    `tests/test_busmap.py`) and 42 (a re-read of its own store gives it a third sink). It
+    bridges 43 status vars on 14.7, each confirmed in the emulator (the G12 reporting the pin on
+    flips the derived colour and bool cells; 13.6's cell for that var never moves there).
+
+    A var with two clean blocks naming different cells is not one bridge; it refuses rather
+    than pick. Refuses `BridgeUnknown` where the slot base is not followed (`state_reach` does
+    not locate, or the base escapes); otherwise a var with no clean block is a defensible
+    "not bridged", since the trace followed the base everywhere it goes.
+    """
+    return _derived_bridge(data, SRAM_LOW, SRAM_HIGH)
+
+
+@memo.content_cached(copy=lambda r: {k: dict(v) for k, v in r.items()})
+def _derived_bridge(data: bytes, lo: int, hi: int) -> dict[int, dict]:
+    import bisect
+
+    from . import slottrace, tanknames
+    try:
+        e1 = slottrace.guicode_entry1(data)
+        sr = slottrace.state_reach(data)
+    except tanknames.TankNameError as err:
+        raise BridgeUnknown(
+            "BRIDGE_UNKNOWN: the per-tick decoder the receive-slot base reaches is not located "
+            "(%s), so which cell each status variable's block writes is not known" % err)
+    if e1 is None or not slottrace.is_instruction(data, e1):
+        raise BridgeUnknown(
+            "BRIDGE_UNKNOWN: GuiCode_entry1 (the GuiCode header word at +0x10 the LCD calls with "
+            "the receive-slot base) is not located, so the base is not followed")
+    if sr.escapes:
+        raise BridgeUnknown(
+            "BRIDGE_UNKNOWN: the receive-slot base escapes the analysis at %s, so a status "
+            "variable's block could read it where no trace follows"
+            % ", ".join("%#x (%s)" % e for e in sr.escapes))
+    reads = [(v.index, r) for v in guidata.variable_table(data)
+             for r in slottrace.slot_reads(data, v.index) if r.how == "base"]
+    starts = sorted(r.at for _v, r in reads)
+    out: dict[int, dict] = {}
+    for var, r in reads:
+        i = bisect.bisect_right(starts, r.at)
+        boundary = starts[i] if i < len(starts) else None
+        cells: dict[int, set] = {}
+        clean = True
+        for s in r.sinks:
+            if s.kind == "cell" and lo <= s.target < hi and (boundary is None
+                                                             or s.at < boundary):
+                cells.setdefault(s.target, set()).add(s.width)
+            else:
+                clean = False
+        word = [c for c, ws in cells.items() if ws <= {2, 4}]
+        byte = [c for c, ws in cells.items() if ws == {1}]
+        if not (clean and len(cells) == 2 and len(word) == 1 and len(byte) == 1):
+            continue
+        row = {"colour_cell": word[0], "bool_cell": byte[0], "read_addr": "%08x" % r.at}
+        prev = out.get(var)
+        if prev is not None and (prev["colour_cell"], prev["bool_cell"]) != (word[0], byte[0]):
+            raise BridgeUnknown(
+                "BRIDGE_UNKNOWN: status variable %d has two clean blocks naming different "
+                "cells (reads at %s and %#x); which one paints it is not known"
+                % (var, prev["read_addr"], r.at))
+        out.setdefault(var, row)
     return out
 
 
@@ -135,7 +226,8 @@ class Consumers:
     vslot: dict[int, list[int]] = field(default_factory=dict)    # table idx -> objects (value_slot)
 
 
-def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers) -> None:
+def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers,
+                          rows: int) -> None:
     """Fold one object-pointer table's records into `con` in place. `obj` indices are local to
     `table` (the same convention every other table-1 caller here already used); a caller that
     folds multiple tables gets object indices that alias across tables, which is fine -- this
@@ -148,11 +240,11 @@ def _scan_table_consumers(data: bytes, gs: int, table: list[int], con: Consumers
             continue
         for r in recs:
             vs = getattr(r, "value_slot", None)
-            if isinstance(vs, int) and 0 <= vs < CELL_TABLE_LEN:
+            if isinstance(vs, int) and 0 <= vs < rows:
                 con.vslot.setdefault(vs, []).append(obj)
             for entry in (getattr(r, "colors", None) or []):
                 if len(entry) > 2 and entry[1] in (6, 7) and isinstance(entry[2], int) \
-                        and 0 <= entry[2] < CELL_TABLE_LEN:
+                        and 0 <= entry[2] < rows:
                     con.colour.setdefault(entry[2], []).append(obj)
 
 
@@ -170,7 +262,8 @@ def object_consumers(data: bytes) -> Consumers:
     alone would strand every cell-allocating op with no allocator to grow for it."""
     gs, _ = guidata.guidata_extent(data)
     con = Consumers()
-    _scan_table_consumers(data, gs, guidata.object_tables(data)[1], con)
+    _scan_table_consumers(data, gs, guidata.object_tables(data)[1], con,
+                          celltables.row_count(data))
     for d in (con.colour, con.vslot):
         for k in d:
             d[k] = sorted(set(d[k]))
@@ -221,7 +314,7 @@ def foreign_table_refs(data: bytes, cells: "set[int]") -> dict[int, list[tuple[i
 def all_table_cell_consumers(data: bytes) -> set[int]:
     """Every `+0x44BC8` cell index referenced as a mode-6/7 colour or a `value_slot` by any
     object in ANY of the four GuiData object-pointer tables (`guidata.object_tables`), sanity-
-    filtered to `0 <= idx < CELL_TABLE_LEN` (the two big tables carry repeated/garbage pointers
+    filtered to `0 <= idx < rows`, the located row count (the two big tables carry repeated/garbage pointers
     that decode to nonsense out-of-range slots).
 
     This is the honest consumer set: cells 254/256/258/260 are referenced only by objects in the
@@ -232,8 +325,9 @@ def all_table_cell_consumers(data: bytes) -> set[int]:
     via an undecoded trailing field neither scan can see)."""
     gs, _ = guidata.guidata_extent(data)
     con = Consumers()
+    rows = celltables.row_count(data)
     for table in guidata.object_tables(data):
-        _scan_table_consumers(data, gs, table, con)
+        _scan_table_consumers(data, gs, table, con, rows)
     return set(con.colour) | set(con.vslot)
 
 
@@ -251,9 +345,11 @@ class StatusRow:
     commanded: bool                    # instance is the channel of a located single-channel control
 
 
-def backbone(data: bytes, build: str = "136") -> list[StatusRow]:
-    """Row per DC_DIMMER_STATUS_3 variable (the display-list status vars), sorted by instance."""
-    bridge = load_bridge(build)
+def backbone(data: bytes) -> list[StatusRow]:
+    """Row per DC_DIMMER_STATUS_3 variable (the display-list status vars), sorted by instance.
+    The bridge is this image's own (`derived_bridge`); refuses `BridgeUnknown` where it does
+    not derive."""
+    bridge = derived_bridge(data)
     table = cell_table(data)
     c2i = _cell_to_indices(table)
     con = object_consumers(data)
@@ -368,8 +464,7 @@ def grid_objects(data: bytes, rows: list[StatusRow]) -> set[int]:
     return out
 
 
-def per_floorplan(data: bytes, rows: list[StatusRow],
-                  build: str = "136") -> tuple[list[FloorplanView], set[int]]:
+def per_floorplan(data: bytes, rows: list[StatusRow]) -> tuple[list[FloorplanView], set[int]]:
     scr = layout.Screen(data)
     roots = {}
     for p in PAGES:
@@ -449,9 +544,9 @@ def _fmt_objs(objs: list[int], limit: int = 8) -> str:
     return s + (" …" if len(objs) > limit else "")
 
 
-def build_report(data: bytes, build: str = "136") -> str:
-    rows = backbone(data, build)
-    views, visible_union = per_floorplan(data, rows, build)
+def build_report(data: bytes) -> str:
+    rows = backbone(data)
+    views, visible_union = per_floorplan(data, rows)
     grids = grid_objects(data, rows)
     displayed_any: set[int] = set()
     for v in views:
@@ -588,11 +683,10 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     p = argparse.ArgumentParser(description="regenerate docs/STATUS-INDICATOR-MAP.md")
     p.add_argument("mcf", help="path to the MCF (e.g. firefly-13.6/mcf.bin)")
-    p.add_argument("--build", default="136", help="bridge-data build id (default 136)")
     p.add_argument("--out", default="docs/STATUS-INDICATOR-MAP.md")
     args = p.parse_args(argv)
     data = open(args.mcf, "rb").read()
-    text = build_report(data, args.build)
+    text = build_report(data)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(text)
     print("wrote %s (%d bytes)" % (args.out, len(text)))

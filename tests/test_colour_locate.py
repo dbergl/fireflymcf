@@ -73,7 +73,7 @@ def _grown(data):
     first, then the cell table, appended to GuiData; every base literal repointed)."""
     dptr, toff = guidata.find_variable_tables(data)
     cell_base, type_base = GD + dptr, GD + toff
-    old_len = tablegrow.find_index_bound(data, cell_base) + 1
+    old_len = tablegrow.find_index_bound(data, cell_base)        # the row count
     tables = [tablegrow.IndexedTable(type_base, 1), tablegrow.IndexedTable(cell_base, 4)]
     refs = {b: len(tablegrow.find_base_refs(data, b)) for b in (cell_base, type_base)}
     sites = len(tablegrow.find_bound_sites(data, old_len - 1))

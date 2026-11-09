@@ -5381,7 +5381,10 @@ That something is `FUN_00247BF8`:
 `0x2003a814` (slot 45) has **exactly one writer** in the whole section.
 
 *`[0x20039908]` is the group-variant setter*, and that is not assumed: 41 of 41 distinct ids passed
-to it in `movs r0,#N` are group indices whose byte 1 is `0x80`, out of 96 such groups in 233. The
+to it in `movs r0,#N` are group indices whose byte 1 is `0x80`, out of 96 such groups in 233.
+*(Superseded 2026-11-08 by Finding 90: the full census finds 105 calls and 49 distinct groups on
+13.6, all of them `0x80` groups, and the setter is the LCD's ungated `FUN_0021B678`, which does
+not read byte 1; 14.7 drives two `0x00` groups, 5 and 17.)* The
 LCD half of the same mechanism is `CONTROL-BEHAVIOR.md` §5a's single setter caller. Group **199** —
 defect 0b's silent `Shore Brkr Size` `−` — is in this called set, which independently supports that
 defect's "externally selected, and nothing moved it" reading.
@@ -6294,13 +6297,17 @@ are the appended routines' own instructions. That unflashed build's allocation t
 made with. Two near misses show the width matters: a `strh` to `0x20039F66` and a pointer to
 `0x20039F56` both stop two bytes short.
 
-**The residual, bounded by hand.** Four bases are indexed by a register the trace cannot bound:
+**The residual.** Four bases are indexed by a register the trace cannot bound:
 `0x200301B0` (+12·depth for the base-frame stack, +(nibble+0x2d)·4 for the register file — both
 inside the state span), `0x200371D1` (the digit buffer, + strlen), and two tables *above* the cell
 area, `0x2003A8B8` (stride 8, indexed from 0 upward — `FUN_0024F1FC`'s device table) and
-`0x2003A9A8` (stride 4, `-1`-guarded). The module poisons everything above the last two, so no
-candidate is offered there. What it still cannot see: a base that arrives as a function
-parameter, and pointer walks — the same limit `slotsource` carries.
+`0x2003A9A8` (stride 4, `-1`-guarded). These were bounded by hand here; since 2026-11-08 the
+module locates them instead (Finding 89): `sramreach.locate_render_state` finds the render state
+as the one literal base addressed through `movw` offsets, a register-indexed base inside it is a
+struct field bounded by the struct's end, and `sramreach.cell_area` runs from the struct's end
+to the lowest indexed base above it (`0x2003A8B8` here). Every indexed base above the struct is
+poisoned to the top of SRAM, so no candidate is offered there. What it still cannot see: a base
+that arrives as a function parameter, and pointer walks — the same limit `slotsource` carries.
 
 **Free SRAM.** After every form above, plus the cell table at variable-type width and the LCD
 firmware's 29 unrelated words, nine holes of 20 bytes or more remain below `0x2003A8B8`, identical
@@ -6392,7 +6399,9 @@ the `readout`/`follow_register` routine shape, already coach-verified.
 power-on. Group 199's counter is `0x20006E6C + 199·16 + 0x0A = 0x20007AE6`, inside the `.bss` zero
 loop's range `0x20000228`–`0x2000AD98` (`raminit`), so it is **0 at power-on** — the whole state table
 is. A `0x80` group whose bindings are all variant 0 therefore fires normally from cold until the
-setter (`FUN_0021B5E8`, sole caller `0x21B002`) moves it. PC.32's silence at power-on then needs
+setter moves it (the LCD's `FUN_0021B5E8`, sole caller `0x21B002` in `FUN_0021A664`, or GuiCode's `setVariant`,
+`FUN_0021B678`: 199 is one of the groups GuiCode drives, `newbutton.guicode_selected_groups`,
+2026-11-08). PC.32's silence at power-on then needs
 either a setter write that never appeared, or the `[state+0x09]` phase-byte route; the counter
 alone no longer explains a cold-boot failure. The cell is an LCD-RAM address a GuiCode routine can
 read, so `add_register_readout` could show it live if its register spec grew an `addr` form — the
@@ -6402,6 +6411,150 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 (a redefinition ends a pointer's lifetime; a parameter survives a call only through a copy), the
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
+
+## Finding 90 — GuiCode's `setVariant` is the LCD's ungated `FUN_0021B678`, and every group GuiCode drives by number is located on 11.23, 13.6 and 14.7 — `proven-from-code`, 2026-11-08
+
+**The question.** GuiCode calls one pointer as `setVariant(group, v)` (13.6 cell `0x20039908`;
+Finding 57 first counted 41 distinct group ids passed to it). An allocator must not hand out a
+group GuiCode drives (`CONTROL-BEHAVIOR.md` §5a; holds on 13.6's driven 136/137 died on a coach,
+2026-09-30). Answering that on any image needs three facts that were 13.6 pins: which function
+the pointer holds, what its group argument indexes, and every call through it.
+
+**The pointer is host-API `+0x04`, and it holds `FUN_0021B678`.** The LCD builds the host-API
+table on its stack and hands it to `GuiCode_entry0`: `ldr r3,=0x21B679 ; str r3,[sp,#0x28]`
+@`0x21C18E`/`0x21C196` (table at `sp+0x24`, so `+0x04`), then `ldr r3,[r5,#0xc] ; add r0,sp,#0x24
+; blx r3` @`0x21C1AE`-`0x21C1B2` (`r5` the GuiCode header, `+0x0C` entry0). Entry0 copies the word
+to the cell (`hooklocate.host_api_cells`: 13.6 `0x20039908`, 14.7 `0x200395FC`, 11.23
+`0x20039304`). The function, `0x21B678`-`0x21B688`:
+
+    ldr r3,=0x20006E5C ; ldrb r3,[r3,#0xf] ; add r0,r3 ; ldr r3,=0x20006E6C
+    add.w r0,r3,r0,lsl #4 ; strb r1,[r0,#0xa] ; strb r1,[r0,#0xb] ; bx lr
+
+It writes both variant counters of runtime record `b3 + r0` with no byte-1 gate and no variant
+bound. `[0x20006E5C+0x0F]` is the GuiData tag-0x10 directory `b3` the group-table loader
+`FUN_0021B420` keeps; `b3` is 0 on every corpus image, so GuiCode's `r0` is the group-table index
+(`lcdgroups.host_writer`, which finds the unique builder call site and matches the shape on each
+image). The gated setter `FUN_0021B5E8` (byte 1 `0x80`, the variant nibble) is reached only from
+the LCD's own `FUN_0021A664`, at `0x21B002` in the second range of its Ghidra body
+(`0x21AEA4`-`0x21B105`), never through the host table. `CONTROL-BEHAVIOR.md` §5a's corrected text
+carries the same reading.
+
+**The LCD is the same code on all three.** 11.23 and 14.7 carry one LCD Firmware (`cbed1028`),
+and `grammar.prove_lcd` proves it a relocation twin of 13.6's over `FUN_0021B420`,
+`FUN_0021B5E8`, `FUN_0021B678`, the sender `FUN_0021B8B4`, `FUN_0021BAB4`, `FUN_0021AB88` and
+both ranges of `FUN_0021A664`: every function at 13.6's address, two LCD-flash pool words +4, the
+30 callee bindings +0, and every call between them landing on the located twin, in both
+directions.
+
+**The census** (`newbutton.setter_calls`). A sweep visits every `ldr rN,[pc,#]` of the cell and
+every path from it while `rN` holds it; each deref must reach `blx` of its register with `r0` a
+constant, on a linear path (a conditional branch or conditional call between them refuses). A
+raw halfword scan of both literal-load encodings (`0x48xx`, `ldr.w` `0xF8DF`/`0xF85F`) must count
+exactly the loads the decode saw.
+
+| image | loads | derefs = calls | distinct groups |
+|---|---|---|---|
+| 13.6 | 76 | 105 | 49 |
+| 14.7 | 86 | 113 | 47 |
+| 11.23 | 64 | 90 | 39 |
+
+13.6's 49 are the groups the 13.6-only scan returned before, so every 13.6 build is unchanged.
+The driven groups are excluded from every allocator as a conservative superset: driven is
+sufficient to exclude, not proof that a hold is dead (a hold on driven group 129 works on a
+coach, 2026-10-19; what separates it from 136/137 is not established).
+
+**The reserved templates are located by DGN.** `newbutton.reserved_groups` finds the unique group
+whose whole binding slice is `1FFD3` and the one that is `1FFC5`: 68 and 69 on all three images,
+whose four bindings are the only ones carrying either DGN.
+
+**The status bridge is derived, not dumped.** `status_map.derived_bridge` follows the
+receive-slot base through `slottrace` and reads each clean slot-to-cell block from the image's
+own GuiCode. On 13.6 it equals the committed Ghidra dump (`data/slot_bridge_136.txt`) on every
+status var, so `backbone`, `pin_bindings`, `state_loads` and `bind_pin` give the dump's values;
+on 14.7 pins 1-43 are bridged, each on the cells the derivation names, and the emulated G12
+moves exactly those cells (`tests/test_groups_locate.py`).
+
+Tests: `tests/test_groups_locate.py` (the census, its refusals by mutation, the reserved groups,
+the bridge), `tests/test_grammar.py` (`prove_lcd` and its mutations).
+
+## Finding 89 — the display-cell table's bound is compared at 14 sites in every image, 8 gates and 6 clamps; the render state and the free cell area are located from GuiCode — `proven-from-code` except where marked, 2026-11-08
+
+**The question.** Growing the display-cell table (`DAT_00253D04`, 13.6 GuiData `+0x44BC8`) on
+another firmware needs three things that were 13.6 pins: where the table and its parallel type
+table are, every instruction that compares an index against its row count (each must be rebumped
+or a grown row is refused at run time), and which SRAM a fresh cell may take. `celltables.locate`
+(module docstring) and `sramreach.locate_render_state`/`cell_area` (module docstring) now find all
+three from GuiCode; the addresses below are their output on stock images and are test
+expectations only.
+
+**The tables.** The cell table is the one GuiData literal whose `rows` words are all 0 or SRAM
+pointers, at least half of them real, gated by exactly one distinct unsigned bound; the type table
+is the other literal gated by the same bound, ending 4-aligned where the cell table starts.
+
+| image | cell table | type table | rows | bound compare |
+|---|---|---|---|---|
+| 13.6 | `+0x44BC8` | `+0x4492C` | 665 | `cmp.w r0,#0x298`, then `bls` (`0x2533BA`) |
+| 14.7 | `+0x42B74` | `+0x42978` | 505 | `cmp.w #0x1F8` (`0x255C82`) |
+| 11.23 | `+0x44B60` | `+0x4492C` | 562 | `movw r3,#0x231 ; cmp r0,r3` (`0x250CEA`) |
+
+In each, `type + align4(rows) == cell` (13.6 `0x4492C + 0x29C`, 14.7 `0x42978 + 0x1FC`, 11.23
+`0x4492C + 0x234`), and the pair equals the literal pair `guidata.variable_table_literals` reads.
+
+**Fourteen compares, two kinds.** Every image compares an index against the bound at exactly 14
+sites, each followed by an unsigned branch:
+
+- **8 gate sites** guard an indexed `ldr` off a base literal-loaded with the cell table, within two
+  branch hops. 13.6: `0x2533BA`, `0x25347C`, `0x25355C`, `0x253654`, `0x253A76`, `0x253AC6`,
+  `0x253BD8`, `0x256870`. 14.7: `0x255C82`, `0x255D44`, `0x255E24`, `0x255F1C`, `0x25633E`,
+  `0x25638E`, `0x2564A0`, `0x259130`. 11.23: `0x250CEA`, `0x250DFA`, `0x250F46`, `0x251080`,
+  `0x251886`, `0x2518D2`, `0x251924`, `0x25462C`.
+- **6 clamp sites** compare an index the instruction before has stored with `strh` to an SRAM
+  halfword (the code stores 0 there when it is out of range); a later `ldrh` of that halfword
+  indexes the cell table. Store, then the read-back and the indexed read it feeds:
+
+  | 13.6 compare | `strh` to | `ldrh` → indexed read | 14.7 compare | `strh` to | `ldrh` → indexed read |
+  |---|---|---|---|---|---|
+  | `0x25383C` | `0x20036DA8` | `0x258208` → `0x25820C` | `0x256104` | `0x20036DAC` | `0x25AAC4` → `0x25AAC8` |
+  | `0x253870` | `0x20036DAA` | `0x257C56` → `0x257C5A` | `0x256138` | `0x20036DAE` | `0x25A512` → `0x25A516` |
+  | `0x25388E` | `0x20036DAC` | `0x257D38` → `0x257D3C` | `0x256156` | `0x20036DB0` | `0x25A5F4` → `0x25A5F8` |
+  | `0x2538AC` | `0x20036DAE` | `0x257E3C` → `0x257E40` | `0x256174` | `0x20036DB2` | `0x25A6F8` → `0x25A6FC` |
+  | `0x2538C6` | `0x20036DB0` | `0x257ED4` → `0x257ED8` | `0x25618E` | `0x20036DB4` | `0x25A790` → `0x25A794` |
+  | `0x2538E4` | `0x20036DB2` | `0x257FF4` → `0x257FF8` | `0x2561AC` | `0x20036DB6` | `0x25A8B0` → `0x25A8B4` |
+
+  11.23 credits six clamps the same way (`0x251548`, `0x25157A`, `0x2515AC`, `0x2515DC`,
+  `0x25160E`, `0x25163E`), all in the `movw+cmp` form.
+
+The rebump surface (`tablegrow.cell_table_bound_sites`) is the 14 sites, gates plus clamps, and
+it refuses unless every compare against the bound is in it: CELL_TABLE_BOUND_SITES. 11.23's
+`movw+cmp` form is refused by form (CELL_TABLE_BOUND_FORM): the grow rewrites only `cmp.w`
+immediates.
+
+**Finding 88's 13 against these 14.** Finding 88 counts the sites of the mode-7 bound *inside the
+record decoder twin* (13.6 `FUN_00252CB0`, `0x252CB0`-`0x253E0E`): 13 of the 14 (7 gates and all 6
+clamps). The fourteenth, a gate at `0x256870` (14.7 `0x259130`), lies outside the decoder, so the
+grammar comparison of the decoder never sees it; the locator scans all of GuiCode. Both count the
+same one immediate.
+
+**The render state.** Exactly one literal SRAM base is addressed through `movw` offsets
+(`movw rZ,#off ; ldr [rB,rZ]`, Finding 66): 13.6 `0x200301B0` (591 access sites, largest offset
+`0x96B4`), 14.7 `0x200301B4` (597, `0x9390`), 11.23 `0x20030160` (407, `0x9120`). The struct ends
+at base + largest offset + 4: `0x20039868`, `0x20039548`, `0x20039284`. Zero or several such bases
+refuse (RENDER_STATE_BASES). It is read from the recipe's stock image (`stockscope`), so an
+authored routine's own `movw`-addressed base does not count.
+
+**The cell area.** From the struct's end to the lowest register-indexed base at or above it:
+13.6 `[0x20039868, 0x2003A8B8)`, 14.7 `[0x20039548, 0x2003A3D0)`, 11.23 `[0x20039284,
+0x20039ACC)`. The ceiling is the indexed table Finding 66 bounded by hand on 13.6 (`0x2003A8B8`,
+first indexed at `0x24EFD8`); 14.7's is first indexed at `0x24F8DE`, 11.23's at `0x24D0B4`. Every
+stock cell-table row lies in it, or the locator refuses (CELL_OUTSIDE_AREA); no base above the
+struct refuses CELL_AREA_NO_CEILING. *Inference*: a register-indexed base inside the struct (the
+digit buffer, 13.6 `0x200371D1`, 14.7 `0x200371D5`, 11.23 `0x20036DC1`) is a struct field whose
+index stays below the struct's end. Finding 66 bounds 13.6's buffer at `0x40` by hand; no
+instruction bounds it at the struct's end, so the module claims the whole struct for it.
+
+Tests: `tests/test_celltable_locate.py` (the tables, sites and clamp proofs above, the area and its
+refusals, the stock scope), `tests/test_grow_147.py` (a grow on 14.7 rebumps all 14 sites and the
+grown rows stay in the area), `tests/test_tablegrow_grow.py`.
 
 ## Finding 88 — 14.7 decodes, lays out and draws records as 13.6 does, except one decoder bound, two renderer arms and both text drawers; 11.23 does not — `proven-from-code` (instruction-for-instruction twins), 2026-11-08
 
@@ -6424,7 +6577,7 @@ from `grammar.prove`'s `proof` lines on stock 14.7 and 11.23.
 
 | function (13.6) | 14.7 twin | what differs |
 |---|---|---|
-| decoder `FUN_00252CB0` (1592 items) | `0x255578`, the only twin of 7 prologue candidates | one immediate: the mode-7 index bound `cmp.w #0x298` (664; 13.6 `0x2533BA`, then `bls`) is `cmp.w #0x1f8` (504), one value at all 13 sites (`0x255C82`, `0x255D44`, `0x255E24`, …). 5 callees map one-to-one; GuiData pool values shift `-0x12C40`, `-0x2054`, `-0x1FB4`, `+0x0`; SRAM `+0x0` ×2, `+0x4` ×3 |
+| decoder `FUN_00252CB0` (1592 items) | `0x255578`, the only twin of 7 prologue candidates | one immediate: the mode-7 index bound `cmp.w #0x298` (664; 13.6 `0x2533BA`, then `bls`) is `cmp.w #0x1f8` (504), one value at all 13 sites inside the decoder (`0x255C82`, `0x255D44`, `0x255E24`, …; GuiCode compares it at a 14th outside the decoder, Finding 89). 5 callees map one-to-one; GuiData pool values shift `-0x12C40`, `-0x2054`, `-0x1FB4`, `+0x0`; SRAM `+0x0` ×2, `+0x4` ×3 |
 | layout `FUN_00257BFC` (679 items) | `0x25A4B8`, the only twin of 7 candidates | nothing: 4 callees map one-to-one; GuiData `-0x2054`, `-0x1FB4`; SRAM `-0x3AC`, `+0x4` |
 | renderer dispatch `FUN_00256C54` (51 items, `tbh`) | `0x259514`, the only twin | 64 callees one-to-one; wtypes 0-9, 11-13, 15-17, 19-47 proven, of which 9, 15, 20-31, 36-45 reach only the default arm |
 | renderer arm wt 10, 18 | `0x25A1CE`, **not a twin** | first difference `0x25A1F8`: 13.6 `movw r3, #0x96b4`, 14.7 `movw r3, #0x9390` |
@@ -6979,6 +7132,21 @@ in common, lists 46 clean colour/bool blocks. The tracer reproduces 45 of them c
 not written between. The dump also gives var 138 two stores (`0x24853C`, `0x248542`) that are
 var 3's (`cmp r2,#0x4e` on var 3's percentage, `0x248532`) — the LP tank's level decides them —
 and gives var 206 var 207's Float store. `test_ghidra_bridge_dump_reproduced` pins all of it.
+
+**The status bridge is derived from it (2026-11-08).** `status_map.derived_bridge` keeps a base
+read of a var's slot whose every sink is a display-cell store (`0x2003xxxx`) made before the next
+base slot read, to exactly two cells, one word or halfword (colour) and one byte (bool). On 13.6
+it equals the dump on all 42 bridged `DC_DIMMER_STATUS_3` vars, read address included; it leaves
+out var 124 (the dump's error above) and var 42 (its re-read gives it a third sink), neither a
+status var. On 14.7 it bridges 43 status vars (pins 1-43). In the emulator on stock 14.7, the
+G12 reporting pins 3, 17, 30 and 43 on sets each derived colour cell to its ON master (and the
+bool of 3 and 30, whose cells nothing else loads, to 1); reporting them off restores both, and
+the cells 13.6's dump names never move there (pin 3, var 20: derived `0x20039854`/`0x20039D50`,
+13.6's `0x20039BB0`). `backbone`, `pin_bindings`, `state_loads` and `bind_pin` read it; the dump
+(`load_bridge("136")`) stays as the tests' positive control. It refuses `BRIDGE_UNKNOWN` where
+the base is not followed (`state_reach` does not locate, or the base escapes), and where one var
+has two clean blocks naming different cells (it does not pick one; no corpus image has such a
+var).
 
 ### 3. What it reaches, and the names
 
@@ -7968,7 +8136,9 @@ closes it, and the answer is that the silence is *intended* — just not for thi
 
 Group 199 is `11 80 04 00 76 02 03 00`: byte 1 `0x80` = **externally selected** (§5a of
 `CONTROL-BEHAVIOR.md`: the press never cycles its counter, only the setter can), byte 0's low
-nibble = 1 (the setter accepts variants 0 and 1, `FUN_0021B5E8` `0x21B606`-`0x21B610`). Its three
+nibble = 1 (the LCD's gated setter `FUN_0021B5E8` accepts variants 0 and 1, `0x21B606`-`0x21B610`;
+GuiCode's own `setVariant` is the ungated `FUN_0021B678`, which does not read the nibble:
+`CONTROL-BEHAVIOR.md` §5a, corrected 2026-11-08). Its three
 bindings all carry variant 0 (byte-2 high nibble; the sender `FUN_0021B8B4` matches
 `counter == byte2 >> 4` at `0x21B944`-`0x21B94A`). So **variant 1 is a state with nothing to
 send** — the group's "disabled" arm, a shape 74 other `11 80` groups share.

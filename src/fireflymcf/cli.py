@@ -1494,7 +1494,7 @@ def _cmd_pins(args: argparse.Namespace) -> int:
         b = bindings[p]
         try:
             loads = statusbind.state_loads(data, b.var) if b.bridged else {}
-        except statusbind.StatusBindError:
+        except (statusbind.StatusBindError, statusbind.BridgeUnknown):
             loads = {}
         off = loads.get(statusbind.OFF_STATE)
         on = loads.get(statusbind.ON_STATE)
@@ -1521,9 +1521,23 @@ def _cmd_pins(args: argparse.Namespace) -> int:
                 for c in captions.get(p, [])],
         })
 
+    # A built image's cell table was grown, so which rows are stock spares is unknown
+    # (SPARE_ROWS_UNKNOWN); that is reported, and the pins are still listed.
+    try:
+        spares, spares_unknown = statusbind.spare_cell_indices(data), None
+    except statusbind.SpareRowsUnknown as e:
+        spares, spares_unknown = None, (f"{e.code}: the cell table was grown; which rows are "
+                                        "stock spares is unknown")
+    from . import celltables
+    try:
+        spare_label = f"spare +0x{celltables.locate(data).cell_off:X} indices"
+    except (guidata.VariableTableNotFound, ValueError):
+        spare_label = "spare display-cell indices"
     if args.json:
-        print(json.dumps({"pins": rows,
-                          "spare_cell_indices": statusbind.spare_cell_indices(data)}, indent=2))
+        out = {"pins": rows, "spare_cell_indices": spares}
+        if spares_unknown is not None:
+            out["spare_cell_indices_unknown"] = spares_unknown
+        print(json.dumps(out, indent=2))
         return 0
 
     print(f"{'pin':>4} {'var':>4} {'use':>7} {'bool':>5} {'off colour':>15} "
@@ -1543,7 +1557,8 @@ def _cmd_pins(args: argparse.Namespace) -> int:
             for c in r["captions"]:
                 print(f"{'':>10}caption  {c['text']!r} ({'+'.join(c['via'])}, objects "
                       f"{', '.join(map(str, c['objects']))}): {c['when']}")
-    print(f"\nspare +0x44BC8 indices: {statusbind.spare_cell_indices(data)}")
+    print(f"\n{spare_label}: "
+          f"{spares if spares_unknown is None else f'unknown ({spares_unknown})'}")
     print("OUTPUTS-page name: the G12 OUTPUTS row's names; + = shown only under some floorplan "
           "or option (--names lists the conditions and the control captions)")
     if args.all:
@@ -1565,17 +1580,27 @@ def _cmd_bus_map(args: argparse.Namespace) -> int:
     dgns = frozenset(_parse_dgn(d) for d in args.dgn) if args.dgn else None
     entries = busmap.receive_map(data, dgns)
     sends = busmap.send_map(data, dgns)
+    # A pin unnamed because the status join is unavailable is not one the build never names
+    from . import outputs
+    join = outputs.status_join_refusal(data) \
+        if any(e.dgn == busmap.DGN_DC_DIMMER_STATUS_3 for e in entries) else None
     if args.json:
         cov = busmap.coverage(entries)
-        print(json.dumps({
+        payload = {
             "receive": [busmap.as_json(e) for e in entries],
             "coverage": {"%05X" % d: dict(c) for d, c in sorted(cov.items())},
             "send": sendmap.as_json(sends),
-        }, indent=2))
+        }
+        if join:                                     # present only when the join refused
+            payload["status_join_unavailable"] = join
+        print(json.dumps(payload, indent=2))
         return 0
     cols = ("entries", "named", "drawn", "drawn-unnamed", "config", "logic-only", "write-only",
             "untraced", "inert")
     cov = busmap.coverage(entries)
+    if join:
+        print("status join unavailable (no caption is joined to a pin by its status cell): "
+              + join)
     if not args.name:
         print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
         print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))
@@ -1718,7 +1743,8 @@ def _print_send_map(m, detail: bool, rows: bool = True, name: str | None = None)
             what["%05X %s" % (e.dgn, e.describe().split(" level")[0] if e.dgn == 0x1FEDB
                                else e.describe())] += 1
         summary = "; ".join(("%s x%d" % (k, n)) if n > 1 else k for k, n in what.items())
-        flag = " [GuiCode sets the variant]" if g.guicode_variant else ""
+        flag = (" [GuiCode sets the variant]" if g.guicode_variant
+                else " [GuiCode variant unknown]" if g.guicode_variant is None else "")
         print("%4d %-10s %-50s %s%s" % (g.group, g.cls, _ctl_text(g.controls)[:50],
                                         summary[:160] if not detail else "", flag))
         if detail:

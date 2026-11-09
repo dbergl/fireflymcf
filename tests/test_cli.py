@@ -346,3 +346,40 @@ def test_every_subcommand_prints_help():
             cli_mod.main([cmd, "--help"])
         assert e.value.code == 0, cmd
         assert "usage: fireflymcf %s" % cmd in out.getvalue(), cmd
+
+
+def test_pins_on_a_grown_image_reports_spares_unknown(tmp_path, mcf_136):
+    """`pins` on a built (grown) image: the spare indices are unknown (SPARE_ROWS_UNKNOWN,
+    `statusbind.spare_cell_indices`), which it says, with the reason, and still lists the pins."""
+    import json
+    from tests.conftest import REPO_ROOT
+    from fireflymcf import celltables, readout
+    grown, _cells, _edits = readout.allocate_fresh_cells(mcf_136, [(2, 3)])
+    live = celltables.locate(grown).cell_off
+    assert live != 0x44BC8                          # the label names the located (grown) table
+    path = tmp_path / "mcf-grown.bin"
+    path.write_bytes(grown)
+    r = _run("pins", str(path), cwd=REPO_ROOT)
+    assert r.returncode == 0, r.stderr
+    assert (f"spare +0x{live:X} indices: unknown (SPARE_ROWS_UNKNOWN: the cell table was "
+            "grown; which rows are stock spares is unknown)") in r.stdout
+    assert len([ln for ln in r.stdout.splitlines() if ln[:4].strip().isdigit()]) > 10
+    r = _run("pins", str(path), "--json", cwd=REPO_ROOT)
+    assert r.returncode == 0, r.stderr
+    out = json.loads(r.stdout)
+    assert out["pins"] and out["spare_cell_indices"] is None
+    assert out["spare_cell_indices_unknown"].startswith("SPARE_ROWS_UNKNOWN")
+
+
+def test_pins_survives_a_bridge_refusal_in_state_loads(mcf_136, tmp_path, monkeypatch, capsys):
+    """`state_loads` refuses BRIDGE_UNKNOWN (no longer a `StatusBindError`); `pins` leaves that
+    pin's states blank instead of crashing."""
+    from fireflymcf import cli, statusbind
+
+    def refuse(data, var):
+        raise statusbind.BridgeUnknown("test: the bridge does not derive")
+    monkeypatch.setattr(statusbind, "state_loads", refuse)
+    path = tmp_path / "mcf.bin"
+    path.write_bytes(mcf_136)
+    assert cli.main(["pins", str(path)]) == 0
+    assert capsys.readouterr().out

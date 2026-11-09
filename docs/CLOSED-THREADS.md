@@ -349,7 +349,8 @@ Verbatim, as part of the documentation cleanup. Dated statements below describe 
    press-cycling *skips* exactly those groups — the two are mutually exclusive by construction.
    `0x00` = the press cycles the variant; `0x80` = something outside chooses it. All seven pool refs
    to the state table were enumerated, so the three write sites are the complete set, and the
-   setter has exactly **one** caller (`0x21B002` in `FUN_0021AB88`) taking the variant from a
+   setter has exactly **one** caller (`0x21B002` in `FUN_0021A664`; not `FUN_0021AB88` as first
+   written, Ghidra `lcd136` 2026-11-08) taking the variant from a
    runtime record field.
 
    **The real defect shape: a group declaring a variant range wider than its bindings cover.**

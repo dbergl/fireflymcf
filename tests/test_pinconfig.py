@@ -74,3 +74,15 @@ def test_format_pin_renders_without_error(mcf_136, pin):
     text = pinconfig.format_pin(pinconfig.describe_pin(mcf_136, pin))
     assert f"G12 output pin {pin}" in text
     assert "COMMAND" in text and "STATUS" in text and "DIAGNOSTICS" in text
+
+
+def test_describe_pin_says_when_the_bridge_does_not_derive(mcf_136, monkeypatch):
+    from fireflymcf import status_map
+
+    def unknown(_data):
+        raise status_map.BridgeUnknown("BRIDGE_UNKNOWN: stubbed")
+    monkeypatch.setattr(status_map, "derived_bridge", unknown)
+    cfg = pinconfig.describe_pin(mcf_136, 3)
+    assert cfg.bridge_refusal.startswith("BRIDGE_UNKNOWN") and cfg.var is None
+    assert cfg.commanded                                   # the command side still reads
+    assert "BRIDGE_UNKNOWN" in pinconfig.format_pin(cfg)

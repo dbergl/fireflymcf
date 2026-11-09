@@ -38,7 +38,8 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 
-from . import celltables, firmware, guidata, memo, patch, relocate, status_map, theme
+from . import (celltables, firmware, guidata, memo, patch, relocate, status_map,
+               stockscope, theme)
 
 DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 
@@ -47,14 +48,11 @@ DGN_DC_DIMMER_STATUS_3 = guidata.DGN_DC_DIMMER_STATUS_3
 FILTER_INSTANCE_FIELD = 4
 FILTER_DISABLED = 0xFF
 
-CELL_TABLE_OFF = status_map.CELL_TABLE_OFF        # GuiData-relative base of the +0x44BC8 table
-CELL_TABLE_LEN = status_map.CELL_TABLE_LEN
+CELL_TABLE_OFF = status_map.CELL_TABLE_OFF        # 13.6's stock +0x44BC8; read celltables.locate
 SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
 
 # The G12 drives 44 outputs (`g12_config`: 8 relay + 12 half-bridge + 24 high-current).
 PIN_MIN, PIN_MAX = 1, 44
-
-GUICODE_CHECKSUM = "section-checksum:Lyra 13v6 GuiCode"
 
 
 class StatusBindError(ValueError):
@@ -64,6 +62,27 @@ class StatusBindError(ValueError):
     will be flashed to a coach, and a silently-wrong colour cell or filter byte is a bricked
     screen or a control that reports another pin's state.
     """
+
+
+class SpareRowsUnknown(StatusBindError):
+    """SPARE_ROWS_UNKNOWN: the stock image's display-cell table was itself grown
+    (`celltables.stale_pair`), so which of its rows are stock, and so may be spare, is not
+    known. Its grown rows are written by authored routines though no record names them."""
+    code = "SPARE_ROWS_UNKNOWN"
+
+
+# BRIDGE_UNKNOWN: the status bridge is derived from each image's GuiCode
+# (`status_map.derived_bridge`, 2026-11-08), and refuses where the receive-slot base is not
+# followed. Until then it was the committed 13.6 Ghidra dump (`status_map.load_bridge`), and
+# every other image refused: 14.7's pin 3 bound to 13.6's cell 0x20039BB0, which never changes
+# there when the G12 reports the pin on (observed 2026-11-08).
+BridgeUnknown = status_map.BridgeUnknown
+
+
+def require_bridge(data: bytes) -> dict:
+    """The derived status bridge of `data` (`status_map.derived_bridge`); refuses
+    `BridgeUnknown` where it does not locate."""
+    return status_map.derived_bridge(data)
 
 
 # --------------------------------------------------------------------------------------
@@ -95,13 +114,13 @@ class PinBinding:
         return self.bridged and self.colour_index is None
 
 
-def pin_bindings(data: bytes, build: str = "136") -> dict:
+def pin_bindings(data: bytes) -> dict:
     """`{pin: PinBinding}` for every G12 output that a `DC_DIMMER_STATUS_3` filter entry watches.
 
     A pin watched by more than one entry keeps the **bridged** one (a duplicate entry with no
     GuiCode block cannot drive anything); ties break to the lowest var, deterministically.
     """
-    rows = status_map.backbone(data, build)
+    rows = status_map.backbone(data)
     commanded = status_map.commanded_instances(data)
     best: dict = {}
     for r in rows:
@@ -121,27 +140,54 @@ def pin_bindings(data: bytes, build: str = "136") -> dict:
     return best
 
 
-def free_pins(data: bytes, build: str = "136") -> list:
+def free_pins(data: bytes) -> list:
     """G12 outputs no located control commands, sorted — the candidates for a new button.
 
     Restricted to `PIN_MIN..PIN_MAX`: the filter table also watches instances well above 44
     (other RV-C devices on the bus), and those are not outputs this panel can drive.
     """
-    return sorted(p for p, b in pin_bindings(data, build).items()
+    return sorted(p for p, b in pin_bindings(data).items()
                   if not b.commanded and PIN_MIN <= p <= PIN_MAX)
 
 
 def spare_cell_indices(data: bytes) -> list:
-    """`+0x44BC8` indices referenced by **no** record's colour field and no `value_slot`.
+    """Display-cell table indices referenced by **no** record's colour field and no `value_slot`,
+    in any of the four object tables, below the STOCK image's located row count.
 
     Such an index is dead: a widget reaches the table only by naming an index (§5.4b), so an
     index nothing names contributes nothing on screen and may be repointed. `inferred-from-data`
     — it is a whole-corpus scan of record references, and nothing is *known* to iterate the
     table rather than index it, but that has not been proven from code.
+
+    The row bound is located (2026-11-08): a fixed 665 offered 14.7's indices 505-664, past its
+    505-row table. It is the stock image's (`stockscope.stock_image`: the recipe's stock inside
+    a compile, else `data` itself), never `data`'s: a row a grow appended was minted for an op,
+    and a grown 13.6 reference build leaves 28 of its 68 grown rows unnamed by any decoded record
+    while authored routines still write their cells (measured 2026-11-08), so "unnamed" there
+    does not mean dead. A stock image that was itself grown (`celltables.stale_pair`) refuses
+    with `SpareRowsUnknown` rather than guess which rows are stock.
+
+    An index object table 1 leaves unnamed but another table reads
+    (`status_map.foreign_table_refs`: 13.6's 252-260 background-bar cells, 14.7's 187, 193, 224,
+    230 and more) is not spare: repointing 254/256/258 painted the coach-48V bars (2026-09-11).
     """
+    stock = stockscope.stock_image(data)
+    stale = celltables.stale_pair(stock)
+    if stale is not None:
+        raise SpareRowsUnknown(
+            "SPARE_ROWS_UNKNOWN: the stock image's display-cell table was grown (a stale pair "
+            "at GuiData+%#x no GuiCode reads), so its stock rows, and so its spare indices, are "
+            "unknown; build from the ungrown stock image" % stale)
+    return _spare_cell_indices(data, celltables.row_count(stock))
+
+
+@memo.content_cached
+def _spare_cell_indices(data: bytes, rows: int) -> list:
     con = status_map.object_consumers(data)
     used = set(con.colour) | set(con.vslot)
-    return [i for i in range(CELL_TABLE_LEN) if i not in used]
+    cand = [i for i in range(rows) if i not in used]
+    foreign = status_map.foreign_table_refs(data, set(cand))
+    return [i for i in cand if i not in foreign]
 
 
 def cell_index(data: bytes, cell: int) -> int | None:
@@ -610,7 +656,7 @@ def _code_index(code: bytes, base: int) -> tuple:
     return tuple(loads), {k: tuple(v) for k, v in branches.items()}
 
 
-def state_loads(data: bytes, var: int, build: str = "136") -> dict:
+def state_loads(data: bytes, var: int) -> dict:
     """`{OFF_STATE | <cmp value>: StateLoad}` for `var`'s GuiCode block.
 
     Located structurally, not by address: find the `ldr rX,[pc,#..]` whose pool word holds the
@@ -629,7 +675,7 @@ def state_loads(data: bytes, var: int, build: str = "136") -> dict:
 
     A state whose shape does not match is omitted rather than guessed.
     """
-    bridge = status_map.load_bridge(build)
+    bridge = require_bridge(data)
     if var not in bridge:
         raise StatusBindError(
             f"var {var} has no clean GuiCode bridge block; its colour is not firmware-driven "
@@ -727,8 +773,7 @@ def colour_masters(data: bytes) -> dict:
     return out
 
 
-def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
-                     build: str = "136") -> tuple:
+def set_state_colour(data: bytes, var: int, state: str, rgb: tuple) -> tuple:
     """Give `var`'s `state` ("off" or "on") the colour `rgb` — a 2-byte GuiCode edit.
 
     Repoints that one `ldr`'s `imm8` at a pool word holding a master that already carries `rgb`.
@@ -740,7 +785,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
     LDR-literal range (`Align(pc,4)+4+imm8*4`, `imm8 <= 255`) of this instruction.
     """
     key = _resolve_state(state)
-    loads = state_loads(data, var, build)
+    loads = state_loads(data, var)
     if key not in loads:
         raise StatusBindError(
             f"var {var}'s GuiCode block has no recognised {key!r} colour load "
@@ -783,7 +828,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
         file_off, old, bytes(out[file_off:file_off + 2]), "guicode-state-colour",
         f"var {var} {state} colour master {load.master:#010x} {load.rgb} -> "
         f"{_word(code, base, origin + choice * 4):#010x} {wanted}")]
-    return _reseal_with(bytes(out), edits, [GUICODE_CHECKSUM])
+    return _reseal_with(bytes(out), edits, [firmware.guicode_checksum_label(data)])
 
 
 # --------------------------------------------------------------------------------------
@@ -791,8 +836,7 @@ def set_state_colour(data: bytes, var: int, state: str, rgb: tuple,
 # --------------------------------------------------------------------------------------
 
 def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
-             on_colour: tuple | None = None, index: int | None = None,
-             build: str = "136") -> tuple:
+             on_colour: tuple | None = None, index: int | None = None) -> tuple:
     """Make `pin`'s live status paintable, and return the table index a widget should name.
 
     Returns `(new_data, colour_index, edits)`. `colour_index` is what to write into a box
@@ -807,8 +851,11 @@ def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
     It deliberately does NOT retarget any filter's instance byte: on 13.6 every pin 1-44 is
     already watched, so doing so would silently steal another pin's watcher. Call
     `set_filter_instance` explicitly when that trade is what you want.
+
+    Refuses `BridgeUnknown` where the status bridge does not derive (`require_bridge`).
     """
-    b = pin_bindings(data, build).get(pin)
+    require_bridge(data)
+    b = pin_bindings(data).get(pin)
     if b is None:
         raise StatusBindError(f"no DC_DIMMER_STATUS_3 filter entry watches pin {pin}")
     if not b.bridged:
@@ -837,7 +884,7 @@ def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
     for state, rgb in (("off", off_colour), ("on", on_colour)):
         if rgb is None:
             continue
-        data, e = set_state_colour(data, b.var, state, rgb, build)
+        data, e = set_state_colour(data, b.var, state, rgb)
         edits += e
 
     return data, colour_index, edits

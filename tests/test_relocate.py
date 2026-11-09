@@ -847,3 +847,40 @@ def test_find_match_table_anchors_a_table_two_wider_than_the_object_count(monkey
     assert (start - stock_mt) // 2 == n + 2
     monkeypatch.setattr(guidata, "MATCH_TABLE_MAX_APPENDED", -1)   # the width scan tries nothing
     assert guidata.find_match_table(grown) == stock_mt
+
+
+def test_grow_match_table_overwrites_14_7s_alignment_pad(mcf_147):
+    """14.7 stock has 1077 objects and a 1078-entry match table: object table 1 starts
+    4-aligned, so the last u16 is a pad (0) no object reads. The grow overwrites it with the
+    first value instead of refusing the table as a wrong window (2026-11-08)."""
+    import struct
+    from fireflymcf import guidata, relocate
+    n = len(guidata.object_tables(mcf_147)[1])
+    mt = guidata.find_match_table(mcf_147)
+    gs, _ = guidata.guidata_extent(mcf_147)
+    t1, _ = relocate.object_table_bounds(mcf_147, relocate.OBJECT_TABLE_INDEX)
+    assert (n, (t1 - mt) // 2, t1 % 4) == (1077, 1078, 0)
+    assert struct.unpack_from("<H", mcf_147, gs + mt + 2 * n)[0] == 0
+    grown, edits = relocate.grow_match_table(mcf_147, [3, 0xFFFF])
+    gs2, _ = guidata.guidata_extent(grown)
+    assert guidata.find_match_table(grown) == mt
+    got = [struct.unpack_from("<H", grown, gs2 + mt + 2 * i)[0] for i in (n - 1, n, n + 1)]
+    assert got == [struct.unpack_from("<H", mcf_147, gs + mt + 2 * (n - 1))[0], 3, 0xFFFF]
+
+
+def test_grow_match_table_still_refuses_a_pad_holding_a_value(mcf_147):
+    """The pad is accepted only as the zero (or sentinel) a pad holds: the same slot holding
+    a match value is no pad, and the table is refused as a wrong window, as before."""
+    import struct
+
+    import pytest
+
+    from fireflymcf import guidata, patch, relocate
+    n = len(guidata.object_tables(mcf_147)[1])
+    gs, _ = guidata.guidata_extent(mcf_147)
+    buf = bytearray(mcf_147)
+    struct.pack_into("<H", buf, gs + guidata.find_match_table(mcf_147) + 2 * n, 5)
+    img, _ = patch.reseal(bytes(buf))
+    assert guidata.find_match_table(img) == guidata.find_match_table(mcf_147)
+    with pytest.raises(relocate.RelocationError, match="wrong window"):
+        relocate.grow_match_table(img, [3, 0xFFFF])

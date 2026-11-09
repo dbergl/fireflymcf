@@ -315,16 +315,45 @@ def test_refuses_a_destination_with_no_bridge_block(
         patch.McfPatcher(image).set_channel(bath_fan, 42)
 
 
-def test_refuses_on_a_build_with_no_bridge_dump() -> None:
-    """The bridge dump is 13.6's alone; 14.7 must refuse rather than borrow 13.6's cells."""
+def test_retargets_on_14_7_to_its_derived_cells() -> None:
+    """The status bridge is derived per image (2026-11-08): on 14.7 the default indicator
+    retarget names 14.7's own cells for the new channel, not 13.6's."""
     with open("firefly-14.7 (Terrain)/mcf.bin", "rb") as handle:
         other = handle.read()
     fan = [c for c in guidata.find_control_groups(other) if c.group == BATH_FAN_GROUP][0]
-    with pytest.raises(patch.PatchError, match="13.6"):
-        patch.McfPatcher(other).set_channel(fan, FREE_CHANNEL)
+    new = statusbind.pin_bindings(other)[FREE_CHANNEL]
+    assert (new.colour_cell, new.bool_cell) == (
+        status_map.derived_bridge(other)[new.var]["colour_cell"],
+        status_map.derived_bridge(other)[new.var]["bool_cell"])
     patcher = patch.McfPatcher(other)
-    patcher.set_channel(fan, FREE_CHANNEL, move_display_list=True)
-    assert patcher.edits()
+    patcher.set_channel(fan, FREE_CHANNEL)
+    notes = " ".join(e.note for e in patcher.edits())
+    assert "%#010x" % new.colour_cell in notes
+
+
+def test_refuses_where_the_bridge_does_not_derive(monkeypatch) -> None:
+    """Where the receive-slot base escapes the trace, the default retarget refuses rather than
+    name cells; moving the status variable still works."""
+    from fireflymcf import slottrace
+    with open("firefly-14.7 (Terrain)/mcf.bin", "rb") as handle:
+        other = handle.read()
+    real = slottrace.state_reach
+    monkeypatch.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
+        real(d).functions, real(d).loads, ((0x240000, "test"),)))
+    from fireflymcf import outputs
+    caches = (status_map._derived_bridge, outputs._captions, outputs.status_join_refusal)
+    for c in caches:
+        c.cache_clear()
+    try:
+        fan = [c for c in guidata.find_control_groups(other) if c.group == BATH_FAN_GROUP][0]
+        with pytest.raises(patch.PatchError, match="does not derive"):
+            patch.McfPatcher(other).set_channel(fan, FREE_CHANNEL)
+        patcher = patch.McfPatcher(other)
+        patcher.set_channel(fan, FREE_CHANNEL, move_display_list=True)
+        assert patcher.edits()
+    finally:
+        for c in caches:
+            c.cache_clear()
 
 
 # Every single-channel control on 13.6, by group: does its indicator name its own pin's cells

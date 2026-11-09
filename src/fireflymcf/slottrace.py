@@ -592,6 +592,12 @@ def guicode_entry1(data: bytes) -> int | None:
     return (w & ~1) if w & 1 else None
 
 
+def is_instruction(data: bytes, addr: int) -> bool:
+    """Whether `addr` starts an instruction of GuiCode's linear decode (the one every trace here
+    walks)."""
+    return addr in _tracer(data).at
+
+
 def _function_end(tr: Tracer, k: int) -> int:
     """Index one past function `k`'s body: the next `push {..., lr}` prologue."""
     for j in range(k + 1, len(tr.ins)):

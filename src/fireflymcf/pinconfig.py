@@ -69,6 +69,7 @@ class PinConfig:
     off_rgb: tuple | None = None
     on_rgb: tuple | None = None
     outputs_row: tuple | None = None                  # (label, file_offset)
+    bridge_refusal: str | None = None                 # why the status path is unknown
 
     @property
     def commanded(self) -> bool:
@@ -115,7 +116,7 @@ def _group_pairs(gt, bt, gid: int) -> set:
             for j in range(g.start, g.start + g.count) if 0 <= j < len(bt)}
 
 
-def describe_pin(data: bytes, pin: int, build: str = "136") -> PinConfig:
+def describe_pin(data: bytes, pin: int) -> PinConfig:
     """Gather every MCF reference to `pin`. Read-only; nothing is modified."""
     cfg = PinConfig(pin=pin)
     gt = guidata.group_table(data)
@@ -152,14 +153,19 @@ def describe_pin(data: bytes, pin: int, build: str = "136") -> PinConfig:
     except Exception:
         pass
 
-    pb = statusbind.pin_bindings(data, build).get(pin)
+    try:
+        pb = statusbind.pin_bindings(data).get(pin)
+    except statusbind.BridgeUnknown as err:
+        # The status path needs the status bridge; where it does not derive, say so
+        cfg.bridge_refusal = "%s: %s" % (err.code, err)
+        pb = None
     if pb is not None:
         cfg.var, cfg.bridged = pb.var, pb.bridged
         cfg.colour_cell, cfg.colour_index = pb.colour_cell, pb.colour_index
         cfg.bool_index, cfg.consumers = pb.bool_index, list(pb.colour_consumers)
         if pb.bridged:
             try:
-                loads = statusbind.state_loads(data, pb.var, build)
+                loads = statusbind.state_loads(data, pb.var)
                 cfg.off_rgb = getattr(loads.get("off"), "rgb", None)
                 on = loads.get(1) or loads.get("on")
                 cfg.on_rgb = getattr(on, "rgb", None)
@@ -200,6 +206,8 @@ def format_pin(cfg: PinConfig) -> str:
     L.append(f"    masters       {cfg.masters or 'none'}")
     L += ["", f"STATUS    {'displayable' if cfg.displayable else 'not displayable'}",
           f"    var           {cfg.var}   bridged={cfg.bridged}"]
+    if cfg.bridge_refusal:
+        L.append(f"    UNKNOWN       {cfg.bridge_refusal}")
     if cfg.colour_cell is not None:
         L.append(f"    colour cell   0x{cfg.colour_cell:08X}  table index {cfg.colour_index}")
     L.append(f"    bool index    {cfg.bool_index}")

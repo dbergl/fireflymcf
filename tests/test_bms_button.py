@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from fireflymcf import guidata, levelcontrols, newbutton, options, recipe
+from fireflymcf import guidata, newbutton, options, recipe
 
 REPO = Path(__file__).resolve().parents[1]
 STOCK = REPO / "firefly-13.6/mcf.bin"
@@ -57,7 +57,7 @@ def test_alarms_binds_hold_and_tap_frames(built):
 
 def test_alarms_group_is_hold_safe(built):
     stock = STOCK.read_bytes()
-    assert _alarms_group(built) in newbutton.hold_safe_groups(stock, levelcontrols.RESERVED_GROUPS)
+    assert _alarms_group(built) in newbutton.hold_safe_groups(stock)
 
 
 def test_bad_wire_refused():

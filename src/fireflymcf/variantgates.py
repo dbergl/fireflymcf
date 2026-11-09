@@ -2,9 +2,10 @@
 variant -- and the one-byte edit that ungates one. `GUICODE.md` Finding 68 (2026-09-05).
 
 The mechanism, every joint cited. A group whose header byte 1 is `0x80` is *externally
-selected* (`CONTROL-BEHAVIOR.md` §5a): the press never cycles its variant counter, only the
-LCD's setter `FUN_0021B5E8` can, and the sender `FUN_0021B8B4` (`0x21B944`) fires only bindings
-whose byte-2 high nibble equals that counter. GuiCode reaches the setter through the function
+selected* (`CONTROL-BEHAVIOR.md` §5a): the press never cycles its variant counter, only a
+setter can, and the sender `FUN_0021B8B4` (`0x21B944`) fires only bindings whose byte-2 high
+nibble equals that counter. GuiCode reaches its setter, the ungated `FUN_0021B678` (corrected
+2026-11-08 from `FUN_0021B5E8`, the LCD's own gated one: `lcdgroups`), through the function
 pointer at `0x20039908` (`setVariant(group, variant)`), and `FUN_00247BF8` -- the per-tick
 routine handed the receive-slot array in `r0` -- calls it in the shape
 

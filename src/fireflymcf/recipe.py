@@ -16,8 +16,9 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import (coverage, donors, firmware, followchannel, grammar, guidata, patch,
-                        relocate, theme)
+from fireflymcf import (celltables, coverage, decodeguards, donors, firmware, followchannel,
+                        grammar, guidata, newbutton, patch, relocate, sramreach, statusbind,
+                        stockscope, theme)
 
 SCHEMA = 1
 
@@ -38,7 +39,8 @@ class RecipeError(ValueError):
 
 
 class GateError(RecipeError, AssertionError):
-    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`).
+    """A whole-image gate refused the build (`STRUCTURAL_GATE`, `CAPABILITY_GATE`, `NOT_SEALED`,
+    `HOOK_REFUSED`, `VARIANT_SETTER_UNKNOWN`; `ops_doc.GATE_CODES` documents each).
     Raised explicitly, never by `assert`, so `python -O` cannot remove a gate. It is also an
     AssertionError, the type these gates raised before they were explicit."""
 
@@ -340,28 +342,26 @@ def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
     _assert_no_guicode_selected_group_reused(ctx.stock, data)
 
 
-# Command groups no op may claim, though `newbutton.free_group_slots` lists them: on 13.6, 68 and
-# 69 hold the stock `1FFD3` / `1FFC5` inverter/charger enable/disable templates that the
-# PD-inverter bridge brief (`docs/HARDWARE-VERIFIED.md`) names as the route it will drive. The gate
-# keys on those DGNs in the stock image, so another build (whose 68/69 are something else) is not
-# gated. The reboot button's first build overwrote 68 with the APS-500 reboot group; this is what
-# catches it.
-RESERVED_GROUPS = {68: 0xFFD3, 69: 0xFFC5}
-
-
 def _assert_reserved_groups_intact(stock: bytes, data: bytes) -> None:
+    """No op may change a stock inverter/charger template (`newbutton.RESERVED_DGNS`, the
+    `1FFD3` / `1FFC5` enable/disable groups the PD-inverter bridge brief in
+    `docs/HARDWARE-VERIFIED.md` names as the route it will drive), though
+    `newbutton.free_group_slots` lists them. The groups are located in the STOCK image
+    (`newbutton.template_groups`: every group whose whole slice is that DGN; 68 and 69 on 11.23,
+    13.6 and 14.7, 2026-11-08), so a stock with no such group has nothing gated, and one with
+    several has each gated. The reboot button's first build overwrote 68 with the APS-500 reboot
+    group; this is what catches it."""
+    from fireflymcf import newbutton
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
     sb, db = guidata.binding_table(stock), guidata.binding_table(data)
-    for g, dgn_low in RESERVED_GROUPS.items():
-        if g >= len(sg) or not sg[g].count:
-            continue
-        slice_ = range(sg[g].start, sg[g].start + sg[g].count)
-        if not all(sb[i].dgn_low == dgn_low for i in slice_):
-            continue
-        _gate(dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_),
-              "STRUCTURAL_GATE",
-              "reserved group %d (the stock %#x inverter/charger template) was changed" % (
-                  g, 0x10000 | dgn_low))
+    for dgn, groups in newbutton.template_groups(stock).items():
+        for g in groups:
+            slice_ = range(sg[g].start, sg[g].start + sg[g].count)
+            _gate(g < len(dg) and dg[g].raw == sg[g].raw
+                  and all(i < len(db) and db[i].raw == sb[i].raw for i in slice_),
+                  "STRUCTURAL_GATE",
+                  "reserved group %d (the stock %#x inverter/charger template) was changed" % (
+                      g, dgn))
 
 
 def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
@@ -369,15 +369,31 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     GuiCode drives by number (`newbutton.guicode_selected_groups`). A build of 2026-09-30 reused 136
     and 137 from
     13.6's 130-139 block: a tap on 136 worked, but its hold never repeated, and 137's hold-only
-    reboot never fired, on the coach 2026-09-30. Edits that keep a group's slice (a gesture or a
-    binding byte on an existing control) are not reuse and are not gated."""
+    reboot never fired, on the coach 2026-09-30. Driven is sufficient to refuse, not proof a
+    hold is dead: a hold on driven group 129 (Low Volts) works on the coach (2026-10-19), and
+    what separates it from 136/137 is not established (`newbutton.guicode_selected_groups`).
+    Edits that keep a group's slice (a gesture or a binding byte on an existing control) are not
+    reuse and are not gated.
+
+    Where the GuiCode-driven groups are not known (`newbutton.VariantSetterUnknown`: the setter
+    cell or the LCD's writer does not prove out) a build that reuses no group has nothing to
+    check and passes; one that reuses any group is refused VARIANT_SETTER_UNKNOWN, since it
+    cannot be shown to miss them. 11.23, 13.6 and 14.7 all locate (2026-11-08)."""
     from fireflymcf import newbutton
-    selected = newbutton.guicode_selected_groups(stock)
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
+    try:
+        selected = newbutton.guicode_selected_groups(stock)
+    except newbutton.VariantSetterUnknown as e:
+        moved = [g.index for g in sg if g.index < len(dg) and dg[g.index].start != g.start]
+        _gate(not moved, e.code,
+              "group(s) %s were reused, and which groups GuiCode drives by number is not known "
+              "on this image: %s" % (moved, e))
+        return
     bad = [g for g in selected if g < len(sg) and g < len(dg) and dg[g].start != sg[g].start]
     _gate(not bad, "STRUCTURAL_GATE",
           "group(s) %s were reused, but GuiCode drives them by number "
-          "(newbutton.guicode_selected_groups); a hold on them does not work" % bad)
+          "(newbutton.guicode_selected_groups); holds on driven 136/137 died on a coach "
+          "(2026-09-30), so a reused group must not be one" % bad)
 
 
 def _assert_authored_cells_fresh(ctx: Ctx) -> None:
@@ -390,8 +406,8 @@ def _assert_authored_cells_fresh(ctx: Ctx) -> None:
     background bars. Enforcing "authored cells are freshly grown, never reused" is the invariant
     that makes that class impossible, and it is what would have failed the original coach-48V
     build. Reads the stock row count structurally (`readout.resolve_cell_tables`); a build whose
-    cell table cannot be located or uses an unsupported bound encoding is left ungated -- the ops
-    that grow support only the 13.6 `cmp.w #imm` bound form."""
+    cell table cannot be located is left ungated. The grow itself rebumps only a `cmp.w #imm`
+    bound (13.6, 14.7) and refuses 11.23's `movw+cmp` (`tablegrow.cell_table_bound_sites`)."""
     if not ctx.authored_cells:
         return
     from fireflymcf import readout
@@ -569,9 +585,14 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 
 
 # Coded refusals from the locators an op builds on (a template or donor this image does not
-# prove, `donors`; a record grammar that is not 13.6's, `grammar`), surfaced under their own
-# code as the op's refusal, as FollowChannelError is above.
-_CODED = (donors.DonorError, grammar.GrammarError)
+# prove, `donors`; a record grammar or LCD group handling that is not 13.6's, `grammar`; a cell
+# or type table that does not locate, `celltables`), surfaced under their own code as the op's
+# refusal, as FollowChannelError is above.
+_CODED = (donors.DonorError, grammar.GrammarError, grammar.LcdGrammarError,
+          celltables.CellTableError,
+          sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
+          newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
+          decodeguards.DecoderRangeUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:
@@ -580,7 +601,7 @@ def _verify(o, data: bytes, ctx: Ctx) -> str:
     whole-image state another op may have rewritten, so it is refused as a gate is: a failed
     CompileResult in a build that holds a user op, raised otherwise (`_finish_or_refuse`)."""
     try:
-        with donors.witness_scope(getattr(ctx, "stock", None)):
+        with stockscope.stock_scope(getattr(ctx, "stock", None)):
             return o.verify(data, ctx)
     except followchannel.FollowChannelError as e:
         raise GateError("HOOK_REFUSED", "%s verify: the per-tick hook does not prove out: %s"
@@ -593,7 +614,7 @@ def _apply(o, data: bytes, ctx: Ctx, limit: int) -> bytes:
     """`o.apply` plus the tick-chain check, with a per-tick hook that does not prove out
     (`FollowChannelError` escaping an op) refused as DETOUR_REFUSED, naming the op."""
     try:
-        with donors.witness_scope(getattr(ctx, "stock", None)):
+        with stockscope.stock_scope(getattr(ctx, "stock", None)):
             out = o.apply(data, ctx)
     except followchannel.FollowChannelError as e:
         raise RecipeError("DETOUR_REFUSED", "%s: the per-tick hook does not prove out: %s"

@@ -410,27 +410,47 @@ The sender matches each entry's byte-2 high nibble against a counter
 Prompted by PC.32 (`Shore Brkr Size`'s `−` emits nothing). This closes "what calls these setters
 was not traced" and sharpens the gate; the initial-value question below stays open.
 
-**The setter is one dispatcher, `FUN_0021B5E8(index, variant)`, with three write sites**, and all
-of the state table's seven pool references were enumerated to confirm there are no others:
+**Corrected 2026-11-08 (`proven-from-code`, `lcdgroups.host_writer`): there are two setters, and
+the one GuiCode calls is not gated.** The pointer GuiCode calls as `setVariant(group, v)`
+(`0x20039908` on 13.6) holds host-API `+0x04`, which the LCD's table builder stores as `0x21B679`
+(`ldr r3,=0x21B679 ; str r3,[sp,#0x28]` @`0x21C18E`/`0x21C196`, table at `sp+0x24`, handed to
+entry0 by `blx r3` @`0x21C1B2`). That is **`FUN_0021B678`**, the third write site below, a
+function of its own: `ldr r3,=0x20006E5C ; ldrb r3,[r3,#0xf] ; add r0,r3 ; ldr r3,=0x20006E6C ;
+add.w r0,r3,r0,lsl #4 ; strb r1,[r0,#0xa] ; strb r1,[r0,#0xb] ; bx lr` (`0x21B678`-`0x21B688`).
+It writes both counters of record `b3 + group` with **no byte-1 gate and no nibble bound**. The
+gated dispatcher `FUN_0021B5E8` is the LCD's own path from a GuiData record field (its one caller,
+below). The same holds on 11.23 and 14.7, whose LCD (`cbed1028`) builds the same table at the
+same addresses. So the "`0x00` = the setter refuses" reading below is true of `FUN_0021B5E8`
+only; GuiCode can set the counters of any group. `GUICODE.md` Finding 90 has the proof on all
+three images, the census of every GuiCode call through the pointer (13.6: 105 calls, 49 groups)
+and the LCD twin proof. *(The text below is the 2026-08-24 tracing, with the setter it describes
+now named `FUN_0021B5E8`.)*
+
+**The gated setter is one dispatcher, `FUN_0021B5E8(index, variant)`, with three write sites
+counted with `FUN_0021B678`'s**, and all of the state table's seven pool references were
+enumerated to confirm there are no others:
 
 | site | writes | gate |
 |---|---|---|
 | `0x21B618`/`0x21B61A` | `state + index*16 + 0x0A` **and** `+0x0B` | group byte 1 bits 6-7 **== `0x80`** (`0x21B5FE`-`0x21B604`), then `blo` on byte 0's low nibble |
 | `0x21B66A`/`0x21B66C` | same, index from `[struct+0xF]` | the **same** byte-1 gate at `0x21B650`-`0x21B656` |
-| `0x21B684`/`0x21B686` | same, index offset by `[struct+0xF]` | — (fragment; see call-site note) |
+| `0x21B684`/`0x21B686` | same, index offset by `[struct+0xF]` | — (`FUN_0021B678`, host API `+0x04`: GuiCode's `setVariant`, corrected 2026-11-08 above) |
 
 `index == 0xF` and `0xE` are special arms: `0xF` sets the **global** counter at `[struct+0x0E]`,
 gated on `[struct+0x0D]` bits 6-7 == `0x80` and wrapped by its low nibble — the exact mirror of
 the per-control rule.
 
 **So the two mechanisms are mutually exclusive by construction, and byte 1 is the switch.**
-`0x00` = the counter press-cycles and the setter *refuses to touch it*; `0x80` = press-cycling is
-skipped and **only** the setter can move it. A `0x80` group is therefore not a broken group — it is
+`0x00` = the counter press-cycles and `FUN_0021B5E8` *refuses to touch it*; `0x80` = press-cycling
+is skipped and **only** a setter can move it (GuiCode's `FUN_0021B678` moves either kind: 14.7
+drives two `0x00` groups, 5 and 17, 2026-11-08). A `0x80` group is therefore not a broken group — it is
 an **externally-selected** control, authored that way.
 
 **One call site.** A BL scan of the whole image finds exactly one caller of `0x21B5E8`, at
-**`0x21B002`** inside `FUN_0021AB88`, and it passes `variant = ([r4+0x108] + sb)[2] >> 4` — a
-runtime record field, not a constant. The bulk entry at `0x21B68C` has **zero** callers in 13.6.
+**`0x21B002`** inside `FUN_0021A664` (the second range of its Ghidra body, `0x21AEA4`-`0x21B105`,
+reached by a tail call; not `FUN_0021AB88` as first written; Ghidra `lcd136`, 2026-11-08), and it
+passes `variant = ([r4+0x108] + sb)[2] >> 4` — a runtime record field, not a constant. The bulk
+entry at `0x21B68C` has **zero** callers in 13.6.
 
 *Confirmed in passing:* the group entry's bytes 4-5 are the binding **base index** (u16) and byte 6
 the count — group 199 reads base 630, count 3, and bindings 630-632 are exactly its three
@@ -889,12 +909,14 @@ A toggle that sends "on" or "off" by the state the panel shows needs no new mech
 `0x80` group (§5a) whose variant something outside the screen sets. The group carries two
 bindings on one DGN, both on mask `0x06` (§3): **variant 0 sends the "on" payload, variant 1 the
 "off" payload**. Byte 1 `0x80` stops the press from cycling the counter (`0x21BC5E`, `0x21BCFA`),
-and makes the setter `FUN_0021B5E8(index, variant)` accept it (its gate at
-`0x21B5FE`-`0x21B604`). The setter is reached through the function pointer at **`0x20039908`**.
-**Byte 0's low nibble must be at least 1.** The setter writes only while the variant is at most
-that nibble (`and r3,r3,#0xf` / `cmp r3,r4` / `blo` past the store, `0x21B60A`-`0x21B610`).
-The tap prefix's nibble is 0, which would refuse `setVariant(group, 1)`, so the toggle would send
-"on" forever. Stock's setter-driven two-variant groups carry 1: 129 (the Low Volts toggle,
+and makes the LCD's gated setter `FUN_0021B5E8(index, variant)` accept it (its gate at
+`0x21B5FE`-`0x21B604`). GuiCode's `setVariant` is reached through the function pointer at
+**`0x20039908`** (13.6), which holds the ungated `FUN_0021B678` (§5a, corrected 2026-11-08).
+**Byte 0's low nibble is 1.** `FUN_0021B5E8` writes only while the variant is at most that
+nibble (`and r3,r3,#0xf` / `cmp r3,r4` / `blo` past the store, `0x21B60A`-`0x21B610`);
+`FUN_0021B678` does not read it, so on GuiCode's path the nibble does not bound the variant
+(inference from the two functions' code; no build has carried a toggle with nibble 0). It is
+kept at 1 because stock's setter-driven two-variant groups carry 1: 129 (the Low Volts toggle,
 `11 80 0c 80`), 143 and 146. The toggle's prefix is `11 80 00 00`.
 
 `add_button_status` drives it. When an entry names a toggle button, its per-tick routine

@@ -29,7 +29,8 @@ no OPTIONS row names is reported raw. `describe` and `as_json` render one.
 
 **Second name source: control captions** (`control_captions`). A control's caption is the text
 it draws. It is joined to a pin two ways, kept apart: `status` (the control's box takes its fill
-from the cell-table index the pin's GuiCode status block colours, `statusbind.pin_bindings`) and
+from the cell-table index the pin's GuiCode status block colours, `statusbind.pin_bindings`;
+none where the status bridge does not derive) and
 `command` (the control's touch region names a binding group whose entries command only that pin,
 `guidata.group_table`/`binding_table`). That the label inside the control is the control's
 caption is `inferred-from-data`: it is the record order controls use (box, caption, touch
@@ -585,7 +586,12 @@ def _captions(data: bytes) -> tuple:
     from . import statusbind
     gs, ge = guidata.guidata_extent(data)
     table = guidata.object_tables(data)[1]
-    bindings = statusbind.pin_bindings(data)
+    try:
+        bindings = statusbind.pin_bindings(data)
+    except statusbind.BridgeUnknown:
+        # The status join needs the status bridge; where it does not derive (the receive-slot
+        # base escapes the trace) no caption is joined by status, and the command join stands.
+        bindings = {}
     by_colour = {b.colour_index: p for p, b in bindings.items()
                  if b.colour_index is not None and b.bridged
                  and statusbind.PIN_MIN <= p <= statusbind.PIN_MAX}
@@ -631,6 +637,20 @@ def _captions(data: bytes) -> tuple:
                                      % (obj, "; ".join(why),
                                         ", ".join("@%#x" % r.offset for r in labels))))
     return tuple(found)
+
+
+@memo.content_cached(copy=None)
+def status_join_refusal(data: bytes) -> str | None:
+    """Why no caption is joined by status on this image (`"BRIDGE_UNKNOWN: ..."`), or None when
+    the status bridge derives. A caller that lists names says so, so a pin left unnamed for that
+    reason is not read as one the build never names."""
+    from . import statusbind
+    try:
+        statusbind.pin_bindings(data)
+    except statusbind.BridgeUnknown as err:
+        msg = str(err)
+        return msg if msg.startswith(err.code) else "%s: %s" % (err.code, msg)
+    return None
 
 
 def control_captions(data: bytes) -> dict[int, list[Caption]]:

@@ -2622,7 +2622,8 @@ write sites are the complete set.
 
 So group 199 is an **externally-selected** control and group 200 is a press-cycled one. Firefly
 authored that difference deliberately. And the setter has exactly **one** caller in the whole
-image — `0x21B002` in `FUN_0021AB88` — which takes the variant from a runtime record field.
+image — `0x21B002` in `FUN_0021A664` (not `FUN_0021AB88` as first written; Ghidra `lcd136`,
+2026-11-08) — which takes the variant from a runtime record field.
 
 **The shape is not fatal on its own.** Of the 14 groups with it, four are referenced by an object:
 **33** (objects 408/409/862), **86** (obj 103), **87** (obj 105) and **199** (obj 929). If those

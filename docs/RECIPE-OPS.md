@@ -30,6 +30,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 
 **Hardware status** says whether the op's mechanism has run on the reference coach (Jayco B-Van, firmware 13.6). "Verified" is the op's default: `no` means the compile manifest lists it under `unverified` and the build needs a coach check with stock on the stick; some ops narrow it by parameter. **Firmware** lists the firmware each op may compile on (`11.23`, `13.6`, `14.7`); compile refuses it on any other with `UNSUPPORTED_FIRMWARE`. A firmware marked `(unverified)` has not run the op on a coach, and `--allow-unverified` applies per firmware; `(emulated)` is information only and never verifies. `fireflymcf ops` prints this reference from the installed package.
 
+**Whole-image gates** run after every op and name no op. They refuse a build with these codes; an op's own verify that hits a locator's coded refusal surfaces under that locator's code instead.
+
+- `STRUCTURAL_GATE` — a structural check of the finished image failed: the GuiData record boundaries or geometry, an unclaimed differing byte run, a stale GuiCode-to-GuiData pointer, a pointer into the LCD firmware stranded by an insertion, a reused stock display cell, a changed reserved group, or a reused group GuiCode drives by number (`newbutton.guicode_selected_groups`).
+- `CAPABILITY_GATE` — the (channel, command) pairs the image can send differ from stock by other than the ops declared.
+- `NOT_SEALED` — the image is not sealed after verify.
+- `HOOK_REFUSED` — an op's verify found that the per-tick hook or its chain no longer proves out (another op may have rewritten it).
+- `VARIANT_SETTER_UNKNOWN` — the build reuses a command group (moves its binding slice), and which groups GuiCode drives by number is not known on this image: the variant-setter cell does not locate, the LCD does not prove it holds the ungated variant writer (`lcdgroups.host_writer`), or a use of it does not resolve to a constant group (`newbutton.guicode_selected_groups`). A build that reuses no group passes.
+
 ## Summary
 
 | op | class | purpose | hardware status | verified | Firmware |
@@ -61,15 +69,15 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes | 13.6 |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes | 13.6 |
 | [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes | 13.6 |
-| [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. | **no** | 13.6 (unverified) |
-| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). | **no** | 13.6 (unverified) |
+| [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. On 14.7, emulated 2026-11-08 (a two-state cycle): each reported state draws its arm in the button's box only and sets the variant to the next state, which a tap sends; stale draws the unknown state. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). On 14.7, emulated 2026-11-08 (eq on a toggle): the reported value flips the cell and the toggle group's variant, the button redraws in its box only, and a tap sends the opposite command. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to 829 is verified); it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes | 13.6 |
 | [`add_corner_mark`](#add_corner_mark) | structural | Put a state-gated one-character mark in a corner of an existing button. | Flashed 2026-09-06. PC.61. | yes | 13.6 |
-| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) after a blank 0xFFFF default arm at its base, attached under `parent`. A preview without slot values (Studio, `render`) draws that blank arm. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). | **no** | 13.6 (unverified) |
-| [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. | yes | 13.6 |
+| [`add_enum_label`](#add_enum_label) | structural | Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) after a blank 0xFFFF default arm at its base, attached under `parent`. A preview without slot values (Studio, `render`) draws that blank arm. | UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). Emulated 2026-11-08 on 13.6 and 14.7: with no `background` the arms draw over each other. On 14.7, emulated 2026-11-08 with a background: each value draws its text in the box, stale and unlisted values the default. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated 2026-11-08 (with `wire_button`, donor 214): the clone draws at its place, changing no pixel outside its records, and a tap sends only the wired output's toggle. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** | 13.6 (unverified) |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes | 13.6 |
-| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). | **no** | 13.6 (unverified) |
+| [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame after the threshold and a short tap none; a tap button sends once per press; the same hold forced onto GuiCode-driven group 136 is refused by the finish gate, and with the gate stubbed neither a tap nor a hold on it sends. A driven group is excluded as a conservative superset, not because every hold on one is dead: a hold on driven group 129 works on the coach (2026-10-19). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). On 14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no pixel outside the box changed on any rail page. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes | 13.6 |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes | 13.6, 14.7 (unverified, emulated) |
@@ -80,14 +88,14 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`set_record_color`](#set_record_color) | structural | Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object. | UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes | 13.6 |
 | [`swap_aes_electrical`](#swap_aes_electrical) | structural | Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, and wire a settings sub-page. | Flashed 2026-09-01. | yes | 13.6 |
-| [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). | yes | 13.6 |
+| [`wire_button`](#wire_button) | structural | Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group. | Flashed (the Starlink button). On 14.7, emulated 2026-11-08: the G12 reporting the wired output on and off recolours the button in place (status bridge derived from 14.7's GuiCode). | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_aes_low_volts_trigger`](#add_aes_low_volts_trigger) | guicode | Add a live, recolouring Low Volts arm indicator to the compact AES frame. | Flashed 2026-09-01. | yes | 13.6 |
 | [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes | 13.6 |
 | [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes | 13.6 |
-| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. | yes | 13.6 |
+| [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, emulated 2026-11-08 (drawn and `draw` false): each published value repaints the digits in the readout's box, and a cell poisoned before reset is never drawn; `cell_slot` refuses DECODER_RANGE_UNKNOWN there. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes | 13.6 |
 | [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes | 13.6 |
-| [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. | yes | 13.6 |
+| [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a silent baseline, each later edge one on or off frame while the gate holds, none while it does not. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes | 13.6 |
 | [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes | 13.6 |
 
@@ -284,7 +292,11 @@ Error codes:
 - `NO_SUCH_CONTROL` — no located control is labelled `label`
 - `AMBIGUOUS_LABEL` — more than one located control has that label
 - `CAPABILITY_CHANGE` — set_channel's I8 check refused (a dimmable control moved to a channel this file never dims/commands) and allow_capability_change was not set; offers=["acknowledge"]
-- `REMAP_REFUSED` — any other set_channel check (I5-I7) refused the remap, or the default indicator retarget did: the control's indicator names none of its own pin's cells (it does not follow its command channel), the destination has no GuiCode bridge block, or the image is not 13.6 (the only build with a bridge dump). The PatchError's message names which
+- `REMAP_REFUSED` — any other set_channel check (I5-I7) refused the remap, or the default indicator retarget did: the control's indicator names none of its own pin's cells (it does not follow its command channel), the destination has no GuiCode bridge block, or the status bridge does not derive on this image (`status_map.derived_bridge`). The PatchError's message names which
+- `BRIDGE_UNKNOWN` — verifying the default indicator retarget, the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed); apply refuses that case first, as REMAP_REFUSED
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### remove_control
 
@@ -344,6 +356,9 @@ Error codes:
 - `AMBIGUOUS_LABEL` — object has more than one label field containing `old`
 - `LABEL_TOO_LONG` — `new` does not fit the field and `allow_grow` was not set; offers=["grow", "shorten"]
 - `GROW_REFUSED` — `labels.grow_label` refused the relocating grow
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### retarget_inverter_gear
 
@@ -489,6 +504,9 @@ Error codes:
 
 - `BAD_PARAMS` — colours is not a {role: [r,g,b]} map, a role is unknown, or tank_wells is not a role with a static index
 - `WRONG_BUILD` — the GuiCode theme-init is not located in its stock form (`themeswap.locate_theme_init`: another build, or a theme already applied)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### show_nav_slides_icon
 
@@ -537,15 +555,20 @@ Add a "Batt Heat" button to the compact AES frame: press-and-hold sends a 60-min
 | `text` | string |  | "Batt Heat" | button caption |
 | `enable_wire` | string |  | "aa55000000008ca0" | 8-byte payload (hex) sent once on a 1-s hold |
 | `off_wire` | string |  | "aa55000000000000" | 8-byte payload (hex) sent on a tap |
-| `group_pool` | string {"free", "hold_safe"} |  | "free" | where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 were dead on a coach) |
+| `group_pool` | string {"free", "hold_safe"} |  | "free" | where the command group comes from: the first free slot (the heater, byte-stable), or newbutton.hold_safe_groups (a group GuiCode does not drive; holds on GuiCode-driven 136/137 died on a coach, 2026-09-30) |
 
 Error codes:
 
 - `NO_FREE_GROUP` — no empty group-table slot to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates). BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the gesture group's prefix, is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the container carries no LCD Firmware section (`donors.group_prefix`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_aes_batt_heat_status
 
@@ -570,6 +593,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_aes_bms_button_status
 
@@ -595,6 +622,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_alt_reboot
 
@@ -614,6 +645,8 @@ Error codes:
 - `NO_FREE_GROUP` — no empty group-table slot, outside the reserved 68/69, to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates), or the hold donor group is not the verified shape.
 - `REPLACE_REFUSED` — the page's record stream could not be relocated.
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_batt_heat_battery_glyph
 
@@ -660,15 +693,19 @@ Error codes:
 
 - `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load under some floorplan or option (13.6's 12 is "A/C Fan Low" always, 05 is "Tank Heat Fresh" on WA/WD/WT); offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed the output
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control — a narrower check than build_home_button's own, see statusbind.py)
+- `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the new button's command group cannot be shown not to be one (`newbutton.unused_command_groups`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### add_button_states
 
 Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm.
 
-- **Hardware status:** UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state.
+- **Hardware status:** UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. On 14.7, emulated 2026-11-08 (a two-state cycle): each reported state draws its arm in the button's box only and sets the variant to the next state, which a tap sends; stale draws the unknown state.
 - **Proof:** `statelights.py`, `statusfold.py`
 - **Implementation:** `recipe_ops.AddButtonStates`
 
@@ -691,12 +728,16 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_button_status
 
 Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.
 
-- **Hardware status:** UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).
+- **Hardware status:** UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). On 14.7, emulated 2026-11-08 (eq on a toggle): the reported value flips the cell and the toggle group's variant, the button redraws in its box only, and a tap sends the opposite command.
 - **Proof:** `statelights.py`, `statusfold.py`
 - **Implementation:** `recipe_ops.AddButtonStatus`
 
@@ -718,6 +759,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_card_readouts
 
@@ -781,7 +826,7 @@ Error codes:
 
 Show a received value as text from a table (1-16 entries plus a default for stale and unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels (optionally on a fill) after a blank 0xFFFF default arm at its base, attached under `parent`. A preview without slot values (Studio, `render`) draws that blank arm.
 
-- **Hardware status:** UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).
+- **Hardware status:** UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state). Emulated 2026-11-08 on 13.6 and 14.7: with no `background` the arms draw over each other. On 14.7, emulated 2026-11-08 with a background: each value draws its text in the box, stale and unlisted values the default.
 - **Proof:** `enumlabel.py`, `statusfold.py`
 - **Implementation:** `recipe_ops.AddEnumLabel`
 
@@ -813,12 +858,16 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_glyph_button
 
 Clone a donor control into a bare button shell on a page, sized w x h, unwired.
 
-- **Hardware status:** Flashed (the Starlink button). Must be followed by `wire_button`.
+- **Hardware status:** Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated 2026-11-08 (with `wire_button`, donor 214): the clone draws at its place, changing no pixel outside its records, and a tap sends only the wired output's toggle.
 - **Proof:** `newbutton.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddGlyphButton`
 
@@ -869,7 +918,7 @@ Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as 
 Error codes:
 
 - `BAD_PARAMS` — a parameter is malformed (dgn not 18-bit, refresh outside 0..3, arrow, accent, orientation not in `levelpage.ORIENTATIONS`, controls not a bool).
-- `NO_FREE_GROUP` — `controls`: fewer than three free group-table slots outside `levelcontrols.RESERVED_GROUPS`.
+- `NO_FREE_GROUP` — `controls`: fewer than three free group-table slots outside the reserved templates (`newbutton.reserved_groups`).
 - `GROW_REFUSED` — `controls`: the binding table could not be grown (arena, gates) or a donor group is not the stock shape `levelcontrols` expects.
 - `NO_ARROW_GLYPH` — `arrow` names a character that still falls back to the placeholder.
 - `APPEND_REFUSED` — the 14 entries could not be appended (registry cap, arena, gates).
@@ -880,6 +929,12 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_low_volts_control
 
@@ -915,7 +970,7 @@ Error codes:
 
 Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
 
-- **Hardware status:** UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo).
+- **Hardware status:** UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame after the threshold and a short tap none; a tap button sends once per press; the same hold forced onto GuiCode-driven group 136 is refused by the finish gate, and with the gate stubbed neither a tap nor a hold on it sends. A driven group is excluded as a conservative superset, not because every hold on one is dead: a hold on driven group 129 works on the coach (2026-10-19).
 - **Proof:** `rvcbutton.py`, `enumlabel.py`
 - **Implementation:** `recipe_ops.AddRvcButton`
 
@@ -952,8 +1007,13 @@ Error codes:
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 - `CYCLE_UNDRIVEN` — (compile) a cycle that no later enabled `add_button_states` drives.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the gesture group's prefix, is not proven 13.6's (`grammar.prove_lcd`: one of its functions not a twin), or the container carries no LCD Firmware section (`donors.group_prefix`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_text_label
 
@@ -988,6 +1048,8 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`). Where the text drawers are not twins of 13.6's (14.7, `grammar.prove`), each of the label's font, alignment (horizontal and vertical) and pitch must occur in a stock wt-11 record of the recipe's stock image; one that does not is refused here.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### aes_card_layout
 
@@ -1213,7 +1275,7 @@ Error codes:
 
 Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group.
 
-- **Hardware status:** Flashed (the Starlink button).
+- **Hardware status:** Flashed (the Starlink button). On 14.7, emulated 2026-11-08: the G12 reporting the wired output on and off recolours the button in place (status bridge derived from 14.7's GuiCode).
 - **Proof:** `newbutton.py`, `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.WireButton`
 
@@ -1230,8 +1292,12 @@ Error codes:
 - `NAMED_OUTPUT` — the G12 OUTPUTS list names `channel` for a load under some floorplan or option; offers=["acknowledge_named_output"] — retry with allow_named_output=True once the owner has confirmed it
 - `BAD_REF` — target names an earlier op id that produced no object (from resolve_target)
 - `BIND_REFUSED` — statusbind.bind_pin refused (unwatched pin, no bridge block, or the pin is already commanded by a LOCATED control)
+- `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — retarget_command refused because the channel is already commanded by an existing binding; offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed those bindings belong to unreachable controls
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the fresh command group cannot be shown not to be one (`newbutton.unused_command_groups`)
 - `WIRE_REFUSED` — any other newbutton.retarget_command refusal, OR newbutton.retarget_indicator refusing the target (out-of-range object index, or an object with no wtype-33 indicator record -- e.g. a target that isn't a button shell at all)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ## GuiCode-growing edits (authored ARM code)
 
@@ -1254,6 +1320,8 @@ Error codes:
 
 - `NO_SUCH_REGISTER` — the 0x2F DGN_CONFIG subscription is not in the variable table.
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is below stock's 0x00259BB4 or misaligned (beyond it, from earlier appends, the routine chains). BRIDGE_REFUSED / GROW_REFUSED / DETOUR_REFUSED -- the bridge could not be authored, appended, or the detour site was not the stock `bl`.
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 
 ### add_option_follower
 
@@ -1283,6 +1351,10 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is not the pinned 13.6 address (0x00259BB4); refuses rather than build against an image this op was never proven on (as `follow_channel` does)
 - `GROW_REFUSED` — `growsection.grow_section` refused
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the stock `bl` the plan expects (the grows shifted something they should not have)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
 ### add_pump_auto_off
 
@@ -1306,12 +1378,17 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode append point is below stock 13.6's own append point or misaligned; refuses rather than build against an image this op was not proven on.
 - `GROW_REFUSED` — `growsection.grow_section` refused.
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the plan's expected stock/chained `bl`; a grow shifted something it should not have.
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_register_readout
 
 Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`.
 
-- **Hardware status:** Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance.
+- **Hardware status:** Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, emulated 2026-11-08 (drawn and `draw` false): each published value repaints the digits in the readout's box, and a cell poisoned before reset is never drawn; `cell_slot` refuses DECODER_RANGE_UNKNOWN there.
 - **Proof:** `readout.py`, `BUS-BASELINE.md` PC.59, PC.60
 - **Implementation:** `recipe_ops.AddRegisterReadout`
 
@@ -1335,6 +1412,7 @@ Show any register as a live number on any page, or feed an existing readout's ce
 
 Error codes:
 
+- `DECODER_RANGE_UNKNOWN` — `cell_slot` on a firmware whose per-tick decoder window is not known (`decodeguards.decoder_range`: 13.6 only).
 - `BAD_PARAMS` — a malformed param: drawing params with `draw` false or with `cell_slot`, a non-integer `cell_slot`, `silence` that is not a list of addresses or comes without `cell_slot`, a missing page/x/y, or a bad `format`.
 - `READOUT_REFUSED` — the register, the display cell or the copy routine could not be resolved or built.
 - `GROW_REFUSED` — GuiCode could not be grown for the routine.
@@ -1344,6 +1422,10 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### add_voltage_battery
 
@@ -1375,6 +1457,10 @@ Error codes:
 - `NO_SUCH_RECORD` — `parent` does not carry the expected container / 'Chassis' label / attach-440 / attach-clone record shape (`_reposition_pair`)
 - `BAD_LABEL_FRAMING` — the 'Chassis' label's on-disk framing is not the single length-prefixed, NUL-terminated string shape this op's retext assumes (`_reposition_label`) -- e.g. a multi-part label (R37 `cnt` > 1) on a build whose donor differs from 13.6's
 - `REPOSITION_REFUSED` — `relocate.replace_object_records` refused the rebuilt object-902 record stream (a structural gate failed)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 
 ### follow_channel
 
@@ -1401,12 +1487,15 @@ Error codes:
 - `UNEXPECTED_APPEND_POINT` — the GuiCode section's append point is below the stock 13.6 address (0x00259BB4) or misaligned; refuses rather than build against an image this op was never proven on. A point BEYOND it (earlier appends) is fine: the routine chains
 - `GROW_REFUSED` — `growsection.grow_section` refused (misaligned payload, or a descriptor field did not hold the expected pre-grow value)
 - `DETOUR_REFUSED` — the bytes at the detour's file offset were not the stock `bl` this plan expects (the grow shifted something it should not have)
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ### follow_register
 
 Watch any register for an edge and drive a channel, gated by register conditions.
 
-- **Hardware status:** Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register.
+- **Hardware status:** Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a silent baseline, each later edge one on or off frame while the gate holds, none while it does not.
 - **Proof:** `followchannel.py`
 - **Implementation:** `recipe_ops.FollowRegister`
 
@@ -1416,6 +1505,12 @@ Watch any register for an edge and drive a channel, gated by register conditions
 | `target_channel` | integer | yes |  |  |
 | `on_level` | integer |  | 200 |  |
 | `gates` | array |  | [] | list of {ref\|dgn+..., mask?, value?}; all must hold |
+
+Error codes:
+
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
 
 ## G12 section edits
 

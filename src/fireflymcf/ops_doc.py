@@ -119,7 +119,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Flashed 2026-08-17.", "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",
         "Clone a donor control into a bare button shell on a page, sized w x h, unwired.",
-        "Flashed (the Starlink button). Must be followed by `wire_button`.",
+        "Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated "
+        "2026-11-08 (with `wire_button`, donor 214): the clone draws at its place, changing no "
+        "pixel outside its records, and a tap sends only the wired output's toggle.",
         "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
     "add_voltage_battery": ("guicode",
         "Clone a stock battery graphic beside another and drive it from a bus voltage: "
@@ -138,7 +140,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "`docs/HARDWARE-VERIFIED.md`"),
     "wire_button": ("structural",
         "Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group.",
-        "Flashed (the Starlink button).", "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
+        "Flashed (the Starlink button). On 14.7, emulated 2026-11-08: the G12 reporting the "
+        "wired output on and off recolours the button in place (status bridge derived from 14.7's "
+        "GuiCode).", "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
     "install_glyph": ("structural",
         "Write new artwork into an icon font as a glyph and point one character at it. "
         "Pixels travel in the project as hex rows.",
@@ -209,14 +213,19 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "follow_register": ("guicode",
         "Watch any register for an edge and drive a channel, gated by register conditions.",
         "Routine shared with the flashed follower; no instance has been flashed. A coach check is "
-        "warranted for a new watch register.",
+        "warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a "
+        "silent baseline, each later edge one on or off frame while the gate holds, none while "
+        "it does not.",
         "`followchannel.py`"),
     "add_register_readout": ("guicode",
         "Show any register as a live number on any page, or feed an existing readout's cell "
         "past a stock decode fence (`cell_slot` + `silence`). The value is "
         "`(max((slot & mask) - sub, 0) * mul + add) >> shift`.",
         "Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) "
-        "cells, `sub`, `mul` and an `add` above 255 report unverified per instance.",
+        "cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, "
+        "emulated 2026-11-08 (drawn and `draw` false): each published value repaints the "
+        "digits in the readout's box, and a cell poisoned before reset is never drawn; "
+        "`cell_slot` refuses DECODER_RANGE_UNKNOWN there.",
         "`readout.py`, `BUS-BASELINE.md` PC.59, PC.60"),
     "swap_aes_electrical": ("structural",
         "Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, "
@@ -293,7 +302,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
         "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
         "`parent`. A preview without slot values (Studio, `render`) draws that blank arm.",
-        "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue "
+        "between a long word and a short one (photo per state). Emulated 2026-11-08 on 13.6 "
+        "and 14.7: with no `background` the arms draw over each other. On 14.7, emulated "
+        "2026-11-08 with a background: each value draws its text in the box, stale and "
+        "unlisted values the default.", "`enumlabel.py`, `statusfold.py`"),
     "add_text_label": ("structural",
         "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
         "at the font's cell pitch), optionally on a fill and inside a 1 px section frame, "
@@ -316,14 +329,23 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, "
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
-        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo).", "`rvcbutton.py`, `enumlabel.py`"),
+        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). "
+        "On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame "
+        "after the threshold and a short tap none; a tap button sends once per press; the same "
+        "hold forced onto GuiCode-driven group 136 is refused by the finish gate, and with the "
+        "gate stubbed neither a tap nor a hold on it sends. A driven group is excluded as a "
+        "conservative superset, not because every hold on one is dead: a hold on driven group "
+        "129 works on the coach (2026-10-19).", "`rvcbutton.py`, `enumlabel.py`"),
     "add_button_status": ("structural",
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
         "above valid_max reads off) into its own fresh cell, and each button's static body "
         "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); "
         "a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.",
-        "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).", "`statelights.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading "
+        "off (photo per state). On 14.7, emulated 2026-11-08 (eq on a toggle): the reported value "
+        "flips the cell and the toggle group's variant, the button redraws in its box only, and "
+        "a tap sends the opposite command.", "`statelights.py`, `statusfold.py`"),
     "add_button_states": ("structural",
         "Show which of N states a unit reports on a button and, on a cycle button, make a tap "
         "send the next one: one per-tick statusfold routine tries each entry's states (each a "
@@ -334,7 +356,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "and colour; refused if anything else on the page would change in any arm.",
         "UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the "
         "unknown state's with no report, and each state draws its own arm. Bench check: candump "
-        "at each reported state, photo per state.", "`statelights.py`, `statusfold.py`"),
+        "at each reported state, photo per state. On 14.7, emulated 2026-11-08 (a two-state "
+        "cycle): each reported state draws its arm in the button's box only and sets the "
+        "variant to the next state, which a tap sends; stale draws the unknown state.",
+        "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "
@@ -366,21 +391,38 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
 
 
 def _error_codes(cls) -> list[tuple[str, str]]:
-    """Parse the `Error codes:` section of an op docstring into (code, text) pairs."""
+    """Parse the `Error codes:` section of an op docstring into (code, text) pairs. A line may
+    name several codes that share one meaning (`A, B — text`); each gets its own pair."""
     doc = inspect.getdoc(cls) or ""
     m = re.search(r"Error codes?:\n(.*?)(?:\n\n|\Z)", doc, re.S)
     if not m:
         return []
     out: list[tuple[str, str]] = []
+    last: list[int] = []
     for line in m.group(1).splitlines():
         s = line.strip()
         if not s:
             continue
-        mm = re.match(r"([A-Z][A-Z0-9_]+)\s*[—–-]+\s*(.*)", s)
+        mm = re.match(r"([A-Z][A-Z0-9_]+(?:,\s*[A-Z][A-Z0-9_]+)*)\s*[—–-]+\s*(.*)", s)
         if mm:
-            out.append((mm.group(1), mm.group(2).strip()))
+            last = []
+            for code in re.split(r",\s*", mm.group(1)):
+                last.append(len(out))
+                out.append((code, mm.group(2).strip()))
         elif out:
-            out[-1] = (out[-1][0], (out[-1][1] + " " + s).strip())
+            for i in last:
+                out[i] = (out[i][0], (out[i][1] + " " + s).strip())
+    return out
+
+
+def _grouped(errs: list[tuple[str, str]]) -> list[tuple[list[str], str]]:
+    """Consecutive codes that share one meaning, as one entry (the docstring's `A, B — text`)."""
+    out: list[tuple[list[str], str]] = []
+    for code, text in errs:
+        if out and out[-1][1] == text:
+            out[-1][0].append(code)
+        else:
+            out.append(([code], text))
     return out
 
 
@@ -424,6 +466,30 @@ def _firmware_cell(e: dict) -> str:
             notes.append("emulated")
         parts.append(fw + (" (%s)" % ", ".join(notes) if notes else ""))
     return ", ".join(parts)
+
+
+# The codes a whole-image gate refuses a build with after every op has run (`recipe._finish`):
+# they name no op. `tests/test_ops_doc.py` pins this to the gates `recipe.py` holds.
+GATE_CODES: dict[str, str] = {
+    "STRUCTURAL_GATE": "a structural check of the finished image failed: the GuiData record "
+                       "boundaries or geometry, an unclaimed differing byte run, a stale "
+                       "GuiCode-to-GuiData pointer, a pointer into the LCD firmware stranded by "
+                       "an insertion, a reused stock display cell, a changed reserved group, or "
+                       "a reused group GuiCode drives by number "
+                       "(`newbutton.guicode_selected_groups`).",
+    "CAPABILITY_GATE": "the (channel, command) pairs the image can send differ from stock by "
+                       "other than the ops declared.",
+    "NOT_SEALED": "the image is not sealed after verify.",
+    "HOOK_REFUSED": "an op's verify found that the per-tick hook or its chain no longer proves "
+                    "out (another op may have rewritten it).",
+    "VARIANT_SETTER_UNKNOWN": "the build reuses a command group (moves its binding slice), and "
+                              "which groups GuiCode drives by number is not known on this image: "
+                              "the variant-setter cell does not locate, the LCD does not prove "
+                              "it holds the ungated variant writer (`lcdgroups.host_writer`), "
+                              "or a use of it does not resolve to a constant group "
+                              "(`newbutton.guicode_selected_groups`). A build that reuses no "
+                              "group passes.",
+}
 
 
 def entries(registry: dict | None = None) -> list[dict]:
@@ -493,6 +559,13 @@ def render(registry: dict | None = None) -> str:
                "information only and never verifies. `fireflymcf ops` prints this reference from "
                "the installed package.")
     out.append("")
+    out.append("**Whole-image gates** run after every op and name no op. They refuse a build "
+               "with these codes; an op's own verify that hits a locator's coded refusal "
+               "surfaces under that locator's code instead.")
+    out.append("")
+    for code, text in GATE_CODES.items():
+        out.append("- `%s` — %s" % (code, text))
+    out.append("")
     out.append("## Summary")
     out.append("")
     out.append("| op | class | purpose | hardware status | verified | Firmware |")
@@ -528,8 +601,8 @@ def render(registry: dict | None = None) -> str:
                 out.append("")
                 out.append("Error codes:")
                 out.append("")
-                for code, text in errs:
-                    out.append("- `%s` — %s" % (code, text))
+                for codes, text in _grouped(errs):
+                    out.append("- %s — %s" % (", ".join("`%s`" % c for c in codes), text))
             out.append("")
     return "\n".join(out).rstrip() + "\n"
 

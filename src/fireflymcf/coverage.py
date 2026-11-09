@@ -453,7 +453,10 @@ def _cell_table_copies(data: bytes, start: int, lo: int,
                        hi: int) -> list[tuple[int, int, int, bool]]:
     """`(type_at, cell_at, rows, live)` for every copy of the cell/type table pair in the
     absolute range (lo, hi), in order and non-overlapping; `live` marks the copy GuiCode reads
-    (`guidata.find_variable_tables`, which follows the repointed base literals).
+    (`celltables.locate`, which follows the repointed base literals and reads the bound from
+    whichever compare form the build uses; on 14.7 the type table it names is the one GuiCode
+    loads, `+0x42978`, not a backward scan's `+0x42970`, so a copy's type table is matched at
+    its real start).
 
     A copy is accepted only when every one of these holds, so a coincidence cannot be claimed:
     its type table starts 4-aligned with the reference's first 16 bytes and its cell table
@@ -465,12 +468,12 @@ def _cell_table_copies(data: bytes, start: int, lo: int,
     verbatim). Rows past the live count are the newest grow's own: each must only be well
     formed, a variable type (`guidata.VARIABLE_TYPE_MAX`) and a cell that is 0 or an SRAM
     address (`guidata.SRAM_LOW`..`SRAM_HIGH`)."""
-    from . import guidata, tablegrow
+    from . import celltables, guidata, tablegrow
     try:
-        cell_off, type_off = guidata.find_variable_tables(data)
-        live_rows = tablegrow.find_index_bound(data, 0x90000000 + cell_off)
-    except Exception:
-        return []
+        located = celltables.locate(data)
+    except (guidata.VariableTableNotFound, ValueError, ImportError):
+        return []           # no locatable pair (or no GuiCode, or a bare install): no copies
+    cell_off, type_off, live_rows = located.cell_off, located.type_off, located.rows
     live_types = bytes(data[start + type_off:start + type_off + live_rows])
     live_cells = bytes(data[start + cell_off:start + cell_off + 4 * live_rows])
     tp = bytes(data[start + type_off:start + type_off + _COPY_PREFIX])
