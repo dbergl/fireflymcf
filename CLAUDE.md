@@ -68,7 +68,7 @@ re-derived from scratch because `images.py` was not in a table.
 ```
 python3 -m venv .venv && .venv/bin/pip install -e '.[full,test]'
 scripts/link-research.sh [RESEARCH_REPO]           # link the research data (default ../firefly-firmware)
-python3 -m pytest tests/ -q -n auto                # the suite, ~4m20s on 16 threads warm (see docs/TESTING.md); `--dist worksteal` is in addopts; first run fills the compile cache
+python3 -m pytest tests/ -q -n auto                # the suite, ~4m30s on 16 threads with a warm cache, slower cold (see docs/TESTING.md); conftest switches xdist to worksteal; first run fills the compile cache
 (cd ../firefly-firmware && .venv/bin/python -m pytest tests -q -n auto)   # after an engine change: the reference builds, byte for byte
 fireflymcf doctor MCF [--bus]                      # what a build is and which edits are safe on it
 fireflymcf bus-map MCF [--dgn X] [--json]          # every message received and sent, and what the panel calls it

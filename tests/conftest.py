@@ -19,6 +19,16 @@ from typing import NamedTuple
 
 import pytest
 
+
+def pytest_configure(config):
+    """Distribute with worksteal under xdist. `--dist load` (xdist's default once `-n` is given) hands
+    each worker a contiguous initial chunk it never gives back, which stranded the emulator tests on
+    four workers (8m31s against 4m22s). Set here, not in addopts, so `-p no:xdist` still parses.
+    An explicit `--dist load` is indistinguishable from the default and is also mapped."""
+    opt = config.option
+    if getattr(opt, "numprocesses", None) and getattr(opt, "dist", None) == "load":
+        opt.dist = "worksteal"
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Directory names are not uniform: the 14.7 directory has a space and a parenthesis.

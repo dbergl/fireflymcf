@@ -54,4 +54,3 @@ fireflymcf = ["py.typed", "data/*.txt", "data/*.json", "emu/native/*.c", "emu/sy
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--dist worksteal"

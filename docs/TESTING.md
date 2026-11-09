@@ -1,7 +1,7 @@
 # Testing — commands, parallel runs, and the speed pass
 
 ```
-python3 -m pytest tests/ -q -n auto               # the whole suite: 4m22s on 16 threads (2026-11-09, warm compile cache)
+python3 -m pytest tests/ -q -n auto               # the whole suite: 4m22s-4m48s on 16 threads (2026-11-09, warm compile cache; a cold run after any src/ edit misses every compile and is slower)
 python3 -m pytest tests/test_x.py -v              # serial, one module; use it to see WHY something is red
 npm test --prefix studio/web                      # the web editor's tests
 ```
@@ -64,17 +64,18 @@ GuiCode tracers that still run once per build per worker.
 **Running the suite in parallel** (measured 2026-08-21: 26m49s → **3m56s**, same 1062/1/3).
 `pytest-xdist` forks **processes**; threads would not help, since this is CPU-bound pure Python
 and the GIL would serialise it. Install with `sudo apt install python3-pytest-xdist` — PEP 668
-blocks `pip install` into the system Python here. Plain `-n auto` is the fastest mode: `--dist
+blocks `pip install` into the system Python here. Plain `-n auto` (`--dist load`) was the fastest mode then: `--dist
 loadscope` looks better on paper (many modules have expensive module-scoped fixtures, which
 plain `load` re-runs per worker) and measured **slower**, 4m53s, because finer-grained balancing
-wins by more than the duplicated fixtures cost. (That was measured when the suite had 1062 tests; the 2026-08-21 `worksteal` result is superseded below.)
+wins by more than the duplicated fixtures cost. The 2026-08-21 `worksteal` result was measured on a 1062-test suite and is superseded by the 2026-11-09 measurement below.
 
 **Distribution, 2026-11-09** (3843 passed, 2 skipped, 2 xfailed, `-n 16`, warm cache): `--dist load`
 (xdist's default) took **8m31s**, `--dist worksteal` **4m22s**, `--dist load --maxschedchunk 1`
 **5m33s**. Under `load` each worker is handed a contiguous initial chunk of `len/16/4` tests and
 never gives any back; `tests/emu/` sorts first, so its ~1000 s of emulator work all landed on
-four workers and one ran alone for minutes. `pyproject.toml` `addopts` now sets `--dist
-worksteal`, so a bare `-n auto` uses it; a run without `-n` ignores it. `loadscope` keeps
+four workers and one ran alone for minutes. `tests/conftest.py` `pytest_configure` now switches `load` to
+`worksteal` when `-n` is given, so a bare `-n auto` uses it (an explicit `--dist load` is
+indistinguishable and is also switched); runs without `-n`, or with `-p no:xdist`, are untouched. `loadscope` keeps
 modules whole, which leaves a floor of the slowest module; do not use it.
 
 Not in `addopts` are the worker count and `-x`/`pdb` options: xdist interleaves output, disables `pdb` and
