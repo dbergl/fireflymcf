@@ -89,7 +89,7 @@ def test_147_finds_the_seven_guards_and_the_absorb_float_fence(mcf_147):
 def test_1123_locates(mcf_1123):
     """11.23 locates; its guard variable lists leak (research 2026-11-08), which is why
     `cell_slot` is not enabled there on the strength of the range alone."""
-    assert decodeguards.range_guards(mcf_1123)
+    assert len(decodeguards.range_guards(mcf_1123)) == 9
     assert isinstance(decodeguards.range_guards(mcf_1123, 0x247590, 0x247600), list)
 
 

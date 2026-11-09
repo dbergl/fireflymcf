@@ -6430,7 +6430,10 @@ unconditional `b` back inside (`0x24EDB8 b 0x24EBA4`, `0x24EDBC b 0x24EBBC`, `0x
 `0x24EDD4 b 0x24EC58`, `0x24EDDE b 0x24EDAE`) and none loading `[r4,#imm]`: a flag clear, two
 `movs r3,#1`, a pair of indirect calls, and `0x24EDDA strb.w r3,[r4,#0x21f]`. A literal pool and
 the next function, `0x24EE28 push {r3,r4,r5,lr}`, follow. So no decode lives outside
-`[0x247BF8, 0x24EDB0)`. 14.7 has the same shape, `0x247CAC`-`0x24F1FC pop {r4-r7,pc}` with five
+`[0x247BF8, 0x24EDB0)`. The tail rule's limit: it refuses a tail that loads `[r4,#imm]` or
+`ldm r4`, and sees nothing else through r4 -- not a store (that `0x24EDDA strb.w` passes it),
+not an indexed load `[r4, rN]`, and not a load through a copy of r4 (the guard scanner's own
+limit). None of the three appears in 13.6's five tails, which the listing above gives whole. 14.7 has the same shape, `0x247CAC`-`0x24F1FC pop {r4-r7,pc}` with five
 tails `0x24F1FE`-`0x24F22A`; 11.23 runs `0x247590`-`0x24CDFA pop.w {r4-r11,pc}`, with no tails and
 one bounded switch (`0x24C40E cmp r3,#4; bhi 0x24C44C; tbb [pc,r3]`, every arm inside).
 `decodeguards.decoder_range` locates the extent by these rules and refuses `DECODER_RANGE_UNKNOWN`
@@ -6477,7 +6480,15 @@ Tests: `tests/test_decodeguards.py` (the three ranges, 14.7's seven guards and i
 `0x24ABE0`, and a refusal for each rule: a NOP'd epilogue, a planted `bx lr`, an unbounded `tbb`,
 a branch out, a tail that does not rejoin, a tail that loads a slot, zero or two regions);
 `tests/test_hooklocate.py::test_decoder_range` (13.6's guards over the located range equal those
-over the old pin, on stock and on every grown reference build used as stock).
+over the old pin, on stock and on every grown reference build used as stock). The switch rule:
+`test_a_bounded_switch_is_followed_and_an_unbounded_one_refused`, `test_a_bounded_tbh_is_followed`,
+and refusals for an arm outside the callee, an arm into its own table and a table that does not
+end on an instruction (all on 11.23), plus `test_an_in_range_branch_off_an_instruction_boundary_is_refused`
+and `test_a_conditional_epilogue_is_not_the_epilogue` (13.6). In the emulator
+(`tests/emu/test_ops147.py`): `test_decoder_range_147_fence` (239 and 360 stored, 238, 361 and
+1080 reverted), `test_add_register_readout_existing_cell` and
+`test_add_register_readout_existing_cell_repaints` (`cell_slot` on 14.7's Absorb and Chassis
+cells), and `test_absorb_readout_is_unattached_on_147` (stock 14.7 draws no Absorb row).
 
 ## Finding 90 — GuiCode's `setVariant` is the LCD's ungated `FUN_0021B678`, and every group GuiCode drives by number is located on 11.23, 13.6 and 14.7 — `proven-from-code`, 2026-11-08
 

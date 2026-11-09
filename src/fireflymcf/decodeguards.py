@@ -51,9 +51,11 @@ own code (`decoder_range`, with `decoder_range_proof` citing the addresses):
 4. every branch that leaves the extent lands in an out-of-line tail block after the epilogue
    that reaches an unconditional `b` back inside within `TAIL_LIMIT` bytes and loads no
    `[r4,#imm]` (13.6 has five, `0x24EDB2`-`0x24EDDE`), so no decode lives outside the range.
-   The tail rule sees only direct loads through r4, not loads through a copy of it -- the same
-   limit the guard scanner has; every branch target inside the extent must be an instruction
-   boundary.
+   The tail rule sees only direct immediate-offset loads through r4 (`ldr* [r4,#imm]`, `ldm
+   r4`): not a load through a copy of r4 (the same limit the guard scanner has), not an
+   indexed load `[r4, rN]`, and not a store through r4 -- 13.6's last tail stores one,
+   `0x24EDDA strb.w r3, [r4, #0x21f]`, and passes. Every branch target inside the extent must
+   be an instruction boundary.
 
 Anything else refuses `DecoderRangeUnknown`. The located ranges are 13.6 `(0x247BF8, 0x24EDB0)`,
 14.7 `(0x247CAC, 0x24F1FC)` and 11.23 `(0x247590, 0x24CDFA)`. Until 2026-11-08 the end was a 13.6
@@ -256,8 +258,10 @@ def _branch_target(i, A):
 def _tail_back(ins, at, t, lo, hi, tail_limit, A, tanknames) -> int:
     """The address of the unconditional `b` back into (lo, hi] that ends the tail block at `t`.
     The block may make calls; it may not load `[r4,#imm]` or `ldm r4` (a decode outside the
-    scanned range), branch anywhere else, or return. Only direct loads through r4 are seen, not
-    loads through a copy of r4 -- the same limit the guard scanner has."""
+    scanned range), branch anywhere else, or return. Only direct immediate-offset loads through
+    r4 are seen: not loads through a copy of r4 (the same limit the guard scanner has), not
+    indexed loads `[r4, rN]`, and not stores through r4 (13.6 `0x24EDDA strb.w r3, [r4,
+    #0x21f]` is one, in a tail that passes)."""
     k = at[t]
     while k < len(ins):
         j = ins[k]
