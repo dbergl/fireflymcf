@@ -51,6 +51,9 @@ own code (`decoder_range`, with `decoder_range_proof` citing the addresses):
 4. every branch that leaves the extent lands in an out-of-line tail block after the epilogue
    that reaches an unconditional `b` back inside within `TAIL_LIMIT` bytes and loads no
    `[r4,#imm]` (13.6 has five, `0x24EDB2`-`0x24EDDE`), so no decode lives outside the range.
+   The tail rule sees only direct loads through r4, not loads through a copy of it -- the same
+   limit the guard scanner has; every branch target inside the extent must be an instruction
+   boundary.
 
 Anything else refuses `DecoderRangeUnknown`. The located ranges are 13.6 `(0x247BF8, 0x24EDB0)`,
 14.7 `(0x247CAC, 0x24F1FC)` and 11.23 `(0x247590, 0x24CDFA)`. Until 2026-11-08 the end was a 13.6
@@ -105,9 +108,9 @@ def decoder_range_proof(data: bytes) -> str:
 
 
 def _locate(data: bytes) -> tuple[int, int, str]:
-    # Not memoised itself: every input it reads (`hooklocate`, `tanknames.decoder_ranges`,
-    # `tanknames._guicode`) is, and a cache here would serve a stale range past a stubbed input.
-    import capstone.arm as A
+    # Not memoised up to the region lookup: its inputs (`hooklocate`, `tanknames.decoder_ranges`)
+    # are, and a cache here would serve a stale range past a stubbed input. The walk over the
+    # region is, keyed on the bytes, the region and the tail limit (`_walk`).
     from . import tanknames
 
     try:
@@ -123,6 +126,15 @@ def _locate(data: bytes) -> tuple[int, int, str]:
             f"{len(regions)} r4=GuiCodeState regions start at the callee {start:#x} "
             f"(tanknames.decoder_ranges); exactly one is its extent")
     lo, hi = regions[0]
+    return _walk(data, lo, hi, TAIL_LIMIT)
+
+
+@memo.content_cached(copy=None)
+def _walk(data: bytes, lo: int, hi: int, tail_limit: int) -> tuple[int, int, str]:
+    """Prove `[lo, hi)` is the whole decoder (module docstring, rules 2-4) and say how."""
+    import capstone.arm as A
+    from . import tanknames
+
     code, base, ins, at = tanknames._guicode(data)
     if hi not in at:
         raise DecoderRangeUnknown(f"the region end {hi:#x} is not an instruction boundary")
@@ -142,9 +154,6 @@ def _locate(data: bytes) -> tuple[int, int, str]:
             switches.append(i.address)
             while k < k_end and ins[k].address < table_end:    # table bytes, not code
                 k += 1
-            if k < k_end and ins[k].address != table_end:
-                raise DecoderRangeUnknown(
-                    f"the switch table after {i.address:#x} does not end on an instruction")
             continue
         if _leaves_unless_branch_or_call(i, A):
             raise DecoderRangeUnknown(
@@ -156,13 +165,17 @@ def _locate(data: bytes) -> tuple[int, int, str]:
         if t is None:
             raise DecoderRangeUnknown(f"{i.address:#x} `{i.mnemonic} {i.op_str}` has no target")
         if lo <= t <= hi:
+            if t not in at:
+                raise DecoderRangeUnknown(
+                    f"{i.address:#x} `{i.mnemonic} {i.op_str}` lands at {t:#x}, inside the "
+                    f"callee but not on an instruction boundary")
             continue
         if t < hi or t not in at:
             raise DecoderRangeUnknown(
                 f"{i.address:#x} `{i.mnemonic} {i.op_str}` leaves the callee to {t:#x}, "
                 f"not to a tail block after its epilogue")
         if t not in tails:
-            tails[t] = _tail_back(ins, at, t, lo, hi, A, tanknames)
+            tails[t] = _tail_back(ins, at, t, lo, hi, tail_limit, A, tanknames)
     proof = (f"{lo:#x} `push`..`mov r4, r0` (hooklocate's per-tick callee, the one "
              f"tanknames.decoder_ranges region starting there) to {hi:#x} "
              f"`{ep.mnemonic} {ep.op_str}`, its only return; {len(tails)} out-of-line tail "
@@ -174,7 +187,8 @@ def _locate(data: bytes) -> tuple[int, int, str]:
 
 
 def _is_pop_r4_pc(i) -> bool:
-    if i.mnemonic not in ("pop", "pop.w"):
+    import capstone.arm as A
+    if i.mnemonic not in ("pop", "pop.w") or i.cc not in (0, A.ARM_CC_AL):
         return False
     regs = {i.reg_name(op.reg) for op in i.operands}
     return {"r4", "pc"} <= regs
@@ -196,7 +210,8 @@ def _leaves_unless_branch_or_call(i, A) -> bool:
 def _switch(ins, k, code, base, lo, hi, at, A) -> int:
     """The end of the table of the `tbb`/`tbh` at `ins[k]`, once it is proven a bounded switch
     whose every arm lands inside the callee: `cmp rX, #N; bhi default; tb[bh] [pc, rX]`, with
-    N+1 entries. Anything else is a computed jump this locator cannot follow."""
+    N+1 entries, the table ending on an instruction boundary and no arm landing in it. Anything
+    else is a computed jump this locator cannot follow."""
     i = ins[k]
     cmp, guard = (ins[k - 2], ins[k - 1]) if k >= 2 else (None, None)
     mem = [op for op in i.operands if op.type == A.ARM_OP_MEM]
@@ -216,14 +231,19 @@ def _switch(ins, k, code, base, lo, hi, at, A) -> int:
     raw = bytes(code[off:off + count * width])
     if len(raw) != count * width:
         raise DecoderRangeUnknown(f"the switch table at {table:#x} runs off GuiCode")
+    table_end = table + ((count * width + 1) & ~1)
+    if table_end not in at:
+        raise DecoderRangeUnknown(
+            f"the switch table after {i.address:#x} does not end on an instruction "
+            f"({table_end:#x})")
     for n in range(count):
         entry = int.from_bytes(raw[n * width:(n + 1) * width], "little")
         arm = table + 2 * entry
-        if not (lo < arm < hi and arm in at):
+        if not (lo < arm < hi and arm in at) or table <= arm < table_end:
             raise DecoderRangeUnknown(
                 f"the switch at {i.address:#x} sends case {n} to {arm:#x}, not to an "
                 f"instruction inside the callee")
-    return table + ((count * width + 1) & ~1)
+    return table_end
 
 
 def _branch_target(i, A):
@@ -233,14 +253,15 @@ def _branch_target(i, A):
     return None
 
 
-def _tail_back(ins, at, t, lo, hi, A, tanknames) -> int:
+def _tail_back(ins, at, t, lo, hi, tail_limit, A, tanknames) -> int:
     """The address of the unconditional `b` back into (lo, hi] that ends the tail block at `t`.
-    The block may make calls; it may not load `[r4,#imm]` (a decode outside the scanned range),
-    branch anywhere else, or return."""
+    The block may make calls; it may not load `[r4,#imm]` or `ldm r4` (a decode outside the
+    scanned range), branch anywhere else, or return. Only direct loads through r4 are seen, not
+    loads through a copy of r4 -- the same limit the guard scanner has."""
     k = at[t]
     while k < len(ins):
         j = ins[k]
-        if j.address - t > TAIL_LIMIT:
+        if j.address - t > tail_limit:
             break
         if (j.mnemonic.startswith("ldr") and tanknames._r4_disp(j) is not None) or (
                 j.mnemonic.startswith("ldm") and j.reg_name(j.operands[0].reg) == "r4"):
@@ -250,7 +271,7 @@ def _tail_back(ins, at, t, lo, hi, A, tanknames) -> int:
         if j.id in (A.ARM_INS_B, A.ARM_INS_CBZ, A.ARM_INS_CBNZ):
             back = _branch_target(j, A)
             if (j.id == A.ARM_INS_B and j.cc in (0, A.ARM_CC_AL)
-                    and back is not None and lo < back <= hi):
+                    and back is not None and lo < back <= hi and back in at):
                 return j.address
             raise DecoderRangeUnknown(
                 f"the tail block at {t:#x} does not rejoin the callee: {j.address:#x} "
@@ -261,7 +282,7 @@ def _tail_back(ins, at, t, lo, hi, A, tanknames) -> int:
                 f"{j.address:#x} `{j.mnemonic} {j.op_str}`")
         k += 1
     raise DecoderRangeUnknown(
-        f"the tail block at {t:#x} does not rejoin the callee within {TAIL_LIMIT:#x} bytes")
+        f"the tail block at {t:#x} does not rejoin the callee within {tail_limit:#x} bytes")
 
 
 def range_guards(data: bytes, start: int | None = None, end: int | None = None) -> list:

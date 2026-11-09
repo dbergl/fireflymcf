@@ -155,3 +155,60 @@ def test_a_bounded_switch_is_followed_and_an_unbounded_one_refused(mcf_1123):
     assert "1 bounded switch(es) (0x24c412)" in decodeguards.decoder_range_proof(mcf_1123)
     img = _patch(mcf_1123, 0x24C410, bytes.fromhex("00bf"))          # `bhi` -> `nop`
     _refused(img, "computed jump")
+
+
+# 11.23's switch (research 2026-11-08): `0x24C40E cmp r3, #4; bhi; 0x24C412 tbb [pc, r3]`, a
+# five-byte table at 0x24C416 padded to 0x24C41C, whose arms are 0x24C41C, 0x24C426, 0x24C430...
+SWITCH_1123 = (0x24C40E, 0x24C412, 0x24C416)
+
+
+def _as_tbh(data, entries):
+    """11.23's switch rewritten as `cmp r3, #len-1; bhi; tbh [pc, r3, lsl #1]` over `entries`."""
+    cmp_at, tb_at, table = SWITCH_1123
+    img = _patch(data, cmp_at, bytes([len(entries) - 1, 0x2B]))
+    img = _patch(img, tb_at, bytes.fromhex("dfe813f0"))
+    return _patch(img, table, b"".join(e.to_bytes(2, "little") for e in entries))
+
+
+def test_a_bounded_tbh_is_followed(mcf_1123):
+    """Three halfword entries (the stock arms 0x24C41C, 0x24C426, 0x24C430) end the table at
+    0x24C41C, an instruction boundary."""
+    img = _as_tbh(mcf_1123, [3, 8, 13])
+    assert decodeguards.decoder_range(img) == RANGE_1123
+    assert "1 bounded switch(es) (0x24c412)" in decodeguards.decoder_range_proof(img)
+
+
+def test_a_switch_arm_outside_the_callee_is_refused(mcf_1123):
+    img = _as_tbh(mcf_1123, [3, 0x800, 13])                         # case 1 -> 0x24D416
+    _refused(img, "sends case 1 to 0x24d416")
+
+
+def test_a_switch_arm_into_its_own_table_is_refused(mcf_1123):
+    img = _patch(mcf_1123, SWITCH_1123[2], b"\x00")                  # case 0 -> the table
+    _refused(img, "sends case 0 to 0x24c416")
+
+
+def test_a_switch_table_not_ending_on_an_instruction_is_refused(mcf_1123):
+    """`cmp r3, #6`: seven entries end the table at 0x24C41E, inside `ldrb.w` at 0x24C41C."""
+    img = _patch(mcf_1123, SWITCH_1123[0], bytes([6, 0x2B]))
+    _refused(img, "does not end on an instruction")
+
+
+def test_an_in_range_branch_off_an_instruction_boundary_is_refused(mcf_136):
+    """`0x24EDA4 beq #0x24edd6` retargeted into the middle of `0x24ED96 bl` (4 bytes)."""
+    img = _patch(mcf_136, 0x24EDA4, thumb.bcc_n(0x24EDA4, 0x24ED98, "eq"))
+    _refused(img, "not on an instruction boundary")
+
+
+def test_a_conditional_epilogue_is_not_the_epilogue(mcf_136):
+    """An IT-predicated `popeq` is no epilogue. Capstone names it `popeq` and sets its cc, so the
+    mnemonic test and the cc test each refuse it (this test cannot tell which fired)."""
+    from fireflymcf import tanknames as tn
+    _c, _b, ins, at = tn._guicode(mcf_136)
+    ep = ins[at[EPILOGUE_136]]
+    assert decodeguards._is_pop_r4_pc(ep)
+    import capstone
+    md = capstone.Cs(capstone.CS_ARCH_ARM, capstone.CS_MODE_THUMB)
+    md.detail = True
+    it_pop = list(md.disasm(bytes.fromhex("08bff0bd"), EPILOGUE_136 - 2))   # it eq; popeq
+    assert it_pop[1].mnemonic.startswith("pop") and not decodeguards._is_pop_r4_pc(it_pop[1])
