@@ -33,8 +33,10 @@ def pytest_configure(config):
 def pytest_collection_modifyitems(items):
     """Everything under tests/emu/ boots an emulated image and is slow by construction; mark it so
     `-m "not slow"` is the edit-loop tier. Other slow tests carry the marker themselves."""
+    here = Path(__file__).parent
     for item in items:
-        if "emu" in Path(str(item.path)).relative_to(Path(__file__).parent).parts[:1]:
+        path = Path(str(item.path))
+        if path.is_relative_to(here) and "emu" in path.relative_to(here).parts[:1]:
             item.add_marker(pytest.mark.slow)
 
 
@@ -412,11 +414,14 @@ def _cached_entry(project, stock: bytes):
 # - every `pytest.MonkeyPatch` made from session start on is tracked (its `__init__` is wrapped;
 #   collection, and so a test module's import-time code, comes after session start, while pytest's
 #   own configure-time instances, which patch pytest internals for the whole session, come
-#   before); a compile runs for real if any live one has an attribute patch on an object
-#   outside `fireflymcf.emu*` (which the compile path never imports), or any
-#   `setitem`/`setenv`/`delenv`, `syspath_prepend` or `chdir`;
+#   before). The references are strong: an instance dropped without `undo()` leaves its patches in
+#   place, so it must keep forcing the bypass. A compile runs for real if any tracked one has an
+#   attribute patch on an object outside `fireflymcf.emu*` (which the compile path never
+#   imports), or any `setitem`/`setenv`/`delenv`, `syspath_prepend` or `chdir`;
 # - every `unittest.mock` patch is tracked while active (`_patch.__enter__`/`__exit__`,
 #   `_patch_dict._patch_dict`/`_unpatch_dict`); any active one sends the compile through for real.
+# Plain assignment to an engine attribute (`module.attr = ...`) is invisible to this check, so a
+# test that changes the engine must do it through `monkeypatch` or `mock.patch`.
 # Before session start nothing is tracked, so every compile runs for real. Outside a test's
 # setup/call/teardown (collection, session fixtures) it compiles for real too, as does a compile
 # with user ops loaded, one naming an op type that is not a `fireflymcf` op (one a test
@@ -425,7 +430,6 @@ def _cached_entry(project, stock: bytes):
 # ---------------------------------------------------------------------------------------
 
 import types  # noqa: E402
-import weakref  # noqa: E402
 from unittest import mock as _mock  # noqa: E402
 
 from fireflymcf import recipe as _recipe  # noqa: E402
@@ -433,7 +437,7 @@ from fireflymcf import recipe as _recipe  # noqa: E402
 _UNCACHED_COMPILE = _recipe.compile_project
 _CACHE_ACTIVE = [False]
 _TRACKING = [False]
-_LIVE_MONKEYPATCHES: "weakref.WeakSet" = weakref.WeakSet()
+_LIVE_MONKEYPATCHES: list = []     # strong: see the comment above
 _ACTIVE_MOCK_PATCHES: list = []
 
 
@@ -443,33 +447,40 @@ def _install_patch_tracking() -> None:
     for field in ("_setattr", "_setitem", "_cwd", "_savesyspath"):
         # Fail loudly if pytest renames what `_engine_patched` reads.
         assert hasattr(probe, field), f"pytest.MonkeyPatch has no {field}"
-    if getattr(mp_cls.__init__, "_cache_tracked", False):
-        return
     mp_init = mp_cls.__init__
 
     def init(self, *args, **kwargs):
         mp_init(self, *args, **kwargs)
         if _TRACKING[0]:
-            _LIVE_MONKEYPATCHES.add(self)
+            _LIVE_MONKEYPATCHES.append(self)
 
     def entered(enter):
+        if getattr(enter, "_cache_tracked", False):
+            return enter
+
         def wrapper(self, *args, **kwargs):
             result = enter(self, *args, **kwargs)
             _ACTIVE_MOCK_PATCHES.append(self)
             return result
+        wrapper._cache_tracked = True
         return wrapper
 
     def exited(exit_):
+        if getattr(exit_, "_cache_tracked", False):
+            return exit_
+
         def wrapper(self, *args, **kwargs):
             try:
                 _ACTIVE_MOCK_PATCHES.remove(self)
             except ValueError:
                 pass
             return exit_(self, *args, **kwargs)
+        wrapper._cache_tracked = True
         return wrapper
 
     init._cache_tracked = True
-    mp_cls.__init__ = init
+    if not getattr(mp_init, "_cache_tracked", False):
+        mp_cls.__init__ = init
     # `start`/`stop` and decoration go through these for `patch`, `patch.object` and
     # `patch.multiple`; `patch.dict`'s decorator bypasses its `__enter__`, so its inner pair.
     _mock._patch.__enter__ = entered(_mock._patch.__enter__)

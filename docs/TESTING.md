@@ -2,7 +2,7 @@
 
 ```
 python3 -m pytest tests -q -n auto -m "not slow"  # the fast tier, the edit loop: ~77 s on 16 threads (2026-11-09); NOT the merge gate
-python3 -m pytest tests/ -q -n auto               # the whole suite: 4m22s-4m48s on 16 threads (2026-11-09, warm compile cache; a cold run after any src/ edit misses every compile and is slower)
+python3 -m pytest tests/ -q -n auto               # the whole suite: about 4m20s-4m50s warm on 16 threads (2026-11-09; a cold run after any src/ edit misses every compile and is slower)
 python3 -m pytest tests/test_x.py -v              # serial, one module; use it to see WHY something is red
 npm test --prefix studio/web                      # the web editor's tests
 ```
@@ -10,7 +10,7 @@ npm test --prefix studio/web                      # the web editor's tests
 **The fast tier is for the edit loop only.** `-m "not slow"` skips every test under `tests/emu/`
 (auto-marked in `tests/conftest.py`) and every test measured at 3 s or more (marked
 `@pytest.mark.slow`, or `pytestmark` on a module whose module-scoped fixture boots an emulation, so
-every worker pays the setup). About 470 of 3848 tests are slow (the module-wide marks include some fast ones). The full suite, without `-m`, is the
+every worker pays the setup). 473 of 3876 tests are slow (the module-wide marks include some fast ones). The full suite, without `-m`, is the
 gate before a merge and after any engine change. `tests/test_slow_marker.py` fails if a `tests/emu/`
 test loses the marker. A new test that takes 3 s or more should carry `@pytest.mark.slow`.
 
@@ -35,10 +35,13 @@ why the first run after an edit is the slow one. Failed compiles (`ok=False`) ar
 compile that raises is not. A compile runs for real whenever something live could change it: any
 live `pytest.MonkeyPatch` with an attribute patch outside `fireflymcf.emu*` (which the compile path
 never imports) or any `setitem`/`setenv`/`delenv`/`syspath_prepend`/`chdir`, made from any file or
-fixture; any active `unittest.mock` patch; loaded user ops; or an op type a test registered. A
-patched engine must never be served an unpatched result. Each session start (the xdist controller
-only) prunes entries for another `src/` digest unused for a day, and crash-left `.tmp` files older
-than an hour. Delete the directory to force a cold run.
+fixture; any active `unittest.mock` patch; loaded user ops; an op type a test registered; or a
+project whose base is not the given stock. A patched engine must never be served an unpatched
+result. Plain assignment to an engine attribute (`module.attr = ...`) is invisible to the cache, so
+a test that changes the engine must use `monkeypatch` or `mock.patch`. Each session start (on the
+controller, or the only process when run without `-n`) prunes entries for another `src/` digest
+unused for a day, and crash-left `.tmp` files older than an hour. Delete the directory to force a
+cold run.
 
 Two test-hygiene rules from `CLAUDE.md` that apply here:
 

@@ -222,6 +222,25 @@ def test_every_kind_of_monkeypatch_but_an_emulator_setattr_bypasses(monkeypatch,
         os.environ.pop("FIREFLYMCF_CACHE_TEST_DEL", None)
 
 
+def test_a_dropped_but_never_undone_monkeypatch_still_bypasses(monkeypatch):
+    """Its patch outlives its last reference, so its tracking must too."""
+    original = recipe._prepare
+    tracked = len(cc._LIVE_MONKEYPATCHES)
+    assert not cc._engine_patched()
+    leaked = type(monkeypatch)()
+    leaked.setattr(recipe, "_prepare", lambda *a, **k: original(*a, **k))
+    del leaked
+    import gc
+    gc.collect()
+    try:
+        assert cc._engine_patched()
+    finally:
+        for mp in cc._LIVE_MONKEYPATCHES[tracked:]:
+            mp.undo()
+    assert recipe._prepare is original
+    assert not cc._engine_patched()
+
+
 def test_emulator_objects_are_told_apart_by_module():
     import fireflymcf.emu
 
