@@ -5381,7 +5381,10 @@ That something is `FUN_00247BF8`:
 `0x2003a814` (slot 45) has **exactly one writer** in the whole section.
 
 *`[0x20039908]` is the group-variant setter*, and that is not assumed: 41 of 41 distinct ids passed
-to it in `movs r0,#N` are group indices whose byte 1 is `0x80`, out of 96 such groups in 233. The
+to it in `movs r0,#N` are group indices whose byte 1 is `0x80`, out of 96 such groups in 233.
+*(Superseded 2026-11-08 by Finding 90: the full census finds 105 calls and 49 distinct groups on
+13.6, all of them `0x80` groups, and the setter is the LCD's ungated `FUN_0021B678`, which does
+not read byte 1; 14.7 drives two `0x00` groups, 5 and 17.)* The
 LCD half of the same mechanism is `CONTROL-BEHAVIOR.md` §5a's single setter caller. Group **199** —
 defect 0b's silent `Shore Brkr Size` `−` — is in this called set, which independently supports that
 defect's "externally selected, and nothing moved it" reading.
@@ -6408,6 +6411,71 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 (a redefinition ends a pointer's lifetime; a parameter survives a call only through a copy), the
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
+
+## Finding 90 — GuiCode's `setVariant` is the LCD's ungated `FUN_0021B678`, and every group GuiCode drives by number is located on 11.23, 13.6 and 14.7 — `proven-from-code`, 2026-11-08
+
+**The question.** GuiCode calls one pointer as `setVariant(group, v)` (13.6 cell `0x20039908`;
+Finding 57 first counted 41 distinct group ids passed to it). An allocator must not hand out a
+group GuiCode drives (`CONTROL-BEHAVIOR.md` §5a; holds on 13.6's driven 136/137 died on a coach,
+2026-09-30). Answering that on any image needs three facts that were 13.6 pins: which function
+the pointer holds, what its group argument indexes, and every call through it.
+
+**The pointer is host-API `+0x04`, and it holds `FUN_0021B678`.** The LCD builds the host-API
+table on its stack and hands it to `GuiCode_entry0`: `ldr r3,=0x21B679 ; str r3,[sp,#0x28]`
+@`0x21C18E`/`0x21C196` (table at `sp+0x24`, so `+0x04`), then `ldr r3,[r5,#0xc] ; add r0,sp,#0x24
+; blx r3` @`0x21C1AE`-`0x21C1B2` (`r5` the GuiCode header, `+0x0C` entry0). Entry0 copies the word
+to the cell (`hooklocate.host_api_cells`: 13.6 `0x20039908`, 14.7 `0x200395FC`, 11.23
+`0x20039304`). The function, `0x21B678`-`0x21B688`:
+
+    ldr r3,=0x20006E5C ; ldrb r3,[r3,#0xf] ; add r0,r3 ; ldr r3,=0x20006E6C
+    add.w r0,r3,r0,lsl #4 ; strb r1,[r0,#0xa] ; strb r1,[r0,#0xb] ; bx lr
+
+It writes both variant counters of runtime record `b3 + r0` with no byte-1 gate and no variant
+bound. `[0x20006E5C+0x0F]` is the GuiData tag-0x10 directory `b3` the group-table loader
+`FUN_0021B420` keeps; `b3` is 0 on every corpus image, so GuiCode's `r0` is the group-table index
+(`lcdgroups.host_writer`, which finds the unique builder call site and matches the shape on each
+image). The gated setter `FUN_0021B5E8` (byte 1 `0x80`, the variant nibble) is reached only from
+the LCD's own `FUN_0021A664`, at `0x21B002` in the second range of its Ghidra body
+(`0x21AEA4`-`0x21B105`), never through the host table. `CONTROL-BEHAVIOR.md` §5a's corrected text
+carries the same reading.
+
+**The LCD is the same code on all three.** 11.23 and 14.7 carry one LCD Firmware (`cbed1028`),
+and `grammar.prove_lcd` proves it a relocation twin of 13.6's over `FUN_0021B420`,
+`FUN_0021B5E8`, `FUN_0021B678`, the sender `FUN_0021B8B4`, `FUN_0021BAB4`, `FUN_0021AB88` and
+both ranges of `FUN_0021A664`: every function at 13.6's address, two LCD-flash pool words +4, the
+30 callee bindings +0, and every call between them landing on the located twin, in both
+directions.
+
+**The census** (`newbutton.setter_calls`). A sweep visits every `ldr rN,[pc,#]` of the cell and
+every path from it while `rN` holds it; each deref must reach `blx` of its register with `r0` a
+constant, on a linear path (a conditional branch or conditional call between them refuses). A
+raw halfword scan of both literal-load encodings (`0x48xx`, `ldr.w` `0xF8DF`/`0xF85F`) must count
+exactly the loads the decode saw.
+
+| image | loads | derefs = calls | distinct groups |
+|---|---|---|---|
+| 13.6 | 76 | 105 | 49 |
+| 14.7 | 86 | 113 | 47 |
+| 11.23 | 64 | 90 | 39 |
+
+13.6's 49 are the groups the 13.6-only scan returned before, so every 13.6 build is unchanged.
+The driven groups are excluded from every allocator as a conservative superset: driven is
+sufficient to exclude, not proof that a hold is dead (a hold on driven group 129 works on a
+coach, 2026-10-19; what separates it from 136/137 is not established).
+
+**The reserved templates are located by DGN.** `newbutton.reserved_groups` finds the unique group
+whose whole binding slice is `1FFD3` and the one that is `1FFC5`: 68 and 69 on all three images,
+whose four bindings are the only ones carrying either DGN.
+
+**The status bridge is derived, not dumped.** `status_map.derived_bridge` follows the
+receive-slot base through `slottrace` and reads each clean slot-to-cell block from the image's
+own GuiCode. On 13.6 it equals the committed Ghidra dump (`data/slot_bridge_136.txt`) on every
+status var, so `backbone`, `pin_bindings`, `state_loads` and `bind_pin` give the dump's values;
+on 14.7 pins 1-43 are bridged, each on the cells the derivation names, and the emulated G12
+moves exactly those cells (`tests/test_groups_locate.py`).
+
+Tests: `tests/test_groups_locate.py` (the census, its refusals by mutation, the reserved groups,
+the bridge), `tests/test_grammar.py` (`prove_lcd` and its mutations).
 
 ## Finding 89 — the display-cell table's bound is compared at 14 sites in every image, 8 gates and 6 clamps; the render state and the free cell area are located from GuiCode — `proven-from-code` except where marked, 2026-11-08
 

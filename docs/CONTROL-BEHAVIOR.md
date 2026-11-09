@@ -421,8 +421,10 @@ It writes both counters of record `b3 + group` with **no byte-1 gate and no nibb
 gated dispatcher `FUN_0021B5E8` is the LCD's own path from a GuiData record field (its one caller,
 below). The same holds on 11.23 and 14.7, whose LCD (`cbed1028`) builds the same table at the
 same addresses. So the "`0x00` = the setter refuses" reading below is true of `FUN_0021B5E8`
-only; GuiCode can set the counters of any group. *(The text below is the 2026-08-24 tracing, with
-the setter it describes now named `FUN_0021B5E8`.)*
+only; GuiCode can set the counters of any group. `GUICODE.md` Finding 90 has the proof on all
+three images, the census of every GuiCode call through the pointer (13.6: 105 calls, 49 groups)
+and the LCD twin proof. *(The text below is the 2026-08-24 tracing, with the setter it describes
+now named `FUN_0021B5E8`.)*
 
 **The gated setter is one dispatcher, `FUN_0021B5E8(index, variant)`, with three write sites
 counted with `FUN_0021B678`'s**, and all of the state table's seven pool references were
