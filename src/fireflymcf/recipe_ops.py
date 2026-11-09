@@ -1978,6 +1978,10 @@ class AddGlyphButton(Op):
     ctx.handles[op_id] = {"object": idx, "cell": fill_cell, "group": None} — group is
     None until a later `wire_button` gives the shell a command group.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "page": {"type": ["string", "integer"],
@@ -2138,6 +2142,10 @@ class WireButton(Op):
     wiring adds. Updates the target handle's cell/group if the target is a ref, so a
     later op can address the now-wired button by the same id.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "target": {"type": ["integer", "object"],
@@ -8556,6 +8564,10 @@ class AddButtonStatus(Op):
         SRAM cell area does not prove out on this image (`sramreach`)
     """
 
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
 
     PARAMS = {
@@ -9436,6 +9448,10 @@ class AddButtonStates(Op):
         SRAM cell area does not prove out on this image (`sramreach`)
     """
 
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     hardware_verified = False
 
     PARAMS = {
@@ -9911,6 +9927,10 @@ class AddRvcButton(Op):
       RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
         1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
+
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     hardware_verified = False
 

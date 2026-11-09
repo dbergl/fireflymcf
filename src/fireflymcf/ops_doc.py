@@ -119,7 +119,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "Flashed 2026-08-17.", "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",
         "Clone a donor control into a bare button shell on a page, sized w x h, unwired.",
-        "Flashed (the Starlink button). Must be followed by `wire_button`.",
+        "Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated "
+        "2026-11-08 (with `wire_button`, donor 214): the clone draws at its place, changing no "
+        "pixel outside its records, and a tap sends only the wired output's toggle.",
         "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
     "add_voltage_battery": ("guicode",
         "Clone a stock battery graphic beside another and drive it from a bus voltage: "
@@ -138,7 +140,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "`docs/HARDWARE-VERIFIED.md`"),
     "wire_button": ("structural",
         "Wire a button shell to a G12 pin: status cell, indicator, and its own toggle group.",
-        "Flashed (the Starlink button).", "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
+        "Flashed (the Starlink button). On 14.7, emulated 2026-11-08: the G12 reporting the "
+        "wired output on and off recolours the button in place (status bridge derived from 14.7's "
+        "GuiCode).", "`newbutton.py`, `docs/HARDWARE-VERIFIED.md`"),
     "install_glyph": ("structural",
         "Write new artwork into an icon font as a glyph and point one character at it. "
         "Pixels travel in the project as hex rows.",
@@ -325,14 +329,21 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, "
         "touch on a fresh group) pasted as a new object attached under `parent`, refused if a "
         "touch region would overlap or anything else on the page would change.",
-        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo).", "`rvcbutton.py`, `enumlabel.py`"),
+        "UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). "
+        "On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame "
+        "after the threshold and a short tap none; a tap button sends once per press; the same "
+        "hold forced onto a GuiCode-driven group is refused by the finish gate, and with the "
+        "gate stubbed it never sends.", "`rvcbutton.py`, `enumlabel.py`"),
     "add_button_status": ("structural",
         "Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick "
         "statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or "
         "above valid_max reads off) into its own fresh cell, and each button's static body "
         "becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); "
         "a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change.",
-        "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state).", "`statelights.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading "
+        "off (photo per state). On 14.7, emulated 2026-11-08 (eq on a toggle): the reported value "
+        "flips the cell and the toggle group's variant, the button redraws in its box only, and "
+        "a tap sends the opposite command.", "`statelights.py`, `statusfold.py`"),
     "add_button_states": ("structural",
         "Show which of N states a unit reports on a button and, on a cycle button, make a tap "
         "send the next one: one per-tick statusfold routine tries each entry's states (each a "
@@ -343,7 +354,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "and colour; refused if anything else on the page would change in any arm.",
         "UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the "
         "unknown state's with no report, and each state draws its own arm. Bench check: candump "
-        "at each reported state, photo per state.", "`statelights.py`, `statusfold.py`"),
+        "at each reported state, photo per state. On 14.7, emulated 2026-11-08 (a two-state "
+        "cycle): each reported state draws its arm in the button's box only and sets the "
+        "variant to the next state, which a tap sends; stale draws the unknown state.",
+        "`statelights.py`, `statusfold.py`"),
     "add_aes_bms_button_status": ("structural",
         "Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 "
         "field the heater status already receives: blue while clear, cyan while set. One-source "

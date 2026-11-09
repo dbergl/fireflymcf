@@ -28,9 +28,10 @@ import pytest
 
 pytest.importorskip("unicorn")
 
-from fireflymcf import (buildcheck, celltables, container, coverage, donors,  # noqa: E402
-                        followchannel, glyphs, guidata, insert, metrics, newbutton, pagewalk,
-                        patch, recipe, status_map, themeswap)
+from fireflymcf import (aescompact, buildcheck, celltables, container,  # noqa: E402
+                        coverage, donors, followchannel, glyphs, guidata, insert, layout,
+                        lcdgroups, metrics, newbutton, pagewalk, patch, recipe, records, rvcbutton,
+                        status_map, themeswap)
 from fireflymcf.emu import g12, peers  # noqa: E402
 from fireflymcf.emu.canbus import Peer  # noqa: E402
 from fireflymcf.emu.scenario import PANEL_SA, Scenario  # noqa: E402
@@ -64,7 +65,8 @@ TESTED_147 = frozenset({
     "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
     "install_glyph", "append_filter", "drop_from_master", "set_theme", "add_text_label",
-    "add_register_readout", "add_enum_label", "follow_register"})
+    "add_register_readout", "add_enum_label", "follow_register", "add_rvc_button",
+    "add_button_status", "add_button_states", "add_glyph_button", "wire_button"})
 
 
 class _PinnedTime:
@@ -504,10 +506,10 @@ OFF = (65, 81, 163)
 SHELL = {"page": "climate", "x": 100, "y": 380, "w": 120, "h": 60, "fill_cell": 164}
 
 
-def test_unwired_glyph_button_clone_carries_the_donors_live_group(mcf_147, monkeypatch):
+def test_unwired_glyph_button_clone_carries_the_donors_live_group(mcf_147):
     """The 14.7 donor's clone carries the donor's own command group, which drives a live
     output (Bath Fan, output 40), so `add_glyph_button` must refuse a shell no `wire_button`
-    rewired. Checked with the op admitted on 14.7 for this test only (2026-11-08)."""
+    rewired (2026-11-08)."""
     donor, _proof = donors.glyph_button(mcf_147)
     assert donor == GLYPH_DONOR
     assert newbutton.object_group(mcf_147, donor) == DONOR_GROUP
@@ -519,49 +521,99 @@ def test_unwired_glyph_button_clone_carries_the_donors_live_group(mcf_147, monke
     placed, _e = insert.insert_object(mcf_147, clone, CLIMATE_ROOT, position=(100, 380))
     assert newbutton.object_group(placed, newbutton.last_object_index(placed)) == DONOR_GROUP
 
-    monkeypatch.setattr(recipe.REGISTRY["add_glyph_button"], "firmwares",
-                        frozenset({"13.6", "14.7"}))
     with pytest.raises(AssertionError, match="was never wired"):
         _build(mcf_147, [("shell", "add_glyph_button", SHELL)])
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "add_glyph_button and wire_button are not admitted on 14.7, so the compile refuses the "
-    "firmware. Their status bridge is derived per image since 2026-11-08 "
-    "(status_map.derived_bridge); before that bind_pin read the committed 13.6 dump, and "
-    "observed 2026-11-08 with both ops admitted: the clone drew at its place and a tap sent "
-    "1FEDB pin 3 command 5, but pin 3's var 20 bound to 13.6's cell 0x20039BB0, which stays "
-    "0x004151A3 when the G12 reports pin 3 on, so the button never recoloured. 14.7 derives "
-    "var 20's cells as 0x20039854/0x20039D50 (tests/test_groups_locate.py)."))
-def test_add_glyph_button_and_wire_button(mcf_147, tmp_path):
-    """A glyph button cloned from 14.7's donor, wired to output 3: it draws at its new place,
-    a tap sends that output's toggle (and nothing to the donor's output 40), and the G12
-    reporting the output on recolours it in place."""
+@pytest.fixture(scope="module")
+def wired(mcf_147, tmp_path_factory):
+    """A glyph button cloned from 14.7's donor onto CLIMATE CONTROL and wired to output 3, on
+    the emulated panel: the page drawn, then with output 3 set on and off again, then what a tap
+    at its centre sends and the page after the G12 echoes the toggle. Until 2026-11-08
+    `bind_pin` read the committed 13.6 status-bridge dump, binding pin 3's var 20 to 13.6's
+    cell 0x20039BB0, which stays 0x004151A3 on 14.7, so the button never recoloured. The bridge
+    is now derived per image (`status_map.derived_bridge`: 0x20039854/0x20039D50 on 14.7,
+    tests/test_groups_locate.py)."""
+    tmp = tmp_path_factory.mktemp("wired147")
     img = _build(mcf_147, [
         ("shell", "add_glyph_button", SHELL),
         ("wire", "wire_button", {"target": {"ref": "shell"}, "channel": WIRE_PIN,
                                  "off_colour": list(OFF), "allow_commanded_channel": True,
                                  "allow_named_output": True})])
-    x0, y0 = SHELL["x"], SHELL["y"]
-    box = (x0, y0, x0 + SHELL["w"], y0 + SHELL["h"])
-    area = SHELL["w"] * SHELL["h"]
     s = _settled(img)
     s.goto("CLIMATE CONTROL")
     s.run(2.0)
-    off = _shot(s, tmp_path, "off")
-    assert _near(_crop(off, box), OFF) > area // 2, "the clone does not draw at its new place"
-
-    t = _press_at(s, *_centre(box))
-    s.run(1.0)
-    sent = [f.data for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
-    assert [(d[0], d[3]) for d in sent] == [(WIRE_PIN, TOGGLE)], sent
-
+    obj = len(guidata.object_tables(img)[1]) - 1
+    assert obj == len(guidata.object_tables(mcf_147)[1])
+    out = {"img": img, "off": _shot(s, tmp, "off"),
+           "footprint": _footprint(img, CLIMATE_ROOT, obj),
+           "caption": _footprint(img, CLIMATE_ROOT, obj, label="Bath Fan")}
     s.set_g12_output(WIRE_PIN, 200)
     s.run(2.0)
-    on = _shot(s, tmp_path, "on")
-    assert _near(_crop(on, box), OFF) < area // 4, "the button did not recolour"
-    bbox = _diff_bbox(off, on)
-    assert bbox is not None and bbox[0] >= x0 and y0 <= bbox[1] and bbox[3] <= box[3], bbox
+    out["on"] = _shot(s, tmp, "on")
+    s.set_g12_output(WIRE_PIN, 0)
+    s.run(2.0)
+    out["off_again"] = _shot(s, tmp, "off_again")
+    t = _press_at(s, *_centre(GLYPH_BOX))
+    s.run(1.0)
+    out["sent"] = [bytes(f.data) for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)]
+    out["after_tap"] = _shot(s, tmp, "after_tap")
+    stock = _settled(mcf_147)
+    stock.goto("CLIMATE CONTROL")
+    stock.run(2.0)
+    out["stock"] = _shot(stock, tmp, "stock")
+    return out
+
+
+GLYPH_BOX = (SHELL["x"], SHELL["y"], SHELL["x"] + SHELL["w"], SHELL["y"] + SHELL["h"])
+
+
+def _footprint(img: bytes, root: int, obj: int, label: str | None = None):
+    """The union of `obj`'s placed records under `root` (x1/y1 inclusive): the clone's box,
+    icon, caption and touch region, read from the build's own walk (only the record labelled
+    `label`, if given)."""
+    qs = [q for q in layout.Screen(img).walk(root)
+          if q.obj_index == obj and label in (None, q.label)]
+    assert qs, obj
+    return (min(q.x0 for q in qs), min(q.y0 for q in qs),
+            max(q.x1 for q in qs), max(q.y1 for q in qs))
+
+
+def test_add_glyph_button(wired):
+    """The clone draws its body in its declared box on CLIMATE CONTROL and changes no pixel
+    outside its own records (the donor's caption, "Bath Fan", is carried right of the box), and
+    a tap at its centre sends exactly the wired output's toggle (1FEDB pin 3, command 5),
+    nothing to the donor's output 40 (2026-11-08)."""
+    area = SHELL["w"] * SHELL["h"]
+    assert _near(_crop(wired["off"], GLYPH_BOX), OFF) > area // 2, \
+        "the clone does not draw at its new place"
+    assert _near(_crop(wired["stock"], GLYPH_BOX), OFF) < area // 4
+    bbox = _diff_bbox(wired["stock"], wired["off"])
+    assert _inside(bbox, wired["footprint"]), (bbox, wired["footprint"])
+    assert [(d[0], d[3]) for d in wired["sent"]] == [(WIRE_PIN, TOGGLE)], wired["sent"]
+
+
+def test_wire_button(wired):
+    """`set_g12_output` on the wired output recolours the button in place: on, the off body is
+    gone from its box; off again, its box is the off box pixel for pixel. The tap's toggle,
+    echoed by the emulated G12, lights it the same way. No change reaches a pixel outside the
+    clone's records. Off again, the carried caption's anti-aliased edges differ (193 pixels):
+    the hollow caption is drawn over itself on the repaint, and the same build on 13.6 differs
+    by the same 193 pixels in the same box (2026-11-08)."""
+    area = SHELL["w"] * SHELL["h"]
+    assert _near(_crop(wired["on"], GLYPH_BOX), OFF) < area // 4, "the button did not recolour"
+    bbox = _diff_bbox(wired["off"], wired["on"])
+    assert bbox is not None and _inside(bbox, wired["footprint"]), (bbox, wired["footprint"])
+    _same_but_caption(wired, "off", "off_again")
+    _same_but_caption(wired, "on", "after_tap")
+
+
+def _same_but_caption(wired: dict, a: str, b: str) -> None:
+    """Shots `a` and `b` agree pixel for pixel in the button's box, and differ, if at all, only
+    in the carried caption's record."""
+    bbox = _diff_bbox(wired[a], wired[b])
+    assert bbox is None or _inside(bbox, wired["caption"]), (a, b, bbox)
+    assert _diff_bbox(_crop(wired[a], GLYPH_BOX), _crop(wired[b], GLYPH_BOX)) is None, (a, b)
 
 
 # --- the theme ----------------------------------------------------------------------------------
@@ -745,7 +797,6 @@ def _readout_cell(img: bytes, stock: bytes) -> int:
 
 
 def layout_walk(img: bytes, root: int):
-    from fireflymcf import layout
     return layout.Screen(img).walk(root)
 
 
@@ -971,31 +1022,191 @@ def test_follow_channel(mcf_147, monkeypatch):
                                  {"watch_channel": 3, "target_channel": 4})], "NO_SUCH_LABEL")
 
 
-STATUS_BUTTON = ("b", "add_rvc_button", {
-    "parent": CLIMATE_ROOT, "x": 100, "y": 380, "w": 120, "h": 60, "text": "Go",
-    "dgn": DC_DIMMER_COMMAND_2,
-    "toggle": {"on_payload": "03ffc801ff00ffff", "off_payload": "03ff0003ff00ffff"}})
-STATES_BUTTON = ("b", "add_rvc_button", {
-    "parent": CLIMATE_ROOT, "x": 100, "y": 380, "w": 120, "h": 60, "text": "Go",
-    "dgn": DC_DIMMER_COMMAND_2, "tap": {"payload": "03ffc805ff00ffff"}})
+# --- add_rvc_button and its status ops -----------------------------------------------------------
+
+# A new button on CLIMATE CONTROL's empty band (the glyph button's box), sending 1FEDB pin 3
+# frames; test expectations only. 14.7's first hold-safe slot is group 12, which GuiCode does not
+# drive; 136 is a group it drives (`newbutton.guicode_selected_groups` on 14.7, 2026-11-08).
+RVC_BOX = GLYPH_BOX
+RVC_AT = {"parent": CLIMATE_ROOT, "x": SHELL["x"], "y": SHELL["y"], "w": SHELL["w"],
+          "h": SHELL["h"], "text": "Go", "dgn": DC_DIMMER_COMMAND_2}
+PIN3_TOGGLE = "03ffc805ff00ffff"
+PIN3_ON = "03ffc801ff00ffff"
+PIN3_OFF = "03ff0003ff00ffff"
+HOLD_S = 3
+FIRST_HOLD_SAFE = 12
+DRIVEN_GROUP = 136
+HOLD_BUTTON = ("b", "add_rvc_button",
+               {**RVC_AT, "hold": {"payload": PIN3_TOGGLE, "seconds": HOLD_S}})
 
 
-# TODO(Plan 6, Task 5): replace these two compile-only tests with the emulator proofs of
-# add_button_status / add_button_states on 14.7, and admit both ops on 14.7.
-def test_add_button_status_compiles_once_admitted(mcf_147, monkeypatch):
-    """The pool refusal these two ops met on 14.7 (VARIANT_SETTER_UNKNOWN, observed 2026-11-08:
-    the driven-group scan read only 13.6's setter cell) is gone: the scan reads the located cell
-    and the LCD proves what it holds (`tests/test_groups_locate.py`). With both ops admitted the
-    build compiles. They stay off 14.7 until the emulator proves them (Plan 6, Task 5)."""
-    _admit(monkeypatch, "add_rvc_button", "add_button_status")
-    _build(mcf_147, [STATUS_BUTTON, ("s", "add_button_status", {"buttons": [
-        {"button": {"ref": "b"}, "source": {"var": 232}, "compare": {"eq": 1}}]})])
+def _new_groups(stock: bytes, img: bytes) -> list[int]:
+    """The groups the build changed, read from the two group tables."""
+    sg, dg = guidata.group_table(stock), guidata.group_table(img)
+    return [g.index for g in sg if g.index < len(dg) and dg[g.index].raw != g.raw]
 
 
-def test_add_button_states_compiles_once_admitted(mcf_147, monkeypatch):
-    """See `test_add_button_status_compiles_once_admitted`."""
-    _admit(monkeypatch, "add_rvc_button", "add_button_states")
-    _build(mcf_147, [STATES_BUTTON, ("s", "add_button_states", {"buttons": [
-        {"button": {"ref": "b"}, "states": [
-            {"match": {"source": {"var": 232}, "eq": 0}},
-            {"match": {"source": {"var": 232}, "eq": 1}, "lit": True}]}]})])
+def _rvc_sends(s: Scenario, since: float) -> list:
+    return [(round(f.t - since, 3), bytes(f.data).hex())
+            for f in _panel_sends(s, DC_DIMMER_COMMAND_2, since)]
+
+
+def test_add_rvc_button(mcf_147):
+    """The hold form on 14.7's first hold-safe group: a 4 s hold sends exactly one frame, the
+    binding's DGN and payload, once the 3 s threshold has passed; a 0.2 s tap sends nothing
+    (2026-11-08)."""
+    assert rvcbutton.allocate(mcf_147, pool="hold_safe") == [FIRST_HOLD_SAFE]
+    assert FIRST_HOLD_SAFE not in newbutton.guicode_selected_groups(mcf_147)
+    img = _build(mcf_147, [HOLD_BUTTON])
+    assert _new_groups(mcf_147, img) == [FIRST_HOLD_SAFE]
+    s = _settled(img)
+    s.goto("CLIMATE CONTROL")
+    s.run(2.0)
+    assert _inside(s.control_box("Go"), RVC_BOX)
+    for _ in range(2):
+        t = s.now
+        s.tap("Go", hold_s=0.2)
+        s.run(1.0)
+        assert _rvc_sends(s, t) == [], "a short tap sent the hold's frame"
+        t = s.now
+        s.tap("Go", hold_s=4.0)
+        s.run(1.0)
+        sent = _rvc_sends(s, t)
+        assert [p for _dt, p in sent] == [PIN3_TOGGLE], sent
+        assert HOLD_S <= sent[0][0] < 4.0, ("not sent after the hold threshold", sent)
+
+
+def test_add_rvc_button_tap(mcf_147):
+    """The tap form sends its payload once per press, short or long (2026-11-08)."""
+    img = _build(mcf_147, [("b", "add_rvc_button", {**RVC_AT, "tap": {"payload": PIN3_TOGGLE}})])
+    [grp] = _new_groups(mcf_147, img)
+    assert grp not in newbutton.guicode_selected_groups(mcf_147)
+    s = _settled(img)
+    s.goto("CLIMATE CONTROL")
+    s.run(2.0)
+    for hold in (0.0, 0.2, 2.0):
+        t = s.now
+        s.tap("Go", hold_s=hold)
+        s.run(1.0)
+        assert [p for _dt, p in _rvc_sends(s, t)] == [PIN3_TOGGLE], hold
+
+
+def test_add_rvc_button_never_on_a_driven_group(mcf_147, monkeypatch):
+    """Negative control: neither pool offers a group GuiCode drives on 14.7, and the hold
+    button forced onto one (136, by a pool patched to offer it) is refused by the finish gate
+    (`recipe._assert_no_guicode_selected_group_reused`), not built (2026-11-08)."""
+    driven = newbutton.guicode_selected_groups(mcf_147)
+    assert DRIVEN_GROUP in driven and DRIVEN_GROUP not in newbutton.reserved_groups(mcf_147)
+    for pool in rvcbutton.POOLS:
+        offered = rvcbutton.allocate(mcf_147, pool=pool, need=1)
+        assert not set(offered) & driven, pool
+    assert not set(newbutton.hold_safe_groups(mcf_147)) & driven
+    assert not set(newbutton.assignable_groups(mcf_147)) & driven
+    monkeypatch.setattr(newbutton, "hold_safe_groups", lambda _data: [DRIVEN_GROUP])
+    project = recipe.Project(base_sha256=hashlib.sha256(mcf_147).hexdigest(), build_name=None,
+                             ops=[recipe.OpSpec(id="b", type=HOLD_BUTTON[1],
+                                                params=HOLD_BUTTON[2])])
+    with pytest.raises(recipe.GateError, match=r"group\(s\) \[%d\] were reused" % DRIVEN_GROUP) \
+            as ei:
+        recipe.compile_project(project, mcf_147)
+    assert ei.value.code == "STRUCTURAL_GATE"
+
+
+def test_add_rvc_button_hold_on_a_driven_group_is_dead(mcf_147, monkeypatch):
+    """What the gate refuses does not work: with the gate stubbed out, the same hold button on
+    driven group 136 builds, and neither a short tap nor a 4 or 6 s hold sends anything, as
+    13.6's holds on its driven 136/137 did on the coach (2026-09-30); emulated 2026-11-08."""
+    monkeypatch.setattr(newbutton, "hold_safe_groups", lambda _data: [DRIVEN_GROUP])
+    monkeypatch.setattr(recipe, "_assert_no_guicode_selected_group_reused", lambda *_a: None)
+    img = _build(mcf_147, [HOLD_BUTTON])
+    assert _new_groups(mcf_147, img) == [DRIVEN_GROUP]
+    s = _settled(img)
+    s.goto("CLIMATE CONTROL")
+    s.run(2.0)
+    for hold in (0.2, 4.0, 6.0):
+        t = s.now
+        s.tap("Go", hold_s=hold)
+        s.run(1.0)
+        assert _rvc_sends(s, t) == [], hold
+
+
+def _status_run(img: bytes, stock: bytes, tmp_path) -> dict:
+    """Boot `img`, open CLIMATE CONTROL, and walk var 232 through stale, 1, 0, 1: at each step
+    the switch's cell, the button group's LCD runtime record (`lcdgroups.host_writer`, 16
+    bytes per group, variant counters at +0x0A/+0x0B), a screenshot, and what a tap sends."""
+    [grp] = _new_groups(stock, img)
+    assert grp == FIRST_HOLD_SAFE
+    gs, tab = guidata.guidata_extent(img)[0], guidata.object_tables(img)[1]
+    first = len(guidata.object_tables(stock)[1])
+    [sw] = [r for o in range(first, len(tab)) for r in records.object_records(img, gs + tab[o])
+            if r.wtype == 6]
+    cell = status_map.cell_table(img)[sw.value_slot]
+    rec = lcdgroups.host_writer(img).records + 16 * grp
+    s = _settled(img)
+    host = s._m.canbus.add_peer(_Host())
+    s.goto("CLIMATE CONTROL")
+    s.run(2.0)
+    steps = []
+    for v in (None, 1, 0, 1):
+        if v is not None:
+            _publish(s, host, v)
+        r = s.read_mem(rec, 16)
+        step = {"v": v, "cell": int.from_bytes(s.read_mem(cell, 2), "little"),
+                "variant": (r[0x0A], r[0x0B]),
+                "shot": _shot(s, tmp_path, "v%s" % v)}
+        t = s.now
+        s.tap("Go")
+        s.run(1.0)
+        step["sent"] = [p for _dt, p in _rvc_sends(s, t)]
+        steps.append(step)
+    stock_s = _settled(stock)
+    stock_s.goto("CLIMATE CONTROL")
+    stock_s.run(2.0)
+    return {"steps": steps, "stock": _shot(stock_s, tmp_path, "stock")}
+
+
+def _assert_status_steps(run: dict, cells: dict) -> None:
+    """Var 232 = 1 lights the button (`cells[1]`, variant 1, the on colour in its box) and a
+    tap sends "off"; 0 and stale leave it off (variant 0) and a tap sends "on"; every pixel the
+    button changes, against stock or between states, lies in its box."""
+    steps = run["steps"]
+    area = SHELL["w"] * SHELL["h"]
+    on_rgb = tuple(aescompact.BATT_HEAT_ON_RGB)
+    for st in steps:
+        lit = st["v"] == 1
+        assert st["cell"] == cells[st["v"]], (st["v"], st["cell"])
+        assert st["variant"] == (int(lit), int(lit)), (st["v"], st["variant"])
+        assert st["sent"] == [PIN3_OFF if lit else PIN3_ON], (st["v"], st["sent"])
+        body = _near(_crop(st["shot"], RVC_BOX), on_rgb)
+        assert (body > area // 2) if lit else (body == 0), (st["v"], body)
+        assert _inside(_diff_bbox(run["stock"], st["shot"]), RVC_BOX), st["v"]
+    for a, b in zip(steps, steps[1:]):
+        bbox = _diff_bbox(a["shot"], b["shot"])
+        assert bbox is None or _inside(bbox, RVC_BOX), (a["v"], b["v"], bbox)
+    assert _diff_bbox(steps[0]["shot"], steps[1]["shot"]) is not None, "lit drew nothing"
+
+
+def test_add_button_status(mcf_147, tmp_path):
+    """A toggle driven by var 232 (eq 1): the routine writes the switch's cell 1 or 0 and calls
+    setVariant on the toggle's group, so its LCD record holds variant = lit, the button draws
+    lit or not in its box only, and a tap sends the opposite of what is reported (2026-11-08)."""
+    img = _build(mcf_147, [
+        ("b", "add_rvc_button", {**RVC_AT, "toggle": {"on_payload": PIN3_ON,
+                                                      "off_payload": PIN3_OFF}}),
+        ("s", "add_button_status", {"buttons": [
+            {"button": {"ref": "b"}, "source": {"var": REG["index"]}, "compare": {"eq": 1}}]})])
+    _assert_status_steps(_status_run(img, mcf_147, tmp_path), {None: 0, 1: 1, 0: 0})
+
+
+def test_add_button_states(mcf_147, tmp_path):
+    """A two-state cycle driven by var 232: state 0 "on" (eq 1, lit) sends payload 0 "on",
+    state 1 "off" (eq 0) payload 1 "off". The routine writes the matched state (2 = unknown
+    while stale) and calls setVariant with the next state, so with this order the variant is
+    the lit flag, as for the toggle: the button draws the reported state in its box only and a
+    tap sends the opposite command (2026-11-08)."""
+    img = _build(mcf_147, [
+        ("b", "add_rvc_button", {**RVC_AT, "cycle": {"payloads": [PIN3_ON, PIN3_OFF]}}),
+        ("s", "add_button_states", {"buttons": [{"button": {"ref": "b"}, "states": [
+            {"match": {"source": {"var": REG["index"]}, "eq": 1}, "lit": True},
+            {"match": {"source": {"var": REG["index"]}, "eq": 0}}]}]})])
+    _assert_status_steps(_status_run(img, mcf_147, tmp_path), {None: 2, 1: 0, 0: 1})
