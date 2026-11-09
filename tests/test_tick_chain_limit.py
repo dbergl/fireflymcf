@@ -9,6 +9,8 @@ import pytest
 
 from fireflymcf import followchannel, recipe, routinekit, theme, thumb, userop
 
+pytestmark = pytest.mark.slow  # module-scoped emulation fixtures: every worker pays the setup
+
 NEEDS_RESEARCH_DATA = "installs per-tick routines on the 13.6 corpus image"
 
 DEFAULT = followchannel.DEFAULT_TICK_CHAIN_LIMIT

@@ -93,6 +93,7 @@ def _default_arm(data, sw):
     return records.object_records(data, gs + tab[sw.child_index])
 
 
+@pytest.mark.slow
 def test_mode_label_on_home(built):
     gs, tab = _gs_tab(built)
     obj, sw = _label_switch(built)
@@ -153,6 +154,7 @@ def test_hook_reaches_the_routine(built):
     assert hook == want
 
 
+@pytest.mark.slow
 def test_background_arm(with_bg):
     _obj, sw = _label_switch(with_bg)
     bg = theme.resolve_fill_index(with_bg, color=(65, 81, 163))
@@ -280,6 +282,7 @@ def test_cell_is_freshly_grown(built):
     assert status_map.cell_table(built)[sw.value_slot] not in status_map.cell_table(_stock())
 
 
+@pytest.mark.slow
 def test_cell_is_recorded_for_the_aliasing_gate(monkeypatch):
     seen = {}
     real = recipe_ops.AddEnumLabel.apply
@@ -301,6 +304,7 @@ def test_cell_is_recorded_for_the_aliasing_gate(monkeypatch):
     ({(23, 0)}, "cannot be written back"),
     ({(23, 1), (14, 1)}, "different font/align"),
 ])
+@pytest.mark.slow
 def test_refused_when_the_entering_state_is_unknown(monkeypatch, states, why):
     monkeypatch.setattr(enumlabel, "entering_state", lambda *_a: set(states))
     err = _errors(_op())
@@ -323,6 +327,7 @@ def _font_changes(msg):
     return out
 
 
+@pytest.mark.slow
 def test_layout_gate_refuses_a_leak(monkeypatch):
     """Under 924 (root 18) the label's font reaches the next switch (`18:5/1088:3`) unless the
     restore record hands it back. The colour state is shared past the label's object (GUICODE
@@ -336,6 +341,7 @@ def test_layout_gate_refuses_a_leak(monkeypatch):
     assert code == "LABEL_REFUSED" and "18:5/1088:3" in _font_changes(msg), msg
 
 
+@pytest.mark.slow
 def test_climate_parent_refuses_the_inherited_slot():
     """899's first wtype-5 attach (the clone `insert.insert_object` makes) carries value_slot 0;
     every arm label would inherit it (`_effective_slot`'s rule), so the paste is refused."""
@@ -359,6 +365,18 @@ def test_inert_source_refuses():
 
 # --- verify rebuilds what apply placed ----------------------------------------------------------
 
+@pytest.fixture(scope="module")
+def spied():
+    """One compile of `_op()` with `AddEnumLabel.apply` spied on, shared by the two verify tests.
+    Built inside the patch context (so the compile is uncached and the spy is gone before any
+    test runs); the tests only read it."""
+    with pytest.MonkeyPatch.context() as mp:
+        seen = _spy_apply(mp)
+        res = _compile([_op()])
+    assert res.ok, res.errors
+    return res.data, seen
+
+
 def _spy_apply(monkeypatch):
     seen = {}
     real = recipe_ops.AddEnumLabel.apply
@@ -371,11 +389,10 @@ def _spy_apply(monkeypatch):
     return seen
 
 
-def test_verify_catches_a_tampered_routine(monkeypatch):
-    seen = _spy_apply(monkeypatch)
-    res = _compile([_op()])
-    assert res.ok, res.errors
-    data, op, ctx = res.data, seen["op"], seen["ctx"]
+@pytest.mark.slow
+def test_verify_catches_a_tampered_routine(spied):
+    data, seen = spied
+    op, ctx = seen["op"], seen["ctx"]
     op.verify(data, ctx)                                   # the untouched image passes
     h = ctx.handles["mode"]
     gc = theme.guicode_section(data)
@@ -387,12 +404,11 @@ def test_verify_catches_a_tampered_routine(monkeypatch):
             op.verify(bytes(bad), ctx)
 
 
-def test_verify_catches_a_tampered_arm(monkeypatch):
+@pytest.mark.slow
+def test_verify_catches_a_tampered_arm(spied):
     """An arm's label recoloured, or its box shrunk, after apply: verify reads the records."""
-    seen = _spy_apply(monkeypatch)
-    res = _compile([_op()])
-    assert res.ok, res.errors
-    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    data, seen = spied
+    op, ctx = seen["op"], seen["ctx"]
     _obj, sw = _label_switch(data)
     gs, tab = _gs_tab(data)
     arm = sw.child_index + 1                               # the band's first text arm

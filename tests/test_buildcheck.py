@@ -30,6 +30,7 @@ def renamed(stock):
     return result.data
 
 
+@pytest.mark.slow
 def test_stock_against_itself_differs_nowhere(stock):
     r = buildcheck.compare(stock, stock, {"WD": WD}, [HOME])
     assert r.runs == [] and all(s.status == "same" for s in r.sections)
@@ -37,6 +38,7 @@ def test_stock_against_itself_differs_nowhere(stock):
     assert [p.bbox for p in r.pages] == [None]
 
 
+@pytest.mark.slow
 def test_a_rename_lands_on_its_object_and_its_page(stock, renamed):
     r = buildcheck.compare(stock, renamed, {"WD": WD}, [HOME, 5])
     assert [run.region for run in r.runs] == [

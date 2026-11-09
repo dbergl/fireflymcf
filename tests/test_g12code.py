@@ -815,6 +815,7 @@ def test_an_adjust_control_emits_no_config_buffer_frame(mcf_136):
         "the run should walk up 3000 and return to the default")
 
 
+@pytest.mark.slow
 def test_service_mode_writes_an_offset_with_no_selector(mcf_136):
     """PC.36: Service Mode is the third config-write shape -- offset only, no selector.
 

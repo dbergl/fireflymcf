@@ -10,6 +10,7 @@ structurally — `ldr rX,[rY,#0x214]` — and reading its instruction stream, no
 these bytes).
 """
 from __future__ import annotations
+import pytest
 
 from fireflymcf import config
 
@@ -192,6 +193,7 @@ def test_floorplan_slot_refuses_when_the_register_is_not_in_the_table(mcf_136):
     assert config._slot_of_register(mcf_136, 0xDEADBEEF) is None
 
 
+@pytest.mark.slow
 def test_rule_a_over_match_is_cut_by_the_value(mcf_1123):
     """The trace's Rule A over-match: 11.23's cfg `0x0B` handler emits a burst before the next
     `bl`, and the spike reported `{A0, ED, F5}` for it. Requiring the nearest write frame to

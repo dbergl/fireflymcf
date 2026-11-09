@@ -1,4 +1,5 @@
 """The scrub gate stays in the suite: no firmware, captures or PII in tracked files."""
+import pytest
 import importlib.util
 import sys
 import pathlib
@@ -71,5 +72,6 @@ def test_allow_list_exempts(tmp_path):
     assert scrub_check.scan([p], [f"{p.name}:pii-host"]) == []
 
 
+@pytest.mark.slow
 def test_tracked_tree_is_clean():
     assert scrub_check.scan(scrub_check.tracked_files(), scrub_check.load_allow()) == []

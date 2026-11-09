@@ -6,6 +6,7 @@ register 0x20039B49; floorplan value 8 is "WD" (`guidata.find_floorplan_table`, 
 too). This file only exercises the CLI's formatting/plumbing, not the binding logic itself.
 """
 from __future__ import annotations
+import pytest
 
 import json
 
@@ -53,6 +54,7 @@ def test_options_command_json_prints_nothing_else(capsys):
     assert "option binding(s)" not in out
 
 
+@pytest.mark.slow
 def test_options_command_recovers_the_floorplan_map_on_1123(capsys):
     """11.23's value->code map comes off its floorplan-name switch (objects 852/853 --
     hidden until 2026-08-30, when the hardware-confirmed 0-based map let the oracle match

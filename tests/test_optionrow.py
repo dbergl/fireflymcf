@@ -306,6 +306,7 @@ def test_pump_link_row_placement_clears_every_existing_options_touch_region(mcf_
         "expected B2.2's (100, 300) fixture to collide with a stock row"
 
 
+@pytest.mark.slow
 def test_combined_image_renders_the_row_and_passes_every_gate(mcf_136):
     """The B2.3 acceptance test: B2.1 + B2.2 compose into ONE image that (a) renders the
     checkbox + 'Pump Link' label at the chosen (x, y) in BOTH display states, (b) passes

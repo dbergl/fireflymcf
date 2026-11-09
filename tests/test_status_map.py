@@ -141,6 +141,7 @@ def _read(path):
         return fh.read()
 
 
+@pytest.mark.slow
 def test_value_slot_table_base_moves_between_builds():
     """The premise, asserted rather than assumed: all three bases differ."""
     from fireflymcf import guidata

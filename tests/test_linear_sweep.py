@@ -175,6 +175,7 @@ def test_cmp_w_scan_matches_the_original_through_a_chain_of_edits(seed):
         code = _edit(rng, code)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("seed", range(4))
 def test_pool_aware_decode_matches_the_original_through_a_chain_of_edits(seed):
     rng = random.Random(200 + seed)

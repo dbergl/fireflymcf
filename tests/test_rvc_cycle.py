@@ -16,6 +16,8 @@ from fireflymcf import (followchannel, gestures, guidata, newbutton, recipe, rec
                         status_map, theme, thumb)
 from tests.thumbsim import Sim
 
+pytestmark = pytest.mark.slow  # module-scoped emulation fixtures: every worker pays the setup
+
 REPO = Path(__file__).resolve().parents[1]
 STOCK = REPO / "firefly-13.6/mcf.bin"
 SHA = "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382"

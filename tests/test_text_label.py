@@ -78,6 +78,7 @@ def built16():
 # font 16 needs one writing font 14 back (align 1 is what the label leaves too).
 @pytest.mark.parametrize("font,w,h,fixture,restore", [(14, 120, 24, "built14", None),
                                                       (16, 130, 31, "built16", 14)])
+@pytest.mark.slow
 def test_fan_speed_on_climate(request, font, w, h, fixture, restore):
     data = request.getfixturevalue(fixture)
     gs, tab = _gs_tab(data)
@@ -244,6 +245,7 @@ def test_no_colour():
     assert _errors(_op(background=[1, 2, 3]))[0] == "NO_COLOUR"
 
 
+@pytest.mark.slow
 def test_inherited_slot_refused():
     code, msg = _errors(_op(parent=SLOT_PARENT, x=88, y=372))
     assert code == "LAYOUT_REFUSED" and "inherits value_slot 0" in msg, msg
@@ -305,6 +307,7 @@ def _spy_apply(monkeypatch):
 FONT16 = {"font": 16, "w": 130, "h": 31}
 
 
+@pytest.mark.slow
 def test_verify_catches_tampering(monkeypatch):
     seen = _spy_apply(monkeypatch)
     res = _compile([_op(**FONT16)])
@@ -348,6 +351,7 @@ def test_verify_catches_a_leaked_state(monkeypatch):
         h["restore"] = restore
 
 
+@pytest.mark.slow
 def test_verify_reads_every_field_apply_placed(monkeypatch):
     """v-align, the transparent background, the fill's radius and second ink, and the attach's
     own geometry: each corrupted after apply is caught."""
@@ -426,6 +430,7 @@ def test_frame_refusals(frame, code, why):
     assert got == code and why in msg, msg
 
 
+@pytest.mark.slow
 def test_verify_catches_a_tampered_frame(monkeypatch):
     seen = _spy_apply(monkeypatch)
     res = _compile([_op(frame=FRAME)])

@@ -77,6 +77,7 @@ def test_a_gate_with_a_default_arm_is_recorded_as_such(images):
     assert any(not g.has_default for g in gates)
 
 
+@pytest.mark.slow
 def test_the_audit_runs_on_every_build(images):
     """Object numbering and slot allocation differ per build; the audit must not be 13.6-shaped."""
     for name, data in images.items():

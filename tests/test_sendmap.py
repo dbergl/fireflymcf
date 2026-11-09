@@ -65,6 +65,7 @@ COVERAGE_136 = {
 }
 
 
+@pytest.mark.slow
 def test_coverage_136():
     m = sendmap.send_map(image(B136))
     cov = sendmap.coverage(m)
@@ -341,6 +342,7 @@ def test_the_sender_slot(name, slot, store):
     assert sendmap.guicode_sends(data)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", [B136, B1123, B147])
 def test_the_slot_never_escapes(name):
     """The argument from absence behind the GuiCode enumeration: the slot's address is one pool
@@ -371,6 +373,7 @@ def test_the_binding_payload_is_the_wire_order():
 
 # ------------------------------------------------------------------------------ spot checks
 
+@pytest.mark.slow
 def test_other_builds():
     for name, n_groups, n_bindings in ((B1123, 230, 732), (B147, 234, 743)):
         m = sendmap.send_map(image(name))
@@ -384,6 +387,7 @@ def test_other_builds():
     assert any(c.caption == "Starlink Power" for s in starlink for c in s.controls)
 
 
+@pytest.mark.slow
 def test_spec_names_are_kept_apart():
     assert sendmap.spec_name(0x1FEDB) == "RV-C DC_DIMMER_COMMAND_2"
     assert sendmap.spec_name(0x0EA42) == "J1939 Request (destination 0x42)"
@@ -396,6 +400,7 @@ def test_spec_names_are_kept_apart():
 
 # ------------------------------------------------------------------------------ the pins can fail
 
+@pytest.mark.slow
 def test_without_the_dispatcher_no_send_is_a_touch(clean_caches, monkeypatch):
     monkeypatch.setattr(sendmap, "touch_dispatch", lambda data: ({}, (), frozenset(),
                                                                  frozenset(), frozenset()))
@@ -420,6 +425,7 @@ def test_without_the_sender_slot_guicode_sends_nothing(clean_caches, monkeypatch
         test_every_captured_panel_frame_is_in_the_map()
 
 
+@pytest.mark.slow
 def test_without_the_release_search_the_options_are_lost(clean_caches, monkeypatch):
     """The OPTIONS rows act on release: drop the second search and they are no longer touch."""
     real = sendmap.touch_dispatch
@@ -435,6 +441,7 @@ def test_without_the_release_search_the_options_are_lost(clean_caches, monkeypat
 
 # ------------------------------------------------------------------------------ the command
 
+@pytest.mark.slow
 def test_cli_bus_map_send(capsys):
     assert cli.main(["bus-map", str(REPO / B136), "--dgn", "1FEDB"]) == 0
     out = capsys.readouterr().out
@@ -447,6 +454,7 @@ def test_cli_bus_map_send(capsys):
     assert payload["send"]["sender_slot"] == "0x2003986c"
 
 
+@pytest.mark.slow
 def test_cli_doctor_bus(capsys):
     assert cli.main(["doctor", str(REPO / B136)]) == 0
     assert "doctor --bus" in capsys.readouterr().out

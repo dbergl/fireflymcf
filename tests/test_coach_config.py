@@ -10,6 +10,7 @@ STOCK = "firefly-13.6/mcf.bin"
 CAPTURE = Path(__file__).parent / "fixtures" / "livecfg-sample.log"
 
 
+@pytest.mark.slow
 def test_from_a_capture_is_the_coach_state(tmp_path):
     out = tmp_path / "coach.json"
     assert cli.main(["coach-config", STOCK, "-o", str(out), "--capture", str(CAPTURE)]) == 0
@@ -44,6 +45,7 @@ def test_a_capture_without_config_frames_is_refused(tmp_path, capsys):
     assert "no configuration frames" in capsys.readouterr().err
 
 
+@pytest.mark.slow
 def test_every_option_it_accepts_renders(tmp_path):
     """Each name coach-config accepts resolves in `slot_values`, as `render --config` does.
     13.6 stores the cargo light as 'Cargo / Bath Light\\n    (CH. 25)'; coach-config names

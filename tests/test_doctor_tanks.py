@@ -2,6 +2,7 @@
 
 The skill runs `doctor` first; listing the instances there means an agent sees what this
 firmware broadcasts before it can name a tank instance from memory."""
+import pytest
 import json
 
 from fireflymcf import cli, tankbroadcast
@@ -9,6 +10,7 @@ from fireflymcf import cli, tankbroadcast
 STOCK = "firefly-13.6/mcf.bin"
 
 
+@pytest.mark.slow
 def test_json_lists_each_broadcast_from_the_file(capsys):
     assert cli.main(["doctor", STOCK, "--json"]) == 0
     tanks = json.loads(capsys.readouterr().out)["tank_broadcasts"]

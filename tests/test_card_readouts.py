@@ -5,6 +5,7 @@
 import json
 from pathlib import Path
 
+import pytest
 from fireflymcf import guidata, recipe
 
 REPO = Path(__file__).resolve().parents[1]
@@ -98,6 +99,7 @@ def _font_changes(msg):
     return out
 
 
+@pytest.mark.slow
 def test_paste_needs_the_restore(monkeypatch):
     """Under 793 the restore record hands back the font and align: without it the rows' font
     reaches later records on the pages reaching 793. The colour state is shared past the
@@ -183,6 +185,7 @@ def test_parent_ref_resolving_to_829_is_verified():
     assert "cr" not in by_ref.unverified
 
 
+@pytest.mark.slow
 def test_parent_829_never_widens_an_unverified_status(monkeypatch):
     """verify settles the parent half of the status and nothing else: an op validate() left
     unverified for another reason stays unverified on 829."""

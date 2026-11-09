@@ -803,6 +803,7 @@ def test_the_pointer_gate_refuses_a_moved_guicode_section(_mid_case, monkeypatch
     assert not ok and "GuiCode moved or resized" in msg
 
 
+@pytest.mark.slow
 def test_find_match_table_survives_more_appends_than_the_width_scan_tries(monkeypatch):
     """A 58-op build appended more objects than `MATCH_TABLE_MAX_APPENDED` without growing the
     match table, and the width scan stopped finding it (INSERT_REFUSED on the 15th button). The

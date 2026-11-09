@@ -4,6 +4,7 @@ The compact frame is built from byte-verbatim clones of stock donor records; the
 never touched (its render must stay pixel-identical stock -> built).
 """
 
+import pytest
 from fireflymcf import aescompact, guidata, records
 
 
@@ -21,6 +22,7 @@ def test_clone_all_in_one_matches_stock_829():
     assert [r.wtype for r in _recs(out, 829)] == [r.wtype for r in stock_829]
 
 
+@pytest.mark.slow
 def test_swap_builds_faithful_frame_and_leaves_ags_golden():
     """rev4: object 829 becomes the 7-record faithful mirror of the AGS compact frame 830, and
     the AGS-mode render stays pixel-identical (donors are cloned, never written)."""
@@ -491,6 +493,7 @@ def test_pump_section_lands_inside_its_own_outlined_box():
         assert y0 <= p.y0 <= p.y1 <= y1, f"{p.label!r} {p.wtype} spills vertically: {p}"
 
 
+@pytest.mark.slow
 def test_frame_with_the_pump_section_keeps_every_other_element_in_place():
     """The 2026-08-23 discipline: verifying only what you set is not verification.
 

@@ -230,6 +230,7 @@ def test_bind_pin_on_an_indexed_pin_only_sets_the_colour(data):
     assert sb.state_loads(out, 32)[sb.OFF_STATE].rgb == (65, 81, 163)
 
 
+@pytest.mark.slow
 def test_bind_pin_indexes_a_spare_for_an_unindexed_pin(data):
     out, idx, edits = sb.bind_pin(data, 17, off_colour=(65, 81, 163))
     assert idx in sb.spare_cell_indices(data)

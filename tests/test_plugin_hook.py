@@ -98,6 +98,7 @@ def test_the_plugin_manifest_and_hook_agree():
     assert "ensure_fireflymcf.py" in WRAPPER.read_text(encoding="utf-8")
 
 
+@pytest.mark.slow
 def test_install_then_noop_then_upgrade(tmp_path):
     data = tmp_path / "data"
     ok, line = hook.ensure(_plugin(tmp_path, "1.0.0"), data, _spec(_wheel(tmp_path, "1.0.0")))
@@ -119,6 +120,7 @@ def test_install_then_noop_then_upgrade(tmp_path):
     assert not (data / "install.lock").exists()
 
 
+@pytest.mark.slow
 def test_a_failed_install_says_how_to_install_by_hand(tmp_path):
     data = tmp_path / "data"
     ok, line = hook.ensure(_plugin(tmp_path, "2.0.0"), data,
@@ -155,6 +157,7 @@ def test_a_stale_lock_is_taken_over(tmp_path, monkeypatch):
     assert hook._locked(lock) and lock.exists()
 
 
+@pytest.mark.slow
 def test_main_prints_one_line_and_never_fails(tmp_path):
     root = _plugin(tmp_path, "3.0.0")
     env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE_PLUGIN")}
@@ -196,6 +199,7 @@ def _hook_env(tmp_path, root, spec, **extra):
     return env
 
 
+@pytest.mark.slow
 @needs_bash
 def test_the_hook_command_installs_through_the_wrapper(tmp_path):
     """What hooks.json runs: bash, the wrapper, whichever Python 3.10+ it finds first."""

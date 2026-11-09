@@ -70,6 +70,7 @@ def test_the_unexplained_class_is_not_a_type_class(mcf_136):
     assert len(unexplained_types & explained_types) >= 5
 
 
+@pytest.mark.slow
 def test_the_sibling_build_carries_the_same_open_class(mcf_1123):
     """11.23's own inverter page gates on slot 32, and that slot is unexplained there too."""
     entry = slotsource.slot_source(mcf_1123, 32)

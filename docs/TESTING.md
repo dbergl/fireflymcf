@@ -1,10 +1,18 @@
 # Testing — commands, parallel runs, and the speed pass
 
 ```
-python3 -m pytest tests/ -q -n auto               # the whole suite: ~4 min after a src/ edit, ~80 s otherwise
+python3 -m pytest tests -q -n auto -m "not slow"  # the fast tier, the edit loop: ~77 s on 16 threads (2026-11-09); NOT the merge gate
+python3 -m pytest tests/ -q -n auto               # the whole suite: about 4m20s-4m50s warm on 16 threads (2026-11-09; a cold run after any src/ edit misses every compile and is slower)
 python3 -m pytest tests/test_x.py -v              # serial, one module; use it to see WHY something is red
 npm test --prefix studio/web                      # the web editor's tests
 ```
+
+**The fast tier is for the edit loop only.** `-m "not slow"` skips every test under `tests/emu/`
+(auto-marked in `tests/conftest.py`) and every test measured at 3 s or more (marked
+`@pytest.mark.slow`, or `pytestmark` on a module whose module-scoped fixture boots an emulation, so
+every worker pays the setup). 473 of 3876 tests are slow (the module-wide marks include some fast ones). The full suite, without `-m`, is the
+gate before a merge and after any engine change. `tests/test_slow_marker.py` fails if a `tests/emu/`
+test loses the marker. A new test that takes 3 s or more should carry `@pytest.mark.slow`.
 
 `pytest-xdist` is installed with `sudo apt install python3-pytest-xdist`; PEP 668 blocks
 `pip install` into the system Python here.
@@ -23,9 +31,17 @@ A hazard when running in parallel, inert today:
 `recipe.compile_project` goes through a disk cache shared by all xdist workers, keyed on the digest
 of `src/`, the canonical project JSON and the stock hash, so a recipe compiles once per code
 version, not once per test or per worker. Editing anything under `src/` invalidates it, which is
-why the first run after an edit is the slow one. A test that requests `monkeypatch` (or a module
-using `pytest.MonkeyPatch`) always compiles for real: a patched engine must never be served an
-unpatched result. Delete the directory to force a cold run.
+why the first run after an edit is the slow one. Failed compiles (`ok=False`) are cached too; a
+compile that raises is not. A compile runs for real whenever something live could change it: any
+live `pytest.MonkeyPatch` with an attribute patch outside `fireflymcf.emu*` (which the compile path
+never imports) or any `setitem`/`setenv`/`delenv`/`syspath_prepend`/`chdir`, made from any file or
+fixture; any active `unittest.mock` patch; loaded user ops; an op type a test registered; or a
+project whose base is not the given stock. A patched engine must never be served an unpatched
+result. Plain assignment to an engine attribute (`module.attr = ...`) is invisible to the cache, so
+a test that changes the engine must use `monkeypatch` or `mock.patch`. Each session start (on the
+controller, or the only process when run without `-n`) prunes entries for another `src/` digest
+unused for a day, and crash-left `.tmp` files older than an hour. Delete the directory to force a
+cold run.
 
 Two test-hygiene rules from `CLAUDE.md` that apply here:
 
@@ -64,15 +80,21 @@ GuiCode tracers that still run once per build per worker.
 **Running the suite in parallel** (measured 2026-08-21: 26m49s → **3m56s**, same 1062/1/3).
 `pytest-xdist` forks **processes**; threads would not help, since this is CPU-bound pure Python
 and the GIL would serialise it. Install with `sudo apt install python3-pytest-xdist` — PEP 668
-blocks `pip install` into the system Python here. Plain `-n auto` is the fastest mode: `--dist
+blocks `pip install` into the system Python here. Plain `-n auto` (`--dist load`) was the fastest mode then: `--dist
 loadscope` looks better on paper (many modules have expensive module-scoped fixtures, which
 plain `load` re-runs per worker) and measured **slower**, 4m53s, because finer-grained balancing
-wins by more than the duplicated fixtures cost. `--dist worksteal` is no better either (3m57s):
-it rebalances a worker's *queue*, and the tail here is one irreducible 60s test
-(`test_statusbind`), not a queue. That test is the floor, so there is little left without
-splitting it.
+wins by more than the duplicated fixtures cost. The 2026-08-21 `worksteal` result was measured on a 1062-test suite and is superseded by the 2026-11-09 measurement below.
 
-Deliberately **not** in a `pytest.ini` `addopts`: xdist interleaves output, disables `pdb` and
+**Distribution, 2026-11-09** (3843 passed, 2 skipped, 2 xfailed, `-n 16`, warm cache): `--dist load`
+(xdist's default) took **8m31s**, `--dist worksteal` **4m22s**, `--dist load --maxschedchunk 1`
+**5m33s**. Under `load` each worker is handed a contiguous initial chunk of `len/16/4` tests and
+never gives any back; `tests/emu/` sorts first, so its ~1000 s of emulator work all landed on
+four workers and one ran alone for minutes. `tests/conftest.py` `pytest_configure` now switches `load` to
+`worksteal` when `-n` is given, so a bare `-n auto` uses it (an explicit `--dist load` is
+indistinguishable and is also switched); runs without `-n`, or with `-p no:xdist`, are untouched. `loadscope` keeps
+modules whole, which leaves a floor of the slowest module; do not use it.
+
+Not in `addopts` are the worker count and `-x`/`pdb` options: xdist interleaves output, disables `pdb` and
 makes `-x` unpredictable. Parallel answers *"is it green"*; run serial to find out *why it is
 red*. A shared-path hazard, inert today but worth knowing before trusting a green run:
 - `test_static_mount_never_shadows_api` creates `studio/web/dist/index.html` when the web bundle
