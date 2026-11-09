@@ -189,6 +189,17 @@ def test_cells_are_freshly_grown(base, built):
         status_map.cell_table(stock))
 
 
+@pytest.fixture(scope="module")
+def spied():
+    """One `BASE + status` compile with `AddButtonStatus.apply` spied on, shared by the tests that
+    read what `apply` recorded. Built inside the patch context (so the compile is uncached and
+    the spy is gone before any test runs); the tests only read it."""
+    with pytest.MonkeyPatch.context() as mp:
+        seen = _spy_apply(mp)
+        data = _ok(BASE + [_status()])
+    return data, seen
+
+
 def _spy_apply(monkeypatch):
     seen = {}
     real = recipe_ops.AddButtonStatus.apply
@@ -202,17 +213,15 @@ def _spy_apply(monkeypatch):
 
 
 @pytest.mark.slow
-def test_cells_are_recorded_for_the_aliasing_gate(monkeypatch):
-    seen = _spy_apply(monkeypatch)
-    _ok(BASE + [_status()])
+def test_cells_are_recorded_for_the_aliasing_gate(spied):
+    _data, seen = spied
     slots = [b["slot"] for b in seen["ctx"].handles["st"]["buttons"]]
     assert len(slots) == 3 and set(slots) <= seen["cells"]
 
 
 @pytest.mark.slow
-def test_verify_catches_a_tampered_routine(monkeypatch):
-    seen = _spy_apply(monkeypatch)
-    data = _ok(BASE + [_status()])
+def test_verify_catches_a_tampered_routine(spied):
+    data, seen = spied
     op, ctx = seen["op"], seen["ctx"]
     op.verify(data, ctx)                                   # the untouched image passes
     h = ctx.handles["st"]

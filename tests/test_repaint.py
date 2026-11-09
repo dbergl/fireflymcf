@@ -392,14 +392,21 @@ def _run(image, tmp_path):
     return {"box": box, "screen": screen, "steps": {x["name"]: x for x in steps}}
 
 
-@pytest.fixture(scope="module")
-def runs(mcf_136, tmp_path_factory):
+def _one_run(mcf_136, tmp_path_factory, on: bool):
     pytest.importorskip("unicorn")
-    out = {}
-    for on in (True, False):
-        image = _project(tmp_path_factory.mktemp(f"p{int(on)}"), mcf_136, on)
-        out[on] = _run(image, tmp_path_factory.mktemp(f"shots{int(on)}"))
-    return out
+    image = _project(tmp_path_factory.mktemp(f"p{int(on)}"), mcf_136, on)
+    return _run(image, tmp_path_factory.mktemp(f"shots{int(on)}"))
+
+
+@pytest.fixture(scope="module")
+def run_bound(mcf_136, tmp_path_factory):
+    """The op with `repaint`; its own fixture so two workers can build the two runs apart."""
+    return _one_run(mcf_136, tmp_path_factory, True)
+
+
+@pytest.fixture(scope="module")
+def run_unbound(mcf_136, tmp_path_factory):
+    return _one_run(mcf_136, tmp_path_factory, False)
 
 
 def _the_routine_ran_and_nothing_else_moved(run):
@@ -443,36 +450,36 @@ def _outline_repainted_live(run):
         assert np.array_equal(st[n]["img"], start), f"{n}: the screen differs from the start"
 
 
-def test_repaint_turns_the_outline_red_and_back_without_a_page_draw(runs):
-    _the_routine_ran_and_nothing_else_moved(runs[True])
-    _outline_repainted_live(runs[True])
+def test_repaint_turns_the_outline_red_and_back_without_a_page_draw(run_bound):
+    _the_routine_ran_and_nothing_else_moved(run_bound)
+    _outline_repainted_live(run_bound)
 
 
-def test_without_the_repaint_the_same_check_fails(runs):
+def test_without_the_repaint_the_same_check_fails(run_unbound):
     """The control: the same op without `repaint` writes the same colour word at the same
     ticks, and HOME never shows it (no page draw happens in the window), so the live check
     above fails on it."""
-    _the_routine_ran_and_nothing_else_moved(runs[False])
+    _the_routine_ran_and_nothing_else_moved(run_unbound)
     with pytest.raises(AssertionError, match="did not turn red"):
-        _outline_repainted_live(runs[False])
-    st = runs[False]["steps"]
+        _outline_repainted_live(run_unbound)
+    st = run_unbound["steps"]
     for x in st.values():
         if x["name"] != "composed-red":
             assert np.array_equal(x["img"], st["start"]["img"]), x["name"]
 
 
-def test_a_full_compose_draws_the_same_with_and_without_the_bind(runs):
+def test_a_full_compose_draws_the_same_with_and_without_the_bind(run_bound, run_unbound):
     """HOME composed with the alarm word set is pixel for pixel the unbound op's compose (which
     draws the red from the gauge's own record), and the same as the live repaint drew. This is
     consistency evidence, not a test of the leak paths: binding fillB or an inherited fillB2
     instead also passes it, because HOME's compose takes neither the `+0x704C` box fill nor a
     path that draws the inherited field. The fillB refusal is pinned by
     `test_fillb_is_never_watched` from the code."""
-    bound, unbound = runs[True]["steps"], runs[False]["steps"]
+    bound, unbound = run_bound["steps"], run_unbound["steps"]
     for st in (bound, unbound):
         assert st["composed-red"]["word"] == RED and st["composed-red"]["page"] == "HOME"
         assert st["red-again"]["word"] == RED
     assert np.array_equal(bound["composed-red"]["img"], unbound["composed-red"]["img"])
     assert np.array_equal(bound["composed-red"]["img"], bound["red-again"]["img"])
     assert np.array_equal(bound["red-again"]["img"], bound["above-14s"]["img"])
-    assert _count(_band(unbound["composed-red"]["img"], runs[False]["box"]), (255, 0, 0)) > 150
+    assert _count(_band(unbound["composed-red"]["img"], run_unbound["box"]), (255, 0, 0)) > 150

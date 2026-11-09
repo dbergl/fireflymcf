@@ -298,7 +298,7 @@ def _text_coverage(img: bytes, slot: int, text: str) -> np.ndarray:
     return cov
 
 
-def test_add_text_label(mcf_147, tmp_path):
+def test_add_text_label(mcf_147, stock_rails, tmp_path):
     """White text on CLIMATE CONTROL. 14.7's text drawers are not twins of 13.6's
     (`grammar.prove`), so this is the pixel evidence `donors` defers to: every glyph of the
     text is drawn in the declared box (each full-coverage pixel exactly `ffffff`, each empty
@@ -309,7 +309,7 @@ def test_add_text_label(mcf_147, tmp_path):
     box = (LABEL["x"], LABEL["y"], LABEL["x"] + LABEL["w"], LABEL["y"] + LABEL["h"])
     s = _settled(img)
     assert s._roots_for("CLIMATE CONTROL") == {CLIMATE_ROOT}
-    stock = _rail_shots(_settled(mcf_147), tmp_path, "stock")
+    stock = stock_rails
     shots = _rail_shots(s, tmp_path, "build")
     for page in RAIL_PAGES:
         bbox = _diff_bbox(stock[page], shots[page])
@@ -640,11 +640,18 @@ def _rail_shots(s: Scenario, tmp_path, tag: str) -> dict:
     return out
 
 
+@pytest.fixture(scope="module")
+def stock_rails(mcf_147, tmp_path_factory):
+    """Stock 14.7's rail pages, settled once at the pinned clock (the emulator is deterministic).
+    Read-only: the tests that share it only compare against it."""
+    return _rail_shots(_settled(mcf_147), tmp_path_factory.mktemp("stock-rails"), "stock")
+
+
 def _exact(img: np.ndarray, rgb) -> int:
     return int((img == np.array(rgb)).all(axis=2).sum())
 
 
-def test_set_theme(mcf_147, tmp_path):
+def test_set_theme(mcf_147, stock_rails, tmp_path):
     """The six chrome roles re-themed on 14.7: the edits land where `themeswap` locates them (6
     in GuiCode; in GuiData 1 inline field, 7 mode-6 palette entries, 5 tank wells), each role's
     SRAM cell holds its colour after boot, and no rail page draws a pixel of a stock role colour
@@ -691,7 +698,7 @@ def test_set_theme(mcf_147, tmp_path):
             assert got == p.applied[role], (role, hex(cell), hex(got))
 
     # 4. Stock draws every stock role colour on the rail pages; the build draws none of them.
-    stock = _rail_shots(_settled(mcf_147), tmp_path, "stock")
+    stock = stock_rails
     for role, v in themeswap.STOCK.items():
         assert sum(_exact(a, themeswap.int_rgb(v)) for a in stock.values()) > 0, role
     for page, a in stock.items():

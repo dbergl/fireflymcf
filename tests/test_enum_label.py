@@ -365,6 +365,18 @@ def test_inert_source_refuses():
 
 # --- verify rebuilds what apply placed ----------------------------------------------------------
 
+@pytest.fixture(scope="module")
+def spied():
+    """One compile of `_op()` with `AddEnumLabel.apply` spied on, shared by the two verify tests.
+    Built inside the patch context (so the compile is uncached and the spy is gone before any
+    test runs); the tests only read it."""
+    with pytest.MonkeyPatch.context() as mp:
+        seen = _spy_apply(mp)
+        res = _compile([_op()])
+    assert res.ok, res.errors
+    return res.data, seen
+
+
 def _spy_apply(monkeypatch):
     seen = {}
     real = recipe_ops.AddEnumLabel.apply
@@ -378,11 +390,9 @@ def _spy_apply(monkeypatch):
 
 
 @pytest.mark.slow
-def test_verify_catches_a_tampered_routine(monkeypatch):
-    seen = _spy_apply(monkeypatch)
-    res = _compile([_op()])
-    assert res.ok, res.errors
-    data, op, ctx = res.data, seen["op"], seen["ctx"]
+def test_verify_catches_a_tampered_routine(spied):
+    data, seen = spied
+    op, ctx = seen["op"], seen["ctx"]
     op.verify(data, ctx)                                   # the untouched image passes
     h = ctx.handles["mode"]
     gc = theme.guicode_section(data)
@@ -395,12 +405,10 @@ def test_verify_catches_a_tampered_routine(monkeypatch):
 
 
 @pytest.mark.slow
-def test_verify_catches_a_tampered_arm(monkeypatch):
+def test_verify_catches_a_tampered_arm(spied):
     """An arm's label recoloured, or its box shrunk, after apply: verify reads the records."""
-    seen = _spy_apply(monkeypatch)
-    res = _compile([_op()])
-    assert res.ok, res.errors
-    data, op, ctx = res.data, seen["op"], seen["ctx"]
+    data, seen = spied
+    op, ctx = seen["op"], seen["ctx"]
     _obj, sw = _label_switch(data)
     gs, tab = _gs_tab(data)
     arm = sw.child_index + 1                               # the band's first text arm
