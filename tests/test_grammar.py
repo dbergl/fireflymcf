@@ -249,3 +249,145 @@ def test_text_drawer_mutation_clears_the_flag_only(stocks):
     new = bytes([old[0] ^ 0x40, old[1]])  # imm5 0xb -> another offset
     p = grammar.prove(_patch(data, at, new))
     assert not p.text_drawers_twin and (p.decoder, p.layout, p.renderer) == TWINS["13.6"]
+
+
+# --- the LCD firmware's group handling (`grammar.prove_lcd`, 2026-11-08) --------------------------
+
+# Expectations only (Ghidra lcd136; research `groups.md` §3): every image carries the six at
+# 13.6's addresses, its LCD a relocation twin of 13.6's.
+LCD_FUNCTIONS_136 = {"FUN_0021B420": 0x21B420, "FUN_0021B5E8": 0x21B5E8,
+                     "FUN_0021B678": 0x21B678, "FUN_0021B8B4": 0x21B8B4,
+                     "FUN_0021BAB4": 0x21BAB4, "FUN_0021AB88": 0x21AB88}
+
+
+def _lcd_sec(data: bytes):
+    from fireflymcf import container
+    return next(s for s in container.parse_container(data).sections
+                if "LCD Firmware" in (s.name or ""))
+
+
+def _lcd_patch(data: bytes, addr: int, code: bytes) -> bytes:
+    from fireflymcf.raminit import LCD_BASE
+    out = bytearray(data)
+    at = _lcd_sec(data).offset + addr - LCD_BASE
+    out[at:at + len(code)] = code
+    return bytes(out)
+
+
+def _lcd_read(data: bytes, addr: int, n: int) -> bytes:
+    from fireflymcf.raminit import LCD_BASE
+    at = _lcd_sec(data).offset + addr - LCD_BASE
+    return data[at:at + n]
+
+
+def test_lcd_136_proves_itself(stocks):
+    p = grammar.prove_lcd(stocks["13.6"])
+    assert dict(p.functions) == LCD_FUNCTIONS_136
+    assert set(p.pool_shifts) == {"SRAM", "GuiData", "LCD flash"}
+    assert all(s == frozenset({0}) for s in p.pool_shifts.values())
+    assert p.callee_shifts <= frozenset({0})
+    assert len(p.proof) >= len(LCD_FUNCTIONS_136)
+
+
+@pytest.mark.parametrize("version", ["14.7", "11.23"])
+def test_lcd_twins_with_relocations_reported(stocks, version):
+    """11.23 and 14.7 share one LCD, a relocation twin of 13.6's (research `groups.md` §3: 17
+    bytes differ in `0x21A000`-`0x21E124`, rodata pointers +4 and `bl` displacements +2). Inside
+    the six only the rodata shift shows: both LCD-flash pool words (`FUN_0021B420`'s deadline
+    table at pool `0x21B5E4`, `FUN_0021BAB4`'s at `0x21BDD4`) are +4. The six `bl` sites whose
+    displacement grew by 2 (`0x21B1DC`, `0x21B218`, `0x21B288`, `0x21C23C`, `0x21D290`,
+    `0x21D3C0`) lie outside every one of the six Ghidra bodies, so each of the 22 callee
+    bindings is +0."""
+    p = grammar.prove_lcd(stocks[version])
+    assert dict(p.functions) == LCD_FUNCTIONS_136
+    assert p.pool_shifts["LCD flash"] == frozenset({4})
+    assert p.pool_shifts["SRAM"] == p.pool_shifts["GuiData"] == frozenset({0})
+    assert p.callee_shifts == frozenset({0})
+    text = "\n".join(p.proof)
+    assert "LCD flash pool values (1 distinct) shifted +0x4 x1" in text
+    assert "22 callee bindings over the six, shifted +0x0" in text
+    assert "reference to FUN_0021B8B4 at 0x21bb9a lands on the located twin 0x21b8b4" in text
+    for name, addr in LCD_FUNCTIONS_136.items():
+        assert f"{name}" in text and f"{addr:#x}" in text
+
+
+def test_lcd_flipped_immediate_refuses_naming_it(stocks):
+    data = stocks["14.7"]
+    assert _lcd_read(data, 0x21B686, 2) == bytes.fromhex("c172")        # strb r1, [r0, #0xb]
+    bad = _lcd_patch(data, 0x21B686, bytes.fromhex("0173"))              # strb r1, [r0, #0xc]
+    with pytest.raises(grammar.LcdGrammarError) as e:
+        grammar.prove_lcd(bad)
+    assert e.value.code == "LCD_GRAMMAR"
+    assert "FUN_0021B678" in str(e.value)
+    assert "0x21b686" in str(e.value) and "#0xc" in str(e.value)
+
+
+def test_lcd_changed_rodata_word_refuses(stocks):
+    """An LCD-flash pool word maps one-to-one: FUN_0021B420's deadline-table pointer (14.7 pool
+    `0x21B5E4`, 13.6's `0x21F2A2` + 4) made another value refuses."""
+    data = stocks["14.7"]
+    assert _lcd_read(data, 0x21B5E4, 4) == struct.pack("<I", 0x21F2A6)
+    with pytest.raises(grammar.LcdGrammarError) as e:
+        grammar.prove_lcd(_lcd_patch(data, 0x21B5E4, struct.pack("<I", 0x40000000)))
+    assert "FUN_0021B420" in str(e.value) and "LCD flash" in str(e.value)
+
+
+def test_lcd_call_between_the_six_must_land_on_the_located_twin(stocks):
+    """`FUN_0021BAB4` calls the sender `FUN_0021B8B4` once (`0x21BB9A`). Retargeted to another
+    helper (`0x21B694`) the callee mapping alone is still one-to-one, so it is the cross-check
+    that refuses."""
+    data = stocks["14.7"]
+    assert _lcd_read(data, 0x21BB9A, 4) == bytes.fromhex("fff78bfe")     # bl #0x21b8b4
+    bad = _lcd_patch(data, 0x21BB9A, bytes.fromhex("fff77bfd"))          # bl #0x21b694
+    with pytest.raises(grammar.LcdGrammarError) as e:
+        grammar.prove_lcd(bad)
+    assert "FUN_0021B8B4" in str(e.value) and "0x21bb9a" in str(e.value)
+    assert "not the located twin 0x21b8b4" in str(e.value)
+
+
+def test_lcd_a_container_without_an_lcd_section_refuses_cleanly(stocks):
+    data = stocks["14.7"]
+    head = data[:_lcd_sec(data).offset]
+    at = head.index(b"LCD Firmware\x00")
+    renamed = bytearray(data)
+    renamed[at:at + 3] = b"XYZ"
+    with pytest.raises(grammar.LcdGrammarError, match="no LCD Firmware section") as e:
+        grammar.prove_lcd(bytes(renamed))
+    assert e.value.code == "LCD_GRAMMAR"
+    with pytest.raises(grammar.LcdGrammarError):
+        grammar.prove_lcd(b"\x00" * 64)
+
+
+def test_lcd_proof_is_memoised_and_immutable(stocks):
+    p = grammar.prove_lcd(stocks["14.7"])
+    with pytest.raises(TypeError):
+        p.functions["FUN_0021B420"] = 0                           # type: ignore[index]
+    assert grammar.prove_lcd(stocks["14.7"]) is p
+
+
+def test_group_prefix_gate_is_prove_lcd(stocks):
+    """`donors.group_prefix` is gated on `prove_lcd` alone: it refuses LCD_GRAMMAR when the LCD's
+    group handling is not 13.6's (even where the GuiCode grammar proves), and accepts 11.23,
+    whose GuiCode grammar does not prove but whose LCD does."""
+    from fireflymcf import donors
+    pre, proof = donors.group_prefix(stocks["14.7"], "group.tap")
+    assert pre == donors.GROUP_PREFIXES["group.tap"].prefix
+    assert any("FUN_0021B420" in line for line in proof)
+    pre, _ = donors.group_prefix(stocks["11.23"], "group.hold")
+    assert pre == donors.GROUP_PREFIXES["group.hold"].prefix
+    bad = _lcd_patch(stocks["14.7"], 0x21B686, bytes.fromhex("0173"))
+    grammar.prove(bad)                                       # GuiCode untouched: still proves
+    for name in donors.GROUP_PREFIXES:
+        with pytest.raises(donors.DonorError) as e:
+            donors.group_prefix(bad, name)
+        assert e.value.code == "LCD_GRAMMAR" and "0x21b686" in str(e.value)
+
+
+def test_lcd_generator_reproduces_shipped_fingerprints(stocks):
+    spec = importlib.util.spec_from_file_location(
+        "gen_grammar_fingerprints", REPO_ROOT / "scripts" / "gen_grammar_fingerprints.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert gen.build_lcd(stocks["13.6"]) == grammar.lcd_fingerprints()
+    with pytest.raises(SystemExit):
+        gen.build_lcd(stocks["14.7"])                    # 13.6 stock only

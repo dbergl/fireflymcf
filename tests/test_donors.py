@@ -91,25 +91,23 @@ def test_templates_refuse_on_1123(stocks):
         with pytest.raises(donors.DonorError) as e:
             donors.template(data, name)
         assert e.value.code == "GRAMMAR"
+    # the group prefixes are gated on the LCD's group handling (`grammar.prove_lcd`), which 11.23
+    # proves: its GuiCode grammar does not gate them
     for name in donors.GROUP_PREFIXES:
-        with pytest.raises(donors.DonorError) as e:
-            donors.group_prefix(data, name)
-        assert e.value.code == "GRAMMAR"
+        assert donors.group_prefix(data, name)[0] == donors.GROUP_PREFIXES[name].prefix
     with pytest.raises(donors.DonorError) as e:
         donors.mode7_index_limit(data)
     assert e.value.code == "GRAMMAR"
 
 
 def test_builders_refuse_on_1123_with_a_code(stocks):
-    """Every rewired builder refuses 11.23 with GRAMMAR, never a raw IndexError/ValueError."""
+    """Every rewired builder refuses 11.23 with GRAMMAR, never a raw IndexError/ValueError.
+    `rvcbutton.gesture_group` is not among them: its one gate, the group prefix, is the LCD's
+    (`grammar.prove_lcd`), which 11.23 proves (`test_gesture_group_on_1123`)."""
     data = stocks["11.23"]
     calls = [
         lambda: rvcbutton.button_records(data, touch_id=5, w=100, h=50, text="Hi", glyph=None,
                                          font=None, fill_index=10),
-        lambda: rvcbutton.gesture_group(data, form="tap", hold_seconds=None,
-                                        binding_start=0, count=1),
-        lambda: rvcbutton.gesture_group(data, form="hold", hold_seconds=2,
-                                        binding_start=0, count=1),
         lambda: statelights.capsule(data, fill_index=10, w=100, h=50),
         lambda: switchbuild.author_switch(data, value_slot=1, arms_base=2, count=2),
         lambda: readout.author_readout_object(data, x=1, y=1, display_slot=3,
@@ -128,6 +126,15 @@ def test_builders_refuse_on_1123_with_a_code(stocks):
         with pytest.raises(donors.DonorError) as e:
             call()
         assert e.value.code == "GRAMMAR"
+
+
+def test_gesture_group_on_1123(stocks):
+    """11.23's LCD group handling is 13.6's (`grammar.prove_lcd`), so its gesture groups are the
+    13.6 prefixes edited exactly as on 13.6."""
+    for form, secs in (("tap", None), ("hold", 2)):
+        args = dict(form=form, hold_seconds=secs, binding_start=0, count=1)
+        assert rvcbutton.gesture_group(stocks["11.23"], **args) == \
+            rvcbutton.gesture_group(stocks["13.6"], **args)
 
 
 def test_text_template_without_witness_refuses(stocks, monkeypatch):

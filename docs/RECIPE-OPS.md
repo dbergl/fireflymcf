@@ -562,6 +562,7 @@ Error codes:
 - `NO_FREE_GROUP` — no empty group-table slot to host the button's command group.
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates). BUTTON_REFUSED / REPLACE_REFUSED -- the button records could not be built or spliced.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the gesture group's prefix, is not proven 13.6's (`grammar.prove_lcd`: one of its six functions not a twin), or the container carries no LCD Firmware section (`donors.group_prefix`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
@@ -1005,6 +1006,7 @@ Error codes:
 - `TOGGLE_UNDRIVEN` — (compile) a toggle that no later enabled `add_button_status` drives.
 - `CYCLE_UNDRIVEN` — (compile) a cycle that no later enabled `add_button_states` drives.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the gesture group's prefix, is not proven 13.6's (`grammar.prove_lcd`: one of its six functions not a twin), or the container carries no LCD Firmware section (`donors.group_prefix`).
 - `NO_TEMPLATE` — a frozen record template cannot be used on this image (`donors`): no stock record witnesses its form, or a font slot is missing or cannot draw the text.
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)

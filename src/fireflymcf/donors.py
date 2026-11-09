@@ -82,12 +82,15 @@ both from the theme-init block's stores) and refuses NO_TEMPLATE when the block 
 
 **Group prefixes** (`GROUP_PREFIXES`, `group_prefix`): the 4-byte prefix of a stock tap group
 (103, `10 00 04 80`) and hold group (17, `10 00 0c 00`), which `rvcbutton.gesture_group` edits
-into a new gesture. Their meaning is read by the LCD firmware's group code (`FUN_0021B420`, the
-gated variant setter `FUN_0021B5E8`, the sender `FUN_0021B8B4`; GuiCode's own setter,
-`FUN_0021B678`, reads no prefix byte: `lcdgroups`), not GuiCode, so `grammar.prove` does
-not cover it; it is the only gate. That the prefixes mean the same on another image is data
-evidence, not code proof: groups 17 and 103 hold the same prefix bytes on 11.23, 13.6 and 14.7
-(measured 2026-11-07).
+into a new gesture. Their meaning is read by the LCD firmware's group code, not GuiCode: the
+group-table loader `FUN_0021B420`, the gated variant setter `FUN_0021B5E8`, the sender
+`FUN_0021B8B4` and `FUN_0021BAB4`/`FUN_0021AB88` (GuiCode's own setter, `FUN_0021B678`, reads no
+prefix byte: `lcdgroups`). So the gate is `grammar.prove_lcd`, not `grammar.prove`: those six
+functions are twins of 13.6's in the image's LCD Firmware section (code proof since 2026-11-08;
+before, the gate was the GuiCode grammar and the prefixes' cross-image equality data evidence).
+11.23 and 14.7 carry one LCD, a relocation twin of 13.6's, so the prefixes are accepted on both,
+11.23 included though its GuiCode grammar does not prove. A container without its own LCD
+Firmware section refuses: the proof is of the LCD the image carries.
 
 **The mode-7 index limit** (`mode7_index_limit`, `check_mode7_index`). The decoder clamps a mode-7
 colour index to 0 above `cmp.w r0, #0x298` (13.6 `0x2533BA`, then `bls`; GrammarProof bound
@@ -95,8 +98,8 @@ colour index to 0 above `cmp.w r0, #0x298` (13.6 `0x2533BA`, then `bls`; Grammar
 above the image's limit (MODE7_INDEX).
 
 **Refusals** (`DonorError`, with `code`): GRAMMAR (no grammar proof, or the wtype is not proven),
-NO_TEMPLATE (no witness for a text template, an unknown name, a missing font, an unlocated colour
-cell), NO_DONOR (a caller-named donor record that does not exist or has the wrong form),
+LCD_GRAMMAR (a group prefix on an image whose LCD group handling is not proven), NO_TEMPLATE (no
+witness for a text template, an unknown name, a missing font, an unlocated colour cell), NO_DONOR (a caller-named donor record that does not exist or has the wrong form),
 MODE7_INDEX. `DonorError` is not a `ValueError`, so the builders' own `except ValueError`
 wrappers do not recode it; `recipe` surfaces the code as the op's refusal.
 """
@@ -111,7 +114,7 @@ from . import glyphs, grammar, guidata, memo, metrics, records, stockscope, them
 
 class DonorError(Exception):
     """A template, group prefix or donor this image does not prove usable. `code` is one of
-    GRAMMAR, NO_TEMPLATE, NO_DONOR, MODE7_INDEX."""
+    GRAMMAR, LCD_GRAMMAR, NO_TEMPLATE, NO_DONOR, MODE7_INDEX."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -484,17 +487,23 @@ def _template(data: bytes, name: str, t: Template, font: int | None, base: bytes
 
 
 def group_prefix(data: bytes, name: str) -> tuple[bytes, tuple]:
-    """`(4-byte prefix, proof lines)` for group prefix `name` (module docstring). The only gate
-    is `grammar.prove`; the prefix's meaning is LCD-firmware code, its cross-image equality data
-    evidence (2026-11-07)."""
+    """`(4-byte prefix, proof lines)` for group prefix `name` (module docstring). The gate is
+    `grammar.prove_lcd`: the LCD code that reads the prefix is a twin of 13.6's. Refuses
+    LCD_GRAMMAR when it is not (or the container carries no LCD Firmware section), NO_TEMPLATE
+    for an unknown name."""
     try:
         g = GROUP_PREFIXES[name]
     except KeyError:
         raise DonorError("NO_TEMPLATE", f"no group prefix named {name!r}") from None
-    p = _prove(data, f"group prefix {name}")
-    return g.prefix, (f"grammar: decoder {p.decoder:#x}",
-                      "prefix semantics are the LCD firmware's (FUN_0021B420); equal at this "
-                      "group on 11.23, 13.6 and 14.7 (data evidence, 2026-11-07)")
+    try:
+        p = grammar.prove_lcd(data)
+    except grammar.LcdGrammarError as e:
+        raise DonorError("LCD_GRAMMAR", f"group prefix {name}: the LCD firmware's group "
+                                        f"handling is not proven 13.6's: {e}") from e
+    return g.prefix, (
+        "LCD group handling: " + ", ".join(f"{n} at {a:#x}" for n, a in p.functions.items()),
+        "the prefix's bytes are read by those twins (FUN_0021B420 loads the entry, FUN_0021B5E8 "
+        "gates on byte 1, FUN_0021B8B4 sends; module docstring)")
 
 
 @dataclass(frozen=True)

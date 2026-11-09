@@ -101,9 +101,9 @@ def gesture_group(data: bytes, *, form: str, hold_seconds: int | None,
                   binding_start: int, count: int) -> bytes:
     """The group-table entry (`guidata.GROUP_ENTRY_SIZE` bytes) for `form` whose slice is
     `count` bindings from `binding_start`. The prefix is a frozen 13.6 group prefix
-    (`donors.group_prefix`, gated on the image's grammar proof), edited and cloned with a zero pad
-    byte (`optionrow._clone_group_entry`). `hold_seconds` None keeps the prefix's 1-s hold nibble
-    (Batt Heat's, byte for byte)."""
+    (`donors.group_prefix`, gated on `grammar.prove_lcd`, the LCD's group handling), edited and
+    cloned with a zero pad byte (`optionrow._clone_group_entry`). `hold_seconds` None keeps the
+    prefix's 1-s hold nibble (Batt Heat's, byte for byte)."""
     def prefix(name: str) -> bytearray:
         pre, _proof = _donors.group_prefix(data, name)
         return bytearray(pre + bytes(guidata.GROUP_ENTRY_SIZE - len(pre)))

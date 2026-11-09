@@ -294,7 +294,7 @@ def test_coded_refusals_are_documented():
                         ("add_register_readout", {"NO_DONOR", "CELL_TABLE_NO_BOUND",
                                                   "CELL_TABLE_BOUND_FORM", "RENDER_STATE_BASES",
                                                   "DECODER_RANGE_UNKNOWN"}),
-                        ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN"}),
+                        ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN", "LCD_GRAMMAR"}),
                         ("follow_register", {"SPARE_ROWS_UNKNOWN"}),
                         ("add_button", {"BRIDGE_UNKNOWN"}),
                         ("wire_button", {"BRIDGE_UNKNOWN"})):

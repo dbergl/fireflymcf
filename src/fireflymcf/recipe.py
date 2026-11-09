@@ -581,10 +581,11 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 
 
 # Coded refusals from the locators an op builds on (a template or donor this image does not
-# prove, `donors`; a record grammar that is not 13.6's, `grammar`; a cell or type table that
-# does not locate, `celltables`), surfaced under their own code as the op's refusal, as
-# FollowChannelError is above.
-_CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError,
+# prove, `donors`; a record grammar or LCD group handling that is not 13.6's, `grammar`; a cell
+# or type table that does not locate, `celltables`), surfaced under their own code as the op's
+# refusal, as FollowChannelError is above.
+_CODED = (donors.DonorError, grammar.GrammarError, grammar.LcdGrammarError,
+          celltables.CellTableError,
           sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
           newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
           decodeguards.DecoderRangeUnknown)
