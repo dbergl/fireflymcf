@@ -29,6 +29,7 @@ def pytest_configure(config):
     if getattr(opt, "numprocesses", None) and getattr(opt, "dist", None) == "load":
         opt.dist = "worksteal"
 
+
 def pytest_collection_modifyitems(items):
     """Everything under tests/emu/ boots an emulated image and is slow by construction; mark it so
     `-m "not slow"` is the edit-loop tier. Other slow tests carry the marker themselves."""

@@ -10,7 +10,7 @@ npm test --prefix studio/web                      # the web editor's tests
 **The fast tier is for the edit loop only.** `-m "not slow"` skips every test under `tests/emu/`
 (auto-marked in `tests/conftest.py`) and every test measured at 3 s or more (marked
 `@pytest.mark.slow`, or `pytestmark` on a module whose module-scoped fixture boots an emulation, so
-every worker pays the setup). About 420 of 3848 tests are slow. The full suite, without `-m`, is the
+every worker pays the setup). About 470 of 3848 tests are slow (the module-wide marks include some fast ones). The full suite, without `-m`, is the
 gate before a merge and after any engine change. `tests/test_slow_marker.py` fails if a `tests/emu/`
 test loses the marker. A new test that takes 3 s or more should carry `@pytest.mark.slow`.
 
