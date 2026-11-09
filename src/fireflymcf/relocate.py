@@ -835,7 +835,9 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
     Raises for a value `find_match_table` could not read back (one in 256..0xFFFE; every stock
     table tops out at 255), and for a genuinely impossible state: a table wider than the
     object count whose extra entries are NOT all `0xFFFF` -- `find_match_table` found the
-    wrong window.
+    wrong window. The one exception is a stock image's 4-alignment pad: with an odd object
+    count `n` the table is `n + 1` wide, and that last u16 (0 on 14.7 stock) belongs to no
+    object, so it is overwritten as a sentinel is.
     """
     if not values or len(values) % 2:
         raise RelocationError(
@@ -862,7 +864,12 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
     covered = 0
     if gap < 0:
         extra = [struct.unpack_from("<H", data, gs + mt + 2 * i)[0] for i in range(n, w)]
-        if any(v != 0xFFFF for v in extra):
+        # The 4-alignment pad: object table 1 starts 4-aligned right after the table, so with
+        # an ODD object count a stock image carries one u16 past the last object's entry. 14.7
+        # stock (1077 objects) holds 0 there (2026-11-08). No object has its index, so nothing
+        # reads it, and it is overwritten in place as a sentinel is.
+        pad = w == n + 1 and n % 2 == 1 and extra in ([0], [0xFFFF])
+        if not pad and any(v != 0xFFFF for v in extra):
             raise RelocationError(
                 f"grow_match_table: match table width {w} exceeds the object count {n} and the "
                 f"extra entries are not pre-covering 0xFFFF sentinels -- find_match_table likely "

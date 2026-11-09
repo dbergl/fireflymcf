@@ -16,8 +16,9 @@ import hashlib
 import json
 import struct
 
-from fireflymcf import (celltables, coverage, donors, firmware, followchannel, grammar, guidata,
-                        patch, relocate, sramreach, statusbind, stockscope, theme)
+from fireflymcf import (celltables, coverage, decodeguards, donors, firmware, followchannel,
+                        grammar, guidata, newbutton, patch, relocate, sramreach, statusbind,
+                        stockscope, theme)
 
 SCHEMA = 1
 
@@ -370,10 +371,21 @@ def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
     and 137 from
     13.6's 130-139 block: a tap on 136 worked, but its hold never repeated, and 137's hold-only
     reboot never fired, on the coach 2026-09-30. Edits that keep a group's slice (a gesture or a
-    binding byte on an existing control) are not reuse and are not gated."""
+    binding byte on an existing control) are not reuse and are not gated.
+
+    Where the GuiCode-driven groups are not known (`newbutton.VariantSetterUnknown`: 14.7,
+    2026-11-08) a build that reuses no group has nothing to check and passes; one that reuses
+    any group is refused VARIANT_SETTER_UNKNOWN, since it cannot be shown to miss them."""
     from fireflymcf import newbutton
-    selected = newbutton.guicode_selected_groups(stock)
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
+    try:
+        selected = newbutton.guicode_selected_groups(stock)
+    except newbutton.VariantSetterUnknown as e:
+        moved = [g.index for g in sg if g.index < len(dg) and dg[g.index].start != g.start]
+        _gate(not moved, e.code,
+              "group(s) %s were reused, and which groups GuiCode drives by number is not known "
+              "on this image: %s" % (moved, e))
+        return
     bad = [g for g in selected if g < len(sg) and g < len(dg) and dg[g].start != sg[g].start]
     _gate(not bad, "STRUCTURAL_GATE",
           "group(s) %s were reused, but GuiCode drives them by number "
@@ -573,7 +585,8 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 # does not locate, `celltables`), surfaced under their own code as the op's refusal, as
 # FollowChannelError is above.
 _CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError,
-          sramreach.SramReachError, statusbind.SpareRowsUnknown)
+          sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
+          newbutton.VariantSetterUnknown, decodeguards.DecoderRangeUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:

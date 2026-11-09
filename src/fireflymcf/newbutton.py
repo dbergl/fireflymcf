@@ -151,7 +151,15 @@ def unused_command_groups(data: bytes) -> list[int]:
 SET_VARIANT_PTR = 0x20039908
 
 
-@memo.content_cached
+class VariantSetterUnknown(ValueError):
+    """VARIANT_SETTER_UNKNOWN: `guicode_selected_groups` scans for loads of 13.6's variant-setter
+    cell (`SET_VARIANT_PTR`), and this image's setter cell (`hooklocate.host_api_cells` +0x04)
+    is another word or does not locate. The scan would find nothing there, and "GuiCode drives
+    no group" is not known; on 14.7 the located cell is 0x200395FC (2026-11-08), and the scan
+    for it is the group-pool locator `add_rvc_button` still needs."""
+    code = "VARIANT_SETTER_UNKNOWN"
+
+
 def guicode_selected_groups(data: bytes) -> frozenset:
     """Group indices GuiCode passes BY IMMEDIATE to `setVariant(group, v)`. A pointer load
     `ldr rN,[pc,#imm]` of `0x20039908` is followed (within 512 bytes) by calls of the shape
@@ -164,7 +172,28 @@ def guicode_selected_groups(data: bytes) -> frozenset:
     sent a tap but never repeated on a hold, and the APS-500 reboot (137, hold-only) sent
     nothing, while the identically built 96/126/127 worked. How the block's other input
     cancels a screen hold is NOT established (inference); that GuiCode drives these groups is.
+
+    Refuses `VariantSetterUnknown` when the image's located setter cell is not
+    `SET_VARIANT_PTR` (or does not locate): an empty answer there would be a guess.
     """
+    from . import followchannel, hooklocate
+    try:
+        cell = hooklocate.host_api_cells(data)[0x04]
+    except (followchannel.FollowChannelError, KeyError) as e:
+        raise VariantSetterUnknown(
+            f"the variant setter's cell does not locate on this image ({e}), so which groups "
+            f"GuiCode drives by number is not known") from e
+    if cell != SET_VARIANT_PTR:
+        raise VariantSetterUnknown(
+            f"this image's variant setter is reached through {cell:#x}, not {SET_VARIANT_PTR:#x} "
+            f"(13.6's), which is the cell the group scan reads; which groups GuiCode drives by "
+            f"number is not known here")
+    return _selected_groups(data, SET_VARIANT_PTR)
+
+
+@memo.content_cached
+def _selected_groups(data: bytes, setter_cell: int) -> frozenset:
+    """`guicode_selected_groups`' scan, for loads of `setter_cell`."""
     from . import theme
     gc = theme.guicode_section(data)
     img = data[gc.offset:gc.offset + gc.length]
@@ -174,7 +203,7 @@ def guicode_selected_groups(data: bytes) -> frozenset:
         return img[pc] | (img[pc + 1] << 8)
 
     ptr_lits = {base + i for i in range(0, len(img) - 3, 4)
-                if struct.unpack_from("<I", img, i)[0] == SET_VARIANT_PTR}
+                if struct.unpack_from("<I", img, i)[0] == setter_cell}
     out = set()
     for pc in range(0, len(img) - 1, 2):
         h = hw(pc)

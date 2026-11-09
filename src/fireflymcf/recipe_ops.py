@@ -32,6 +32,7 @@ from fireflymcf import bitcombine
 from fireflymcf import cardlayout
 from fireflymcf import cardreadouts
 from fireflymcf import cornermark
+from fireflymcf import decodeguards
 from fireflymcf import enumlabel
 from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, switchbuild
 from fireflymcf import pagedraw as pd
@@ -1840,6 +1841,8 @@ class AddButton(Op):
         try:
             data, cell, e = statusbind.bind_pin(data, self.channel,
                                                 off_colour=self.off_colour)
+        except statusbind.BridgeUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except statusbind.StatusBindError as err:
             raise RecipeError("BIND_REFUSED", str(err))
         ctx.edits.extend(e)
@@ -2136,6 +2139,8 @@ class WireButton(Op):
         try:
             data, cell, e = statusbind.bind_pin(data, self.channel,
                                                 off_colour=self.off_colour)
+        except statusbind.BridgeUnknown as err:
+            raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except statusbind.StatusBindError as err:
             raise RecipeError("BIND_REFUSED", str(err))
         ctx.edits.extend(e)
@@ -6220,7 +6225,12 @@ class FollowRegister(Op):
     on-screen checkbox. Watch/gate refs name a resolve_register op id (or inline
     {dgn, instance|selector}). The authored routine is the hardware-verified Pump Link follower
     (2026-08-31) with
-    generalized inputs; a coach check is warranted the first time a NEW watch register is used."""
+    generalized inputs; a coach check is warranted the first time a NEW watch register is used.
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): the first
+    report is a silent baseline, each later edge sends the target on or off while the gates
+    hold, and nothing while they do not."""
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "watch": {"type": "object", "description": "{ref|dgn+instance/selector, mask?, value?}"},
@@ -6352,7 +6362,14 @@ class AddRegisterReadout(Op):
     per instance (`apply`, when `cell.fresh`): a coach photo of one tier does not vouch for an
     address nothing has ever touched.
 
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): drawn and
+    `draw` false, a published value repaints the digits, and a cell poisoned before boot is
+    written stale before the readout first draws. The existing-cell mode (`cell_slot`) refuses
+    DECODER_RANGE_UNKNOWN beyond 13.6: the per-tick decoder's window is known only there.
+
     Error codes:
+      DECODER_RANGE_UNKNOWN -- `cell_slot` on a firmware whose per-tick decoder window is not
+        known (`decodeguards.decoder_range`: 13.6 only).
       BAD_PARAMS -- a malformed param: drawing params with `draw` false or with `cell_slot`, a
         non-integer `cell_slot`, `silence` that is not a list of addresses or comes without
         `cell_slot`, a missing page/x/y, or a bad `format`.
@@ -6373,6 +6390,8 @@ class AddRegisterReadout(Op):
         (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
     """
     hardware_verified = True
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
     PARAMS = {
         "properties": {
             "register": {"type": "object", "description": "{ref} | {dgn, instance|selector}"},
@@ -6486,6 +6505,11 @@ class AddRegisterReadout(Op):
 
     def apply(self, data, ctx):
         reg = _resolve_register_spec(data, ctx, self.register_spec, self.spec.id)
+        if self.cell_slot is not None:
+            # Feeding a STOCK readout's cell means knowing the per-tick decoder's stores and
+            # fences on it (`decodeguards`, `BUS-BASELINE.md` PC.55/PC.60); the decoder's window
+            # is known on 13.6 only, so any other firmware refuses DECODER_RANGE_UNKNOWN.
+            decodeguards.decoder_range(ctx.stock)
         silenced, remaining = [], []
         try:
             if self.cell_slot is not None:
@@ -6603,6 +6627,12 @@ class AddRegisterReadout(Op):
         }
         return sealed
 
+    def _verified_here(self, ctx) -> bool:
+        """The manifest's HARDWARE-VERIFIED: this instance's flag, on a firmware a coach has run
+        it on (`verified_on`); on 14.7 the op is emulated only."""
+        fw = getattr(ctx, "firmware", None)
+        return bool(self.hardware_verified) and (fw is None or fw in self.verified_on)
+
     def _refuse_directive_leak(self, before, after, root, object_index):
         """Any stock readout on the page's screen whose directive-in-force changed is a leak."""
         old = {(e[1], e[2]): e[3] for e in readout.directive_in_force(before, root) if e[0] == "readout"}
@@ -6649,7 +6679,7 @@ class AddRegisterReadout(Op):
                 % (h["display_slot"], h["display_addr"], h["var_index"], h["slot_addr"],
                    self.add, self.shift, h["entry"], [hex(a) for a in h["silenced"]],
                    [hex(a) for a in h["remaining_writers"]],
-                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                   "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
@@ -6693,12 +6723,12 @@ class AddRegisterReadout(Op):
             return ("add_register_readout: cell %d @ %#x (tier %d, fresh=%s), routine @ %#x, "
                     "sub %d, mul %d; no widget (drawn by another op) -- HARDWARE-%s"
                     % (h["display_slot"], h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                       self.sub, self.mul, "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                       self.sub, self.mul, "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
         return ("add_register_readout: object %d at (%d,%d) on root %d (of %s), cell %d @ %#x "
                 "(tier %d, fresh=%s), routine @ %#x -- HARDWARE-%s"
                 % (h["object_index"], self.x, self.y, h["root"], h["roots"], h["display_slot"],
                    h["display_addr"], h["tier"], h["fresh"], h["entry"],
-                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+                   "VERIFIED" if self._verified_here(ctx) else "UNVERIFIED"))
 
 
 @op("swap_aes_electrical")
@@ -8703,6 +8733,10 @@ class AddEnumLabel(_LabelBox, Op):
     so does any arm record inheriting a value slot from a wtype-5 attach above it
     (`_pasted_inherited_slots`, the rule `add_rvc_button` and `move_control` apply).
 
+    On 14.7 it is emulated, not coach-run (`tests/emu/test_ops147.py`, 2026-11-08): each value
+    draws its text, stale and unlisted values the default. Without a `background` the arms
+    draw over each other in the emulator, on 13.6 as on 14.7 (2026-11-08).
+
     Params:
       parent: object index | {ref} -- the object the label attaches under (it needs a wtype-5
               attach record to clone).
@@ -8742,6 +8776,8 @@ class AddEnumLabel(_LabelBox, Op):
     """
 
     hardware_verified = False
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {

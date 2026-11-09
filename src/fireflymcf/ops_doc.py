@@ -209,14 +209,19 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "follow_register": ("guicode",
         "Watch any register for an edge and drive a channel, gated by register conditions.",
         "Routine shared with the flashed follower; no instance has been flashed. A coach check is "
-        "warranted for a new watch register.",
+        "warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a "
+        "silent baseline, each later edge one on or off frame while the gate holds, none while "
+        "it does not.",
         "`followchannel.py`"),
     "add_register_readout": ("guicode",
         "Show any register as a live number on any page, or feed an existing readout's cell "
         "past a stock decode fence (`cell_slot` + `silence`). The value is "
         "`(max((slot & mask) - sub, 0) * mul + add) >> shift`.",
         "Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) "
-        "cells, `sub`, `mul` and an `add` above 255 report unverified per instance.",
+        "cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, "
+        "emulated 2026-11-08 (drawn and `draw` false): each published value repaints the "
+        "digits in the readout's box, and a cell poisoned before reset is never drawn; "
+        "`cell_slot` refuses DECODER_RANGE_UNKNOWN there.",
         "`readout.py`, `BUS-BASELINE.md` PC.59, PC.60"),
     "swap_aes_electrical": ("structural",
         "Replace the AES ELECTRICAL page body with a compact frame mirroring the AGS one, "
@@ -293,7 +298,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "slot to an index cell, drawn by one enrolled wtype-6 switch of boxed wtype-11 labels "
         "(optionally on a fill) after a blank 0xFFFF default arm at its base, attached under "
         "`parent`. A preview without slot values (Studio, `render`) draws that blank arm.",
-        "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue between a long word and a short one (photo per state).", "`enumlabel.py`, `statusfold.py`"),
+        "UNVERIFIED. Bench check: every value, a non-key value and stale, with no residue "
+        "between a long word and a short one (photo per state). Emulated 2026-11-08 on 13.6 "
+        "and 14.7: with no `background` the arms draw over each other. On 14.7, emulated "
+        "2026-11-08 with a background: each value draws its text in the box, stale and "
+        "unlisted values the default.", "`enumlabel.py`, `statusfold.py`"),
     "add_text_label": ("structural",
         "Draw static text on any page: one boxed wtype-11 label (latin-1, a '\\n' for more lines "
         "at the font's cell pitch), optionally on a fill and inside a 1 px section frame, "

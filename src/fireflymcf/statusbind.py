@@ -73,6 +73,31 @@ class SpareRowsUnknown(StatusBindError):
     code = "SPARE_ROWS_UNKNOWN"
 
 
+class BridgeUnknown(StatusBindError):
+    """BRIDGE_UNKNOWN: the GuiCode bridge dump that names a status variable's colour and bool
+    cells (`status_map.load_bridge`) is committed for one firmware only, 13.6
+    (`data/slot_bridge_136.txt`), and this image is another. Its cells would be 13.6's, which
+    on another image are words nothing writes (observed on 14.7 2026-11-08: pin 3's 13.6 cell
+    0x20039BB0 never changes when the G12 reports the pin on), so a pin is never bound there."""
+    code = "BRIDGE_UNKNOWN"
+
+
+# The firmware (`firmware.KNOWN` key) each committed bridge dump was read from.
+BRIDGE_FIRMWARE = {"136": "13.6"}
+
+
+def require_bridge(data: bytes, build: str = "136") -> None:
+    """Refuse `BridgeUnknown` unless the bridge dump `build` was read from this image's
+    firmware (`firmware.identify`)."""
+    which = firmware.identify(data)
+    want = BRIDGE_FIRMWARE.get(build)
+    if want is None or which != want:
+        raise BridgeUnknown(
+            f"the GuiCode bridge dump {build!r} names {want or 'no known firmware'}'s status "
+            f"cells and this image is {which or firmware.describe(data)}: its pins' colour "
+            f"cells are not located, so none is bound")
+
+
 # --------------------------------------------------------------------------------------
 # reading the binding
 # --------------------------------------------------------------------------------------
@@ -841,7 +866,10 @@ def bind_pin(data: bytes, pin: int, *, off_colour: tuple | None = None,
     It deliberately does NOT retarget any filter's instance byte: on 13.6 every pin 1-44 is
     already watched, so doing so would silently steal another pin's watcher. Call
     `set_filter_instance` explicitly when that trade is what you want.
+
+    Refuses `BridgeUnknown` on an image the bridge dump was not read from (`require_bridge`).
     """
+    require_bridge(data, build)
     b = pin_bindings(data, build).get(pin)
     if b is None:
         raise StatusBindError(f"no DC_DIMMER_STATUS_3 filter entry watches pin {pin}")
