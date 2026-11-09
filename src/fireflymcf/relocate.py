@@ -837,7 +837,9 @@ def grow_match_table(data: bytes, values: list[int]) -> tuple[bytes, list[Edit]]
     object count whose extra entries are NOT all `0xFFFF` -- `find_match_table` found the
     wrong window. The one exception is a stock image's 4-alignment pad: with an odd object
     count `n` the table is `n + 1` wide, and that last u16 (0 on 14.7 stock) belongs to no
-    object, so it is overwritten as a sentinel is.
+    object, so it is overwritten as a sentinel is. That the pad belongs to no object is
+    inference from data: it is the one u16 past the object count, the table must end 4-aligned
+    where object-table 1 begins, and no reader of it indexed past `n - 1` is cited.
     """
     if not values or len(values) % 2:
         raise RelocationError(

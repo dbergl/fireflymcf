@@ -23,7 +23,9 @@ base inside it (the digit buffer, base + 0x7021 on 13.6 and 14.7) is a struct fi
 the struct's end -- an inference: GUICODE.md bounds 13.6's buffer at 0x40 by hand, inside a
 struct that runs further. Any other indexed base reaches everything above it. The free cell area
 (`cell_area`) runs from the struct's end to the lowest indexed base above it, and every cell the
-display-cell table names must lie in it, or the module refuses (`SramReachError`).
+stock display-cell table names must lie in it, or the module refuses (`SramReachError`). The
+render state and the area are read from the recipe's stock (`stockscope.stock_image`); which
+words are used (`reach`) is read from the working image, so what earlier ops added is counted.
 """
 from __future__ import annotations
 
@@ -31,7 +33,7 @@ import re
 import struct
 from dataclasses import dataclass, field
 
-from . import celltables, container, memo, status_map, theme
+from . import celltables, container, memo, status_map, stockscope, theme
 
 SRAM_LOW, SRAM_HIGH = status_map.SRAM_LOW, status_map.SRAM_HIGH
 _MAX_STEPS = 400                    # longest observed lifetime is 246 instructions on 13.6
@@ -42,8 +44,10 @@ class SramReachError(ValueError):
     RENDER_STATE_BASES (not exactly one literal SRAM base is addressed through `movw` offsets),
     CELL_AREA_NO_CEILING (no register-indexed base lies above the render state to bound the
     area) or CELL_OUTSIDE_AREA (a display-cell table row names SRAM outside the area).
-    RENDER_STATE_BASES also refuses an image where an authored routine addresses its own
-    literal SRAM base through `movw` offsets: that is a second such base."""
+    Both are read from the recipe's stock (`stockscope.stock_image`), so an authored routine
+    that addresses its own literal SRAM base through `movw` offsets (a second such base), or a
+    row an earlier op pointed outside the area, refuses only where that image is itself the
+    stock: a built image used as a compile base, or one read outside a recipe."""
 
     def __init__(self, code: str, message: str):
         super().__init__(message)
@@ -283,18 +287,28 @@ def _render_state(t: _Trace) -> RenderState:
 
 
 def locate_render_state(data: bytes) -> RenderState:
-    """The render state of `data`, from GuiCode alone (module docstring). Raises
-    `SramReachError` (RENDER_STATE_BASES) unless exactly one literal SRAM base is addressed
-    through `movw` offsets."""
-    return _render_state(_guicode_trace(data))
+    """The render state, from the GuiCode of the recipe's stock (`stockscope.stock_image`;
+    outside a recipe, `data` itself), never from what an earlier op appended: an authored
+    routine that addresses its own literal SRAM base through `movw` offsets is a second such
+    base, and must not make an unrelated later op refuse. Raises `SramReachError`
+    (RENDER_STATE_BASES) unless exactly one literal SRAM base is addressed through `movw`
+    offsets in that GuiCode."""
+    return _render_state(_guicode_trace(stockscope.stock_image(data)))
 
 
 def cell_area(data: bytes) -> tuple[int, int]:
     """`(lo, hi)`: the SRAM between the render state's end and the lowest register-indexed base
-    at or above it, where every display cell lives and a fresh one may be minted. Refuses
-    (`SramReachError`) when no indexed base lies above the struct (CELL_AREA_NO_CEILING) or a
-    cell-table row names SRAM outside the area (CELL_OUTSIDE_AREA)."""
-    t = _guicode_trace(data)
+    at or above it, where every display cell lives and a fresh one may be minted. Read from the
+    recipe's stock (`stockscope.stock_image`), as `locate_render_state` is: a row an earlier op
+    pointed elsewhere, or an authored routine's own indexed base, is the working image's, and
+    `reach` (which stays on the working image) counts it as used. Refuses (`SramReachError`)
+    when no indexed base lies above the struct (CELL_AREA_NO_CEILING) or a stock cell-table row
+    names SRAM outside the area (CELL_OUTSIDE_AREA)."""
+    return _cell_area(stockscope.stock_image(data))
+
+
+def _cell_area(stock: bytes) -> tuple[int, int]:
+    t = _guicode_trace(stock)
     rs = _render_state(t)
     above = [b for b in t.indexed if b >= rs.end]
     if not above:
@@ -304,9 +318,9 @@ def cell_area(data: bytes) -> tuple[int, int]:
             "bounds the cell area from above" % (rs.base, rs.end))
     lo, hi = rs.end, min(above)
     from . import guidata
-    ct = celltables.locate(data)
-    gs, _ = guidata.guidata_extent(data)
-    rows = struct.unpack_from("<%dI" % ct.rows, data, gs + ct.cell_off)
+    ct = celltables.locate(stock)
+    gs, _ = guidata.guidata_extent(stock)
+    rows = struct.unpack_from("<%dI" % ct.rows, stock, gs + ct.cell_off)
     outside = [(i, c) for i, c in enumerate(rows) if c and not lo <= c < hi]
     if outside:
         raise SramReachError(
@@ -318,17 +332,18 @@ def cell_area(data: bytes) -> tuple[int, int]:
 
 
 def reach(data: bytes) -> Reach:
-    """Every working-area address `data` reaches, by form (`Reach`). Raises `SramReachError`
+    """Every working-area address `data` reaches, by form (`Reach`): the working image's own
+    forms, with the render state the stock's (`locate_render_state`). Raises `SramReachError`
     when the render state cannot be located."""
-    return _reach(data, SRAM_LOW, SRAM_HIGH)
+    rs = locate_render_state(data)
+    return _reach(data, SRAM_LOW, SRAM_HIGH, rs.base, rs.end)
 
 
 @memo.content_cached(copy=lambda r: r)
-def _reach(data: bytes, sram_lo: int, sram_hi: int) -> Reach:
+def _reach(data: bytes, sram_lo: int, sram_hi: int, state_base: int, state_end: int) -> Reach:
     sec = theme.guicode_section(data)
     body = bytes(data[sec.offset:sec.offset + sec.length])
     t = _trace(body, theme.guicode_base(sec), sram_lo, sram_hi)
-    rs = _render_state(t)
 
     out = Reach()
     out.raw_words = {w for w in _words(body) if sram_lo <= w < sram_hi} | _lcd_words(data)
@@ -337,14 +352,14 @@ def _reach(data: bytes, sram_lo: int, sram_hi: int) -> Reach:
     out.traced = set(t.traced)
     out.base_offset = {a: set(v) for a, v in t.base_offset.items()}
     out.indexed_bases = {b: set(v) for b, v in t.indexed.items()}
-    out.state_span = (rs.base, rs.end)
+    out.state_span = (state_base, state_end)
     # An indexed table whose index this trace cannot bound reaches, as far as the file can say,
     # everything above its base. A base inside the render state is a field of it (the digit
     # buffer), bounded by the struct; the struct's own base is its state span.
     for b in out.indexed_bases:
-        if b == rs.base:
+        if b == state_base:
             continue
-        out.poisoned.append((b, rs.end) if rs.base <= b < rs.end else (b, sram_hi))
+        out.poisoned.append((b, state_end) if state_base <= b < state_end else (b, sram_hi))
     return out
 
 

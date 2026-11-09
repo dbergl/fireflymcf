@@ -9,7 +9,11 @@ stock copy in place but unread. Every reader and writer resolves through here; a
 
 1. Collect every bound compare: `cmp rI,#imm`, `cmp.w rI,#imm`, or `movw rB,#imm ; cmp rI,rB`
    (11.23's form), kept only when the next instruction is an unsigned ordering branch
-   (`bls`/`bhi`/`bhs`/`blo`). A `beq`/`bne` after it is a sentinel test, not a bound.
+   (`bls`/`bhi`/`bhs`/`blo`/`bcs`/`bcc`, `_UNSIGNED_BRANCHES`; `bcs`/`bcc` are capstone's
+   spellings of `bhs`/`blo`). A `beq`/`bne` after it is a sentinel test, not a bound. A bound
+   formed as `mov.w rB,#imm ; cmp rI,rB` is not scanned; no corpus image has one (a halfword
+   scan of 11.23, 13.6 and 14.7 GuiCode for `mov`/`mov.w` then `cmp` on that register then an
+   unsigned branch found none, 2026-11-08).
 2. Credit a compare's `imm` to a GuiData-mapped literal T when, within two branch hops, it
    reaches an indexed `ldr` with the compare's index register off a base literal-loaded with T
    (`tablegrow._reaches_indexed_read_off_base`).
@@ -19,8 +23,8 @@ stock copy in place but unread. Every reader and writer resolves through here; a
    table starts: `T + align4(rows) == cell`.
 5. The type table has one source of truth: the located pair must equal the literal pair
    `guidata.variable_table_literals` names, or the locator refuses.
-6. The bound's other compares are clamp sites: GuiCode stores an index with `strh` just before
-   comparing it to the bound (and stores 0 when it is out of range), and a later `ldrh` of that
+6. The bound's other compares are clamp sites: GuiCode stores an index with `strh` in the 8 bytes
+   before comparing it to the bound (and stores 0 when it is out of range), and a later `ldrh` of that
    SRAM halfword indexes the cell table. A compare counts as a clamp site only when
    `_halfword_moves` resolves both the store and a read whose loaded register reaches an indexed
    `ldr` off the cell table's base (`_clamps`); `proof` names the store, the read and the indexed
@@ -118,7 +122,9 @@ def _bound_compares(code: bytes, base: int) -> tuple:
 def _compares(code: bytes, base: int) -> tuple:
     """`(off, after, idx_reg, imm, form)` for every register-against-constant compare decoded
     at a halfword of `code` (a linear pass desyncs across literal pools), whatever follows it:
-    `cmp rI,#imm8`, `cmp.w rI,#imm` and `movw rB,#imm ; cmp rI,rB`. `cmp.w` comes from
+    `cmp rI,#imm8`, `cmp.w rI,#imm` and `movw rB,#imm ; cmp rI,rB`. `mov.w rB,#imm ; cmp rI,rB`
+    (a modified-immediate bound) is not scanned: no corpus image bounds a table that way (module
+    docstring, step 1), and a bound in it would leave a site the grow cannot see. `cmp.w` comes from
     `tablegrow._cmp_w_sites` (memoised, incremental across GuiCode edits); the 16-bit `cmp` and
     the `movw` of the register form are prefiltered by their encodings."""
     import numpy as np
@@ -402,7 +408,8 @@ def _clamps(code: bytes, base: int, cell: int, bound: int, gates: tuple, sram_lo
             sram_hi: int) -> tuple:
     """`(site, form, store, addr, ((reader, read), ...))` for every clamp site of the cell table:
     a bound compare (`_bound_compares`, imm == `bound`, not a gate site) whose index register
-    the instruction just before it stores with `strh` to SRAM `addr`, where some `ldrh` of
+    an instruction in the 8 bytes before it (`site - 8 .. site - 2`; on every corpus clamp the
+    store is the instruction immediately before on 13.6 and 14.7, module docstring) stores with `strh` to SRAM `addr`, where some `ldrh` of
     `addr` (`reader`) loads a register that indexes the cell table (`read`, the indexed `ldr`
     off a base literal-loaded with `cell`, `tablegrow._reaches_indexed_read_off_base`). A
     compare with no such reader is not credited."""
@@ -557,7 +564,8 @@ def stale_pair(data: bytes) -> int | None:
     end of GuiData and leaves the old pair in place, unread).
 
     A stale pair is accepted only when, below the located pair, all of these hold: the live cell
-    table's first four rows repeat at a 4-aligned offset C (a grow copies old rows verbatim); the
+    table's first four rows (on to its first non-zero row, `_match_prefix`) repeat at a 4-aligned
+    offset C (a grow copies old rows verbatim); the
     live type table's first 16 bytes repeat at a 4-aligned T with 0 < C - T <= align4(rows)
     (the stock adjacency, type table ending where its cell table starts); and no GuiCode literal
     loads either base (`tablegrow.find_base_refs`). It answers only "grown or not"; the old pair's
@@ -567,13 +575,28 @@ def stale_pair(data: bytes) -> int | None:
     return _stale_pair(data, guidata.SRAM_LOW, guidata.SRAM_HIGH)
 
 
+def _match_prefix(data: bytes, at: int, rows: int) -> bytes | None:
+    """The live cell table's rows `stale_pair` searches for below it: the first four, and on to
+    the first non-zero row when those are all zero, so the match cannot be any zero run. None
+    when no row is non-zero: a table that names no cell has no copy to tell apart. Measured
+    2026-11-08: row 0 is zero and rows 1-3 non-zero on stock 11.23, 13.6 and 14.7, so the prefix
+    is the first four rows there."""
+    words = struct.unpack_from("<%dI" % rows, data, at)
+    first = next((i for i, w in enumerate(words) if w), None)
+    if first is None:
+        return None
+    return bytes(data[at:at + 4 * max(4, first + 1)])
+
+
 @memo.content_cached(copy=None)
 def _stale_pair(data: bytes, sram_lo: int, sram_hi: int) -> int | None:
     from . import tablegrow
     ct = _locate(data, sram_lo, sram_hi)
     gs, _ = guidata.guidata_extent(data)
     live, live_t = gs + ct.cell_off, gs + ct.type_off
-    cell16, type16 = data[live:live + 16], data[live_t:live_t + 16]
+    cell16, type16 = _match_prefix(data, live, ct.rows), data[live_t:live_t + 16]
+    if cell16 is None:
+        return None
     span4 = (ct.rows + 3) & ~3
     at = gs
     while True:

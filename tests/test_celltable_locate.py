@@ -394,16 +394,132 @@ def test_stale_pair_needs_an_unread_copy(monkeypatch):
         celltables._stale_pair.cache_clear()
 
 
-def test_halfword_moves_reuse_equals_a_fresh_evaluation(mcf_136):
+def _halfword_moves_reusing(monkeypatch, before: tuple, after: tuple) -> tuple:
+    """`(reused, fresh, walks_reused, walks_fresh)`: `_halfword_moves` on `after` evaluated
+    right after `before` (so it may reuse `before`'s untouched starts), and from scratch, both
+    through `__wrapped__` (the content cache would answer a repeat without evaluating), with
+    the `_walk_half` runs each evaluation made."""
+    calls = []
+    real = celltables._walk_half
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+    monkeypatch.setattr(celltables, "_walk_half", counting)
+    try:
+        celltables._RECENT_HALF.clear()
+        celltables._halfword_moves.__wrapped__(*before)
+        calls.clear()
+        reused = celltables._halfword_moves.__wrapped__(*after)
+        walks_reused = len(calls)
+        celltables._RECENT_HALF.clear()
+        calls.clear()
+        fresh = celltables._halfword_moves.__wrapped__(*after)
+        walks_fresh = len(calls)
+    finally:
+        celltables._RECENT_HALF.clear()
+    return reused, fresh, walks_reused, walks_fresh
+
+
+def test_halfword_moves_reuse_equals_a_fresh_evaluation(mcf_136, monkeypatch):
     """`_halfword_moves` reuses a recent evaluation's untouched starts; after a grow (GuiCode
-    literals repointed, bounds rebumped) the reused answer equals a from-scratch one."""
+    literals repointed, bounds rebumped) the reused answer equals a from-scratch one, and the
+    reuse happened (fewer `_walk_half` runs than the fresh evaluation, so the equality is not
+    two fresh evaluations agreeing)."""
     from fireflymcf import readout, tablegrow
     grown, _cells, _edits = readout.allocate_fresh_cells(mcf_136, [(2, 3)])
     args = []
     for img in (mcf_136, grown):
         code, base = tablegrow._guicode_slice(img)
         args.append((bytes(code), base, guidata.SRAM_LOW, guidata.SRAM_HIGH))
-    celltables._halfword_moves(*args[0])
-    reused = celltables._halfword_moves(*args[1])
-    celltables._RECENT_HALF.clear()
-    assert celltables._halfword_moves.__wrapped__(*args[1]) == reused
+    assert args[0][0] != args[1][0] and len(args[0][0]) == len(args[1][0])
+    reused, fresh, walks_reused, walks_fresh = _halfword_moves_reusing(monkeypatch, *args)
+    assert reused == fresh
+    assert 0 < walks_reused < walks_fresh
+
+
+def test_halfword_moves_reuse_survives_a_guicode_append(mcf_136, monkeypatch):
+    """A length-changing edit (a routine appended to GuiCode): the appended start is walked,
+    its store is found, and the reused answer equals a fresh one."""
+    from fireflymcf import tablegrow
+    code, base = tablegrow._guicode_slice(mcf_136)
+    code = bytes(code) + bytes(-len(code) % 4)
+    a = len(code)
+    # ldr r0,[pc,#4] ; strh r1,[r0] ; bx lr ; nop ; .word 0x2003A000
+    tail = struct.pack("<4HI", 0x4801, 0x8001, 0x4770, 0xBF00, 0x2003A000)
+    before = (bytes(tablegrow._guicode_slice(mcf_136)[0]), base, guidata.SRAM_LOW,
+              guidata.SRAM_HIGH)
+    after = (code + tail, base, guidata.SRAM_LOW, guidata.SRAM_HIGH)
+    reused, fresh, walks_reused, walks_fresh = _halfword_moves_reusing(monkeypatch, before, after)
+    assert reused == fresh
+    assert (1, 0x2003A000) in fresh[0][base + a + 2]
+    assert 0 < walks_reused < walks_fresh
+
+
+def test_area_comes_from_the_stock_not_a_user_pointed_cell(mcf_136):
+    """A row an earlier op pointed outside the area is the working image's, not the stock's:
+    inside the recipe's stock scope the area is the stock's and allocation goes on, while the
+    working image's reach still counts the row's cell as used."""
+    from fireflymcf import stockscope
+    gs, _ = guidata.guidata_extent(mcf_136)
+    out = bytearray(mcf_136)
+    struct.pack_into("<I", out, gs + celltables.cell_table_off(mcf_136) + 203 * 4, 0x2003B000)
+    out = bytes(out)
+    with stockscope.stock_scope(mcf_136):
+        assert sramreach.cell_area(out) == sramreach.cell_area(mcf_136)
+        assert sramreach.free_runs(out)
+        assert sramreach.reaching_forms(out, 0x2003B000, 1)["cell_table"] == ["0x2003b000"]
+    with pytest.raises(sramreach.SramReachError):
+        sramreach.cell_area(out)                      # outside a scope, the image is its own stock
+
+
+def test_render_state_comes_from_the_stock_not_an_authored_base(mcf_136, monkeypatch):
+    """An authored routine that addresses its own literal SRAM base through `movw` offsets is a
+    second such base in the working image only. Inside the stock scope the render state is the
+    stock's, so an unrelated later op does not refuse RENDER_STATE_BASES; the routine's accesses
+    stay in the working image's reach."""
+    from fireflymcf import readout, stockscope
+    grown, _cells, _edits = readout.allocate_fresh_cells(mcf_136, [(2, 3)])
+    sec = theme.guicode_section(mcf_136)
+    stock_code = bytes(mcf_136[sec.offset:sec.offset + sec.length])
+    real = sramreach._trace.__wrapped__
+
+    def authored(code, *a):
+        t = real(code, *a)
+        if code == stock_code:
+            return t
+        movw = dict(t.movw)
+        movw[0x2003A100] = ((0x260000, 0x10),)
+        bo = dict(t.base_offset)
+        bo[0x2003A110] = frozenset({(0x260000, 4)})
+        return dataclasses.replace(t, movw=movw, base_offset=bo)
+    monkeypatch.setattr(sramreach, "_trace", authored)
+    sramreach._reach.cache_clear()
+    try:
+        with pytest.raises(sramreach.SramReachError) as e:
+            sramreach.locate_render_state(grown)
+        assert e.value.code == "RENDER_STATE_BASES"
+        with stockscope.stock_scope(mcf_136):
+            assert sramreach.locate_render_state(grown) == sramreach.locate_render_state(mcf_136)
+            assert sramreach.cell_area(grown) == sramreach.cell_area(mcf_136)
+            assert sramreach.reaching_forms(grown, 0x2003A110, 4)["base_offset"] == ["0x260000"]
+            assert sramreach.free_runs(grown)
+    finally:
+        sramreach._reach.cache_clear()
+
+
+def test_stale_pair_matches_a_prefix_with_a_nonzero_row():
+    """A prefix of zero rows would match any zero run below the table; the matched prefix
+    runs at least four rows and on to the first non-zero row, and a table of zero rows has
+    nothing to match."""
+    rows = struct.pack("<6I", 0, 0, 0, 0, 0, 0x20039900) + b"\xAA" * 8
+    assert celltables._match_prefix(rows, 0, 7) == rows[:24]
+    first = struct.pack("<5I", 0x20039900, 0, 0, 0, 0)
+    assert celltables._match_prefix(first, 0, 5) == first[:16]
+    assert celltables._match_prefix(bytes(20), 0, 5) is None
+
+
+def test_stale_pair_prefix_on_stock_is_four_rows(mcf_136):
+    ct = celltables.locate(mcf_136)
+    gs, _ = guidata.guidata_extent(mcf_136)
+    assert len(celltables._match_prefix(mcf_136, gs + ct.cell_off, ct.rows)) == 16
