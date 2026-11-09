@@ -981,6 +981,8 @@ STATES_BUTTON = ("b", "add_rvc_button", {
     "dgn": DC_DIMMER_COMMAND_2, "tap": {"payload": "03ffc805ff00ffff"}})
 
 
+# TODO(Plan 6, Task 5): replace these two compile-only tests with the emulator proofs of
+# add_button_status / add_button_states on 14.7, and admit both ops on 14.7.
 def test_add_button_status_compiles_once_admitted(mcf_147, monkeypatch):
     """The pool refusal these two ops met on 14.7 (VARIANT_SETTER_UNKNOWN, observed 2026-11-08:
     the driven-group scan read only 13.6's setter cell) is gone: the scan reads the located cell

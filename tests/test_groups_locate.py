@@ -90,14 +90,14 @@ def test_13_6_returns_todays_49_groups(mcf_136):
     assert newbutton.guicode_selected_groups(mcf_136) == GROUPS_136
     s = newbutton.setter_calls(mcf_136)
     assert s.cell == newbutton.SET_VARIANT_PTR
-    assert (s.n_literal_loads, s.n_derefs, s.n_calls) == (76, 105, 105)
+    assert (s.n_literal_loads, s.n_raw_loads, s.n_derefs, s.n_calls) == (76, 76, 105, 105)
 
 
 def test_14_7_returns_the_47_researched_groups(mcf_147):
     assert newbutton.guicode_selected_groups(mcf_147) == GROUPS_147
     s = newbutton.setter_calls(mcf_147)
     assert s.cell == hooklocate.host_api_cells(mcf_147)[0x04] == 0x200395FC
-    assert (s.n_literal_loads, s.n_derefs, s.n_calls) == (86, 113, 113)
+    assert (s.n_literal_loads, s.n_raw_loads, s.n_derefs, s.n_calls) == (86, 86, 113, 113)
     assert s.writer.target == 0x21B678
     assert {c.group for c in s.calls} == GROUPS_147
     assert any(c.deref == BRANCHED_DEREF_147 and c.group == 0x8D for c in s.calls)
@@ -106,7 +106,7 @@ def test_14_7_returns_the_47_researched_groups(mcf_147):
 def test_11_23_returns_39_groups(mcf_1123):
     assert newbutton.guicode_selected_groups(mcf_1123) == GROUPS_1123
     s = newbutton.setter_calls(mcf_1123)
-    assert (s.n_derefs, s.n_calls) == (90, 90)
+    assert (s.n_literal_loads, s.n_raw_loads, s.n_derefs, s.n_calls) == (64, 64, 90, 90)
 
 
 def test_skipping_the_branch_follow_refuses_14_7(mcf_147, monkeypatch):
@@ -170,6 +170,36 @@ def test_another_store_to_the_cell_refuses(mcf_147):
     assert ldr >> 11 == 0b01101
     struct.pack_into("<H", broken, at, ldr & ~0x0800)    # str rT,[rN,#0]
     with pytest.raises(newbutton.VariantSetterUnknown, match="store"):
+        newbutton.guicode_selected_groups(bytes(broken))
+
+
+def test_an_indirect_transfer_while_the_cell_is_live_refuses(mcf_147):
+    """A `bx r3` where the cell's register is still live: the paths past it are not followed,
+    so the scan refuses rather than stop there."""
+    def regs(call):
+        ldr = struct.unpack_from("<H", mcf_147, _guicode_offset(mcf_147, call.deref))[0]
+        return (ldr >> 3) & 7, ldr & 7                  # ldr rT,[rN,#0]: (rN, rT)
+
+    call = next(c for c in newbutton.setter_calls(mcf_147).calls if regs(c)[0] >= 4)
+    broken = bytearray(mcf_147)
+    struct.pack_into("<H", broken, _guicode_offset(mcf_147, call.deref), 0x4718)   # bx r3
+    with pytest.raises(newbutton.VariantSetterUnknown, match="transfers control") as ei:
+        newbutton.guicode_selected_groups(bytes(broken))
+    assert ei.value.code == "VARIANT_SETTER_UNKNOWN"
+
+
+def test_a_load_hidden_from_the_decode_fails_the_census(mcf_147):
+    """A load of the cell swallowed by a 32-bit instruction is invisible to the decode the walk
+    runs on; the raw halfword census still counts it, and the counts disagree. The load's
+    32-bit predecessor becomes `nop ; 0xF000`, and `0xF000` pairs with the load."""
+    s = newbutton.setter_calls(mcf_147)
+    assert s.n_raw_loads == s.n_literal_loads == 86
+    load = s.calls[0].load
+    at = _guicode_offset(mcf_147, load) - 4
+    assert struct.unpack_from("<H", mcf_147, at)[0] >> 11 in (0b11101, 0b11110, 0b11111)
+    broken = bytearray(mcf_147)
+    broken[at:at + 4] = b"\x00\xbf\x00\xf0"              # nop ; first half of a 32-bit insn
+    with pytest.raises(newbutton.VariantSetterUnknown, match="raw halfword scan"):
         newbutton.guicode_selected_groups(bytes(broken))
 
 

@@ -183,9 +183,10 @@ class SetterCall:
 @dataclass(frozen=True)
 class SetterScan:
     cell: int
-    n_literal_loads: int
+    n_literal_loads: int  # `ldr rN,[pc,#]` of the cell in the decode the walk runs on
+    n_raw_loads: int    # the same, by a raw halfword scan (0x48xx): the census, which must agree
     n_derefs: int
-    n_calls: int        # == n_derefs: every deref resolved to a call (the completeness claim)
+    n_calls: int        # == n_derefs by construction (an unresolved deref refuses)
     calls: tuple        # `SetterCall`, in address order
     writer: object      # `lcdgroups.HostWriter`: the LCD proof of what the cell holds
 
@@ -227,6 +228,15 @@ def setter_calls(data: bytes) -> SetterScan:
        most `SETTER_BRANCH_HOPS` unconditional `b`, with `r0` a constant by propagation from the
        deref (`movs r0,#k`, or `mov r0,rY` after `movs rY,#k`).
 
+    **Completeness.** `n_derefs == n_calls` holds by construction: a deref that does not
+    resolve refuses. The completeness check is the load census: a raw halfword scan for
+    `ldr rN,[pc,#]` (`0x48xx`) whose pool word is the cell must count exactly the loads the
+    resyncing decode saw (`n_raw_loads == n_literal_loads`), so no load hides inside an
+    instruction the decode misaligned on. While the cell is live, a conditional write of its
+    register does not end the walk (the other arm still holds it), a return (`bx lr`,
+    `pop {..., pc}`) ends it, and any other indirect transfer (`tbb`/`tbh`, `bx rX`, a write to
+    `pc`) refuses: the paths past it are not followed.
+
     The cell's only other use allowed is the one store (entry0's copy). A `ldr.w` or
     `movw`/`movt` of the cell is counted and refused, since the sweep does not follow those.
     On 13.6: 76 loads, 105 derefs, 105 calls, 49 groups; 14.7 86/113/113, 47 groups; 11.23
@@ -255,6 +265,23 @@ _CALLER_SAVED = frozenset({"r0", "r1", "r2", "r3", "r12", "ip"})
 _COND_BRANCH = re.compile(r"b(eq|ne|cs|hs|cc|lo|mi|pl|vs|vc|hi|ls|ge|lt|gt|le)(\.w)?|cbn?z")
 
 
+def _conditional(ins) -> bool:
+    """Executed under a condition (an IT block, or a conditional branch)."""
+    from capstone.arm import ARM_CC_AL, ARM_CC_INVALID
+    return ins.cc not in (ARM_CC_AL, ARM_CC_INVALID)
+
+
+def _both_arms(conds: set) -> bool:
+    """`conds` holds a condition and its inverse (capstone pairs them as odd, odd + 1:
+    EQ/NE, HS/LO, MI/PL, VS/VC, HI/LS, GE/LT, GT/LE)."""
+    return any(c % 2 == 1 and c + 1 in conds for c in conds)
+
+
+def _is_return(ins) -> bool:
+    m, o = ins.mnemonic, ins.op_str
+    return (m == "bx" and o == "lr") or (m in ("pop", "pop.w") and "pc" in o)
+
+
 def _ends_flow(ins) -> bool:
     """An unconditional transfer: the walk cannot continue past it linearly."""
     m, o = ins.mnemonic, ins.op_str
@@ -278,9 +305,12 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
     ins = [i for _s, _e, run in theme.detail_runs(img, base) for i in run]
     index = {i.address: k for k, i in enumerate(ins)}
 
-    def pool(i, disp):
-        la = ((i.address + 4) & ~3) + int(disp, 0) - base
+    def pool_at(addr):
+        la = addr - base
         return struct.unpack_from("<I", img, la)[0] if 0 <= la <= len(img) - 4 else None
+
+    def pool(i, disp):
+        return pool_at(((i.address + 4) & ~3) + int(disp, 0))
 
     def resolve(q, fn):
         """From the deref at `ins[q]` loading `fn`: `(blx address, r0)` or a refusal."""
@@ -302,6 +332,8 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
                 continue
             if _ends_flow(i) or i.mnemonic in ("bl", "blx"):
                 break
+            # Linear propagation is safe on a conditional path: an IT-block `movs r0,#k` decodes
+            # as `moveq r0,#k` (not in the set below), so it nulls r0 and the call refuses.
             _r, w = _reads_writes(i)
             imm = _IMM_RE.fullmatch(i.op_str)
             src = i.op_str.split(", ")[1] if i.op_str.count(", ") == 1 else None
@@ -343,6 +375,7 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
         work, seen = [k + 1], set()
         while work:
             q = work.pop()
+            arms: set = set()                 # conditions r was written under, this IT block
             while q < len(ins) and q not in seen:
                 if len(seen) >= load_window:
                     raise VariantSetterUnknown(
@@ -364,7 +397,16 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
                         raise VariantSetterUnknown(
                             f"{j.address:#x} uses the setter cell {cell:#x} other than by a "
                             f"deref: {j.mnemonic} {j.op_str}")
-                if r in writes or (j.mnemonic in ("bl", "blx") and r in _CALLER_SAVED):
+                # A conditional write leaves the cell live on the other arm: keep walking (it
+                # checks more derefs, never fewer). An unconditional one ends this path, and so
+                # do writes under both a condition and its inverse in one IT block (`ite ne;
+                # movne rN; moveq rN`, 11.23 0x249CF0): every arm overwrote it.
+                if j.mnemonic.startswith("it"):
+                    arms = set()
+                if r in writes and _conditional(j):
+                    arms.add(j.cc)
+                if (r in writes and not _conditional(j)) or _both_arms(arms) or \
+                        (j.mnemonic in ("bl", "blx") and r in _CALLER_SAVED):
                     break
                 cond = _COND_BRANCH.fullmatch(j.mnemonic)
                 if cond or j.mnemonic in ("b", "b.w"):
@@ -379,15 +421,29 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
                     else:
                         q = tgt
                     continue
-                if _ends_flow(j):
+                if _is_return(j) and not _conditional(j):
                     break
+                if _ends_flow(j) or (j.mnemonic not in ("bl", "blx") and "pc" in writes):
+                    if not _is_return(j):
+                        raise VariantSetterUnknown(
+                            f"{j.address:#x} transfers control ({j.mnemonic} {j.op_str}) while "
+                            f"the setter cell is live; the paths past it are not followed")
                 q += 1
     if len(stored) != 1:
         raise VariantSetterUnknown(
             f"{len(stored)} stores to the setter cell {cell:#x} "
             f"({[hex(a) for a in sorted(stored)]}); entry0's copy should be the only one")
+    raw = 0
+    for pc in range(0, len(img) - 1, 2):
+        h = img[pc] | (img[pc + 1] << 8)
+        if h >> 11 == 0b01001 and pool_at(((base + pc + 4) & ~3) + (h & 0xFF) * 4) == cell:
+            raw += 1
+    if raw != n_loads:
+        raise VariantSetterUnknown(
+            f"a raw halfword scan finds {raw} `ldr rN,[pc,#]` of the setter cell {cell:#x} and "
+            f"the decode {n_loads}; a load the decode does not see is not walked")
     calls.sort(key=lambda c: c.deref)
-    return SetterScan(cell, n_loads, len(derefs), len(calls), tuple(calls), writer)
+    return SetterScan(cell, n_loads, raw, len(derefs), len(calls), tuple(calls), writer)
 
 
 def hold_safe_groups(data: bytes, reserved=frozenset()) -> list[int]:
