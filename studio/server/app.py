@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from studio.server.engine import (Engine, EngineError, parse_pairs,
                                   resolve_slots)
 from studio.server.projects import ProjectStore, StoreError
-from fireflymcf import cli, patch, recipe
+from fireflymcf import cli, patch, recipe, statusbind
 
 
 def _export_filename(name: str) -> str:
@@ -90,6 +90,13 @@ def create_app(stock_path: str = "firefly-13.6/mcf.bin",
     @app.exception_handler(StoreError)
     def _store_error(_, exc: StoreError):
         return JSONResponse(status_code=exc.status, content={"detail": exc.detail()})
+
+    # The status bridge refusing (`statusbind.BridgeUnknown`, e.g. under the pins reference)
+    # is a coded refusal, not an internal error.
+    @app.exception_handler(statusbind.BridgeUnknown)
+    def _bridge_unknown(_, exc):
+        return JSONResponse(status_code=422,
+                            content={"detail": {"code": exc.code, "message": str(exc)}})
 
     @app.exception_handler(recipe.RecipeError)
     def _recipe_error(_, exc: recipe.RecipeError):

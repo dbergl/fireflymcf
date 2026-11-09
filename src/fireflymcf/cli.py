@@ -1580,17 +1580,27 @@ def _cmd_bus_map(args: argparse.Namespace) -> int:
     dgns = frozenset(_parse_dgn(d) for d in args.dgn) if args.dgn else None
     entries = busmap.receive_map(data, dgns)
     sends = busmap.send_map(data, dgns)
+    # A pin unnamed because the status join is unavailable is not one the build never names
+    from . import outputs
+    join = outputs.status_join_refusal(data) \
+        if any(e.dgn == busmap.DGN_DC_DIMMER_STATUS_3 for e in entries) else None
     if args.json:
         cov = busmap.coverage(entries)
-        print(json.dumps({
+        payload = {
             "receive": [busmap.as_json(e) for e in entries],
             "coverage": {"%05X" % d: dict(c) for d, c in sorted(cov.items())},
             "send": sendmap.as_json(sends),
-        }, indent=2))
+        }
+        if join:                                     # present only when the join refused
+            payload["status_join_unavailable"] = join
+        print(json.dumps(payload, indent=2))
         return 0
     cols = ("entries", "named", "drawn", "drawn-unnamed", "config", "logic-only", "write-only",
             "untraced", "inert")
     cov = busmap.coverage(entries)
+    if join:
+        print("status join unavailable (no caption is joined to a pin by its status cell): "
+              + join)
     if not args.name:
         print("RECEIVE -- %d receive-filter entries, %d DGNs" % (len(entries), len(cov)))
         print("%-6s %s  %s" % ("DGN", " ".join("%7s" % c[:7] for c in cols), "specification name"))

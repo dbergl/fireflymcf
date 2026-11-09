@@ -69,6 +69,7 @@ class PinConfig:
     off_rgb: tuple | None = None
     on_rgb: tuple | None = None
     outputs_row: tuple | None = None                  # (label, file_offset)
+    bridge_refusal: str | None = None                 # why the status path is unknown
 
     @property
     def commanded(self) -> bool:
@@ -152,7 +153,12 @@ def describe_pin(data: bytes, pin: int) -> PinConfig:
     except Exception:
         pass
 
-    pb = statusbind.pin_bindings(data).get(pin)
+    try:
+        pb = statusbind.pin_bindings(data).get(pin)
+    except statusbind.BridgeUnknown as err:
+        # The status path needs the status bridge; where it does not derive, say so
+        cfg.bridge_refusal = "%s: %s" % (err.code, err)
+        pb = None
     if pb is not None:
         cfg.var, cfg.bridged = pb.var, pb.bridged
         cfg.colour_cell, cfg.colour_index = pb.colour_cell, pb.colour_index
@@ -200,6 +206,8 @@ def format_pin(cfg: PinConfig) -> str:
     L.append(f"    masters       {cfg.masters or 'none'}")
     L += ["", f"STATUS    {'displayable' if cfg.displayable else 'not displayable'}",
           f"    var           {cfg.var}   bridged={cfg.bridged}"]
+    if cfg.bridge_refusal:
+        L.append(f"    UNKNOWN       {cfg.bridge_refusal}")
     if cfg.colour_cell is not None:
         L.append(f"    colour cell   0x{cfg.colour_cell:08X}  table index {cfg.colour_index}")
     L.append(f"    bool index    {cfg.bool_index}")

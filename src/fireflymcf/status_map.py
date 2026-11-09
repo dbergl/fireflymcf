@@ -139,7 +139,7 @@ def _derived_bridge(data: bytes, lo: int, hi: int) -> dict[int, dict]:
         raise BridgeUnknown(
             "BRIDGE_UNKNOWN: the per-tick decoder the receive-slot base reaches is not located "
             "(%s), so which cell each status variable's block writes is not known" % err)
-    if e1 is None or e1 not in slottrace._tracer(data).at:
+    if e1 is None or not slottrace.is_instruction(data, e1):
         raise BridgeUnknown(
             "BRIDGE_UNKNOWN: GuiCode_entry1 (the GuiCode header word at +0x10 the LCD calls with "
             "the receive-slot base) is not located, so the base is not followed")

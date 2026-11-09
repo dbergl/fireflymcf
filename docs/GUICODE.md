@@ -7075,8 +7075,10 @@ G12 reporting pins 3, 17, 30 and 43 on sets each derived colour cell to its ON m
 bool of 3 and 30, whose cells nothing else loads, to 1); reporting them off restores both, and
 the cells 13.6's dump names never move there (pin 3, var 20: derived `0x20039854`/`0x20039D50`,
 13.6's `0x20039BB0`). `backbone`, `pin_bindings`, `state_loads` and `bind_pin` read it; the dump
-(`load_bridge("136")`) stays as the tests' positive control. It refuses `BRIDGE_UNKNOWN` only
-where the base is not followed (`state_reach` does not locate, or the base escapes).
+(`load_bridge("136")`) stays as the tests' positive control. It refuses `BRIDGE_UNKNOWN` where
+the base is not followed (`state_reach` does not locate, or the base escapes), and where one var
+has two clean blocks naming different cells (it does not pick one; no corpus image has such a
+var).
 
 ### 3. What it reaches, and the names
 

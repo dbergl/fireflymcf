@@ -639,6 +639,20 @@ def _captions(data: bytes) -> tuple:
     return tuple(found)
 
 
+@memo.content_cached(copy=None)
+def status_join_refusal(data: bytes) -> str | None:
+    """Why no caption is joined by status on this image (`"BRIDGE_UNKNOWN: ..."`), or None when
+    the status bridge derives. A caller that lists names says so, so a pin left unnamed for that
+    reason is not read as one the build never names."""
+    from . import statusbind
+    try:
+        statusbind.pin_bindings(data)
+    except statusbind.BridgeUnknown as err:
+        msg = str(err)
+        return msg if msg.startswith(err.code) else "%s: %s" % (err.code, msg)
+    return None
+
+
 def control_captions(data: bytes) -> dict[int, list[Caption]]:
     """`{pin: [Caption, ...]}`: what the build's own controls call each pin.
 

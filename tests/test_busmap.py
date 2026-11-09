@@ -28,7 +28,9 @@ def image(name):
 
 
 def _clear():
-    for mod in (busmap, slottrace):
+    # status_map and outputs memoise the status bridge and the captions joined through it, so a
+    # patched trace (an escape) must not leave them cached for a later test
+    for mod in (busmap, slottrace, status_map, outputs):
         for v in vars(mod).values():
             if callable(getattr(v, "cache_clear", None)):
                 v.cache_clear()
@@ -343,6 +345,35 @@ def test_an_escape_voids_every_negative(clean_caches, monkeypatch):
     monkeypatch.setattr(slottrace, "state_reach", leaky)
     m = busmap.receive_map(image(B136))
     assert not any(e.cls == "write-only" for e in m)
+    assert outputs.status_join_refusal(image(B136)).startswith("BRIDGE_UNKNOWN")
+
+
+def test_an_escape_leaves_no_cached_captions_behind(monkeypatch):
+    """The escape case, then the real trace restored: the status-joined captions are back at
+    their full count (a cached refusal would leave only the command-joined ones)."""
+    data = image(B136)
+    _clear()
+    full = len(outputs._captions(data))
+    real = slottrace.state_reach
+    with monkeypatch.context() as m:
+        m.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
+            real(d).functions, real(d).loads, ((0x240000, "test"),)))
+        _clear()
+        assert len(outputs._captions(data)) < full
+    _clear()
+    assert len(outputs._captions(data)) == full
+    assert outputs.status_join_refusal(data) is None
+
+
+def test_bus_map_says_when_the_status_join_is_unavailable(clean_caches, monkeypatch, capsys):
+    real = slottrace.state_reach
+    monkeypatch.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
+        real(d).functions, real(d).loads, ((0x240000, "test"),)))
+    assert cli.main(["bus-map", str(REPO / B136)]) == 0
+    assert "status join unavailable" in capsys.readouterr().out
+    assert cli.main(["bus-map", "--json", str(REPO / B136)]) == 0
+    assert json.loads(capsys.readouterr().out)["status_join_unavailable"].startswith(
+        "BRIDGE_UNKNOWN")
 
 
 # ------------------------------------------------------------------------------ spot checks

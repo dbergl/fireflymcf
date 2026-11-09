@@ -34,8 +34,11 @@ def leaky_base(monkeypatch, request):
         sr = real(data)
         return slottrace.StateReach(sr.functions, sr.loads, ((0x240000, "test"),))
     monkeypatch.setattr(slottrace, "state_reach", leaky)
-    status_map._derived_bridge.cache_clear()
-    request.addfinalizer(status_map._derived_bridge.cache_clear)
+    from fireflymcf import outputs
+    caches = (status_map._derived_bridge, outputs._captions, outputs.status_join_refusal)
+    for c in caches:
+        c.cache_clear()
+    request.addfinalizer(lambda: [c.cache_clear() for c in caches])
 
 
 def test_bind_pin_refuses_where_the_bridge_does_not_derive(mcf_147, leaky_base):

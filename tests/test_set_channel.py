@@ -340,7 +340,10 @@ def test_refuses_where_the_bridge_does_not_derive(monkeypatch) -> None:
     real = slottrace.state_reach
     monkeypatch.setattr(slottrace, "state_reach", lambda d: slottrace.StateReach(
         real(d).functions, real(d).loads, ((0x240000, "test"),)))
-    status_map._derived_bridge.cache_clear()
+    from fireflymcf import outputs
+    caches = (status_map._derived_bridge, outputs._captions, outputs.status_join_refusal)
+    for c in caches:
+        c.cache_clear()
     try:
         fan = [c for c in guidata.find_control_groups(other) if c.group == BATH_FAN_GROUP][0]
         with pytest.raises(patch.PatchError, match="does not derive"):
@@ -349,7 +352,8 @@ def test_refuses_where_the_bridge_does_not_derive(monkeypatch) -> None:
         patcher.set_channel(fan, FREE_CHANNEL, move_display_list=True)
         assert patcher.edits()
     finally:
-        status_map._derived_bridge.cache_clear()
+        for c in caches:
+            c.cache_clear()
 
 
 # Every single-channel control on 13.6, by group: does its indicator name its own pin's cells
