@@ -688,6 +688,7 @@ Add a boxed HOME button wired to a G12 pin: status cell bound, command group all
 | `font` | integer\|null |  | null | caption font slot; selector must be the 0xff inherit default |
 | `allow_commanded_channel` | boolean |  | false | opt out of the channel-collision check |
 | `allow_named_output` | boolean |  | false | acknowledge an output the G12 OUTPUTS list names for a load |
+| `at` | object |  | {"page": "home", "x": 435, "y": 404} | page and attach origin (box left edge = x + 135) |
 
 Error codes:
 
@@ -696,6 +697,11 @@ Error codes:
 - `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the new button's command group cannot be shown not to be one (`newbutton.unused_command_groups`)
+- `GRAMMAR` — the image's record grammar is not proven 13.6's, so the button template (`donors.button_object`) is not usable (11.23)
+- `NO_TEMPLATE` — the template is not proven on this image: no stock object witnesses the caption's text form, or its label does not fill its field
+- `MODE7_INDEX` — the pin's colour cell is not below the image's mode-7 index limit (the decoder would clamp it to cell 0)
+- `PLACEMENT_OVERLAP` — the button's footprint at `at` leaves the page's canvas or covers a placed record other than the page root and one enclosing wt-33 card
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the group and binding the build writes, is not proven 13.6's (`grammar.prove_lcd`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)

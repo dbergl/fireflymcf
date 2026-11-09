@@ -26,7 +26,8 @@ import re
 import struct
 from dataclasses import dataclass
 
-from . import firmware, guidata, insert, memo, patch, records, relocate
+from . import (donors, firmware, grammar, guidata, insert, layout, memo, patch, records,
+               relocate)
 from .cli import _resolve_page_root
 
 
@@ -673,57 +674,113 @@ def _grow_command_group(data: bytes):
 
 
 # --------------------------------------------------------------------------------------
-# clone a boxed button and attach it to the HOME root
+# clone a boxed button and attach it to a page root
 # --------------------------------------------------------------------------------------
 
-# The donor for the byte-clone: obj 279 ("Fresh Tank Heater"), record shape `[33, 11, 12]` --
-# a visible 84x50 box, a caption, and a touch region (MCF-FORMAT.md Sec.6.0a).
+# The object is the proven template `donors.button_object`: three records, shape `[33, 11, 12]`
+# -- a visible 84x50 box, a caption, and a touch region (MCF-FORMAT.md Sec.6.0a) -- whose
+# documented source is 13.6 object 279 ("Fresh Tank Heater"), one of four byte-identical
+# unattached tank-heater objects; on 13.6 the assembled bytes equal object 279's span, so a 13.6
+# build is unchanged by construction (research notes 2026-11-09).
 #
-# It is chosen for a structural reason: it carries a `value_slot` field on BOTH its box and its
-# caption. That field's PRESENCE is gated by the record header, so a same-size edit cannot add
-# one -- and without it the clone can never register for in-place redraw. The obvious donor,
-# the HOME Water Pump (obj 295), has no value_slot on any of its records: it inherits one from
-# its PARENT wtype-5 container record (obj 989/990, value_slot 160 == its fillA index 160), and
-# a clone attached by our own generated container does not inherit that. Cloning 295 therefore
-# gives a button whose colour is right but which only repaints on re-entering the page (a
-# probe on the coach, 2026-08-17).
+# The form is chosen for a structural reason: it carries a `value_slot` field on BOTH its box and
+# its caption. That field's PRESENCE is gated by the record header, so a same-size edit cannot
+# add one -- and without it the clone can never register for in-place redraw. The obvious donor,
+# the HOME Water Pump (13.6 obj 295), has no value_slot on any of its records: it inherits one
+# from its PARENT wtype-5 container record (value_slot 160 == its fillA index 160), and a clone
+# attached by our own generated container does not inherit that. Cloning it therefore gives a
+# button whose colour is right but which only repaints on re-entering the page (a probe on the
+# coach, 2026-08-17).
 #
-# The donor's own value_slots (53 box, 59 caption) are type-1 CONFIG GATES ("is this tank heater
-# fitted?"), not status cells, so `retarget_indicator` rewrites both to the pin's cell.
-DONOR_OBJ = 279
+# The template's own value_slots (13.6: 53 box, 59 caption) are type-1 CONFIG GATES ("is this
+# tank heater fitted?"), not status cells, so `retarget_indicator` rewrites both to the pin's
+# cell.
 
 
-def clone_onto_home(data: bytes, position: tuple[int, int] | None = None
-                    ) -> tuple[bytes, int, list["insert.Edit"]]:
-    """Byte-clone the donor button (object `DONOR_OBJ`) and attach it as a new child of the
-    HOME root, optionally at absolute `position=(x, y)`.
+def clone_onto_home(data: bytes, position: tuple[int, int] | None = None, *,
+                    page: str = "home") -> tuple[bytes, int, list["insert.Edit"]]:
+    """Attach add_button's object (`donors.button_object`, the proven template) as a new child
+    of the `page` root (default HOME), optionally at absolute `position=(x, y)`.
 
-    Two calls into `insert.py`, in sequence: `clone_object` returns the donor's exact byte
-    span (so the clone decodes identically -- no new correctness proof needed beyond the
-    boundary oracle that already covers the donor's shape); `insert_object` appends it as a
-    new object at the top object-table index (so no existing `child_index` shifts) and wires
-    it in as a child of the HOME page root (`cli._resolve_page_root(data, "home")`). When
-    `position` is given, `insert_object` uses a geometry-bearing wtype-5 attach template and
-    rewrites its x/y so the framed clone lands at that origin (the clone's own geometry sets
-    the box *size*, not its position).
+    Two calls into `insert.py`: `donors.button_object` gives the object's bytes (refusing
+    `DonorError` GRAMMAR or NO_TEMPLATE where the image does not prove the template), and
+    `insert_object` appends it as a new object at the top object-table index (so no existing
+    `child_index` shifts) and wires it in as a child of the page root
+    (`cli._resolve_page_root(data, page)`). When `position` is given, `insert_object` uses a
+    geometry-bearing wtype-5 attach template and rewrites its x/y so the framed clone lands at
+    that origin (the clone's own geometry sets the box *size*, not its position).
 
     Returns `(new_data, new_obj_index, edits)`.
     """
-    clone = insert.clone_object(data, DONOR_OBJ)
-    home = _resolve_page_root(data, "home")
-    new_data, edits = insert.insert_object(data, clone, home, position=position)
+    clone, _proof = donors.button_object(data)
+    root = _resolve_page_root(data, page)
+    new_data, edits = insert.insert_object(data, clone, root, position=position)
     new_idx = len(guidata.object_tables(new_data)[1]) - 1
     return new_data, new_idx, edits
+
+
+class PlacementOverlap(ValueError):
+    """PLACEMENT_OVERLAP: the new button's footprint leaves the page's canvas (the page root's
+    own placed records), or covers a placed record other than the page root's and the one wt-33
+    card that encloses it."""
+    code = "PLACEMENT_OVERLAP"
+
+
+@dataclass(frozen=True)
+class Placement:
+    box: tuple          # (x0, y0, x1, y1): the new object's placed records' bounding box
+    canvas: tuple       # the page root's own placed records' bounding box
+    card: int | None    # the object of the one wt-33 card that encloses `box`, if any
+
+
+def _bbox(quads) -> tuple:
+    return (min(min(q.x0, q.x1) for q in quads), min(min(q.y0, q.y1) for q in quads),
+            max(max(q.x0, q.x1) for q in quads), max(max(q.y0, q.y1) for q in quads))
+
+
+def check_placement(data: bytes, root: int, obj: int) -> Placement:
+    """The footprint gate: walk the page (`layout.Screen(data).walk(root)`, the layout engine's
+    replay, type-6 switches on their base arm) and refuse `PlacementOverlap` unless object
+    `obj`'s placed records lie inside the page root's own placed records (the canvas) and touch
+    no placed record but the root's and one wt-33 record that encloses them all (the card the
+    button sits on). Boxes are compared inclusively, so an edge-to-edge neighbour refuses too."""
+    placed = layout.Screen(data).walk(root)
+    mine = [q for q in placed if q.obj_index == obj]
+    canvas_q = [q for q in placed if q.obj_index == root]
+    if not mine:
+        raise PlacementOverlap(f"object {obj} places nothing under page root {root}")
+    if not canvas_q:
+        raise PlacementOverlap(f"page root {root} places no record of its own, so its canvas "
+                               f"is not known")
+    box, canvas = _bbox(mine), _bbox(canvas_q)
+    if not (canvas[0] <= box[0] and canvas[1] <= box[1]
+            and box[2] <= canvas[2] and box[3] <= canvas[3]):
+        raise PlacementOverlap(f"object {obj}'s footprint {box} leaves the page's canvas "
+                               f"{canvas}")
+    hits = []
+    for q in placed:
+        if q.obj_index in (obj, root):
+            continue
+        b = _bbox([q])
+        if not (b[2] < box[0] or b[0] > box[2] or b[3] < box[1] or b[1] > box[3]):
+            hits.append((q, b))
+    cards = [(q, b) for q, b in hits if q.wtype == 33 and b[0] <= box[0] and b[1] <= box[1]
+             and box[2] <= b[2] and box[3] <= b[3]]
+    if len(hits) > 1 or (hits and not cards):
+        raise PlacementOverlap(
+            f"object {obj}'s footprint {box} covers "
+            + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
+    return Placement(box, canvas, cards[0][0].obj_index if cards else None)
 
 
 # --------------------------------------------------------------------------------------
 # retarget the clone's command group to its own RV-C instance
 # --------------------------------------------------------------------------------------
 
-# The clone commands RV-C instance == G12 pin 15: unbound (no existing binding commands
-# it, per BUS-BASELINE/answer-key), latch, and its indicator colour cell is indexed --
-# chosen 2026-08-16 after a dig found the earlier candidate (27) is a motor channel with
-# a command conflict.
+# A 13.6 test default for direct callers (the add_button op always passes its channel): RV-C
+# instance == G12 pin 15, unbound on 13.6 (no existing binding commands it, per
+# BUS-BASELINE/answer-key), latch, and its indicator colour cell is indexed -- chosen 2026-08-16
+# after a dig found the earlier candidate (27) is a motor channel with a command conflict.
 TARGET_CHANNEL = 15
 
 # The single-press toggle: ONE DC_DIMMER_COMMAND_2 binding carrying command 5 (toggle). The
@@ -1147,9 +1204,10 @@ def retarget_command(data: bytes, obj_index: int, *, channel: int | None = None,
 # retarget the clone's on/off indicator to instance 15's colour cell (Task 4)
 # --------------------------------------------------------------------------------------
 
-# Instance 15's indexed colour cell. The clone inherits the donor's own indicator cell
-# (278's wtype-33 fillA mode-7 index 155, byte-cloned) -- 145 is the cell already indexed
-# for instance 15, chosen 2026-08-16 alongside TARGET_CHANNEL (see that constant's note).
+# A 13.6 test default for direct callers (the add_button op always passes the cell
+# `statusbind.bind_pin` returns): instance 15's indexed colour cell on 13.6. The clone inherits
+# the template's own indicator cell -- 145 is the cell already indexed for instance 15, chosen
+# 2026-08-16 alongside TARGET_CHANNEL (see that constant's note).
 INDICATOR_COLOUR_INDEX = 145
 
 # The value_slot written to BOTH the box (wtype 33) and the caption (wtype 11).
@@ -1302,29 +1360,22 @@ def retarget_indicator(data: bytes, obj_index: int, *,
 # Task 5: label, place, and compose the end-to-end build
 # --------------------------------------------------------------------------------------
 
-# The donor caption ("Black Tank Heater", 17 bytes) and the new one, same size (6 chars +
-# 11 trailing spaces, matching the corpus's right-pad-to-fit convention -- MCF-FORMAT.md
-# Sec.6). A same-size rename cannot add a character; "Pin 15" fits comfortably.
-TARGET_LABEL_RAW = b"Fresh Tank Heater"      # obj 279's caption, 17 bytes
-NEW_LABEL_RAW = b"Pin 15" + b" " * 11        # 17 bytes, same field width
-assert len(NEW_LABEL_RAW) == len(TARGET_LABEL_RAW)
+# The caption written when a direct caller gives no `label`: right-padded to the template
+# caption's field (17 bytes on 13.6 and 14.7), the bytes the coach button carried 2026-08-17.
+DEFAULT_LABEL = "Pin 15"
 
-# The (x, y) origin the positioned attach record places the framed button at (its wtype-5
-# geom[0]/geom[1], base-mode 0). The clone is a real box, so its OWN geometry sets the box
-# size and the donor's own geom[0]=135 x-offset rides on top: the drawn box left edge lands
-# at NEW_X + 135, the box is 84 wide x 50 tall, and the "Pin 15" caption centres in it.
-# Tuned 2026-08-17 by rendering `--page home --config build/coach-wd.json` against
-# `build/13.6-images/HOME.jpg`: NEW_X=425 -> box left edge 560, so the box sits at
-# (560..644, 418..468) in the empty lower-right area below the House/Chassis batteries,
-# clear of every existing control.
-# Centred in the HOME bottom-right quadrant (panel x[435,790], y[263,468]; centre x=612), below
-# the Chassis battery indicator (bottom y~391) with padding from the quadrant edges. Donor 279's
-# box is 84 wide and carries its own geom[0]=135 x-offset, which rides on top of the attach
-# record's origin, so the drawn left edge is NEW_X + 135: centring an 84-wide box at x=612 wants
-# a left edge of 570, hence NEW_X = 435. y=404 sits ~13px under the battery and ~14px above the
-# quadrant's bottom edge. Verified on the coach 2026-08-17.
-NEW_X = 435
-NEW_Y = 404
+# The 13.6 default placement, `(page, x, y)`: the (x, y) origin the positioned attach record
+# places the framed button at (its wtype-5 geom[0]/geom[1], base-mode 0). The clone is a real
+# box, so its OWN geometry sets the box size and the template's own geom[0]=135 x-offset rides
+# on top: the drawn box left edge lands at x + 135, the box is 84 wide x 50 tall.
+# Centred in the 13.6 HOME bottom-right quadrant (panel x[435,790], y[263,468]; centre x=612),
+# below the Chassis battery indicator (bottom y~391) with padding from the quadrant edges:
+# centring an 84-wide box at x=612 wants a left edge of 570, hence x = 435. y=404 sits ~13px
+# under the battery and ~14px above the quadrant's bottom edge. Tuned 2026-08-17 by rendering
+# HOME against a photo of the panel; verified on the coach 2026-08-17. On another image the spot
+# is admitted only by `check_placement`, never assumed free.
+DEFAULT_AT_136 = ("home", 435, 404)
+NEW_X, NEW_Y = DEFAULT_AT_136[1:]       # the 13.6 default x, y, kept by name for direct callers
 
 
 def last_object_index(data: bytes) -> int:
@@ -1335,51 +1386,77 @@ def last_object_index(data: bytes) -> int:
 def build_home_button(data: bytes, *, channel: int | None = None,
                       allow_commanded_channel: bool = False,
                       colour_index: int | None = None,
-                      label: str | None = None) -> tuple[bytes, list]:
-    """The full byte-verified build: clone the donor button onto HOME as its own boxed
-    button placed at `(NEW_X, NEW_Y)`, command RV-C instance `TARGET_CHANNEL` (15) with a
-    clean toggle, indicate it via colour cell `INDICATOR_COLOUR_INDEX` (145), relabel it
-    "Pin 15", and reseal.
+                      label: str | None = None,
+                      at: tuple[str, int, int] | None = None) -> tuple[bytes, list]:
+    """The full byte-verified build: attach the proven button template
+    (`donors.button_object`) to a page as its own boxed button placed at `at` (default
+    `DEFAULT_AT_136`, HOME (435, 404)), command an RV-C instance with a clean toggle, indicate it
+    via a colour cell, relabel it, and reseal.
 
-    `channel`, `allow_commanded_channel`, `colour_index` and `label` override those three
-    defaults; each is forwarded to the composed call that already understood it
-    (`retarget_command`, `retarget_indicator`, and the label rewrite respectively). They
-    exist because building on pin 15 and *then* retargeting leaves a real defect: every
-    `retarget_command` call allocates a FRESH group from `allocate_command_group`, so the
-    first group -- still carrying a command-5 binding on the abandoned channel -- stays in
-    the table as an orphan. It is unreachable, but it is a live capability the image can
-    still express, and the capability gate (`recipe.capabilities`) correctly refuses it. Pass
-    the destination channel here and only one group is ever allocated.
+    `channel`, `allow_commanded_channel`, `colour_index` and `label` are forwarded to the
+    composed call that already understood each (`retarget_command`, `retarget_indicator`, and
+    the label rewrite). Left `None`, `channel` and `colour_index` fall back to `TARGET_CHANNEL`
+    (15) and `INDICATOR_COLOUR_INDEX` (145), 13.6 test defaults (the add_button op always passes
+    both), and `label` to `DEFAULT_LABEL`. They exist because building on pin 15 and *then*
+    retargeting leaves a real defect: every `retarget_command` call allocates a FRESH group from
+    `allocate_command_group`, so the first group -- still carrying a command-5 binding on the
+    abandoned channel -- stays in the table as an orphan. It is unreachable, but it is a live
+    capability the image can still express, and the capability gate (`recipe.capabilities`)
+    correctly refuses it. Pass the destination channel here and only one group is ever
+    allocated.
 
-    `label` is padded with trailing spaces to the donor field's width and must not exceed
-    it; a longer caption is a relocating edit, not this one.
+    `label` is padded with trailing spaces to the template caption's field width and must not
+    exceed it; a longer caption is a relocating edit, not this one.
 
-    Composes Tasks 1-4 in sequence (`clone_onto_home` with a positioned attach ->
-    `retarget_command` -> `retarget_indicator`), then one more same-size edit pass of its
-    own -- the label rewrite -- followed by one final `patch.reseal`. Positioning is done
-    by the attach record (not by moving the clone's own geometry): a framed clone's geometry
-    is its box *size*, so the box is placed by `insert_object`'s `position=` argument. Each
-    composed call already reseals internally (one checksum each, every intermediate stage is
-    a valid re-decodable image); the label edit is resealed once more at the end.
+    `at=(page, x, y)` names the page (`cli._resolve_page_root`) and the attach record's origin;
+    the box's left edge lands at x plus the template box's own x offset (135).
+
+    Gates, in order: the template (`donors.button_object`: DonorError GRAMMAR, NO_TEMPLATE); the
+    colour cell (`donors.check_mode7_index`: MODE7_INDEX); the footprint
+    (`check_placement`: PlacementOverlap); the LCD group handling that reads the group and
+    binding the build writes (`grammar.prove_lcd`, the loader `FUN_0021B420` and the sender
+    `FUN_0021B8B4`: DonorError LCD_GRAMMAR), before `retarget_command`.
+
+    Composes `clone_onto_home` with a positioned attach -> `retarget_command` ->
+    `retarget_indicator`, then one more same-size edit pass of its own -- the label rewrite --
+    followed by one final `patch.reseal`. Positioning is done by the attach record (not by
+    moving the clone's own geometry): a framed clone's geometry is its box *size*, so the box is
+    placed by `insert_object`'s `position=` argument. Each composed call already reseals
+    internally (one checksum each, every intermediate stage is a valid re-decodable image); the
+    label edit is resealed once more at the end.
 
     Returns `(new_data, edits)`, edits accumulated across every stage in final-image
     coordinates (structural insert + every same-size field edit + every reseal), sorted by
     offset.
     """
     edits: list = []
+    page, x, y = DEFAULT_AT_136 if at is None else at
 
+    _obj, proof = donors.button_object(data)
+    field = proof.caption_width
     if label is not None:
         raw = label.encode("ascii")
-        if len(raw) > len(TARGET_LABEL_RAW):
+        if len(raw) > field:
             raise ValueError(
-                f"label {label!r} is {len(raw)} bytes and the donor field is "
-                f"{len(TARGET_LABEL_RAW)}; growing it needs a relocating edit")
+                f"label {label!r} is {len(raw)} bytes and the template's caption field is "
+                f"{field}; growing it needs a relocating edit")
     # ...and the PADDING is decided further down, once the caption record has been decoded:
     # where the slack goes depends on that record's own h-align byte, and getting it wrong is
     # visible on the panel (see the padding block below).
+    donors.check_mode7_index(
+        data, INDICATOR_COLOUR_INDEX if colour_index is None else colour_index,
+        "add_button's indicator cell")
 
-    out, idx, e = clone_onto_home(data, position=(NEW_X, NEW_Y))
+    out, idx, e = clone_onto_home(data, position=(x, y), page=page)
     edits += e
+    check_placement(out, _resolve_page_root(out, page), idx)
+    try:
+        grammar.prove_lcd(data)
+    except grammar.LcdGrammarError as err:
+        raise donors.DonorError(
+            "LCD_GRAMMAR", f"add_button: the LCD firmware's group handling, which reads the "
+                           f"group and binding this build writes, is not proven 13.6's: {err}"
+        ) from err
     out, e = retarget_command(out, idx, channel=channel,
                               allow_commanded_channel=allow_commanded_channel)
     edits += e
@@ -1398,11 +1475,11 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     if w11.label_offset is None:
         raise ValueError(f"clone {idx} wtype-11 record carries no label")
     label_off = w11.label_offset
-    current = out[label_off:label_off + len(TARGET_LABEL_RAW)]
-    if current != TARGET_LABEL_RAW:
+    current = out[label_off:label_off + field]
+    if current != proof.caption_label:
         raise ValueError(
             f"clone {idx} wtype-11 label bytes are {current!r}, expected "
-            f"{TARGET_LABEL_RAW!r} (the donor's own caption) before relabelling")
+            f"{proof.caption_label!r} (the template's own caption) before relabelling")
 
     # Pad the caption to the donor field, the way THIS record is drawn.
     #
@@ -1415,11 +1492,11 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     # left of centre, next to a 'Water\nPump' that needed no padding and looked right (owner,
     # 2026-08-21). `align="center"` splits the slack around that line instead.
     if label is None:
-        new_label_raw = NEW_LABEL_RAW
+        new_label_raw = DEFAULT_LABEL.encode("ascii").ljust(field)
     else:
-        donor_field = TARGET_LABEL_RAW.decode("ascii")
+        donor_field = proof.caption_label.decode("latin-1")
         new_label_raw = patch.repad(
-            donor_field, donor_field, label, len(TARGET_LABEL_RAW),
+            donor_field, donor_field, label, field,
             "center" if w11.h_align == 2 else "right").encode("ascii")
 
     working = bytearray(out)

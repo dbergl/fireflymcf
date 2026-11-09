@@ -1306,6 +1306,31 @@
                     "type": "boolean",
                     "default": false,
                     "description": "acknowledge an output the G12 OUTPUTS list names for a load"
+                  },
+                  "at": {
+                    "type": "object",
+                    "properties": {
+                      "page": {
+                        "type": "string"
+                      },
+                      "x": {
+                        "type": "integer"
+                      },
+                      "y": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "page",
+                      "x",
+                      "y"
+                    ],
+                    "default": {
+                      "page": "home",
+                      "x": 435,
+                      "y": 404
+                    },
+                    "description": "page and attach origin (box left edge = x + 135)"
                   }
                 },
                 "required": [

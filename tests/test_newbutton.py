@@ -3,6 +3,8 @@ import pytest
 from fireflymcf import coverage, guidata, newbutton, records, relocate
 
 BUILD = "firefly-13.6/mcf.bin"
+DONOR_136 = 279          # 13.6 object 279: the button template's documented source (donors)
+CAPTION_WIDTH = 17       # its caption field, b"Fresh Tank Heater"
 
 
 def _d():
@@ -68,7 +70,7 @@ def test_object_group_reads_the_clones_group_reference_tail():
     data = _d()
     # The donor (obj 279, "Fresh Tank Heater") references its own group, 5 -- sanity-check the
     # decoder against a known-good object before trusting it on the freshly-cloned one.
-    assert newbutton.object_group(data, newbutton.DONOR_OBJ) == 5
+    assert newbutton.object_group(data, DONOR_136) == 5
 
 
 def test_retarget_command_points_clone_group_at_channel_15_with_a_toggle(retargeted):
@@ -241,7 +243,7 @@ def test_build_home_button_leaves_the_donor_untouched(built):
     (nor on its neighbours, which share the tank-heater group)."""
     out, edits = built
     gs, _ = guidata.guidata_extent(out)
-    d_recs = records.object_records(out, gs + guidata.object_tables(out)[1][newbutton.DONOR_OBJ])
+    d_recs = records.object_records(out, gs + guidata.object_tables(out)[1][DONOR_136])
     d33 = next(r for r in d_recs if r.wtype == 33)
     assert ('fillA', 7, 138) in d33.colors          # donor keeps its own indicator cell
     assert d33.value_slot == 53                     # and its own type-1 config gate
@@ -628,9 +630,9 @@ def test_build_home_button_honours_an_explicit_label_and_refuses_a_longer_one():
     stripped = ["\n".join(ln.strip() for ln in lbl.split("\n")) for lbl in labels]
     assert "Overflow\nValve" in stripped, labels
     # the field is the donor's width, so the written label is padded to exactly that
-    assert any(len(lbl) == len(newbutton.TARGET_LABEL_RAW) for lbl in labels), labels
+    assert any(len(lbl) == CAPTION_WIDTH for lbl in labels), labels
 
-    too_long = "X" * (len(newbutton.TARGET_LABEL_RAW) + 1)
+    too_long = "X" * (CAPTION_WIDTH + 1)
     with pytest.raises(ValueError, match="relocating edit"):
         newbutton.build_home_button(data, label=too_long)
 
@@ -656,4 +658,138 @@ def test_build_home_button_balances_the_pad_on_a_centred_caption():
                if r.wtype == 11 and r.label and "Valve" in r.label)
     assert cap.h_align == 2, "the donor caption is no longer centred; re-check the pad rule"
     assert cap.label == "Overflow\n  Valve ", repr(cap.label)
-    assert len(cap.label) == len(newbutton.TARGET_LABEL_RAW)
+    assert len(cap.label) == CAPTION_WIDTH
+
+
+# --------------------------------------------------------------------------------------
+# The proven template, the placement gate and the LCD gate (2026-11-09)
+# --------------------------------------------------------------------------------------
+
+STOCK_147 = "firefly-14.7 (Terrain)/mcf.bin"
+STOCK_1123 = "firefly-11.23/mcf.bin"
+
+
+def _read(path):
+    with open(path, "rb") as fh:
+        return fh.read()
+
+
+def _sha(b):
+    import hashlib
+    return hashlib.sha256(b).hexdigest()
+
+
+def _compile(stock, monkeypatch=None, firmwares=None, **params):
+    """One add_button op compiled on `stock`; `firmwares` admits the op's firmware gate."""
+    from fireflymcf import recipe
+    if firmwares is not None:
+        monkeypatch.setattr(recipe.REGISTRY["add_button"], "firmwares", frozenset(firmwares))
+    p = recipe.Project(base_sha256=_sha(stock), build_name=None, ops=[recipe.OpSpec(
+        id="b", type="add_button",
+        params={"channel": 15, "label": "Pin 15", "off_colour": [65, 81, 163], **params})])
+    return recipe.compile_project(p, stock)
+
+
+def test_a_13_6_build_is_byte_identical_to_the_donor_279_build():
+    """The template path changes no 13.6 byte: the hashes are the donor-279 builds' (library
+    default and the op on pin 15), taken before the donor became the proven template."""
+    data = _d()
+    out, _ = newbutton.build_home_button(data)
+    assert _sha(out) == "d53359210e5f57757b599392370ae6d53a0fb1a22ae0209fb93c201ba82752ca"
+    out, _ = newbutton.build_home_button(data, channel=28, allow_commanded_channel=True,
+                                         colour_index=160, label="Overflow\nValve")
+    assert _sha(out) == "97cc307f6f4f8eae7ba6aab830b342fb0dc6dd9d8c59ab1d694ad35f12a920f7"
+    r = _compile(data)
+    assert r.ok, r.errors
+    assert _sha(r.data) == "ebd4c2ef326c5c3448b161b79edd7f32a58ef823ec1255fed1d66272fc10ea0a"
+
+
+def test_placement_defaults_to_the_13_6_home_spot():
+    data = _d()
+    assert newbutton.DEFAULT_AT_136 == ("home", 435, 404)
+    default, _ = newbutton.build_home_button(data)
+    explicit, _ = newbutton.build_home_button(data, at=("home", 435, 404))
+    assert default == explicit
+
+
+@pytest.mark.parametrize("path,card", [(BUILD, 901), (STOCK_147, 765)])
+def test_the_default_spot_is_inside_one_card(path, card):
+    """The footprint gate admits the page root and the one wt-33 card around the box (13.6 card
+    901, 14.7 card 765: test expectations, located by the walk)."""
+    from fireflymcf import cli
+    data = _read(path)
+    out, idx, _ = newbutton.clone_onto_home(data, position=newbutton.DEFAULT_AT_136[1:])
+    p = newbutton.check_placement(out, cli._resolve_page_root(out, "home"), idx)
+    assert p.box == (570, 404, 654, 454)
+    assert p.card == card
+
+
+@pytest.mark.parametrize("at", [("home", 560, 340),     # box over the Chassis battery (obj 440)
+                                ("home", 790, 404),     # box past the canvas's right edge
+                                ("home", 435, 460)])    # box past the canvas's bottom edge
+def test_an_overlapping_or_off_canvas_spot_refuses(at):
+    with pytest.raises(newbutton.PlacementOverlap) as e:
+        newbutton.build_home_button(_d(), at=at)
+    assert e.value.code == "PLACEMENT_OVERLAP"
+
+
+def test_the_op_takes_at_and_refuses_an_overlap():
+    r = _compile(_d(), at={"page": "home", "x": 560, "y": 340})
+    assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
+
+
+def test_the_op_places_the_button_at():
+    from fireflymcf import cli, layout
+    r = _compile(_d(), at={"page": "home", "x": 300, "y": 404})
+    assert r.ok, r.errors
+    idx = newbutton.last_object_index(r.data)
+    mine = [q for q in layout.Screen(r.data).walk(cli._resolve_page_root(r.data, "home"))
+            if q.obj_index == idx]
+    assert min(q.x0 for q in mine) == 435 and min(q.y0 for q in mine) == 404
+
+
+def test_an_unproven_lcd_refuses_lcd_grammar(monkeypatch):
+    from fireflymcf import donors, grammar
+
+    def fail(data):
+        raise grammar.LcdGrammarError("stubbed: no twin of FUN_0021B420")
+    monkeypatch.setattr(grammar, "prove_lcd", fail)
+    with pytest.raises(donors.DonorError) as e:
+        newbutton.build_home_button(_d())
+    assert e.value.code == "LCD_GRAMMAR"
+    r = _compile(_d())
+    assert not r.ok and r.errors[0]["code"] == "LCD_GRAMMAR", r.errors
+
+
+def test_a_colour_cell_past_the_mode7_limit_refuses():
+    from fireflymcf import donors
+    data = _d()
+    limit = donors.mode7_index_limit(data)
+    with pytest.raises(donors.DonorError) as e:
+        newbutton.build_home_button(data, colour_index=limit)
+    assert e.value.code == "MODE7_INDEX"
+
+
+def test_on_14_7_the_build_no_longer_trips_the_label_check(monkeypatch):
+    """Before the template, 13.6's object index cloned an unrelated 14.7 object and only the
+    caption check stopped it (BUILD_REFUSED). With the firmware gate admitted the op builds."""
+    r = _compile(_read(STOCK_147), monkeypatch, firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    idx = newbutton.last_object_index(r.data)
+    gs, _ = guidata.guidata_extent(r.data)
+    recs = records.object_records(r.data, gs + guidata.object_tables(r.data)[1][idx])
+    assert [x.wtype for x in recs] == [33, 11, 12]
+    assert next(x for x in recs if x.wtype == 11).label.strip() == "Pin 15"
+
+
+def test_on_11_23_the_build_refuses_grammar(monkeypatch):
+    """11.23's record grammar does not prove, so the template refuses (GRAMMAR), not the old
+    accidental "no IMAGE_OPCODE" from cloning whatever sat at 13.6's object index."""
+    from fireflymcf import donors
+    data = _read(STOCK_1123)
+    with pytest.raises(donors.DonorError) as e:
+        newbutton.build_home_button(data)
+    assert e.value.code == "GRAMMAR"
+    r = _compile(data, monkeypatch, firmwares={"13.6", "11.23"})
+    assert not r.ok and r.errors[0]["code"] == "GRAMMAR", r.errors
+    assert "IMAGE_OPCODE" not in r.errors[0]["message"]

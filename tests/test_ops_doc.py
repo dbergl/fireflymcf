@@ -309,7 +309,9 @@ def test_coded_refusals_are_documented():
                                                   "DECODER_RANGE_UNKNOWN"}),
                         ("add_rvc_button", {"VARIANT_SETTER_UNKNOWN", "LCD_GRAMMAR"}),
                         ("follow_register", {"SPARE_ROWS_UNKNOWN"}),
-                        ("add_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"}),
+                        ("add_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN", "GRAMMAR",
+                                        "NO_TEMPLATE", "MODE7_INDEX", "LCD_GRAMMAR",
+                                        "PLACEMENT_OVERLAP"}),
                         ("wire_button", {"BRIDGE_UNKNOWN", "VARIANT_SETTER_UNKNOWN"})):
         assert codes <= reach.get(name, set()), (name, reach.get(name))
     missing = {name: sorted(c for c in codes - {c for c, _ in

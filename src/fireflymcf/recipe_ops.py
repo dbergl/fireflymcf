@@ -1777,11 +1777,13 @@ def _check_named_output(data, channel: int, allow: bool) -> None:
 
 @op("add_button")
 class AddButton(Op):
-    """Add a new HOME button end to end: bind the pin's status colour cell
+    """Add a new button end to end (HOME by default): bind the pin's status colour cell
     (`statusbind.bind_pin`), then build the boxed button on that pin directly
-    (`newbutton.build_home_button`, donor-279 path — build-on-target, never
-    build-then-retarget; see newbutton's own docstring for why a fresh
-    `allocate_command_group` call per retarget orphans a live group).
+    (`newbutton.build_home_button` — build-on-target, never build-then-retarget; see
+    newbutton's own docstring for why a fresh `allocate_command_group` call per retarget
+    orphans a live group). The button is the proven template `donors.button_object` (box,
+    caption, touch; its documented source is 13.6 object 279), proven per image by the record
+    grammar and a caption witness, never an object index.
 
     Params:
       channel: int — destination G12 channel/pin (0-255). This op is build-on-target
@@ -1800,6 +1802,11 @@ class AddButton(Op):
              groups the coach's floorplan cannot reach)
       allow_named_output: bool (default False) — acknowledge that the G12 OUTPUTS list
              names `channel` for a load and the owner's load is on it anyway
+      at: {page, x, y} (default {page: "home", x: 435, y: 404}, the 13.6 spot) — the
+             page (`pages` names) and the attach origin; the box's left edge lands at x plus
+             the template box's own x offset (135), its top at y. The footprint must lie on
+             the page's canvas and cover nothing but the page root and the one wt-33 card
+             around it (PLACEMENT_OVERLAP)
 
     Error codes:
       NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
@@ -1822,6 +1829,16 @@ class AddButton(Op):
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
         so the new button's command group cannot be shown not to be one
         (`newbutton.unused_command_groups`)
+      GRAMMAR — the image's record grammar is not proven 13.6's, so the button template
+        (`donors.button_object`) is not usable (11.23)
+      NO_TEMPLATE — the template is not proven on this image: no stock object witnesses the
+        caption's text form, or its label does not fill its field
+      MODE7_INDEX — the pin's colour cell is not below the image's mode-7 index limit (the
+        decoder would clamp it to cell 0)
+      PLACEMENT_OVERLAP — the button's footprint at `at` leaves the page's canvas or covers a
+        placed record other than the page root and one enclosing wt-33 card
+      LCD_GRAMMAR — the LCD firmware's group handling, which reads the group and binding the
+        build writes, is not proven 13.6's (`grammar.prove_lcd`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
       NO_FONT_SELECTOR — font was given but the new caption's R38 selector isn't the
                          expected 0xff inherit byte
@@ -1849,6 +1866,12 @@ class AddButton(Op):
             "allow_named_output": {"type": "boolean", "default": False,
                                    "description": "acknowledge an output the G12 OUTPUTS list "
                                                   "names for a load"},
+            "at": {"type": "object",
+                   "properties": {"page": {"type": "string"}, "x": {"type": "integer"},
+                                  "y": {"type": "integer"}},
+                   "required": ["page", "x", "y"],
+                   "default": {"page": "home", "x": 435, "y": 404},
+                   "description": "page and attach origin (box left edge = x + 135)"},
         },
         "required": ["channel", "label", "off_colour"],
     }
@@ -1860,6 +1883,14 @@ class AddButton(Op):
         self.font = self._param("font", None)
         self.allow_commanded = self._param("allow_commanded_channel", False, kind=bool)
         self.allow_named = self._param("allow_named_output", False, kind=bool)
+        at = self._param("at", None, kind=dict)
+        self.at = None
+        if at is not None:
+            if set(at) != {"page", "x", "y"} or not isinstance(at["page"], str) or not all(
+                    isinstance(at[k], int) and not isinstance(at[k], bool) for k in "xy"):
+                raise RecipeError("BAD_PARAMS", "add_button: at wants {page: str, x: int, "
+                                  "y: int}, got %r" % (at,), op_id=self.spec.id)
+            self.at = (at["page"], at["x"], at["y"])
 
     def apply(self, data, ctx):
         _check_named_output(data, self.channel, self.allow_named)
@@ -1875,8 +1906,8 @@ class AddButton(Op):
             data, e = newbutton.build_home_button(
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
-                colour_index=cell, label=self.label)
-        except newbutton.VariantSetterUnknown as err:
+                colour_index=cell, label=self.label, at=self.at)
+        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap) as err:
             raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             # Match only the specific "already commanded by" refusal wording

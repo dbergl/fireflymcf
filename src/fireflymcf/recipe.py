@@ -592,7 +592,7 @@ _CODED = (donors.DonorError, grammar.GrammarError, grammar.LcdGrammarError,
           celltables.CellTableError,
           sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
           newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
-          decodeguards.DecoderRangeUnknown)
+          newbutton.PlacementOverlap, decodeguards.DecoderRangeUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:
