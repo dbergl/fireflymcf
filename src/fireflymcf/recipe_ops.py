@@ -5726,6 +5726,8 @@ class AddOptionFollower(Op):
         type table does not locate on this image (`celltables.locate`)
       SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
         rows are spare is not known (`statusbind.spare_cell_indices`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
     Capability delta `(set(), set())`: the toggle's four bindings are 0x1FED9 config writes
     (channel None), which are outside `recipe.capabilities`'s (channel, command) set
@@ -7448,6 +7450,8 @@ class AddAesBattHeat(Op):
         type table does not locate on this image (`celltables.locate`)
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
         (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-09-21: hold->enable / tap->off captured on
@@ -7513,11 +7517,12 @@ class AddAesBattHeat(Op):
     def apply(self, data, ctx):
         binding_start = len(guidata.binding_table(data))
 
-        # the pool as the preset always chose it (`rvcbutton.allocate` also drops 68/69, which
-        # this op never did; byte identity keeps the old list). The free pool skips the groups
-        # GuiCode drives (`newbutton.assignable_groups`): the finish gate refuses those anyway.
+        # the pool as the preset always chose it (`rvcbutton.allocate` also drops the reserved
+        # templates from the free pool, which this op never did; byte identity keeps the old
+        # list). The free pool skips the groups GuiCode drives (`newbutton.assignable_groups`):
+        # the finish gate refuses those anyway. The hold-safe pool drops the located templates.
         free = (newbutton.assignable_groups(data) if self.group_pool == "free"
-                else newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS))
+                else newbutton.hold_safe_groups(data))
         if not free:
             raise RecipeError("NO_FREE_GROUP",
                               "no empty group-table slot to host the Batt Heat command group",
@@ -7663,6 +7668,8 @@ class AddAltReboot(Op):
       REPLACE_REFUSED -- the page's record stream could not be relocated.
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
         (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     hardware_verified = True     # coach-verified 2026-10-05: one 197F809F#0100FF.. per
@@ -7689,9 +7696,10 @@ class AddAltReboot(Op):
 
         gt = guidata.group_table(data)
         binding_start = len(guidata.binding_table(data))
-        # a hold-only control: `newbutton.hold_safe_groups` (never 68/69, never GuiCode-driven --
-        # 137 never fired on a hold on the coach, 2026-09-30 -- and only a press-cycled slot)
-        free = newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
+        # a hold-only control: `newbutton.hold_safe_groups` (never a reserved template, never
+        # GuiCode-driven -- 137 never fired on a hold on the coach, 2026-09-30 -- and only a
+        # press-cycled slot)
+        free = newbutton.hold_safe_groups(data)
         if not free:
             raise RecipeError("NO_FREE_GROUP",
                               "no empty group-table slot to host the reboot command group",
@@ -9883,6 +9891,8 @@ class AddRvcButton(Op):
         type table does not locate on this image (`celltables.locate`)
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
         (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     hardware_verified = False
@@ -10577,6 +10587,8 @@ class AddPumpAutoOff(Op):
         type table does not locate on this image (`celltables.locate`)
       SPARE_ROWS_UNKNOWN — the stock image's display-cell table was itself grown, so which of its
         rows are spare is not known (`statusbind.spare_cell_indices`)
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
+        so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
     `hardware_verified = True` again as of 2026-09-04: a later task shortened the routine by 4
     bytes for the minute-0 clamp fix, and those emitted bytes ran on the coach, flashed and
@@ -11572,8 +11584,8 @@ class AddLevelPage(Op):
 
     Controls (`controls` true): the
     Blocks-carried stepper (- / +) and the Zero Level button. Three free group slots
-    (`newbutton.free_group_slots` minus `levelcontrols.RESERVED_GROUPS` -- 68/69, the
-    inverter/charger templates the PD-inverter bridge will drive -- taken in order minus, plus,
+    (`newbutton.free_group_slots` minus `newbutton.reserved_groups` -- located; 68/69 on 13.6,
+    the inverter/charger templates the PD-inverter bridge will drive -- taken in order minus, plus,
     zero) get
     `levelcontrols.group_entry` entries, and ONE `optionrow._grow_bindings` call appends their
     four bindings (`levelcontrols.bindings`: minus, plus, zero pitch, zero roll) at
@@ -11598,7 +11610,7 @@ class AddLevelPage(Op):
                          accent, orientation not in `levelpage.ORIENTATIONS`, controls not a
                          bool).
       NO_FREE_GROUP   -- `controls`: fewer than three free group-table slots outside
-                         `levelcontrols.RESERVED_GROUPS`.
+                         the reserved templates (`newbutton.reserved_groups`).
       GROW_REFUSED    -- `controls`: the binding table could not be grown (arena, gates) or a
                          donor group is not the stock shape `levelcontrols` expects.
       NO_ARROW_GLYPH  -- `arrow` names a character that still falls back to the placeholder.
@@ -11625,6 +11637,8 @@ class AddLevelPage(Op):
         SRAM cell area does not prove out on this image (`sramreach`)
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
         (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template (DGN 1FFD3h,
+        1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
     """
 
     # Nothing of this page has been on the coach: a live readout inside a switch arm has no
@@ -11838,18 +11852,19 @@ class AddLevelPage(Op):
         # take
         # `newbutton.hold_safe_groups` only; the rest keep their earlier allocation.
         selected = newbutton.guicode_selected_groups(data)
+        reserved = newbutton.reserved_groups(data)
         free = [g for g in newbutton.free_group_slots(data)
-                if g not in levelcontrols.RESERVED_GROUPS and g not in selected]
+                if g not in reserved and g not in selected]
         names = self._control_names()
         held = [n for n in names if n in levelcontrols.GEOMETRY_CONTROLS]
         plain = [n for n in names if n not in held]
         if len(free) < len(plain):
             raise RecipeError("NO_FREE_GROUP", "the LEVEL controls need %d free group slots, "
                               "%d are free outside the reserved %s (%s)"
-                              % (len(plain), len(free), sorted(levelcontrols.RESERVED_GROUPS),
+                              % (len(plain), len(free), sorted(reserved),
                                  free),
                               op_id=self.spec.id)
-        safe = [g for g in newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
+        safe = [g for g in newbutton.hold_safe_groups(data)
                 if g not in free[:len(plain)]]
         if len(safe) < len(held):
             raise RecipeError("NO_FREE_GROUP", "the geometry steppers need %d hold-safe group "

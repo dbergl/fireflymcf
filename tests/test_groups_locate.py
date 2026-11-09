@@ -8,6 +8,7 @@ cell and resolves each call's group. The 14.7, 11.23 and 13.6 numbers below are 
 expectations taken from the research of 2026-11-08, never locators.
 """
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -241,7 +242,7 @@ def test_boot_on_147_drives_only_located_groups(mcf_147):
     lit = {g for g in range(n) if rec[g * 16 + 0x0A] or rec[g * 16 + 0x0B]}
     assert lit, "no group record was written: the read is not of the records"
     assert lit <= newbutton.guicode_selected_groups(mcf_147)
-    assert not lit & set(newbutton.hold_safe_groups(mcf_147, frozenset({68, 69})))
+    assert not lit & set(newbutton.hold_safe_groups(mcf_147))
 
 
 def test_sendmap_reports_driven_groups_as_unknown_when_the_scan_refuses(mcf_147):
@@ -253,3 +254,125 @@ def test_sendmap_reports_driven_groups_as_unknown_when_the_scan_refuses(mcf_147)
     renamed[at:at + 3] = b"XYZ"
     groups = sendmap.binding_groups(bytes(renamed), False)
     assert groups and all(g.guicode_variant is None for g in groups)
+
+
+# --- reserved groups and the pools (2026-11-08) -------------------------------------------------
+
+# The stock inverter/charger enable/disable templates sit in groups 68/69 on all three images
+# (research 2026-11-08, `groups.md` §2.4/§3). Test expectations, never locators.
+RESERVED_ALL = {68: 0x1FFD3, 69: 0x1FFC5}
+# 13.6's hold-safe pool as the library returned it with the 13.6 constant {68, 69} (2026-11-08).
+HOLD_SAFE_136 = [15, 36, 46, 70, 81, 96, 126, 127, 162, 168, 171, 174, 175, 182, 183, 185, 190,
+                 191, 192, 193, 194, 195, 196, 197, 198, 229]
+
+
+@pytest.mark.parametrize("version", ["11.23", "13.6", "14.7"])
+def test_reserved_groups_locate_on_every_image(corpus, version):
+    assert newbutton.reserved_groups(corpus[version]["mcf"]) == RESERVED_ALL
+
+
+def test_hold_safe_on_13_6_is_todays_list(mcf_136):
+    assert newbutton.hold_safe_groups(mcf_136) == HOLD_SAFE_136
+
+
+def test_hold_safe_on_14_7_has_no_driven_reserved_or_externally_selected_group(mcf_147):
+    gt = guidata.group_table(mcf_147)
+    safe = newbutton.hold_safe_groups(mcf_147)
+    assert len(safe) == 44                          # research 2026-11-08: 88 free, 44 hold-safe
+    assert not set(safe) & GROUPS_147
+    assert not set(safe) & set(RESERVED_ALL)
+    assert not [g for g in safe if gt[g].raw[1] & 0xC0]
+
+
+def test_unused_command_groups_on_14_7_offers_no_driven_group(mcf_147, monkeypatch, request):
+    unused = newbutton.unused_command_groups(mcf_147)
+    assert unused and not set(unused) & GROUPS_147
+    # can fail: a driven set holding the lowest candidate takes it out of the pool
+    newbutton.unused_command_groups.cache_clear()
+    request.addfinalizer(newbutton.unused_command_groups.cache_clear)
+    monkeypatch.setattr(newbutton, "guicode_selected_groups",
+                        lambda data: GROUPS_147 | {unused[0]})
+    assert newbutton.unused_command_groups(mcf_147) == unused[1:]
+
+
+def _second_template(data, dgn_group, victim):
+    """`data` with group `victim` pointed at the first binding of `dgn_group`'s slice: a second
+    group whose whole slice is that template's DGN."""
+    gt = guidata.group_table(data)
+    gs, _ = guidata.guidata_extent(data)
+    out = bytearray(data)
+    at = gs + gt[victim].offset
+    struct.pack_into("<H", out, at + guidata.GROUP_START_FIELD, gt[dgn_group].start)
+    out[at + guidata.GROUP_COUNT_FIELD] = 1
+    return bytes(out)
+
+
+def test_a_second_pure_template_group_refuses(mcf_136):
+    two = _second_template(mcf_136, 68, 70)
+    with pytest.raises(newbutton.ReservedGroupUnknown) as ei:
+        newbutton.reserved_groups(two)
+    assert ei.value.code == "RESERVED_GROUP_UNKNOWN"
+    assert "68" in str(ei.value) and "70" in str(ei.value)
+    with pytest.raises(newbutton.ReservedGroupUnknown):
+        newbutton.hold_safe_groups(two)
+
+
+def test_an_absent_template_refuses(mcf_136):
+    gt = guidata.group_table(mcf_136)
+    gs, _ = guidata.guidata_extent(mcf_136)
+    gone = bytearray(mcf_136)
+    gone[gs + gt[69].offset + guidata.GROUP_COUNT_FIELD] = 0
+    with pytest.raises(newbutton.ReservedGroupUnknown, match="0x1ffc5"):
+        newbutton.reserved_groups(bytes(gone))
+
+
+def test_the_reserved_refusal_is_coded_through_a_recipe():
+    from fireflymcf import recipe
+    assert newbutton.ReservedGroupUnknown in recipe._CODED
+
+
+def test_the_finish_gate_guards_every_located_template(mcf_136):
+    """The finish gate protects the groups the stock holds the templates in, located: a build
+    that changes one is refused, whichever its number."""
+    from fireflymcf import recipe
+    two = _second_template(mcf_136, 68, 70)
+    changed = bytearray(two)
+    gs, _ = guidata.guidata_extent(two)
+    changed[gs + guidata.group_table(two)[70].offset + 1] ^= 0x10
+    with pytest.raises(recipe.GateError, match="reserved group 70"):
+        recipe._assert_reserved_groups_intact(two, bytes(changed))
+    recipe._assert_reserved_groups_intact(mcf_136, mcf_136)
+
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+_GROWN_BUILDS = sorted((REPO_ROOT / "builds").glob("*.bin"))
+
+
+def _added_groups(stock, data):
+    """Groups a build changed from stock (its entry or its binding slice)."""
+    sg, dg = guidata.group_table(stock), guidata.group_table(data)
+    sb, db = guidata.binding_table(stock), guidata.binding_table(data)
+    out = set()
+    for g in dg:
+        if g.index >= len(sg):
+            out.add(g.index)
+            continue
+        s = sg[g.index]
+        if g.raw != s.raw or [b.raw for b in db[g.start:g.start + g.count]] != \
+                [b.raw for b in sb[s.start:s.start + s.count]]:
+            out.add(g.index)
+    return out
+
+
+@pytest.mark.parametrize("path", _GROWN_BUILDS)
+def test_a_build_used_as_stock_never_offers_its_own_groups(mcf_136, path):
+    """Review focus (2026-11-08): every pool reads the image's own GuiCode and GuiData, so a
+    reference build used as the stock of the next build sees the groups it added as taken."""
+    data = path.read_bytes()
+    added = _added_groups(mcf_136, data)
+    if not added:
+        pytest.skip("this build added no group")
+    assert newbutton.reserved_groups(data) == RESERVED_ALL
+    for pool in (newbutton.free_group_slots, newbutton.unused_command_groups,
+                 newbutton.assignable_groups, newbutton.hold_safe_groups):
+        assert not added & set(pool(data)), (pool.__name__, sorted(added & set(pool(data))))

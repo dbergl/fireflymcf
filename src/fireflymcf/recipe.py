@@ -342,28 +342,26 @@ def _run_structural_gates(data: bytes, ctx: Ctx) -> None:
     _assert_no_guicode_selected_group_reused(ctx.stock, data)
 
 
-# Command groups no op may claim, though `newbutton.free_group_slots` lists them: on 13.6, 68 and
-# 69 hold the stock `1FFD3` / `1FFC5` inverter/charger enable/disable templates that the
-# PD-inverter bridge brief (`docs/HARDWARE-VERIFIED.md`) names as the route it will drive. The gate
-# keys on those DGNs in the stock image, so another build (whose 68/69 are something else) is not
-# gated. The reboot button's first build overwrote 68 with the APS-500 reboot group; this is what
-# catches it.
-RESERVED_GROUPS = {68: 0xFFD3, 69: 0xFFC5}
-
-
 def _assert_reserved_groups_intact(stock: bytes, data: bytes) -> None:
+    """No op may change a stock inverter/charger template (`newbutton.RESERVED_DGNS`, the
+    `1FFD3` / `1FFC5` enable/disable groups the PD-inverter bridge brief in
+    `docs/HARDWARE-VERIFIED.md` names as the route it will drive), though
+    `newbutton.free_group_slots` lists them. The groups are located in the STOCK image
+    (`newbutton.template_groups`: every group whose whole slice is that DGN; 68 and 69 on 11.23,
+    13.6 and 14.7, 2026-11-08), so a stock with no such group has nothing gated, and one with
+    several has each gated. The reboot button's first build overwrote 68 with the APS-500 reboot
+    group; this is what catches it."""
+    from fireflymcf import newbutton
     sg, dg = guidata.group_table(stock), guidata.group_table(data)
     sb, db = guidata.binding_table(stock), guidata.binding_table(data)
-    for g, dgn_low in RESERVED_GROUPS.items():
-        if g >= len(sg) or not sg[g].count:
-            continue
-        slice_ = range(sg[g].start, sg[g].start + sg[g].count)
-        if not all(sb[i].dgn_low == dgn_low for i in slice_):
-            continue
-        _gate(dg[g].raw == sg[g].raw and all(db[i].raw == sb[i].raw for i in slice_),
-              "STRUCTURAL_GATE",
-              "reserved group %d (the stock %#x inverter/charger template) was changed" % (
-                  g, 0x10000 | dgn_low))
+    for dgn, groups in newbutton.template_groups(stock).items():
+        for g in groups:
+            slice_ = range(sg[g].start, sg[g].start + sg[g].count)
+            _gate(g < len(dg) and dg[g].raw == sg[g].raw
+                  and all(i < len(db) and db[i].raw == sb[i].raw for i in slice_),
+                  "STRUCTURAL_GATE",
+                  "reserved group %d (the stock %#x inverter/charger template) was changed" % (
+                      g, dgn))
 
 
 def _assert_no_guicode_selected_group_reused(stock: bytes, data: bytes) -> None:
@@ -588,7 +586,8 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
 # FollowChannelError is above.
 _CODED = (donors.DonorError, grammar.GrammarError, celltables.CellTableError,
           sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
-          newbutton.VariantSetterUnknown, decodeguards.DecoderRangeUnknown)
+          newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
+          decodeguards.DecoderRangeUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:

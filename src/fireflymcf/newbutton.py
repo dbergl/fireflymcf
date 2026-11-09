@@ -126,15 +126,20 @@ def unused_command_groups(data: bytes) -> list[int]:
     exactly those groups.
 
     Restricted, as before, to Water-Pump-shaped groups: every binding a
-    `DGN_DC_DIMMER_COMMAND_2`, count 2-3.
+    `DGN_DC_DIMMER_COMMAND_2`, count 2-3. Never a group GuiCode drives by number
+    (`guicode_selected_groups`; the finish gate refuses reusing one), so the allocator is not
+    the last to notice: none is a candidate on 11.23, 13.6 or 14.7 (2026-11-08), and the
+    subtraction keeps that true on any image. Refuses `VariantSetterUnknown` where the driven
+    groups are not known.
     """
     gt = guidata.group_table(data)
     bt = guidata.binding_table(data)
     referenced = _object_referenced_groups(data)
     control = {c.group for c in guidata.find_control_groups(data)}
+    selected = guicode_selected_groups(data)
     out: list[int] = []
     for gid, g in enumerate(gt):
-        if gid in referenced or gid in control:
+        if gid in referenced or gid in control or gid in selected:
             continue
         if not (2 <= g.count <= 3):
             continue
@@ -446,13 +451,81 @@ def _setter_calls(data: bytes, cell: int, writer, load_window: int, call_window:
     return SetterScan(cell, n_loads, raw, len(derefs), len(calls), tuple(calls), writer)
 
 
-def hold_safe_groups(data: bytes, reserved=frozenset()) -> list[int]:
-    """Free group slots fit for a control whose HOLD must work: not in `reserved`, not driven by
-    GuiCode (`guicode_selected_groups`), and still carrying a press-cycled header (byte 1 bits
-    6-7 == 0). Every hold proven on the coach sits on such a slot (Batt Heat 46; the
-    wheelbase and track - on 96/126/127); the 2026-09-30 failures (136/137) were externally selected
-    (`11 80`) and GuiCode-driven. The byte-1 rule is the conservative half: 61/77-82 were `0x80`
-    slots whose TAPS work, and no hold on one has been seen."""
+# The DGNs of the stock inverter/charger enable/disable templates (`1FFD3h`, `1FFC5h`): two-variant
+# toggles (variant 1 enable, variant 0 disable, tap-release) that `docs/HARDWARE-VERIFIED.md`'s
+# PD-inverter bridge brief names as the route that bridge will drive (controller ruling,
+# 2026-09-26). Protocol constants, which is what the reservation means; the GROUPS that hold them
+# are located (`reserved_groups`).
+RESERVED_DGNS = (0x1FFD3, 0x1FFC5)
+
+
+class ReservedGroupUnknown(ValueError):
+    """RESERVED_GROUP_UNKNOWN: which group holds a stock inverter/charger template
+    (`RESERVED_DGNS`) is not known on this image: no group's whole binding slice carries that
+    DGN, or several do. An allocator refuses rather than hand out a template, or a group on a
+    guess that another is the template."""
+    code = "RESERVED_GROUP_UNKNOWN"
+
+
+def binding_dgn(b: guidata.Binding) -> int:
+    """A binding's 18-bit DGN: the u16 at +0 and byte 2 bits 0-1 (`binding_raw`)."""
+    return b.dgn_low | ((b.raw[2] & 0x03) << 16)
+
+
+@memo.content_cached(copy=None)
+def _template_groups(data: bytes, dgns: tuple) -> tuple:
+    """`((dgn, ((group, start, count), ...)), ...)`: for each DGN, every group whose binding
+    slice is non-empty, inside the table, and all of that DGN."""
+    gt = guidata.group_table(data)
+    bt = guidata.binding_table(data)
+    out = {d: [] for d in dgns}
+    for g in gt:
+        if not g.count or g.start + g.count > len(bt):
+            continue
+        found = {binding_dgn(b) for b in bt[g.start:g.start + g.count]}
+        if len(found) == 1 and (d := next(iter(found))) in out:
+            out[d].append((g.index, g.start, g.count))
+    return tuple((d, tuple(out[d])) for d in dgns)
+
+
+def template_groups(data: bytes) -> dict[int, tuple]:
+    """`{dgn: (group, ...)}`: every group whose whole slice is that reserved DGN, zero, one or
+    several per DGN. The finish gate (`recipe._assert_reserved_groups_intact`) protects all of
+    them; an allocator needs exactly one each (`reserved_groups`)."""
+    return {d: tuple(g for g, _s, _c in hits) for d, hits in _template_groups(data,
+                                                                               RESERVED_DGNS)}
+
+
+def reserved_groups(data: bytes) -> dict[int, int]:
+    """`{group: dgn}`: the group holding each stock inverter/charger template (`RESERVED_DGNS`),
+    located as the unique group whose binding slice is non-empty and wholly that DGN. Read from
+    GuiData alone, so a built image used as stock locates its own (the templates stay put: the
+    finish gate refuses a build that changes one).
+
+    11.23, 13.6 and 14.7: `{68: 0x1FFD3, 69: 0x1FFC5}`, and those four bindings (two per
+    group) are the only ones carrying either DGN (2026-11-08). Refuses `ReservedGroupUnknown`
+    when a DGN has no such group or several."""
+    out = {}
+    for dgn, hits in _template_groups(data, RESERVED_DGNS):
+        if len(hits) != 1:
+            raise ReservedGroupUnknown(
+                f"{len(hits)} groups have a binding slice wholly DGN {dgn:#x} "
+                f"({', '.join(f'group {g} [{s}, {s + c})' for g, s, c in hits) or 'none'}); "
+                f"the stock template's group is not known")
+        out[hits[0][0]] = dgn
+    return out
+
+
+def hold_safe_groups(data: bytes) -> list[int]:
+    """Free group slots fit for a control whose HOLD must work: not a reserved template
+    (`reserved_groups`), not driven by GuiCode (`guicode_selected_groups`), and still carrying a
+    press-cycled header (byte 1 bits 6-7 == 0). Every hold proven on the coach sits on such a
+    slot (Batt Heat 46; the wheelbase and track - on 96/126/127); the 2026-09-30 failures
+    (136/137) were externally selected (`11 80`) and GuiCode-driven. The byte-1 rule is the
+    conservative half: 61/77-82 were `0x80` slots whose TAPS work, and no hold on one has been
+    seen. 13.6: 26 slots; 14.7: 44 (2026-11-08). Refuses `ReservedGroupUnknown` and
+    `VariantSetterUnknown` rather than offer a group either might be."""
+    reserved = reserved_groups(data)
     selected = guicode_selected_groups(data)
     gt = guidata.group_table(data)
     return [g for g in free_group_slots(data)

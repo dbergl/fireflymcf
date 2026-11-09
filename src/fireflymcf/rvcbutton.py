@@ -67,7 +67,7 @@ from __future__ import annotations
 
 import struct
 
-from . import (aescompact, cornermark, enumlabel, glyphs, guidata, insert, layout, levelcontrols,
+from . import (aescompact, cornermark, enumlabel, glyphs, guidata, insert, layout,
                metrics, newbutton, optionrow, pagewalk, records, relocate)
 from . import donors as _donors
 
@@ -177,15 +177,17 @@ def bindings(dgn: int, *, form: str, tap: bytes | None, hold: bytes | None,
 
 def allocate(data: bytes, *, pool: str, need: int = 1) -> list[int]:
     """The first `need` group slots of `pool`: ``free`` (`newbutton.assignable_groups`) or
-    ``hold_safe`` (`newbutton.hold_safe_groups`, a group GuiCode does not drive). Never
-    `levelcontrols.RESERVED_GROUPS`. Raises when the pool holds fewer than `need`."""
+    ``hold_safe`` (`newbutton.hold_safe_groups`, a group GuiCode does not drive). Never a
+    reserved template (`newbutton.reserved_groups`, located; refuses `ReservedGroupUnknown`).
+    Raises when the pool holds fewer than `need`."""
     if pool == "free":
         slots = newbutton.assignable_groups(data)
     elif pool == "hold_safe":
-        slots = newbutton.hold_safe_groups(data, levelcontrols.RESERVED_GROUPS)
+        slots = newbutton.hold_safe_groups(data)
     else:
         raise RvcButtonError(f"group pool {pool!r} is not one of {POOLS}")
-    slots = [g for g in slots if g not in levelcontrols.RESERVED_GROUPS]
+    reserved = newbutton.reserved_groups(data)
+    slots = [g for g in slots if g not in reserved]
     if len(slots) < need:
         raise RvcButtonError(f"the {pool!r} group pool holds {len(slots)} slot(s), "
                              f"{need} needed")

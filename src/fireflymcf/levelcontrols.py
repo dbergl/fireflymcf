@@ -93,15 +93,6 @@ STEPPER_DONOR_GROUP = 103          # the stock -300 arrow (104 is the +300; same
 ZERO_DONOR_GROUP = 17              # the stock light group make_hold_to_toggle edits
 FORBIDDEN_DONORS = (64, 85)        # byte 3 bit 7: the second loop over the global list
 
-# Groups the LEVEL controls must never claim, though `newbutton.free_group_slots` lists them.
-# 68 and 69 hold the stock `1FFD3` / `1FFC5` inverter/charger enable/disable templates (two-variant
-# toggles: variant 1 enable, variant 0 disable, tap-release); `docs/HARDWARE-VERIFIED.md`'s
-# PD-inverter bridge brief ("Commands need no edit at all", the paragraph ending "Groups 68/69 are
-# two-variant toggles") names them as the route that bridge will drive. Of the first live page's 43
-# free slots
-# only group 61 is an empty stub, so every other claim overwrites an unreferenced stock template;
-# these two are the ones with a documented purpose (controller ruling, 2026-09-26).
-RESERVED_GROUPS = frozenset({68, 69})    # `recipe.RESERVED_GROUPS` gates them at compile
 
 _BINDINGS = {
     "minus": [(_DGN_PROP_A, FRAMES["minus"][0][1], STEPPER_MASK)],

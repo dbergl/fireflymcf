@@ -566,6 +566,7 @@ Error codes:
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_aes_batt_heat_status
 
@@ -643,6 +644,7 @@ Error codes:
 - `GROW_REFUSED` — the binding table could not be grown (padding arena / gates), or the hold donor group is not the verified shape.
 - `REPLACE_REFUSED` — the page's record stream could not be relocated.
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_batt_heat_battery_glyph
 
@@ -912,7 +914,7 @@ Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as 
 Error codes:
 
 - `BAD_PARAMS` — a parameter is malformed (dgn not 18-bit, refresh outside 0..3, arrow, accent, orientation not in `levelpage.ORIENTATIONS`, controls not a bool).
-- `NO_FREE_GROUP` — `controls`: fewer than three free group-table slots outside `levelcontrols.RESERVED_GROUPS`.
+- `NO_FREE_GROUP` — `controls`: fewer than three free group-table slots outside the reserved templates (`newbutton.reserved_groups`).
 - `GROW_REFUSED` — `controls`: the binding table could not be grown (arena, gates) or a donor group is not the stock shape `levelcontrols` expects.
 - `NO_ARROW_GLYPH` — `arrow` names a character that still falls back to the placeholder.
 - `APPEND_REFUSED` — the 14 entries could not be appended (registry cap, arena, gates).
@@ -928,6 +930,7 @@ Error codes:
 - `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
 - `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_low_volts_control
 
@@ -1005,6 +1008,7 @@ Error codes:
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
+- `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
 
 ### add_text_label
 
@@ -1343,6 +1347,7 @@ Error codes:
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
 ### add_pump_auto_off
 
@@ -1369,6 +1374,7 @@ Error codes:
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `SPARE_ROWS_UNKNOWN` — the stock image's display-cell table was itself grown, so which of its rows are spare is not known (`statusbind.spare_cell_indices`)
+- `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the reuse slot cannot be shown not to be one (`newbutton.unused_command_groups`)
 
 ### add_register_readout
 

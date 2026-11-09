@@ -108,7 +108,7 @@ def test_tap_hold_frames(tap_hold_built):
     assert [newbutton.binding_wire_frame(b) for b in binds] == [
         (0x19FEF99F, bytes.fromhex(HOLD)), (0x19FEF99F, bytes.fromhex(TAP))]
     assert not any(b[2] & 0x04 for b in binds), "no repeat on the held frame"
-    assert group in newbutton.hold_safe_groups(stock, frozenset({68, 69}))
+    assert group in newbutton.hold_safe_groups(stock)
 
 
 def test_hold_only():
@@ -347,13 +347,13 @@ def test_free_pool_never_offers_a_guicode_driven_group():
     finish gate (`recipe._assert_no_guicode_selected_group_reused`) then failed the whole build
     with an assertion. The pool now skips every GuiCode-driven group, so running it dry is the
     op's own NO_FREE_GROUP."""
-    from fireflymcf import levelcontrols, rvcbutton
+    from fireflymcf import rvcbutton
     data = STOCK.read_bytes()
     driven = newbutton.guicode_selected_groups(data)
     assert {136, 137, 138, 139} <= set(driven)
     assert {136, 137, 138, 139} <= set(newbutton.free_group_slots(data))     # the old pool
     pool = [g for g in newbutton.assignable_groups(data)
-            if g not in levelcontrols.RESERVED_GROUPS]
+            if g not in newbutton.reserved_groups(data)]
     got = rvcbutton.allocate(data, pool="free", need=len(pool))
     assert got == pool and not set(got) & set(driven)
     with pytest.raises(rvcbutton.RvcButtonError, match="holds %d slot" % len(pool)):
