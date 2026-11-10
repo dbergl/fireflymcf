@@ -1961,8 +1961,7 @@ class AddButton(Op):
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
                 colour_index=cell, label=self.label, at=self.at, coach=coach)
-        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap,
-                newbutton.CoachConfigConflict) as err:
+        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap) as err:
             raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except pagewalk.ArmPathLimit as err:
             raise RecipeError("ARM_PATH_LIMIT", str(err), op_id=self.spec.id)

@@ -1013,22 +1013,34 @@ def test_unnamed_slot_is_strict(monkeypatch):
     assert "slot 102 = 1" in r.errors[0]["message"]
 
 
-def test_shared_base_partly_named_is_unnamed():
-    """13.6 base 441 is read by slots 204 and 208 on HOME. Naming only 204 leaves the base
-    unnamed, so its non-base arm (441 = 1) is walked; naming both alike names it; naming them
-    differently refuses COACH_CONFIG. Slot 6 = 1 is named throughout so the spot is admitted
-    (unnamed, slot 6 = 2 refuses) and `walked` can be read."""
+def test_shared_base_mixed_values_build():
+    """13.6 base 441 is read by slots 204 and 208 on HOME. Each record follows its own slot, so
+    naming them differently is no longer a conflict. Slot 6 = 0 draws card 901, which holds
+    both records (440:4 reads 204, 443:4 reads 208); slot 6 = 1 draws card 902, which holds
+    only 204's."""
     out, root, idx = _home_clone(_d())
-    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0})
+    p = newbutton.check_placement(out, root, idx, coach={6: 0, 204: 0, 208: 1})
+    assert p.coach
+    assert all(441 not in sv for sv in p.walked), p.walked     # both slots pinned
+
+
+def test_partly_named_base_walks_the_unnamed_record():
+    """Naming 204 only: the record reading 208 is unnamed, so base 441's arms are walked. Slot
+    6 = 0, so card 901 draws the 208 record at all (under slot 6 = 1 it is not drawn)."""
+    out, root, idx = _home_clone(_d())
+    p = newbutton.check_placement(out, root, idx, coach={6: 0, 204: 0})
+    assert p.walked[0] == {}
     assert any(sv.get(441) == 1 for sv in p.walked), p.walked
-    assert 441 not in p.walked[0]            # `S` itself: the unnamed base at its base arm
-    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 0})
-    assert all(sv.get(441) == 0 for sv in p.walked), p.walked
-    with pytest.raises(newbutton.CoachConfigConflict) as e:
-        newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 1})
-    assert e.value.code == "COACH_CONFIG"
-    assert "441" in str(e.value) and "204" in str(e.value) and "208" in str(e.value)
-    assert "independent slots" in str(e.value) and "unnamed" in str(e.value)
+
+
+def test_settings_pin_named_switches_and_reach_nested_ones():
+    """Under slot 6 = 1, slot 6's switch is pinned (its base never appears in a walked set)."""
+    from fireflymcf import pagewalk
+    out, root, idx = _home_clone(_d())
+    p = newbutton.check_placement(out, root, idx, coach={6: 1})
+    paths = pagewalk.switch_arm_paths(out, [root])
+    base6 = [cb for cb, s in paths.slots.items() if s == (6,)]
+    assert base6 and all(cb not in sv for sv in p.walked for cb in base6), p.walked
 
 
 def test_arm_path_limit_has_its_code(monkeypatch):

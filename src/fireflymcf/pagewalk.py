@@ -191,7 +191,8 @@ class ArmPaths:
     slots: dict
 
 
-def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT) -> ArmPaths:
+def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT,
+                     slot_values: dict | None = None) -> ArmPaths:
     """Every arm of every type-6 switch the walks of `roots` can reach, nested ones included.
 
     `{}` first, then each switch the base walk reaches, one arm at a time with every other switch
@@ -202,6 +203,13 @@ def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT) -> ArmPath
     with nesting, not with the product of every switch. Sets are deduplicated; an arm is the first
     candidate with its value (`layout.Screen._switch_child`), and the base candidate is skipped.
 
+    With `slot_values` (`{value_slot: value}`, as `layout.Screen.walk` takes it), every walk is
+    passed it: a type-6 record whose `value_slot` it names is pinned to that value and
+    contributes no arms (its `child_base -> value_slot` is still in `slots`), and a switch it
+    reaches only through a pinned arm is crossed as any other. A base read by two records, one
+    pinned and one not, is driven by `switch_values` only in the unpinned record (the walk
+    prefers `slot_values`). Without it, the answer is the plain walk's.
+
     `switch_arm_sets` is unchanged and still stops at the outermost switches. `ArmPathLimit`
     if more than `limit` sets would be walked."""
     match_off = guidata.find_match_table(data)
@@ -210,7 +218,8 @@ def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT) -> ArmPath
     def switches(sv):
         out = []                         # [((obj, index), child_base, [(value, arm), ...])]
         for root in roots:
-            for r in walk_records(data, root, switch_values=sv or None):
+            for r in walk_records(data, root, switch_values=sv or None,
+                                  slot_values=slot_values):
                 if r.wtype != 6:
                     continue
                 rec = _record(data, r.obj, r.index)
@@ -218,6 +227,8 @@ def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT) -> ArmPath
                     continue
                 if rec.value_slot is not None:
                     slots.setdefault(rec.child_index, set()).add(rec.value_slot)
+                    if slot_values is not None and rec.value_slot in slot_values:
+                        continue             # pinned by the settings: no arms of its own
                 first: dict = {}
                 for value, obj in guidata.switch_candidates(data, rec, match_off):
                     first.setdefault(value, obj)

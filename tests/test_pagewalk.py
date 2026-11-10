@@ -66,3 +66,15 @@ def test_arm_paths_refuse_past_their_limit(mcf_136):
     import pytest
     with pytest.raises(pagewalk.ArmPathLimit):
         pagewalk.switch_arm_paths(mcf_136, [4], limit=10)
+
+
+def test_switch_arm_paths_slot_values_pins_named_switches(mcf_136):
+    """With `slot_values`, a switch reading a named slot contributes no arms (13.6 HOME, root 4:
+    slot 6's switch, based at 901), and `{}` stays first."""
+    plain = pagewalk.switch_arm_paths(mcf_136, [4])
+    pinned = pagewalk.switch_arm_paths(mcf_136, [4], slot_values={6: 1})
+    assert pagewalk.switch_arm_paths(mcf_136, [4], slot_values=None) == plain
+    base6 = [cb for cb, s in plain.slots.items() if s == (6,)]
+    assert base6 and any(cb in sv for sv in plain.sets for cb in base6)
+    assert not any(cb in sv for sv in pinned.sets for cb in base6)
+    assert pinned.sets[0] == {}
