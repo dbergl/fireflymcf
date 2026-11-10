@@ -364,3 +364,8 @@ def test_every_gate_code_is_documented():
     doc = ops_doc.render()
     for code in ops_doc.GATE_CODES:
         assert "`%s`" % code in doc, code
+
+
+def test_add_button_documents_its_coach_codes():
+    codes = {c for c, _ in ops_doc._error_codes(recipe.REGISTRY["add_button"])}
+    assert {"COACH_CONFIG", "ARM_PATH_LIMIT"} <= codes

@@ -892,3 +892,146 @@ def test_on_11_23_the_op_refuses_unsupported_firmware():
     """Without the gate admitted, 11.23 is outside the op's `firmwares` ({13.6, 14.7})."""
     r = _compile(_read(STOCK_1123))
     assert not r.ok and r.errors[0]["code"] == "UNSUPPORTED_FIRMWARE", r.errors
+
+
+# --------------------------------------------------------------------------------------
+# The placement gate under the coach's settings (2026-11-09)
+# --------------------------------------------------------------------------------------
+
+COACH_WD = "build/coach-wd.json"
+
+
+def _compile_coach(stock, coach, monkeypatch=None, firmwares=None, **params):
+    """`_compile` with `coach` (an `options.CoachConfig`) as the `--config` override."""
+    from fireflymcf import recipe
+    if firmwares is not None:
+        monkeypatch.setattr(recipe.REGISTRY["add_button"], "firmwares", frozenset(firmwares))
+    p = recipe.Project(base_sha256=_sha(stock), build_name=None, ops=[recipe.OpSpec(
+        id="b", type="add_button",
+        params={"channel": 15, "label": "Pin 15", "off_colour": [65, 81, 163], **params})])
+    return recipe.compile_project(p, stock, coach=coach, coach_source="--config test.json")
+
+
+def _home_clone(data, at=None):
+    from fireflymcf import cli
+    out, idx, _ = newbutton.clone_onto_home(data, position=(at or newbutton.DEFAULT_AT_136)[1:])
+    return out, cli._resolve_page_root(out, "home"), idx
+
+
+def test_reference_settings_admit_the_136_default():
+    """Under the reference coach's settings (slot 6 = 1: HOME draws card 902) the default spot
+    builds, byte-identical to the build without settings, and the gate says it used them. What it
+    still reports lies only under arms the settings do not draw."""
+    import os
+    from fireflymcf import options
+    if not os.path.exists(COACH_WD):
+        pytest.skip("build/coach-wd.json is linked research data (scripts/link-research.sh)")
+    data = _d()
+    cfg = options.CoachConfig.from_json(COACH_WD)
+    r = _compile_coach(data, cfg)
+    assert r.ok, r.errors
+    assert _sha(r.data) == "ebd4c2ef326c5c3448b161b79edd7f32a58ef823ec1255fed1d66272fc10ea0a"
+    assert r.manifest[0].endswith("; checked against the coach's settings (--config test.json)")
+    S = options.coach_slots(data, cfg, "recipe").slots
+    out, root, idx = _home_clone(data)
+    p = newbutton.check_placement(out, root, idx, coach=S)
+    assert p.coach and p.card == 902
+    assert p.arms and r.placement["b"] == list(p.arms)
+    for entry in p.arms:
+        assert any(all(s in S and S[s] != step["value"] for s in step["slots"])
+                   for step in entry["path"] if step["slots"]), entry
+
+
+def test_settings_refuse_an_overlap_the_base_arm_admits(monkeypatch):
+    """No HOME spot is clear in the base arm (card 901) and covered in card 902 (slot 6 = 1):
+    card 902's records (its label 525..600 and object 440 at 599..689, y 334..391) lie inside the
+    x span the base arm already fills on that band (901's labels 440..515 and 613..688, object
+    443 at 514..604, object 440 at 687..777), and no other HOME switch reads slot 6 (walk,
+    2026-11-09). So the case is shown on card 903, slot 6 = 2: the default spot is clear in the
+    base arm and covers object 148 "DISABLED" and object 163 (touch) in card 903's arm."""
+    from fireflymcf import options
+    data = _d()
+    out, root, idx = _home_clone(data)
+    with pytest.raises(newbutton.PlacementOverlap, match="slot 6 = 2") as e:
+        newbutton.check_placement(out, root, idx, coach={6: 2})
+    assert "object 148" in str(e.value) and "object 163" in str(e.value)
+    r = _compile_coach(data, options.CoachConfig(extra_slots={6: 2}))
+    assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
+    assert "slot 6 = 2" in r.errors[0]["message"]
+    r = _compile(data)
+    assert r.ok, r.errors
+    assert any(newbutton.placement_text(a).startswith("slot 6 = 2: ") for a in r.placement["b"])
+    assert "checked against the coach's settings" not in r.manifest[0]
+
+
+def test_147_star_link(monkeypatch):
+    """14.7 HOME, slot 102 = 1 draws object 240, the Star Link button, over the default spot.
+
+    `{102: 0}` alone still refuses: slot 11 (the battery card's switch, based at 765) is then
+    unnamed, and its arm 2 draws object 117 "DISABLED" and object 132 (touch) over the spot
+    (the no-settings report's `slot 11 = 2` entry). 13.6's slot-6 derivation is not located on
+    14.7 (spec 12), so the owner names slot 11; `{102: 0, 11: 0}` builds."""
+    from fireflymcf import options
+    data = _read(STOCK_147)
+    out, root, idx = _home_clone(data)
+    with pytest.raises(newbutton.PlacementOverlap, match="object 240") as e:
+        newbutton.check_placement(out, root, idx, coach={102: 1, 11: 0})
+    assert "slot 102 = 1" in str(e.value)
+    with pytest.raises(newbutton.PlacementOverlap, match="object 240") as e:
+        newbutton.check_placement(out, root, idx, coach={102: 1})
+    with pytest.raises(newbutton.PlacementOverlap, match="unnamed arm slot 11 = 2") as e:
+        newbutton.check_placement(out, root, idx, coach={102: 0})
+    assert "object 117" in str(e.value) and "object 132" in str(e.value)
+    p = newbutton.check_placement(out, root, idx, coach={102: 0, 11: 0})
+    assert p.coach and p.card == 765
+    r = _compile_coach(data, options.CoachConfig(extra_slots={102: 1}), monkeypatch,
+                       firmwares={"13.6", "14.7"})
+    assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
+    assert "object 240" in r.errors[0]["message"]
+    r = _compile_coach(data, options.CoachConfig(extra_slots={102: 0, 11: 0}), monkeypatch,
+                       firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    assert "checked against the coach's settings (--config test.json)" in r.manifest[0]
+
+
+def test_unnamed_slot_is_strict(monkeypatch):
+    """14.7: an empty block is no settings (today's gate, which builds). Settings that name slot
+    11 (card 765's switch) but not slot 102 check every arm of 102's switch, and refuse naming
+    the slot the owner can add."""
+    from fireflymcf import options
+    data = _read(STOCK_147)
+    r = _compile_coach(data, options.CoachConfig(), monkeypatch, firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    assert "checked against the coach's settings" not in r.manifest[0]
+    out, root, idx = _home_clone(data)
+    with pytest.raises(newbutton.PlacementOverlap, match="slot 102 = 1") as e:
+        newbutton.check_placement(out, root, idx, coach={11: 0})
+    assert "object 240" in str(e.value)
+    r = _compile_coach(data, options.CoachConfig(extra_slots={11: 0}), monkeypatch,
+                       firmwares={"13.6", "14.7"})
+    assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
+    assert "slot 102 = 1" in r.errors[0]["message"]
+
+
+def test_shared_base_partly_named_is_unnamed():
+    """13.6 base 441 is read by slots 204 and 208 on HOME. Naming only 204 leaves the base
+    unnamed, so its non-base arm (441 = 1) is walked; naming both alike names it; naming them
+    differently refuses COACH_CONFIG. Slot 6 = 1 is named throughout so the spot is admitted
+    (unnamed, slot 6 = 2 refuses) and `walked` can be read."""
+    out, root, idx = _home_clone(_d())
+    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0})
+    assert any(sv.get(441) == 1 for sv in p.walked), p.walked
+    assert 441 not in p.walked[0]            # `S` itself: the unnamed base at its base arm
+    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 0})
+    assert all(sv.get(441) == 0 for sv in p.walked), p.walked
+    with pytest.raises(newbutton.CoachConfigConflict) as e:
+        newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 1})
+    assert e.value.code == "COACH_CONFIG"
+    assert "441" in str(e.value) and "204" in str(e.value) and "208" in str(e.value)
+
+
+def test_arm_path_limit_has_its_code(monkeypatch):
+    from fireflymcf import pagewalk
+    monkeypatch.setattr(pagewalk, "ARM_PATH_LIMIT", 10)
+    r = _compile(_d())
+    assert not r.ok and r.errors[0]["code"] == "ARM_PATH_LIMIT", r.errors
