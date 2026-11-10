@@ -114,11 +114,13 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "to a screen.",
         "Flashed. PC.22.", "`CONTROL-BEHAVIOR.md` §9, `docs/SETTLED-FINDINGS.md`"),
     "add_button": ("structural",
-        "Add a boxed HOME button wired to a G12 pin: status cell bound, command group "
-        "allocated on the target channel.",
+        "Add a boxed button wired to a G12 pin, on HOME or, with `at`, at a free spot on any "
+        "page: status cell bound, command group allocated on the target channel.",
         "Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws "
-        "only once the pin's first status arrives, changes no pixel outside its box, and a "
-        "tap sends one `1FEDB` toggle. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
+        "only once the pin's first status arrives, and a tap sends one `1FEDB` toggle. Under "
+        "the emulator's configuration it changes no pixel outside its box; with slot 102 = 1 "
+        "the default spot covers the Star Link button and its touch region (reported, "
+        "2026-11-09). Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
         "so with the firmware gate bypassed it refuses `GRAMMAR`.",
         "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",

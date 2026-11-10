@@ -12,6 +12,7 @@ in the project, and `compile_project` always recompiles the whole project from s
 cannot recur here."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import struct
 
@@ -1805,13 +1806,20 @@ class AddButton(Op):
       at: {page, x, y} (default {page: "home", x: 435, y: 404}, the 13.6 spot) — the
              page (`pages` names) and the attach origin; the box's left edge lands at x plus
              the template box's own x offset (135), its top at y. x and y must fit a u16.
-             The footprint gate walks the page under every switch arm set
-             (`pagewalk.switch_arm_sets`). In the base arm the footprint must lie on the page
-             root's background and cover nothing but root background fills around it and
-             one wt-33 card around it (PLACEMENT_OVERLAP). What it covers only under another
-             arm does not refuse, because which arm a coach draws is its configuration: it is
-             reported per arm (switch -> value, objects) in `CompileResult.placement`, the
-             sidecar's `placement`, and at the end of the op's manifest line
+             The footprint gate walks the page under every switch-arm path
+             (`pagewalk.switch_arm_paths`): the base, each type-6 switch's arms one at a time,
+             and, recursively, the arms of each switch nested inside a non-base arm combined
+             with the path that reaches it. In the all-base walk the footprint must lie on the
+             page root's background and cover nothing but root background fills around it and
+             one wt-33 card around it (PLACEMENT_OVERLAP); only that walk refuses. What it
+             covers only under another path does not refuse, because which arm a coach draws is
+             its configuration: it is reported per path in `CompileResult.placement` and the
+             sidecar's `placement` (each entry: `arm` {child_base: value}, `objects`, `path`
+             [{child_base, slots, value}], `covers` [{object, caption, touch}]), and at the end
+             of the op's manifest line keyed by the value slots a configuration sets, e.g.
+             `slot 102 = 1: object 240 "Star Link" (touch)` (the first six paths; the sidecar
+             lists all). A nested path covering exactly what its parent covers is not
+             repeated
 
     Error codes:
       NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
@@ -1989,10 +1997,13 @@ class AddButton(Op):
         line = "button: object %d %r on pin %d (cell %d)" % (
             idx, self.label.replace("\n", "\\n"), self.channel, cell)
         if h.get("placement_arms"):
+            # the first few paths; the sidecar's `placement` lists every one
+            arms, cap = h["placement_arms"], 6
             line += "; covers, under other switch arms only: " + "; ".join(
-                "%s: objects %s" % (", ".join("%s=%s" % kv for kv in a["arm"].items()),
-                                    ", ".join(map(str, a["objects"])))
-                for a in h["placement_arms"])
+                newbutton.placement_text(a) for a in arms[:cap])
+            if len(arms) > cap:
+                line += "; ... and %d more arm paths (the sidecar's placement lists all)" % (
+                    len(arms) - cap)
         return line
 
 
@@ -4011,13 +4022,14 @@ def _shift_line(entries, roots, cap=_SHIFT_CAP):
 
 def placement_report(ops, ctx):
     """`{op_id: arms}` for every op whose handle carries a non-empty `placement_arms` report
-    (`newbutton.Placement.arms`: switch arms other than the base under which its new button
-    covers another record). Report only."""
+    (`newbutton.Placement.arms`: switch-arm paths other than the base under which its new button
+    covers another record, with the value slots each sets and each covered object's caption and
+    touch region). Deep copies, so a caller cannot reach `ctx.handles`. Report only."""
     out = {}
     for o in ops:
         h = ctx.handles.get(o.spec.id)
         if isinstance(h, dict) and h.get("placement_arms"):
-            out[o.spec.id] = [dict(a) for a in h["placement_arms"]]
+            out[o.spec.id] = copy.deepcopy(list(h["placement_arms"]))
     return out
 
 

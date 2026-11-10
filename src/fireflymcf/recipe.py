@@ -299,10 +299,12 @@ class CompileResult:
     sends: dict = dataclasses.field(default_factory=dict)
     # The `firmware.KNOWN` key of the stock image; `unverified` is judged for this firmware
     firmware: str | None = None
-    # {op_id: [{"arm": {switch: value}, "objects": [...]}, ...]}: the switch arms other than the
-    # base under which a new button's footprint covers another record (`recipe_ops.
-    # placement_report`, `newbutton.check_placement`); which arm a coach draws is its
-    # configuration, so this is report only; additive
+    # {op_id: [{"arm": {switch child_base: value, ...}, "objects": [...], "path": [{"child_base",
+    # "slots", "value"}, ...], "covers": [{"object", "caption", "touch"}, ...]}, ...]}: the
+    # switch-arm paths, nested ones included, other than the base under which a new button's
+    # footprint covers another record (`recipe_ops.placement_report`,
+    # `newbutton.check_placement`); which arm a coach draws is its configuration (the `slots`),
+    # so this is report only; additive
     placement: dict = dataclasses.field(default_factory=dict)
 
 

@@ -508,7 +508,11 @@ def test_add_button(mcf_147, tmp_path):
     """A new HOME button on pin 15 (the op's default spot, the template button of
     `donors.button_object`): invisible until the pin's first status arrives; then every changed
     pixel lies in its box, off draws the off colour confined to the box, a tap sends one 1FEDB
-    toggle, and the G12's echo repaints inside the box only (emulated 2026-11-09)."""
+    toggle, and the G12's echo repaints inside the box only (emulated 2026-11-09).
+
+    Under the emulator's configuration only: slot 102 is not 1, so the switch in card 765 draws
+    its empty arm (object 239), not the Star Link button (object 240) that the default spot
+    covers under slot 102 = 1 (`check_placement`'s report). Test expectations, not locators."""
     img = _build(mcf_147, [("b", "add_button", {"channel": ADD_BUTTON_PIN, "label": "Pin 15",
                                                 "off_colour": list(OFF)})])
     base = _settled(mcf_147)
@@ -518,6 +522,11 @@ def test_add_button(mcf_147, tmp_path):
     s = _settled(img)
     s.goto("HOME")
     s.run(2.0)
+    assert 240 not in {q.obj_index for q in s._placed(s._root())}, \
+        "the emulator draws slot 102's Star Link arm: the box covers it"
+    unset = _shot(s, tmp_path, "unset")
+    assert _diff_bbox(stock_home, unset) is None, \
+        "the button draws before the pin's first status"
     s.set_g12_output(ADD_BUTTON_PIN, 200)
     s.run(2.0)
     box = s.control_box("Pin 15")

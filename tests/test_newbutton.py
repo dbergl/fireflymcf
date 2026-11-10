@@ -712,15 +712,17 @@ def test_placement_defaults_to_the_13_6_home_spot():
     assert default == explicit
 
 
-@pytest.mark.parametrize("path,card,arm,objects", [
-    (BUILD, 901, {"901": 2}, {148, 163}),
-    (STOCK_147, 765, {"239": 1}, {240})])
-def test_the_default_spot_is_inside_one_card_in_the_base_arm(path, card, arm, objects):
+@pytest.mark.parametrize("path,card,arm,objects,text", [
+    (BUILD, 901, {"901": 2}, {148, 163},
+     'slot 6 = 2: object 148 "DISABLED", object 163 (touch)'),
+    (STOCK_147, 765, {"239": 1}, {240}, 'slot 102 = 1: object 240 "Star Link" (touch)')])
+def test_the_default_spot_is_inside_one_card_in_the_base_arm(path, card, arm, objects, text):
     """In the base switch arm the gate admits the page root's background and the one wt-33 card
     around the box (13.6 card 901, 14.7 card 765: test expectations, located by the walk). The
-    spot is NOT clear under every arm: other arms draw records over it (14.7 arm 239=1 draws
-    object 240, a full button), and those are reported per arm, not refused, because which arm
-    a coach draws is its configuration."""
+    spot is NOT clear under every arm: other arms draw records over it (14.7 slot 102 = 1 draws
+    object 240, the Star Link button with its own touch region), and those are reported per arm
+    path, keyed by the value slot a configuration sets, not refused, because which arm a coach
+    draws is its configuration."""
     from fireflymcf import cli
     data = _read(path)
     out, idx, _ = newbutton.clone_onto_home(data, position=newbutton.DEFAULT_AT_136[1:])
@@ -730,7 +732,31 @@ def test_the_default_spot_is_inside_one_card_in_the_base_arm(path, card, arm, ob
     assert p.card == card
     hit = next(a for a in p.arms if a["arm"] == arm)
     assert objects <= set(hit["objects"])
+    assert newbutton.placement_text(hit) == text
     assert all(a["arm"] for a in p.arms), "the base arm never appears in the report"
+
+
+def test_the_report_walks_switches_nested_in_a_non_base_arm():
+    """13.6 HOME: the switch on slot 37 lives inside card 903, the slot-6 = 2 arm of the switch
+    based at 901, so only an arm path reaches it. Under slot 6 = 2 and slot 37 = 2 the footprint
+    covers object 165 (the AES single control), and under slot 37 = 3 object 166 (AES dual);
+    neither is in a one-switch-at-a-time walk (review, 2026-11-09). Test expectations only."""
+    from fireflymcf import cli
+    out, idx, _ = newbutton.clone_onto_home(_d(), position=newbutton.DEFAULT_AT_136[1:])
+    p = newbutton.check_placement(out, cli._resolve_page_root(out, "home"), idx)
+    by_arm = {tuple(a["arm"].items()): a for a in p.arms}
+    for value, obj in ((2, 165), (3, 166)):
+        hit = by_arm[(("901", 2), ("163", value))]
+        assert obj in hit["objects"]
+        assert hit["path"] == [{"child_base": 901, "slots": [6], "value": 2},
+                               {"child_base": 163, "slots": [37], "value": value}]
+        assert {"object": obj, "caption": None, "touch": True} in hit["covers"]
+        assert newbutton.placement_text(hit).startswith("slot 6 = 2 and slot 37 = %d: " % value)
+    # a nested path covering exactly what its parent covers is not repeated
+    for a in p.arms:
+        parent = tuple(list(a["arm"].items())[:-1])
+        if parent:
+            assert a["objects"] != by_arm.get(parent, {"objects": None})["objects"]
 
 
 @pytest.mark.parametrize("at", [("home", 560, 340),     # box over the Chassis battery (obj 440)
@@ -763,11 +789,41 @@ def test_the_gate_walks_the_named_page():
 def test_the_op_reports_other_arms_without_refusing(monkeypatch):
     r = _compile(_d())
     assert r.ok, r.errors
-    assert {"arm": {"901": 2}, "objects": [148, 163]} in r.placement["b"]
-    assert "under other switch arms only" in r.manifest[0] and "901=2" in r.manifest[0]
+    first = r.placement["b"][0]
+    assert first["arm"] == {"901": 2} and first["objects"] == [148, 163]
+    assert first["path"] == [{"child_base": 901, "slots": [6], "value": 2}]
+    assert first["covers"] == [{"object": 148, "caption": "DISABLED", "touch": False},
+                               {"object": 163, "caption": None, "touch": True}]
+    assert ('under other switch arms only: slot 6 = 2: object 148 "DISABLED", object 163 '
+            '(touch); ') in r.manifest[0]
+    assert "more arm paths (the sidecar's placement lists all)" in r.manifest[0]
     r = _compile(_read(STOCK_147), monkeypatch, firmwares={"13.6", "14.7"})
     assert r.ok, r.errors
-    assert any(a["arm"] == {"239": 1} and 240 in a["objects"] for a in r.placement["b"])
+    star = next(a for a in r.placement["b"] if a["arm"] == {"239": 1})
+    assert star["path"] == [{"child_base": 239, "slots": [102], "value": 1}]
+    assert star["covers"] == [{"object": 240, "caption": "Star Link", "touch": True}]
+    assert 'slot 102 = 1: object 240 "Star Link" (touch)' in r.manifest[0]
+
+
+def test_the_placement_report_is_a_deep_copy():
+    """`CompileResult.placement` shares nothing with the op's handle."""
+    from fireflymcf import recipe_ops
+
+    class _O:
+        class spec:
+            id = "b"
+    arms = [{"arm": {"1": 2}, "objects": [3], "path": [{"child_base": 1, "slots": [9],
+                                                         "value": 2}],
+             "covers": [{"object": 3, "caption": None, "touch": True}]}]
+
+    class _Ctx:
+        handles = {"b": {"placement_arms": arms}}
+    out = recipe_ops.placement_report([_O], _Ctx)
+    out["b"][0]["objects"].append(4)
+    out["b"][0]["path"][0]["slots"].append(10)
+    out["b"][0]["covers"][0]["touch"] = False
+    assert arms[0]["objects"] == [3] and arms[0]["path"][0]["slots"] == [9]
+    assert arms[0]["covers"][0]["touch"] is True
 
 
 def test_the_op_takes_at_and_refuses_an_overlap():

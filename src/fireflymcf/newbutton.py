@@ -732,10 +732,14 @@ class Placement:
     box: tuple          # (x0, y0, x1, y1): the new object's placed records' bounding box
     canvas: tuple       # the page root's background (its first placed wt-4 record)
     card: int | None    # the object of the one wt-33 card that encloses `box`, if any
-    # Report only: the switch arms (other than the base) under which the footprint covers a
-    # record the base arm does not admit, as `{"arm": {"<switch child_base>": value},
-    # "objects": [object, ...]}`. Which arm a coach draws is its configuration, which a compile
-    # does not see, so these do not refuse.
+    # Report only: the switch-arm paths (other than the base) under which the footprint covers
+    # a record the base arm does not admit (`check_placement`). Each entry is
+    # `{"arm": {"<switch child_base>": value, ...}, "objects": [object, ...],
+    #   "path": [{"child_base": int, "slots": [value_slot, ...], "value": int}, ...],
+    #   "covers": [{"object": int, "caption": str | None, "touch": bool}, ...]}`,
+    # `arm` and `path` outermost switch first. A configuration sets the `slots`, not the
+    # child_base. Which arm a coach draws is its configuration, which a compile does not see, so
+    # these do not refuse.
     arms: tuple = ()
 
 
@@ -760,9 +764,36 @@ def check_origin(x: int, y: int) -> None:
             raise PlacementOverlap(f"attach origin {name}={v} is outside 0..0xFFFF")
 
 
+def _caption(recs) -> str | None:
+    """An object's caption for a report: its first wt-11/13 label of more than one character,
+    lines joined by a space. A one-character label is taken for an icon (an icon is a
+    character), which is inference: a one-letter caption is not named."""
+    for r in recs:
+        if r.wtype in (11, 13) and r.label:
+            text = " ".join(records.label_text(r.label).split())
+            if len(text) > 1:
+                return text
+    return None
+
+
+def _covered(data: bytes, obj: int) -> dict:
+    """`{"object", "caption", "touch"}` for a covered object, from its OWN records: `touch` is
+    whether it carries a wt-12 touch region."""
+    gs, ge = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    try:
+        recs = records.object_records(data, gs + table[obj])
+    except (IndexError, ValueError):
+        recs = []
+    return {"object": obj, "caption": _caption(recs),
+            "touch": any(r.wtype == 12 for r in recs)}
+
+
 def check_placement(data: bytes, root: int, obj: int) -> Placement:
-    """The footprint gate over every switch arm of the page (`pagewalk.switch_arm_sets`, each
-    walked by `layout.Screen.walk`, the layout engine's replay).
+    """The footprint gate over every switch-arm path of the page (`pagewalk.switch_arm_paths`:
+    the base, each switch's arms one at a time, and recursively the arms of every switch nested
+    inside a non-base arm, combined with the arm path that reaches it), each walked by
+    `layout.Screen.walk`, the layout engine's replay.
 
     In the base arm (`{}`) it refuses `PlacementOverlap` unless object `obj`'s placed records lie
     inside the page root's background (its first placed wt-4 record: the canvas) and touch no
@@ -771,10 +802,12 @@ def check_placement(data: bytes, root: int, obj: int) -> Placement:
     records (its header, its own touch regions and rows) are not admitted. Boxes are compared
     inclusively, so an edge-to-edge neighbour refuses too.
 
-    Under each other arm set, records the base rule would not admit are reported in
+    Under each other arm path, records the base rule would not admit are reported in
     `Placement.arms`, not refused: which arm a coach draws depends on its configuration, which
-    the build does not see."""
-    sets = pagewalk.switch_arm_sets(data, [root])
+    the build does not see. Each entry names the value slots the path sets, and each covered
+    object's caption and whether it carries a touch region. A nested path that covers exactly
+    the objects its parent path covers is not repeated. Only the all-base walk refuses."""
+    paths = pagewalk.switch_arm_paths(data, [root])
     screen = layout.Screen(data)
 
     def walk(sv):
@@ -817,13 +850,38 @@ def check_placement(data: bytes, root: int, obj: int) -> Placement:
             + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
 
     arms = []
-    for sv in sets:
+    covered: dict = {frozenset(): []}
+    for sv in paths.sets:
         if not sv:
             continue
         objs = sorted({q.obj_index for q, _b in foreign(walk(sv), box)[0]})
-        if objs:
-            arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs})
+        covered[frozenset(sv.items())] = objs
+        parent = frozenset(list(sv.items())[:-1])
+        if not objs or (len(sv) > 1 and objs == covered[parent]):
+            continue
+        arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs,
+                     "path": [{"child_base": k, "slots": list(paths.slots.get(k, ())),
+                               "value": v} for k, v in sv.items()],
+                     "covers": [_covered(data, o) for o in objs]})
     return Placement(box, canvas, card, tuple(arms))
+
+
+def placement_text(entry: dict) -> str:
+    """One `Placement.arms` entry as the manifest prints it, e.g.
+    `slot 102 = 1: object 240 "Star Link" (touch)`."""
+    def step(s):
+        slots = s["slots"]
+        if not slots:
+            return "switch %d = %d" % (s["child_base"], s["value"])
+        return "%s %s = %d" % ("slot" if len(slots) == 1 else "slots",
+                               " and ".join(map(str, slots)), s["value"])
+
+    def obj(c):
+        return "object %d%s%s" % (c["object"],
+                                  ' "%s"' % c["caption"] if c["caption"] else "",
+                                  " (touch)" if c["touch"] else "")
+    return "%s: %s" % (" and ".join(step(s) for s in entry["path"]),
+                       ", ".join(obj(c) for c in entry["covers"]))
 
 
 # --------------------------------------------------------------------------------------
@@ -1529,11 +1587,11 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     if w11.label_offset is None:
         raise ValueError(f"clone {idx} wtype-11 record carries no label")
     label_off = w11.label_offset
+    # An invariant, not a gate: the clone and `proof.caption_label` both come from the
+    # template (`donors.button_object`), so they agree by construction. The gate on the caption
+    # is the template proof's NO_TEMPLATE refusal in `donors`.
     current = out[label_off:label_off + field]
-    if current != proof.caption_label:
-        raise ValueError(
-            f"clone {idx} wtype-11 label bytes are {current!r}, expected "
-            f"{proof.caption_label!r} (the template's own caption) before relabelling")
+    assert current == proof.caption_label
 
     # Pad the caption to the donor field, the way THIS record is drawn.
     #

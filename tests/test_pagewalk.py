@@ -45,3 +45,24 @@ def test_colour_state_is_shared_past_a_container(mcf_136):
                  != (dict(walk[j - 1].color_state)["fillA"] if j else None))
     assert (walk[writer].obj, walk[writer].index, walk[writer].label) == (251, 2, "Stop")
     assert (353, 3) in walk[writer].key, "the writer sits inside a container Engine follows"
+
+
+def test_arm_paths_extend_the_one_switch_sets_with_nested_arms(mcf_136):
+    """`switch_arm_paths`' one-entry sets are `switch_arm_sets`' sets, in order; the rest are
+    arm paths into switches nested in a non-base arm. On 13.6 HOME (root 4) the switch based at
+    163 (slot 37) is drawn only inside card 903, arm 2 of the switch based at 901 (slot 6), so
+    only a path reaches its arms (review, 2026-11-09; test expectations)."""
+    paths = pagewalk.switch_arm_paths(mcf_136, [4])
+    assert [s for s in paths.sets if len(s) <= 1] == pagewalk.switch_arm_sets(mcf_136, [4])
+    assert {901: 2, 163: 2} in paths.sets and {901: 2, 163: 3} in paths.sets
+    assert {163: 2} not in paths.sets            # unreachable with 901 at its base
+    nested = next(s for s in paths.sets if s == {901: 2, 163: 2})
+    assert list(nested) == [901, 163]           # outermost first
+    assert paths.slots[901] == (6,) and paths.slots[163] == (37,)
+    assert len({frozenset(s.items()) for s in paths.sets}) == len(paths.sets)
+
+
+def test_arm_paths_refuse_past_their_limit(mcf_136):
+    import pytest
+    with pytest.raises(pagewalk.ArmPathLimit):
+        pagewalk.switch_arm_paths(mcf_136, [4], limit=10)
