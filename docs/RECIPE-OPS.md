@@ -94,7 +94,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes | 13.6 |
 | [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, emulated 2026-11-08 (drawn and `draw` false): each published value repaints the digits in the readout's box, and a cell poisoned before reset is never drawn; `cell_slot` feeds the Absorb cell past its fence (cell-level: stock 14.7 draws no Absorb row) and repaints HOME's Chassis readout, only in its box, on both pages that draw it. `silence` must name every remaining stock store to the cell that is unfenced, or whose fence admits a value the routine computes differently. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes | 13.6 |
-| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes | 13.6 |
+| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one `1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no "Heat Pump" OPTIONS row, so with the firmware gate bypassed it refuses `NO_SUCH_LABEL`. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a silent baseline, each later edge one on or off frame while the gate holds, none while it does not. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes | 13.6 |
 | [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes | 13.6 |
@@ -1472,7 +1472,7 @@ Error codes:
 
 Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row.
 
-- **Hardware status:** Flashed 2026-08-31 (the light to pump follower).
+- **Hardware status:** Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one `1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no "Heat Pump" OPTIONS row, so with the firmware gate bypassed it refuses `NO_SUCH_LABEL`.
 - **Proof:** `followchannel.py`, `BUS-BASELINE.md` PC.45
 - **Implementation:** `recipe_ops.FollowChannel`
 
@@ -1481,13 +1481,14 @@ Watch one G12 output's status and mirror its ON/OFF onto another channel, gated 
 | `watch_channel` | integer | yes |  | G12 output instance whose status bit is watched |
 | `target_channel` | integer | yes |  | G12 output instance the follower drives |
 | `on_level` | integer |  | 200 | level byte the on-frame carries |
-| `gate_option` | string |  | "Heat Pump" | stock caption of the gating OPTIONS row (object 46) |
+| `gate_option` | string |  | "Heat Pump" | stock caption of the gating OPTIONS row |
 | `gate_label` | string |  | "Pump Link" | the row's new caption (same-size rename only) |
 
 Error codes:
 
-- `NO_SUCH_LABEL` — object 46 has no label field containing `gate_option`
-- `AMBIGUOUS_LABEL` — object 46 has more than one field containing `gate_option`
+- `NO_OPTIONS_PAGE` — no object's header reads OPTIONS (`cli._resolve_page_root`)
+- `NO_SUCH_LABEL` — the OPTIONS root has no label field containing `gate_option` (11.23, with the firmware gate admitted: it has no "Heat Pump" row)
+- `AMBIGUOUS_LABEL` — the OPTIONS root has more than one field containing `gate_option`
 - `LABEL_TOO_LONG` — `gate_label` does not fit the field `gate_option` was found in
 - `FOLLOW_REFUSED` — `followchannel.resolve`/`build` could not derive an address or author the routine (an unrecoverable option/status join, or the stock hook byte was not the expected `bl`)
 - `UNEXPECTED_APPEND_POINT` — the GuiCode section's append point is below the stock 13.6 address (0x00259BB4) or misaligned; refuses rather than build against an image this op was never proven on. A point BEYOND it (earlier appends) is fine: the routine chains

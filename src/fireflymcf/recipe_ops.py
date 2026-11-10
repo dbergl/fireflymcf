@@ -5514,10 +5514,11 @@ class FollowChannel(Op):
     Wires three already hardware-proven primitives together, in order:
 
       1. Rename the gate option's OPTIONS row caption (same-size, OBJECT-SCOPED to
-         object 46 -- the file's OPTIONS page -- so the CLIMATE mode-column's own
-         "Heat Pump" captions on OTHER objects are left untouched). This step runs
-         FIRST, against the untouched stock caption text, because step 2 derives the
-         gate register by NAME: renaming after would make `gate_option` unfindable.
+         the OPTIONS page root, located per image by its header (`gate_object`) -- so
+         the CLIMATE mode-column's own "Heat Pump" captions on OTHER objects are left
+         untouched). This step runs FIRST, against the untouched stock caption text,
+         because step 2 derives the gate register by NAME: renaming after would make
+         `gate_option` unfindable.
       2. Derive the plan (`followchannel.resolve`, against the PRE-rename image, for
          the reason above) and author the routine + templates (`followchannel.build`)
          at the GuiCode section's true append point, then append it
@@ -5532,15 +5533,17 @@ class FollowChannel(Op):
       target_channel: int — G12 output instance the follower drives
       on_level: int (default 200) — level byte the on-frame carries
       gate_option: str (default "Heat Pump") — the STOCK caption of the OPTIONS row
-                   that gates transmission (object 46); also the text the rename looks
-                   for
+                   that gates transmission (on the OPTIONS root); also the text the rename
+                   looks for
       gate_label: str (default "Pump Link") — the row's new caption; same length as
                   `gate_option` is required (9 chars <-> 9 chars for the defaults) --
                   this op only ever makes a same-size rename
 
     Error codes:
-      NO_SUCH_LABEL — object 46 has no label field containing `gate_option`
-      AMBIGUOUS_LABEL — object 46 has more than one field containing `gate_option`
+      NO_OPTIONS_PAGE — no object's header reads OPTIONS (`cli._resolve_page_root`)
+      NO_SUCH_LABEL — the OPTIONS root has no label field containing `gate_option` (11.23,
+                      with the firmware gate admitted: it has no "Heat Pump" row)
+      AMBIGUOUS_LABEL — the OPTIONS root has more than one field containing `gate_option`
       LABEL_TOO_LONG — `gate_label` does not fit the field `gate_option` was found in
       FOLLOW_REFUSED — `followchannel.resolve`/`build` could not derive an address or
                        author the routine (an unrecoverable option/status join, or the
@@ -5568,7 +5571,9 @@ class FollowChannel(Op):
     context.
     """
 
-    GATE_OBJECT = 46
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {
@@ -5579,7 +5584,7 @@ class FollowChannel(Op):
             "on_level": {"type": "integer", "default": 200,
                         "description": "level byte the on-frame carries"},
             "gate_option": {"type": "string", "default": "Heat Pump",
-                            "description": "stock caption of the gating OPTIONS row (object 46)"},
+                            "description": "stock caption of the gating OPTIONS row"},
             "gate_label": {"type": "string", "default": "Pump Link",
                           "description": "the row's new caption (same-size rename only)"},
         },
@@ -5593,20 +5598,31 @@ class FollowChannel(Op):
         self.gate_option = self._param("gate_option", "Heat Pump", kind=str)
         self.gate_label = self._param("gate_label", "Pump Link", kind=str)
 
+    @staticmethod
+    def gate_object(data) -> int:
+        """The OPTIONS page root whose row the op renames: the object whose header reads
+        OPTIONS (`cli._resolve_page_root`, memoised in `options.page_root`). Raises
+        ValueError when there is none."""
+        return cli._resolve_page_root(data, "options")
+
     def apply(self, data, ctx):
-        # --- 1. rename the gate row's OPTIONS caption: same-size, object-46-scoped.
+        # --- 1. rename the gate row's OPTIONS caption: same-size, scoped to the OPTIONS root.
+        try:
+            gate_obj = self.gate_object(data)
+        except ValueError as e:
+            raise RecipeError("NO_OPTIONS_PAGE", str(e), op_id=self.spec.id)
         gs, _ = guidata.guidata_extent(data)
-        lo, hi = insert._object_span(data, self.GATE_OBJECT)
+        lo, hi = insert._object_span(data, gate_obj)
         sites = [s for s in patch.find_label_sites(data, self.gate_option)
                  if lo <= s.text_offset - gs < hi]
         if not sites:
             raise RecipeError(
                 "NO_SUCH_LABEL", "object %d has no label field containing %r"
-                % (self.GATE_OBJECT, self.gate_option), op_id=self.spec.id)
+                % (gate_obj, self.gate_option), op_id=self.spec.id)
         if len(sites) > 1:
             raise RecipeError(
                 "AMBIGUOUS_LABEL", "object %d has %d fields containing %r"
-                % (self.GATE_OBJECT, len(sites), self.gate_option), op_id=self.spec.id)
+                % (gate_obj, len(sites), self.gate_option), op_id=self.spec.id)
         patcher = patch.McfPatcher(data)
         try:
             patcher.set_label(sites[0], self.gate_option, self.gate_label, align="right")
@@ -5670,24 +5686,26 @@ class FollowChannel(Op):
             "hook_at": hook_at,
             "code_load_addr": code_load_addr,
             "entry": code_load_addr + followchannel.ENTRY_OFF,
+            "gate_object": gate_obj,
         }
         return sealed
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
+        gate_obj = h["gate_object"]
         gs, _ = guidata.guidata_extent(data)
-        lo, hi = insert._object_span(data, self.GATE_OBJECT)
+        lo, hi = insert._object_span(data, gate_obj)
         got_new = [s.text.strip() for s in patch.find_label_sites(data, self.gate_label)
                   if lo <= s.text_offset - gs < hi]
         assert self.gate_label in got_new, \
             "gate row lost its %r caption (object %d holds: %s)" % (
-                self.gate_label, self.GATE_OBJECT, got_new)
+                self.gate_label, gate_obj, got_new)
         if self.gate_option != self.gate_label:
             stale = [s.text.strip() for s in patch.find_label_sites(data, self.gate_option)
                      if lo <= s.text_offset - gs < hi]
             assert not stale, \
                 "gate row still carries the old caption %r (object %d)" % (
-                    self.gate_option, self.GATE_OBJECT)
+                    self.gate_option, gate_obj)
 
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
@@ -5705,7 +5723,7 @@ class FollowChannel(Op):
         return ("follow_channel: watch=%d -> target=%d (on_level=%d), gated by %r (object "
                 "%d row); detour GuiCode+%#x -> %#x"
                 % (self.watch_channel, self.target_channel, self.on_level, self.gate_label,
-                   self.GATE_OBJECT, h["hook_at"], h["entry"]))
+                   gate_obj, h["hook_at"], h["entry"]))
 
 
 

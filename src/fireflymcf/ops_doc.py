@@ -200,7 +200,12 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "follow_channel": ("guicode",
         "Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a "
         "repurposed OPTIONS row.",
-        "Flashed 2026-08-31 (the light to pump follower).",
+        "Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 "
+        "onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one "
+        "`1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a "
+        "second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has "
+        "no \"Heat Pump\" OPTIONS row, so with the firmware gate bypassed it refuses "
+        "`NO_SUCH_LABEL`.",
         "`followchannel.py`, `BUS-BASELINE.md` PC.45"),
     "add_option_follower": ("guicode",
         "Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a "

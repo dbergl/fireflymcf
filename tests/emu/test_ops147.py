@@ -65,9 +65,9 @@ TESTED_147 = frozenset({
     "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
     "install_glyph", "append_filter", "drop_from_master", "set_theme", "add_text_label",
-    "add_register_readout", "add_enum_label", "follow_register", "add_rvc_button",
-    "add_button", "add_button_status", "add_button_states", "add_glyph_button",
-    "wire_button"})
+    "add_register_readout", "add_enum_label", "follow_register", "follow_channel",
+    "add_rvc_button", "add_button", "add_button_status", "add_button_states",
+    "add_glyph_button", "wire_button"})
 
 
 class _PinnedTime:
@@ -1218,32 +1218,49 @@ def test_follow_register(mcf_147):
         assert sends(t) == [], ("the closed gate let an edge through", v)
 
 
-def _build_refused_as(stock: bytes, specs, code: str) -> bytes:
-    """`_build`, for a strict xfail: the refusal must be `code` (else RuntimeError, which the
-    xfail does not catch, so a different failure fails the test)."""
-    project = recipe.Project(base_sha256=hashlib.sha256(stock).hexdigest(), build_name=None,
-                             ops=[recipe.OpSpec(id=i, type=t, params=p) for i, t, p in specs])
-    res = recipe.compile_project(project, stock)
-    if not res.ok and [e["code"] for e in res.errors] != [code]:
-        raise RuntimeError("refused otherwise than %s: %s" % (code, res.errors))
-    assert res.ok, res.errors
-    return res.data
+# follow_channel on 14.7: test expectations only. The OPTIONS root is located by its header
+# (`cli._resolve_page_root(data, "options")`: object 42 here), and the gate register by the row's
+# name (`followchannel.resolve(..., gate_option="Heat Pump")`: 0x20039E0F here). The by-name join
+# is shown by toggling the row through the panel, never by writing the register.
+FOLLOW_WATCH = 3
+FOLLOW_TARGET = 4
+FOLLOW_GATE_REG = 0x20039E0F
 
 
-def _admit(monkeypatch, *names):
-    for n in names:
-        monkeypatch.setattr(recipe.REGISTRY[n], "firmwares", frozenset({"13.6", "14.7"}))
+def test_follow_channel(mcf_147):
+    """Pin 3 mirrored onto pin 4 at level 200, gated by the renamed "Heat Pump" OPTIONS row
+    ("Pump Link"). As booted the row is clear: pin 3 on sends nothing for pin 4. One tap on the
+    row (OPTIONS acts on release) sets its register, and pin 3 on then sends one 1FEDB on frame
+    for pin 4 at level 200, pin 3 off one off frame; a second tap clears it and pin 3 sends
+    nothing again (emulated 2026-11-09)."""
+    img = _build(mcf_147, [("f", "follow_channel", {
+        "watch_channel": FOLLOW_WATCH, "target_channel": FOLLOW_TARGET, "on_level": 200})])
+    s = _settled(img)
+    on = bytes([FOLLOW_TARGET, 0xFF, 200, 1, 0xFF, 0x00, 0xFF, 0xFF])
+    off = bytes([FOLLOW_TARGET, 0xFF, 0, 3, 0xFF, 0x00, 0xFF, 0xFF])
 
+    def gate() -> int:
+        return s.read_mem(FOLLOW_GATE_REG, 1)[0]
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "follow_channel carries 13.6 pins: GATE_OBJECT = 46 is 13.6's OPTIONS page, whose 'Heat "
-    "Pump' row it renames and whose option register it gates on. Observed 2026-11-08 with the "
-    "op admitted on 14.7: NO_SUCH_LABEL, object 46 has no label field containing 'Heat Pump'. "
-    "It stays off 14.7; follow_register covers the follower without the row."))
-def test_follow_channel(mcf_147, monkeypatch):
-    _admit(monkeypatch, "follow_channel")
-    _build_refused_as(mcf_147, [("f", "follow_channel",
-                                 {"watch_channel": 3, "target_channel": 4})], "NO_SUCH_LABEL")
+    def pin3(level: int) -> list[bytes]:
+        t = s.now
+        s.set_g12_output(FOLLOW_WATCH, level)
+        s.run(3.0)
+        return [bytes(f.data) for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)
+                if f.data[0] == FOLLOW_TARGET]
+
+    assert gate() == 0
+    assert pin3(200) == [] and pin3(0) == [], "the follower sent with the row clear"
+    s.goto("OPTIONS")
+    s.tap("Pump Link")
+    s.run(2.0)
+    assert gate() == 1, "the row's tap did not set the register the follower reads"
+    assert pin3(200) == [on]
+    assert pin3(0) == [off]
+    s.tap("Pump Link")
+    s.run(2.0)
+    assert gate() == 0, "the second tap did not clear the row"
+    assert pin3(200) == [] and pin3(0) == [], "the follower sent with the row cleared"
 
 
 # --- add_rvc_button and its status ops -----------------------------------------------------------

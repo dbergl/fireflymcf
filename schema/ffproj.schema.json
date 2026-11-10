@@ -2926,7 +2926,7 @@
                   "gate_option": {
                     "type": "string",
                     "default": "Heat Pump",
-                    "description": "stock caption of the gating OPTIONS row (object 46)"
+                    "description": "stock caption of the gating OPTIONS row"
                   },
                   "gate_label": {
                     "type": "string",

@@ -53,7 +53,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import guidata, layout, records
+from . import guidata, layout, memo, records
 
 OPTIONS_HEADER_LABEL = "OPTIONS"
 
@@ -118,6 +118,20 @@ def _first_label(recs: list) -> str | None:
     for r in recs:
         if r.label is not None:
             return r.label
+    return None
+
+
+@memo.content_cached(copy=None)
+def page_root(data: bytes, header: str) -> int | None:
+    """The first object-table index whose header -- the first labelled record of its OWN record
+    list (`_first_label`) -- strips to `header`, or None. `cli._resolve_page_root`'s lookup for a
+    named page; memoised on the image's bytes, the header passed in."""
+    gs, ge = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    for i in range(len(table)):
+        label = _first_label(_own_records(data, gs, ge, table, i))
+        if label is not None and label.strip() == header:
+            return i
     return None
 
 
