@@ -17,8 +17,8 @@ import json
 import struct
 
 from fireflymcf import (celltables, coverage, decodeguards, donors, firmware, followchannel,
-                        grammar, guidata, newbutton, patch, relocate, sramreach, statusbind,
-                        stockscope, theme)
+                        grammar, guidata, newbutton, options, patch, relocate, sramreach,
+                        statusbind, stockscope, theme)
 
 SCHEMA = 1
 
@@ -83,6 +83,11 @@ class Project:
     # (TICK_CHAIN_FULL). Written only when set, so a project that never raised it serialises as
     # before.
     tick_chain_limit: int | None = None
+    # The coach's settings (`options.CoachConfig`'s floorplan / options / extra_slots), which a
+    # placing op checks what the coach draws against (`resolve_coach`). Unlike `preview` this is
+    # build input: it can change what compiles, never a byte. `compile --config` replaces it
+    # whole. Written only when non-empty, so a project without one serialises as before.
+    coach: dict = dataclasses.field(default_factory=dict)
 
     @property
     def effective_tick_chain_limit(self) -> int:
@@ -141,9 +146,10 @@ class Project:
                                   or limit < 1):
             raise RecipeError("BAD_PROJECT", "field 'tick_chain_limit' must be a positive "
                               "integer, got %r" % (limit,))
+        coach = _check_coach_block(doc.get("coach", {}))
         return cls(base_sha256=doc["base_sha256"], build_name=doc["build_name"], ops=ops,
                    preview=preview, ext_ops=ext_ops, user_op_acceptance=acceptance,
-                   user_op_sources=sources, tick_chain_limit=limit)
+                   user_op_sources=sources, tick_chain_limit=limit, coach=coach)
 
     def to_json(self) -> str:
         doc = {
@@ -162,7 +168,49 @@ class Project:
             doc["user_op_sources"] = self.user_op_sources
         if self.tick_chain_limit is not None:
             doc["tick_chain_limit"] = self.tick_chain_limit
+        if self.coach:
+            doc["coach"] = self.coach
         return json.dumps(doc, indent=2)
+
+
+_COACH_KEYS = ("floorplan", "options", "extra_slots")
+
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _check_coach_block(block) -> dict:
+    """A project's `coach` block, checked for shape (BAD_PROJECT): an object with only the
+    `CoachConfig` keys `floorplan` (a name), `options` (a list of names, or `{name: value}`) and
+    `extra_slots` (`{"slot": value}`). `preview` is render state and belongs at the project's
+    top level, never here. Whether the names and slots exist on the image is
+    `options.coach_slots`' question, asked at compile (COACH_CONFIG)."""
+    def bad(why):
+        raise RecipeError("BAD_PROJECT", "field 'coach' %s, got %r" % (why, block))
+    if not isinstance(block, dict):
+        bad("must be an object")
+    unknown = sorted(set(block) - set(_COACH_KEYS))
+    if unknown:
+        bad("takes only %s (not %s; a render's preview values belong in the top-level "
+            "'preview')" % (", ".join(_COACH_KEYS), ", ".join(map(repr, unknown))))
+    fp = block.get("floorplan")
+    if fp is not None and not isinstance(fp, str):
+        bad("'floorplan' must be a floorplan name")
+    opts = block.get("options", [])
+    if isinstance(opts, list):
+        if not all(isinstance(n, str) for n in opts):
+            bad("'options' must list option names")
+    elif isinstance(opts, dict):
+        if not all(_is_int(v) for v in opts.values()):
+            bad("'options' values must be integers")
+    else:
+        bad("'options' must be a list of names or a {name: value} object")
+    extra = block.get("extra_slots", {})
+    if not isinstance(extra, dict) or not all(
+            isinstance(k, str) and k.isdigit() and _is_int(v) for k, v in extra.items()):
+        bad("'extra_slots' must map slot numbers to integer values")
+    return block
 
 
 @dataclasses.dataclass
@@ -177,6 +225,9 @@ class Ctx:
     # The stock image's `firmware.KNOWN` key; compile refuses an image it cannot identify, so in a
     # compile this is never None
     firmware: str | None = None
+    # The coach's settings (`resolve_coach`): the recipe's `coach` block or the `--config`
+    # override, resolved and validated; None when there are none
+    coach: "options.CoachSlots | None" = None
 
 
 REGISTRY: dict[str, type] = {}
@@ -306,6 +357,9 @@ class CompileResult:
     # `newbutton.check_placement`); which arm a coach draws is its configuration (the `slots`),
     # so this is report only; additive
     placement: dict = dataclasses.field(default_factory=dict)
+    # The coach settings the compile used (`options.CoachSlots.to_json`: {"slots": {slot: value},
+    # "pinned": [...], "source": "recipe" | "--config <path>"}), or {} when there were none; additive
+    coach: dict = dataclasses.field(default_factory=dict)
 
 
 # ctx.handles key under which a user op's apply records the capabilities it changed
@@ -589,7 +643,8 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
     return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw,
-                         recipe_ops.placement_report(ops, ctx))
+                         recipe_ops.placement_report(ops, ctx),
+                         ctx.coach.to_json() if ctx.coach is not None else {})
 
 
 # Coded refusals from the locators an op builds on (a template or donor this image does not
@@ -677,7 +732,38 @@ def _check_tick_chain(before: bytes, after: bytes, limit: int) -> None:
         return
 
 
-def compile_project(project: Project, stock: bytes) -> CompileResult:
+def resolve_coach(project: Project, stock: bytes,
+                  coach: "options.CoachConfig | None" = None,
+                  coach_source: str | None = None) -> "options.CoachSlots | None":
+    """The coach settings a compile of `project` uses: `coach` (the `--config` override) when
+    given, which replaces the project's `coach` block whole, else that block; resolved and
+    validated for `stock` (`options.coach_slots`, which refuses COACH_CONFIG). None when neither
+    names anything. `coach_source` labels an override (default "--config")."""
+    if coach is not None:
+        return options.coach_slots(stock, coach, coach_source or "--config")
+    if not project.coach:
+        return None
+    return options.coach_slots(stock, options.CoachConfig.from_dict(project.coach), "recipe")
+
+
+def _prepare_coach(project: Project, stock: bytes, fw, errors: list, coach,
+                   coach_source) -> "options.CoachSlots | None":
+    """`resolve_coach`, with its refusal added to `errors` (on a firmware compile accepts:
+    the settings are read off that image) instead of raised."""
+    if fw is None:
+        return None
+    try:
+        return resolve_coach(project, stock, coach, coach_source)
+    except RecipeError as e:
+        errors.append(e)
+        return None
+
+
+def compile_project(project: Project, stock: bytes, *,
+                    coach: "options.CoachConfig | None" = None,
+                    coach_source: str | None = None) -> CompileResult:
+    """`project` applied to `stock`. `coach`, the `--config` override, replaces the project's
+    `coach` block whole; `coach_source` names it (`"--config <path>"`)."""
     if hashlib.sha256(stock).hexdigest() != project.base_sha256:
         raise RecipeError("BASE_MISMATCH",
                           "the supplied stock image does not match the project's base "
@@ -685,10 +771,11 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
     enabled = [s for s in project.ops if s.enabled]
 
     fw, ops, errors = _prepare(enabled, stock)
+    settings = _prepare_coach(project, stock, fw, errors, coach, coach_source)
     if errors:
         return CompileResult(False, None, [e.to_json() for e in errors], [], [], firmware=fw)
 
-    ctx = Ctx(stock=stock, edits=[], insertions=[], handles={}, firmware=fw)
+    ctx = Ctx(stock=stock, edits=[], insertions=[], handles={}, firmware=fw, coach=settings)
     data = stock
     limit = project.effective_tick_chain_limit
     for o in ops:
@@ -701,13 +788,17 @@ def compile_project(project: Project, stock: bytes) -> CompileResult:
     return _finish_or_refuse(project, stock, data, ctx, ops)
 
 
-def _prefix_key(base_hash: str, specs: list, tick_chain_limit: int | None = None) -> str:
+def _prefix_key(base_hash: str, specs: list, tick_chain_limit: int | None = None,
+                coach: "options.CoachSlots | None" = None) -> str:
     """A cache key for the state after applying exactly `specs`, in order, to
     `base_hash`'s stock. Keyed on (id, type, params) only — `enabled`/`note` never
     reach here since callers always filter to the enabled list first, and `note` has
     no effect on the compiled bytes. A set `tick_chain_limit` joins the key: it changes no
     byte, but a cached prefix was checked against the limit it was compiled under, so a
-    lowered limit must recompile to be enforced. Unset, the key is unchanged."""
+    lowered limit must recompile to be enforced. Unset, the key is unchanged. Settings
+    (`resolve_coach`) join it the same way, by their resolved slots and pinned slots: they can
+    change what compiles, and a prefix was checked against the settings it compiled under. Their
+    `source` does not join it, and neither does `Project.preview`."""
     user = _user_ops()
     # A user op's bytes come from its folder, not the package: its folder hash joins the key, so
     # an edited op misses. Built-in entries keep their 3-tuple, so their keys are unchanged.
@@ -716,6 +807,8 @@ def _prefix_key(base_hash: str, specs: list, tick_chain_limit: int | None = None
     text = base_hash + json.dumps(doc, sort_keys=True)
     if tick_chain_limit is not None:
         text += "|tick_chain_limit=%d" % tick_chain_limit
+    if coach is not None:
+        text += "|coach=" + json.dumps([sorted(coach.slots.items()), list(coach.pinned)])
     return hashlib.sha256(text.encode()).hexdigest()
 
 
@@ -730,7 +823,9 @@ def _snapshot(ctx: Ctx) -> tuple:
             set(ctx.authored_cells))
 
 
-def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult:
+def compile_cached(project: Project, stock: bytes, cache: dict, *,
+                   coach: "options.CoachConfig | None" = None,
+                   coach_source: str | None = None) -> CompileResult:
     """Same result as compile_project, resuming from the longest cached enabled-op
     prefix. `cache` is a plain dict the caller owns (the server holds one per
     project); entries are keyed by `_prefix_key` and store `(data, ctx_snapshot)` —
@@ -752,19 +847,21 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
     # Every refusal comes before the cache is read: a cached prefix never carries an op past
     # the firmware gate.
     fw, ops, errors = _prepare(enabled, stock)
+    settings = _prepare_coach(project, stock, fw, errors, coach, coach_source)
     if errors:
         return CompileResult(False, None, [e.to_json() for e in errors], [], [], firmware=fw)
 
     start = 0
     data, snap = stock, ([], [], {}, set())
     for i in range(len(enabled), 0, -1):
-        key = _prefix_key(project.base_sha256, enabled[:i], project.tick_chain_limit)
+        key = _prefix_key(project.base_sha256, enabled[:i], project.tick_chain_limit, settings)
         if key in cache:
             data, snap = cache[key]
             start = i
             break
     ctx = Ctx(stock=stock, edits=list(snap[0]), insertions=list(snap[1]),
-             handles=copy.deepcopy(snap[2]), authored_cells=set(snap[3]), firmware=fw)
+             handles=copy.deepcopy(snap[2]), authored_cells=set(snap[3]), firmware=fw,
+             coach=settings)
 
     limit = project.effective_tick_chain_limit
     for i in range(start, len(enabled)):
@@ -773,8 +870,8 @@ def compile_cached(project: Project, stock: bytes, cache: dict) -> CompileResult
         except RecipeError as e:
             e.op_id = e.op_id or ops[i].spec.id
             return CompileResult(False, None, [e.to_json()], [], [], firmware=fw)
-        cache[_prefix_key(project.base_sha256, enabled[:i + 1], project.tick_chain_limit)] = (
-            data, _snapshot(ctx))
+        cache[_prefix_key(project.base_sha256, enabled[:i + 1], project.tick_chain_limit,
+                          settings)] = (data, _snapshot(ctx))
 
     return _finish_or_refuse(project, stock, data, ctx, ops)
 
