@@ -14,7 +14,8 @@ map.
 
 A walk depends on switch values. `switch_arm_sets` gives the value sets that cover every arm of
 every type-6 switch a page reaches: the base walk (`{}`), then each switch's arms one at a time
-with every other switch at its base.
+with every other switch at its base. `switch_arm_paths` also reaches the switches nested inside a
+non-base arm, as arm paths.
 """
 from __future__ import annotations
 
@@ -168,6 +169,84 @@ def switch_arm_sets(data: bytes, roots, touching: int | None = None) -> list[dic
                 added.add((rec.child_index, value))
                 sets.append({rec.child_index: value})
     return sets
+
+
+# `switch_arm_paths` refuses past this many value sets rather than walk an unbounded product.
+# The largest page measured (2026-11-09, the HOME pages of 13.6 and 14.7) needs far fewer.
+ARM_PATH_LIMIT = 512
+
+
+class ArmPathLimit(ValueError):
+    """`switch_arm_paths` would pass its `limit` of value sets."""
+
+
+@dataclass(frozen=True)
+class ArmPaths:
+    """`switch_arm_paths`'s answer. `sets` are `switch_values` dicts, `{}` first; each dict's
+    insertion order is its arm path, outermost switch first. `slots` maps each switch
+    `child_base` a set drives to the sorted `value_slot`s of the type-6 records based there
+    (the variable a configuration sets; two records can share a base, and one `switch_values`
+    entry drives both)."""
+    sets: tuple
+    slots: dict
+
+
+def switch_arm_paths(data: bytes, roots, limit: int = ARM_PATH_LIMIT) -> ArmPaths:
+    """Every arm of every type-6 switch the walks of `roots` can reach, nested ones included.
+
+    `{}` first, then each switch the base walk reaches, one arm at a time with every other switch
+    at its base (`switch_arm_sets`' sets, in the same order). Then, recursively, for each set S:
+    the switch records the walk under S reaches that the walk under S's parent (S less its last
+    entry) did not, which are switches inside the arm S selects, each arm added to S. A switch reachable
+    at its parent's base is not crossed with the arms of an unrelated switch, so the count grows
+    with nesting, not with the product of every switch. Sets are deduplicated; an arm is the first
+    candidate with its value (`layout.Screen._switch_child`), and the base candidate is skipped.
+
+    `switch_arm_sets` is unchanged and still stops at the outermost switches. `ArmPathLimit`
+    if more than `limit` sets would be walked."""
+    match_off = guidata.find_match_table(data)
+    slots: dict = {}
+
+    def switches(sv):
+        out = []                         # [((obj, index), child_base, [(value, arm), ...])]
+        for root in roots:
+            for r in walk_records(data, root, switch_values=sv or None):
+                if r.wtype != 6:
+                    continue
+                rec = _record(data, r.obj, r.index)
+                if rec.child_index is None:
+                    continue
+                if rec.value_slot is not None:
+                    slots.setdefault(rec.child_index, set()).add(rec.value_slot)
+                first: dict = {}
+                for value, obj in guidata.switch_candidates(data, rec, match_off):
+                    first.setdefault(value, obj)
+                out.append(((r.obj, r.index), rec.child_index,
+                            [(v, a) for v, a in first.items() if a != rec.child_index]))
+        return out
+
+    sets: list[dict] = [{}]
+    seen = {frozenset()}
+    todo = deque([({}, None)])           # (set, the switch records its parent's walk reached)
+    while todo:
+        sv, parent_recs = todo.popleft()
+        found = switches(sv)
+        recs = {ident for ident, _cb, _arms in found}
+        for ident, cb, arms in found:
+            if cb in sv or (parent_recs is not None and ident in parent_recs):
+                continue
+            for value, _arm in arms:
+                child = {**sv, cb: value}
+                key = frozenset(child.items())
+                if key in seen:
+                    continue
+                if len(sets) >= limit:
+                    raise ArmPathLimit(f"more than {limit} switch-arm value sets under roots "
+                                       f"{list(roots)}")
+                seen.add(key)
+                sets.append(child)
+                todo.append((child, recs))
+    return ArmPaths(tuple(sets), {cb: tuple(sorted(v)) for cb, v in slots.items()})
 
 
 def _record(data: bytes, obj: int, index: int) -> records.WRecord:

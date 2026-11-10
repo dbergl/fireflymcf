@@ -768,3 +768,73 @@ def test_condition_gates_still_allow_a_wide_value_on_the_full_mask(mcf_136):
     assert "movw r2, #0x123" in [t for _a, t in disasm]
     with pytest.raises(followchannel.FollowChannelError):             # ... but not as a slot gate
         followchannel.resolve(mcf_136, 25, 44, 200, gate_slot_selector=0xEE, gate_on_value=0x123)
+
+
+# --- the follow_channel op: the gate object is the OPTIONS root, located per image -------------
+
+def _compile_follow(data: bytes, params: dict):
+    import hashlib
+    from fireflymcf import recipe
+    project = recipe.Project(base_sha256=hashlib.sha256(data).hexdigest(), build_name=None,
+                             ops=[recipe.OpSpec(id="f", type="follow_channel", params=params)])
+    return recipe.compile_project(project, data)
+
+
+def test_gate_object_is_the_options_root(mcf_136, mcf_147):
+    """The row the op renames lives on the OPTIONS page, found by its header
+    (`cli._resolve_page_root(data, "options")`): 46 on 13.6, 42 on 14.7 (expectations only)."""
+    from fireflymcf import recipe
+    op = recipe.REGISTRY["follow_channel"]
+    assert not hasattr(op, "GATE_OBJECT"), "the OPTIONS root is located, not pinned"
+    assert op.gate_object(mcf_136) == 46
+    assert op.gate_object(mcf_147) == 42
+
+
+def test_136_build_is_byte_identical(mcf_136):
+    """Locating the OPTIONS root changes no byte of the 13.6 build (sha256 taken 2026-11-09,
+    before the change, with the pinned object 46)."""
+    import hashlib
+    r = _compile_follow(mcf_136, {"watch_channel": 25, "target_channel": 44})
+    assert r.ok, r.errors
+    assert hashlib.sha256(r.data).hexdigest() == \
+        "c91d569f18273ec9cc0288b6398857ce55850f5a9df8647b1bab764bef1e3167"
+
+
+def test_147_build_renames_the_options_row_and_gates_on_its_register(mcf_147):
+    """On 14.7 the op builds: the row's caption on the OPTIONS root reads "Pump Link", and the
+    plan gates on the register the by-name join derives (0x20039E0F, an expectation only; the
+    emulator shows the row's tap drives it, tests/emu/test_ops147.py `test_follow_channel`)."""
+    from fireflymcf import guidata, options
+    r = _compile_follow(mcf_147, {"watch_channel": 3, "target_channel": 4})
+    assert r.ok, r.errors
+    gs, ge = guidata.guidata_extent(r.data)
+    tab = guidata.object_tables(r.data)[1]
+    rows = [t.strip() for _, t in options._iter_option_rows(r.data, gs, ge, tab, 42)]
+    assert "Pump Link" in rows and "Heat Pump" not in rows
+    plan = followchannel.resolve(mcf_147, 3, 4, 200, gate_option="Heat Pump")
+    assert plan.gate_addr == 0x20039E0F
+
+
+def test_on_11_23_the_op_refuses_unsupported_firmware(mcf_1123):
+    """11.23 is outside the op's `firmwares` ({13.6, 14.7})."""
+    r = _compile_follow(mcf_1123, {"watch_channel": 3, "target_channel": 4})
+    assert not r.ok and r.errors[0]["code"] == "UNSUPPORTED_FIRMWARE", r.errors
+
+
+def test_on_11_23_admitted_the_op_refuses_no_such_label(mcf_1123, monkeypatch):
+    """With the firmware gate admitted, 11.23's located OPTIONS root has no "Heat Pump" row:
+    `NO_SUCH_LABEL`, naming that root (1141 there, an expectation only)."""
+    from fireflymcf import recipe
+    monkeypatch.setattr(recipe.REGISTRY["follow_channel"], "firmwares",
+                        frozenset({"13.6", "14.7", "11.23"}))
+    r = _compile_follow(mcf_1123, {"watch_channel": 3, "target_channel": 4})
+    assert not r.ok and [e["code"] for e in r.errors] == ["NO_SUCH_LABEL"], r.errors
+    assert "object 1141 " in r.errors[0]["message"], r.errors
+
+
+def test_no_options_page_refuses(mcf_136, monkeypatch):
+    """An image with no page whose header reads OPTIONS refuses `NO_OPTIONS_PAGE`."""
+    from fireflymcf import options
+    monkeypatch.setattr(options, "page_root", lambda data, header: None)
+    r = _compile_follow(mcf_136, {"watch_channel": 25, "target_channel": 44})
+    assert not r.ok and [e["code"] for e in r.errors] == ["NO_OPTIONS_PAGE"], r.errors

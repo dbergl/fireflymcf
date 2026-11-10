@@ -179,6 +179,7 @@ class _Entry(NamedTuple):
     unverified: tuple[str, ...]
     shifts: str          # `CompileResult.shifts` as JSON, so a served copy is never shared
     firmware: str | None = None
+    placement: str = "{}"    # `CompileResult.placement` as JSON, likewise
 
 
 class _FailedEntry(NamedTuple):
@@ -391,7 +392,7 @@ def _cached_entry(project, stock: bytes):
                 raise _Failed(result)
             return entry
         return _Entry(result.data, tuple(result.manifest), tuple(result.unverified),
-                      json.dumps(result.shifts), result.firmware)
+                      json.dumps(result.shifts), result.firmware, json.dumps(result.placement))
 
     value = _disk_memo("compile", [hashlib.sha256(stock).hexdigest(), project.to_json()],
                        produce)
@@ -535,7 +536,8 @@ def _compile_through_cache(project, stock, *args, **kwargs):
         return failed
     return _recipe.CompileResult(True, entry.data, [], list(entry.manifest),
                                  list(entry.unverified), json.loads(entry.shifts),
-                                 firmware=entry.firmware)
+                                 firmware=entry.firmware,
+                                 placement=json.loads(entry.placement))
 
 
 _recipe.compile_project = _compile_through_cache

@@ -299,6 +299,13 @@ class CompileResult:
     sends: dict = dataclasses.field(default_factory=dict)
     # The `firmware.KNOWN` key of the stock image; `unverified` is judged for this firmware
     firmware: str | None = None
+    # {op_id: [{"arm": {switch child_base: value, ...}, "objects": [...], "path": [{"child_base",
+    # "slots", "value"}, ...], "covers": [{"object", "caption", "touch"}, ...]}, ...]}: the
+    # switch-arm paths, nested ones included, other than the base under which a new button's
+    # footprint covers another record (`recipe_ops.placement_report`,
+    # `newbutton.check_placement`); which arm a coach draws is its configuration (the `slots`),
+    # so this is report only; additive
+    placement: dict = dataclasses.field(default_factory=dict)
 
 
 # ctx.handles key under which a user op's apply records the capabilities it changed
@@ -581,7 +588,8 @@ def _finish(project: Project, stock: bytes, data: bytes, ctx: Ctx,
     shifts, texts = recipe_ops.shift_report(ops, ctx)
     manifest = [m + "; " + texts[o.spec.id] if o.spec.id in texts else m
                 for o, m in zip(ops, manifest)]
-    return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw)
+    return CompileResult(True, data, [], manifest, unverified, shifts, sends, fw,
+                         recipe_ops.placement_report(ops, ctx))
 
 
 # Coded refusals from the locators an op builds on (a template or donor this image does not
@@ -592,7 +600,7 @@ _CODED = (donors.DonorError, grammar.GrammarError, grammar.LcdGrammarError,
           celltables.CellTableError,
           sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
           newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
-          decodeguards.DecoderRangeUnknown)
+          newbutton.PlacementOverlap, decodeguards.DecoderRangeUnknown)
 
 
 def _verify(o, data: bytes, ctx: Ctx) -> str:

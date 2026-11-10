@@ -65,8 +65,9 @@ TESTED_147 = frozenset({
     "rename_label", "set_record_color", "recolor", "move_element", "move_attach",
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
     "install_glyph", "append_filter", "drop_from_master", "set_theme", "add_text_label",
-    "add_register_readout", "add_enum_label", "follow_register", "add_rvc_button",
-    "add_button_status", "add_button_states", "add_glyph_button", "wire_button"})
+    "add_register_readout", "add_enum_label", "follow_register", "follow_channel",
+    "add_rvc_button", "add_button", "add_button_status", "add_button_states",
+    "add_glyph_button", "wire_button"})
 
 
 class _PinnedTime:
@@ -495,6 +496,63 @@ def test_every_147_op_is_tested_here():
     for n in TESTED_147:
         cls = recipe.REGISTRY[n]
         assert "14.7" in cls.emulated_on and "14.7" not in cls.verified_on, n
+
+
+# --- add_button ---------------------------------------------------------------------------------
+
+ADD_BUTTON_PIN = 15
+ADD_BUTTON_TAP = bytes.fromhex("0fffc805ff00ffff")     # 1FEDB: instance 15, toggle (command 5)
+
+
+def test_add_button(mcf_147, tmp_path):
+    """A new HOME button on pin 15 (the op's default spot, the template button of
+    `donors.button_object`): invisible until the pin's first status arrives; then every changed
+    pixel lies in its box, off draws the off colour confined to the box, a tap sends one 1FEDB
+    toggle, and the G12's echo repaints inside the box only (emulated 2026-11-09).
+
+    Under the emulator's configuration only: slot 102 is not 1, so the switch in card 765 draws
+    its empty arm (object 239), not the Star Link button (object 240) that the default spot
+    covers under slot 102 = 1 (`check_placement`'s report). Test expectations, not locators."""
+    img = _build(mcf_147, [("b", "add_button", {"channel": ADD_BUTTON_PIN, "label": "Pin 15",
+                                                "off_colour": list(OFF)})])
+    base = _settled(mcf_147)
+    base.goto("HOME")
+    base.run(2.0)
+    stock_home = _shot(base, tmp_path, "stock")
+    s = _settled(img)
+    s.goto("HOME")
+    s.run(2.0)
+    assert 240 not in {q.obj_index for q in s._placed(s._root())}, \
+        "the emulator draws slot 102's Star Link arm: the box covers it"
+    unset = _shot(s, tmp_path, "unset")
+    assert _diff_bbox(stock_home, unset) is None, \
+        "the button draws before the pin's first status"
+    s.set_g12_output(ADD_BUTTON_PIN, 200)
+    s.run(2.0)
+    box = s.control_box("Pin 15")
+    on = _shot(s, tmp_path, "on")
+    assert _inside(_diff_bbox(stock_home, on), box), (_diff_bbox(stock_home, on), box)
+
+    s.set_g12_output(ADD_BUTTON_PIN, 0)
+    s.run(2.0)
+    off = _shot(s, tmp_path, "off")
+    bbox = _diff_bbox(stock_home, off)
+    assert _inside(bbox, box), (bbox, box)
+    assert _near(_crop(off, box), OFF) > 0, "the box does not draw the off colour"
+    on_off = _diff_bbox(off, on)
+    assert on_off is not None and _inside(on_off, box)
+
+    t = s.now
+    s.tap("Pin 15")
+    s.run(1.0)
+    assert [bytes(f.data) for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)] == [ADD_BUTTON_TAP]
+    lit = _shot(s, tmp_path, "lit")
+    assert _inside(_diff_bbox(stock_home, lit), box)
+    assert _inside(_diff_bbox(off, lit), box) and _diff_bbox(off, lit) is not None
+    assert _near(_crop(lit, box), OFF) < _near(_crop(off, box), OFF), "the echo did not light it"
+    lit_box, stock_box = _crop(lit, box), _crop(stock_home, box)
+    other = (np.abs(lit_box - np.array(OFF)) > 8).any(axis=2) & (lit_box != stock_box).any(axis=2)
+    assert other.any(), "the lit box has no pixel that is neither off colour nor stock background"
 
 
 # --- a new button -------------------------------------------------------------------------------
@@ -1169,32 +1227,49 @@ def test_follow_register(mcf_147):
         assert sends(t) == [], ("the closed gate let an edge through", v)
 
 
-def _build_refused_as(stock: bytes, specs, code: str) -> bytes:
-    """`_build`, for a strict xfail: the refusal must be `code` (else RuntimeError, which the
-    xfail does not catch, so a different failure fails the test)."""
-    project = recipe.Project(base_sha256=hashlib.sha256(stock).hexdigest(), build_name=None,
-                             ops=[recipe.OpSpec(id=i, type=t, params=p) for i, t, p in specs])
-    res = recipe.compile_project(project, stock)
-    if not res.ok and [e["code"] for e in res.errors] != [code]:
-        raise RuntimeError("refused otherwise than %s: %s" % (code, res.errors))
-    assert res.ok, res.errors
-    return res.data
+# follow_channel on 14.7: test expectations only. The OPTIONS root is located by its header
+# (`cli._resolve_page_root(data, "options")`: object 42 here), and the gate register by the row's
+# name (`followchannel.resolve(..., gate_option="Heat Pump")`: 0x20039E0F here). The by-name join
+# is shown by toggling the row through the panel, never by writing the register.
+FOLLOW_WATCH = 3
+FOLLOW_TARGET = 4
+FOLLOW_GATE_REG = 0x20039E0F
 
 
-def _admit(monkeypatch, *names):
-    for n in names:
-        monkeypatch.setattr(recipe.REGISTRY[n], "firmwares", frozenset({"13.6", "14.7"}))
+def test_follow_channel(mcf_147):
+    """Pin 3 mirrored onto pin 4 at level 200, gated by the renamed "Heat Pump" OPTIONS row
+    ("Pump Link"). As booted the row is clear: pin 3 on sends nothing for pin 4. One tap on the
+    row (OPTIONS acts on release) sets its register, and pin 3 on then sends one 1FEDB on frame
+    for pin 4 at level 200, pin 3 off one off frame; a second tap clears it and pin 3 sends
+    nothing again (emulated 2026-11-09)."""
+    img = _build(mcf_147, [("f", "follow_channel", {
+        "watch_channel": FOLLOW_WATCH, "target_channel": FOLLOW_TARGET, "on_level": 200})])
+    s = _settled(img)
+    on = bytes([FOLLOW_TARGET, 0xFF, 200, 1, 0xFF, 0x00, 0xFF, 0xFF])
+    off = bytes([FOLLOW_TARGET, 0xFF, 0, 3, 0xFF, 0x00, 0xFF, 0xFF])
 
+    def gate() -> int:
+        return s.read_mem(FOLLOW_GATE_REG, 1)[0]
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "follow_channel carries 13.6 pins: GATE_OBJECT = 46 is 13.6's OPTIONS page, whose 'Heat "
-    "Pump' row it renames and whose option register it gates on. Observed 2026-11-08 with the "
-    "op admitted on 14.7: NO_SUCH_LABEL, object 46 has no label field containing 'Heat Pump'. "
-    "It stays off 14.7; follow_register covers the follower without the row."))
-def test_follow_channel(mcf_147, monkeypatch):
-    _admit(monkeypatch, "follow_channel")
-    _build_refused_as(mcf_147, [("f", "follow_channel",
-                                 {"watch_channel": 3, "target_channel": 4})], "NO_SUCH_LABEL")
+    def pin3(level: int) -> list[bytes]:
+        t = s.now
+        s.set_g12_output(FOLLOW_WATCH, level)
+        s.run(3.0)
+        return [bytes(f.data) for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)
+                if f.data[0] == FOLLOW_TARGET]
+
+    assert gate() == 0
+    assert pin3(200) == [] and pin3(0) == [], "the follower sent with the row clear"
+    s.goto("OPTIONS")
+    s.tap("Pump Link")
+    s.run(2.0)
+    assert gate() == 1, "the row's tap did not set the register the follower reads"
+    assert pin3(200) == [on]
+    assert pin3(0) == [off]
+    s.tap("Pump Link")
+    s.run(2.0)
+    assert gate() == 0, "the second tap did not clear the row"
+    assert pin3(200) == [] and pin3(0) == [], "the follower sent with the row cleared"
 
 
 # --- add_rvc_button and its status ops -----------------------------------------------------------

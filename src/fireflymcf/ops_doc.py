@@ -114,9 +114,15 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "to a screen.",
         "Flashed. PC.22.", "`CONTROL-BEHAVIOR.md` §9, `docs/SETTLED-FINDINGS.md`"),
     "add_button": ("structural",
-        "Add a boxed HOME button wired to a G12 pin: status cell bound, command group "
-        "allocated on the target channel.",
-        "Flashed 2026-08-17.", "`docs/HARDWARE-VERIFIED.md`"),
+        "Add a boxed button wired to a G12 pin, on HOME or, with `at`, at a free spot on any "
+        "page: status cell bound, command group allocated on the target channel.",
+        "Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws "
+        "only once the pin's first status arrives, and a tap sends one `1FEDB` toggle. Under "
+        "the emulator's configuration it changes no pixel outside its box; with slot 102 = 1 "
+        "the default spot covers the Star Link button and its touch region (reported, "
+        "2026-11-09). Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
+        "so with the firmware gate bypassed it refuses `GRAMMAR`.",
+        "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",
         "Clone a donor control into a bare button shell on a page, sized w x h, unwired.",
         "Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated "
@@ -196,7 +202,12 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "follow_channel": ("guicode",
         "Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a "
         "repurposed OPTIONS row.",
-        "Flashed 2026-08-31 (the light to pump follower).",
+        "Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 "
+        "onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one "
+        "`1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a "
+        "second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has "
+        "no \"Heat Pump\" OPTIONS row, so with the firmware gate bypassed it refuses "
+        "`NO_SUCH_LABEL`.",
         "`followchannel.py`, `BUS-BASELINE.md` PC.45"),
     "add_option_follower": ("guicode",
         "Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a "

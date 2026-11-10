@@ -12,6 +12,7 @@ in the project, and `compile_project` always recompiles the whole project from s
 cannot recur here."""
 from __future__ import annotations
 
+import copy
 import dataclasses
 import struct
 
@@ -1777,11 +1778,13 @@ def _check_named_output(data, channel: int, allow: bool) -> None:
 
 @op("add_button")
 class AddButton(Op):
-    """Add a new HOME button end to end: bind the pin's status colour cell
+    """Add a new button end to end (HOME by default): bind the pin's status colour cell
     (`statusbind.bind_pin`), then build the boxed button on that pin directly
-    (`newbutton.build_home_button`, donor-279 path — build-on-target, never
-    build-then-retarget; see newbutton's own docstring for why a fresh
-    `allocate_command_group` call per retarget orphans a live group).
+    (`newbutton.build_home_button` — build-on-target, never build-then-retarget; see
+    newbutton's own docstring for why a fresh `allocate_command_group` call per retarget
+    orphans a live group). The button is the proven template `donors.button_object` (box,
+    caption, touch; its documented source is 13.6 object 279), proven per image by the record
+    grammar and a caption witness, never an object index.
 
     Params:
       channel: int — destination G12 channel/pin (0-255). This op is build-on-target
@@ -1800,6 +1803,23 @@ class AddButton(Op):
              groups the coach's floorplan cannot reach)
       allow_named_output: bool (default False) — acknowledge that the G12 OUTPUTS list
              names `channel` for a load and the owner's load is on it anyway
+      at: {page, x, y} (default {page: "home", x: 435, y: 404}, the 13.6 spot) — the
+             page (`pages` names) and the attach origin; the box's left edge lands at x plus
+             the template box's own x offset (135), its top at y. x and y must fit a u16.
+             The footprint gate walks the page under every switch-arm path
+             (`pagewalk.switch_arm_paths`): the base, each type-6 switch's arms one at a time,
+             and, recursively, the arms of each switch nested inside a non-base arm combined
+             with the path that reaches it. In the all-base walk the footprint must lie on the
+             page root's background and cover nothing but root background fills around it and
+             one wt-33 card around it (PLACEMENT_OVERLAP); only that walk refuses. What it
+             covers only under another path does not refuse, because which arm a coach draws is
+             its configuration: it is reported per path in `CompileResult.placement` and the
+             sidecar's `placement` (each entry: `arm` {child_base: value}, `objects`, `path`
+             [{child_base, slots, value}], `covers` [{object, caption, touch}]), and at the end
+             of the op's manifest line keyed by the value slots a configuration sets, e.g.
+             `slot 102 = 1: object 240 "Star Link" (touch)` (the first six paths; the sidecar
+             lists all). A nested path covering exactly what its parent covers is not
+             repeated
 
     Error codes:
       NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
@@ -1822,6 +1842,17 @@ class AddButton(Op):
       VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image,
         so the new button's command group cannot be shown not to be one
         (`newbutton.unused_command_groups`)
+      GRAMMAR — the image's record grammar is not proven 13.6's, so the button template
+        (`donors.button_object`) is not usable (11.23)
+      NO_TEMPLATE — the template is not proven on this image: no stock object witnesses the
+        caption's text form, or its label does not fill its field
+      MODE7_INDEX — the pin's colour cell is not below the image's mode-7 index limit (the
+        decoder would clamp it to cell 0)
+      PLACEMENT_OVERLAP — `at`'s x or y is outside 0..0xFFFF, or in the base switch arm the
+        button's footprint leaves the page root's background or covers a placed record other
+        than a root background fill and one wt-33 card around it
+      LCD_GRAMMAR — the LCD firmware's group handling, which reads the group and binding the
+        build writes, is not proven 13.6's (`grammar.prove_lcd`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
       NO_FONT_SELECTOR — font was given but the new caption's R38 selector isn't the
                          expected 0xff inherit byte
@@ -1835,6 +1866,10 @@ class AddButton(Op):
     can target this button via {"ref": op_id}. Declares gained {(channel, 5)} —
     exactly the single command-5 toggle binding this button carries.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "channel": {"type": "integer", "description": "G12 output pin (RV-C instance)"},
@@ -1849,6 +1884,12 @@ class AddButton(Op):
             "allow_named_output": {"type": "boolean", "default": False,
                                    "description": "acknowledge an output the G12 OUTPUTS list "
                                                   "names for a load"},
+            "at": {"type": "object",
+                   "properties": {"page": {"type": "string"}, "x": {"type": "integer"},
+                                  "y": {"type": "integer"}},
+                   "required": ["page", "x", "y"],
+                   "default": {"page": "home", "x": 435, "y": 404},
+                   "description": "page and attach origin (box left edge = x + 135)"},
         },
         "required": ["channel", "label", "off_colour"],
     }
@@ -1860,6 +1901,14 @@ class AddButton(Op):
         self.font = self._param("font", None)
         self.allow_commanded = self._param("allow_commanded_channel", False, kind=bool)
         self.allow_named = self._param("allow_named_output", False, kind=bool)
+        at = self._param("at", None, kind=dict)
+        self.at = None
+        if at is not None:
+            if set(at) != {"page", "x", "y"} or not isinstance(at["page"], str) or not all(
+                    isinstance(at[k], int) and not isinstance(at[k], bool) for k in "xy"):
+                raise RecipeError("BAD_PARAMS", "add_button: at wants {page: str, x: int, "
+                                  "y: int}, got %r" % (at,), op_id=self.spec.id)
+            self.at = (at["page"], at["x"], at["y"])
 
     def apply(self, data, ctx):
         _check_named_output(data, self.channel, self.allow_named)
@@ -1875,8 +1924,8 @@ class AddButton(Op):
             data, e = newbutton.build_home_button(
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
-                colour_index=cell, label=self.label)
-        except newbutton.VariantSetterUnknown as err:
+                colour_index=cell, label=self.label, at=self.at)
+        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap) as err:
             raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except ValueError as err:
             # Match only the specific "already commanded by" refusal wording
@@ -1912,8 +1961,12 @@ class AddButton(Op):
                                            % self.font))
             data = bytes(buf)
         data, _ = patch.reseal(data)
+        page = (self.at or newbutton.DEFAULT_AT_136)[0]
+        placement = newbutton.check_placement(data, newbutton._resolve_page_root(data, page),
+                                              idx)
         ctx.handles[self.spec.id] = {"object": idx, "cell": cell,
-                                     "group": newbutton.object_group(data, idx)}
+                                     "group": newbutton.object_group(data, idx),
+                                     "placement_arms": list(placement.arms)}
         return data
 
     def capability_delta(self, ctx):
@@ -1941,8 +1994,17 @@ class AddButton(Op):
             cap = next(r for r in recs if r.wtype == 11 and r.label
                        and records.label_text(r.label) == records.label_text(self.label))
             assert cap.font == self.font
-        return "button: object %d %r on pin %d (cell %d)" % (
+        line = "button: object %d %r on pin %d (cell %d)" % (
             idx, self.label.replace("\n", "\\n"), self.channel, cell)
+        if h.get("placement_arms"):
+            # the first few paths; the sidecar's `placement` lists every one
+            arms, cap = h["placement_arms"], 6
+            line += "; covers, under other switch arms only: " + "; ".join(
+                newbutton.placement_text(a) for a in arms[:cap])
+            if len(arms) > cap:
+                line += "; ... and %d more arm paths (the sidecar's placement lists all)" % (
+                    len(arms) - cap)
+        return line
 
 
 @op("add_glyph_button")
@@ -3958,6 +4020,19 @@ def _shift_line(entries, roots, cap=_SHIFT_CAP):
                          ", ... and %d more" % rest if rest > 0 else "")
 
 
+def placement_report(ops, ctx):
+    """`{op_id: arms}` for every op whose handle carries a non-empty `placement_arms` report
+    (`newbutton.Placement.arms`: switch-arm paths other than the base under which its new button
+    covers another record, with the value slots each sets and each covered object's caption and
+    touch region). Deep copies, so a caller cannot reach `ctx.handles`. Report only."""
+    out = {}
+    for o in ops:
+        h = ctx.handles.get(o.spec.id)
+        if isinstance(h, dict) and h.get("placement_arms"):
+            out[o.spec.id] = copy.deepcopy(list(h["placement_arms"]))
+    return out
+
+
 def shift_report(ops, ctx):
     """`(shifts, texts)` over `ops` in order: `{op_id: entries}` for every op whose handle
     carries a shift report, and `{op_id: manifest text}` for every op that ran one (a failed
@@ -5451,10 +5526,11 @@ class FollowChannel(Op):
     Wires three already hardware-proven primitives together, in order:
 
       1. Rename the gate option's OPTIONS row caption (same-size, OBJECT-SCOPED to
-         object 46 -- the file's OPTIONS page -- so the CLIMATE mode-column's own
-         "Heat Pump" captions on OTHER objects are left untouched). This step runs
-         FIRST, against the untouched stock caption text, because step 2 derives the
-         gate register by NAME: renaming after would make `gate_option` unfindable.
+         the OPTIONS page root, located per image by its header (`gate_object`) -- so
+         the CLIMATE mode-column's own "Heat Pump" captions on OTHER objects are left
+         untouched). This step runs FIRST, against the untouched stock caption text,
+         because step 2 derives the gate register by NAME: renaming after would make
+         `gate_option` unfindable.
       2. Derive the plan (`followchannel.resolve`, against the PRE-rename image, for
          the reason above) and author the routine + templates (`followchannel.build`)
          at the GuiCode section's true append point, then append it
@@ -5469,15 +5545,17 @@ class FollowChannel(Op):
       target_channel: int — G12 output instance the follower drives
       on_level: int (default 200) — level byte the on-frame carries
       gate_option: str (default "Heat Pump") — the STOCK caption of the OPTIONS row
-                   that gates transmission (object 46); also the text the rename looks
-                   for
+                   that gates transmission (on the OPTIONS root); also the text the rename
+                   looks for
       gate_label: str (default "Pump Link") — the row's new caption; same length as
                   `gate_option` is required (9 chars <-> 9 chars for the defaults) --
                   this op only ever makes a same-size rename
 
     Error codes:
-      NO_SUCH_LABEL — object 46 has no label field containing `gate_option`
-      AMBIGUOUS_LABEL — object 46 has more than one field containing `gate_option`
+      NO_OPTIONS_PAGE — no object's header reads OPTIONS (`cli._resolve_page_root`)
+      NO_SUCH_LABEL — the OPTIONS root has no label field containing `gate_option` (11.23,
+                      with the firmware gate admitted: it has no "Heat Pump" row)
+      AMBIGUOUS_LABEL — the OPTIONS root has more than one field containing `gate_option`
       LABEL_TOO_LONG — `gate_label` does not fit the field `gate_option` was found in
       FOLLOW_REFUSED — `followchannel.resolve`/`build` could not derive an address or
                        author the routine (an unrecoverable option/status join, or the
@@ -5505,7 +5583,9 @@ class FollowChannel(Op):
     context.
     """
 
-    GATE_OBJECT = 46
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
 
     PARAMS = {
         "properties": {
@@ -5516,7 +5596,7 @@ class FollowChannel(Op):
             "on_level": {"type": "integer", "default": 200,
                         "description": "level byte the on-frame carries"},
             "gate_option": {"type": "string", "default": "Heat Pump",
-                            "description": "stock caption of the gating OPTIONS row (object 46)"},
+                            "description": "stock caption of the gating OPTIONS row"},
             "gate_label": {"type": "string", "default": "Pump Link",
                           "description": "the row's new caption (same-size rename only)"},
         },
@@ -5530,20 +5610,31 @@ class FollowChannel(Op):
         self.gate_option = self._param("gate_option", "Heat Pump", kind=str)
         self.gate_label = self._param("gate_label", "Pump Link", kind=str)
 
+    @staticmethod
+    def gate_object(data) -> int:
+        """The OPTIONS page root whose row the op renames: the object whose header reads
+        OPTIONS (`cli._resolve_page_root`, memoised in `options.page_root`). Raises
+        ValueError when there is none."""
+        return cli._resolve_page_root(data, "options")
+
     def apply(self, data, ctx):
-        # --- 1. rename the gate row's OPTIONS caption: same-size, object-46-scoped.
+        # --- 1. rename the gate row's OPTIONS caption: same-size, scoped to the OPTIONS root.
+        try:
+            gate_obj = self.gate_object(data)
+        except ValueError as e:
+            raise RecipeError("NO_OPTIONS_PAGE", str(e), op_id=self.spec.id)
         gs, _ = guidata.guidata_extent(data)
-        lo, hi = insert._object_span(data, self.GATE_OBJECT)
+        lo, hi = insert._object_span(data, gate_obj)
         sites = [s for s in patch.find_label_sites(data, self.gate_option)
                  if lo <= s.text_offset - gs < hi]
         if not sites:
             raise RecipeError(
                 "NO_SUCH_LABEL", "object %d has no label field containing %r"
-                % (self.GATE_OBJECT, self.gate_option), op_id=self.spec.id)
+                % (gate_obj, self.gate_option), op_id=self.spec.id)
         if len(sites) > 1:
             raise RecipeError(
                 "AMBIGUOUS_LABEL", "object %d has %d fields containing %r"
-                % (self.GATE_OBJECT, len(sites), self.gate_option), op_id=self.spec.id)
+                % (gate_obj, len(sites), self.gate_option), op_id=self.spec.id)
         patcher = patch.McfPatcher(data)
         try:
             patcher.set_label(sites[0], self.gate_option, self.gate_label, align="right")
@@ -5607,24 +5698,26 @@ class FollowChannel(Op):
             "hook_at": hook_at,
             "code_load_addr": code_load_addr,
             "entry": code_load_addr + followchannel.ENTRY_OFF,
+            "gate_object": gate_obj,
         }
         return sealed
 
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
+        gate_obj = h["gate_object"]
         gs, _ = guidata.guidata_extent(data)
-        lo, hi = insert._object_span(data, self.GATE_OBJECT)
+        lo, hi = insert._object_span(data, gate_obj)
         got_new = [s.text.strip() for s in patch.find_label_sites(data, self.gate_label)
                   if lo <= s.text_offset - gs < hi]
         assert self.gate_label in got_new, \
             "gate row lost its %r caption (object %d holds: %s)" % (
-                self.gate_label, self.GATE_OBJECT, got_new)
+                self.gate_label, gate_obj, got_new)
         if self.gate_option != self.gate_label:
             stale = [s.text.strip() for s in patch.find_label_sites(data, self.gate_option)
                      if lo <= s.text_offset - gs < hi]
             assert not stale, \
                 "gate row still carries the old caption %r (object %d)" % (
-                    self.gate_option, self.GATE_OBJECT)
+                    self.gate_option, gate_obj)
 
         gcs = next(s for s in container.parse_container(data).sections if "GuiCode" in s.name)
         file_off = gcs.offset + h["hook_at"]
@@ -5642,7 +5735,7 @@ class FollowChannel(Op):
         return ("follow_channel: watch=%d -> target=%d (on_level=%d), gated by %r (object "
                 "%d row); detour GuiCode+%#x -> %#x"
                 % (self.watch_channel, self.target_channel, self.on_level, self.gate_label,
-                   self.GATE_OBJECT, h["hook_at"], h["entry"]))
+                   gate_obj, h["hook_at"], h["entry"]))
 
 
 

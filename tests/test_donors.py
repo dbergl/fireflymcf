@@ -16,6 +16,7 @@ OLD_PINS_136 = {
     "rvc.touch": (315, 9), "switch": (9, 9), "readout.directive": (793, 4),
     "readout.wt8": (793, 5), "pd.fill": (32, 2), "pd.rbox": (368, 1), "pd.hline": (367, 6),
     "pd.frame": (947, 3), "pd.touch": (186, 1),
+    "button.box": (279, 0), "button.caption": (279, 1), "button.touch": (279, 2),
 }
 OLD_GROUP_PINS_136 = {"group.tap": 103, "group.hold": 17}
 
@@ -25,6 +26,7 @@ WITNESSES_147 = {
     "rvc.box": 0, "rvc.capsule": 35, "rvc.caption": 4, "rvc.touch": 43, "switch": 36,
     "readout.directive": 297, "pd.fill": 170, "pd.rbox": 1, "pd.hline": 0, "pd.frame": 9,
     "pd.touch": 8, "readout.wt8": 9,
+    "button.box": 4, "button.caption": 4, "button.touch": 4,
 }
 PANEL_INDEX = {"13.6": 8, "14.7": 1}       # theme.locate_theme_init's panel role
 
@@ -40,7 +42,7 @@ def _record(data: bytes, obj: int, j: int) -> bytes:
     return bytes(data[r.offset:r.end])
 
 
-def test_twelve_templates():
+def test_fifteen_templates():
     assert set(donors.TEMPLATES) == set(OLD_PINS_136)
 
 
@@ -615,3 +617,61 @@ def test_enum_label_index_colour_bound(stocks, version):
         with pytest.raises(donors.DonorError) as e:
             enumlabel.label_records(data, **bad, **kw)
         assert e.value.code == "MODE7_INDEX"
+
+
+# add_button's object: 13.6 object 279, one of four byte-identical "... Tank Heater" objects
+# (278-281 on 13.6, 244-247 on 14.7, none on 11.23; research 2026-11-09). The indices are
+# expectations only: the module locates nothing by them.
+BUTTON_WITNESSES = {"13.6": {278, 279, 280, 281}, "14.7": {244, 245, 246, 247}}
+
+
+def test_button_object_equals_136_clone(stocks):
+    from fireflymcf import insert
+    obj, proof = donors.button_object(stocks["13.6"])
+    assert obj == insert.clone_object(stocks["13.6"], 279)
+    assert proof.witnesses == BUTTON_WITNESSES["13.6"]
+    assert proof.caption_label == b"Fresh Tank Heater" and proof.caption_width == 17
+    assert len(obj) % 4 == 0 and obj[0] == 3
+
+
+@pytest.mark.slow
+def test_button_object_on_147(stocks):
+    from fireflymcf import guidata, insert
+    d = stocks["14.7"]
+    obj, proof = donors.button_object(d)
+    assert proof.witnesses == BUTTON_WITNESSES["14.7"]
+    # equal to twin 245 except three u16 words: box fillA, box value_slot, caption value_slot
+    twin = insert.clone_object(d, 245)
+    assert len(twin) == len(obj)
+    box = records.decode_record(obj, 1)
+    cap = records.decode_record(obj, box.end)
+    words = [box.color_off[0], box.value_slot_off, cap.value_slot_off]
+    assert box.colors[0][:2] == ("fillA", 7) and None not in words
+    allowed = {o + k for o in words for k in (0, 1)}
+    diff = {i for i in range(len(obj)) if obj[i] != twin[i]}
+    assert diff and diff <= allowed, sorted(diff - allowed)
+    # the template's values (13.6 object 279: fillA 138, box slot 53, caption slot 59)
+    assert [int.from_bytes(obj[o:o + 2], "little") for o in words] == [0x8a, 0x35, 0x3b]
+
+
+@pytest.mark.slow
+def test_button_object_refuses_on_1123(stocks):
+    with pytest.raises(donors.DonorError) as e:
+        donors.button_object(stocks["11.23"])
+    assert e.value.code == "GRAMMAR"
+
+
+@pytest.mark.slow
+def test_button_caption_without_witness_refuses_on_147(stocks, monkeypatch, request):
+    """Mutation check: with no witness the caption (a text template, drawers not twins on 14.7)
+    refuses NO_TEMPLATE."""
+    # the memos key on bytes and arguments, not on the monkeypatched `_witnesses`
+    for cached in (donors._template, donors._button_object):
+        cached.cache_clear()
+        request.addfinalizer(cached.cache_clear)
+    monkeypatch.setattr(donors, "_witnesses", lambda data, t: ())
+    with pytest.raises(donors.DonorError) as e:
+        donors.button_object(stocks["14.7"])
+    assert e.value.code == "NO_TEMPLATE"
+    _obj, proof = donors.button_object(stocks["13.6"])   # the twins' proof satisfies 13.6
+    assert proof.caption.witnesses == ()

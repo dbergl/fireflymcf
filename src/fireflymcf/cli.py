@@ -1297,7 +1297,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     sidecar = {"sha256": sha, "size": len(data), "build_name": patch.build_name(data),
                "project": str(args.project), "stock_sha256": project.base_sha256,
                "manifest": result.manifest, "unverified": result.unverified,
-               "shifts": result.shifts}
+               "shifts": result.shifts, "placement": result.placement}
     if discovered:
         sidecar["user_ops"] = _sidecar_user_ops(project, discovered)
     Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
@@ -1961,12 +1961,9 @@ def _resolve_page_root(data: bytes, page: str) -> int:
     if page not in _PAGE_HEADERS:
         raise ValueError(f"unknown --page {page!r}; choose one of {_PAGE_NAMES}")
     wanted = _PAGE_HEADERS[page]
-    gs, ge = guidata.guidata_extent(data)
-    table = guidata.object_tables(data)[1]
-    for i in range(len(table)):
-        label = options._first_label(options._own_records(data, gs, ge, table, i))
-        if label is not None and label.strip() == wanted:
-            return i
+    root = options.page_root(data, wanted)
+    if root is not None:
+        return root
     raise ValueError(
         f"could not resolve --page {page!r} (looking for a page whose header record "
         f"reads {wanted!r}) on this build -- it may be named differently or absent here. "

@@ -68,7 +68,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_aes_bms_button_status`](#add_aes_bms_button_status) | structural | Light a BMS command button (an add_aes_batt_heat instance) from one bit of the 0x18FF7070 field the heater status already receives: blue while clear, cyan while set. One-source bitcombine fold into a fresh cell, one two-arm whole-button switch. | Flashed 2026-10-15 (Ignore Alarms): the button draws; its bit status and whether the BMS honours the command are not yet coach-checked. | **no** | 13.6 (unverified) |
 | [`add_alt_reboot`](#add_alt_reboot) | structural | Add a "REBOOT APS-500" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a 3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA `0x80`; a tap sends nothing. | Coach-verified 2026-10-05: a 3-s hold sends one `GENERAL_RESET` and the APS-500 reboots. | yes | 13.6 |
 | [`add_batt_heat_battery_glyph`](#add_batt_heat_battery_glyph) | structural | Show the battery heater contactor on the House battery icons: a white wavy-lines glyph in the bottom-right corner while the contactor is closed, with the voltage number raised 11 px in every state. Each battery becomes one switch on the Batt Heat state cell over four whole-battery arms. | Flashed 2026-09-26 (glyph verified); style `outline` verified 2026-10-10. | yes | 13.6 |
-| [`add_button`](#add_button) | structural | Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. | yes | 13.6 |
+| [`add_button`](#add_button) | structural | Add a boxed button wired to a G12 pin, on HOME or, with `at`, at a free spot on any page: status cell bound, command group allocated on the target channel. | Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws only once the pin's first status arrives, and a tap sends one `1FEDB` toggle. Under the emulator's configuration it changes no pixel outside its box; with slot 102 = 1 the default spot covers the Star Link button and its touch region (reported, 2026-11-09). Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, so with the firmware gate bypassed it refuses `GRAMMAR`. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_button_states`](#add_button_states) | structural | Show which of N states a unit reports on a button and, on a cycle button, make a tap send the next one: one per-tick statusfold routine tries each entry's states (each a masked, shifted slot equal to a value or within a range; stale never matches) in check order into its own fresh cell (unknown = N; + N+1 while `lit_when` fails), and sets a cycle's variant to the state after it; each button's static body becomes one enrolled wtype-6 switch over whole-button arms, each with its state's caption, glyph and colour; refused if anything else on the page would change in any arm. | UNVERIFIED. Emulated 2026-11-05: each tap sends the state after the reported one, the unknown state's with no report, and each state draws its own arm. Bench check: candump at each reported state, photo per state. On 14.7, emulated 2026-11-08 (a two-state cycle): each reported state draws its arm in the button's box only and sets the variant to the next state, which a tap sends; stale draws the unknown state. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`add_button_status`](#add_button_status) | structural | Light one or many buttons (add_rvc_button or a preset) from receive slots: one per-tick statusfold routine tests each entry's masked, shifted slot (bit, eq, ne or ge; stale or above valid_max reads off) into its own fresh cell, and each button's static body becomes one enrolled two-arm wtype-6 switch over whole-button arms (blue off, cyan on); a toggle button's variant is set to the lit state each tick; refused if anything else on the page would change. | UNVERIFIED. Bench check: every compare (bit, eq, ne, ge), plus stale and 0xFF reading off (photo per state). On 14.7, emulated 2026-11-08 (eq on a toggle): the reported value flips the cell and the toggle group's variant, the button redraws in its box only, and a tap sends the opposite command. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`add_card_readouts`](#add_card_readouts) | structural | Draw captioned live readouts (caption over a right-justified value and its unit) inside an aes_card_layout card; each value names a draw:false add_register_readout cell or an existing display slot. Attached to 829 directly after the card titles. | Flashed 2026-10-15: the readouts are live on the coach. A `parent` resolving to any object other than 829 is UNVERIFIED and compiles as unverified (a ref resolving to 829 is verified); it is refused when the paste moves any other record or a caption would inherit a value slot (LAYOUT_REFUSED). | yes | 13.6 |
@@ -94,7 +94,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes | 13.6 |
 | [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, emulated 2026-11-08 (drawn and `draw` false): each published value repaints the digits in the readout's box, and a cell poisoned before reset is never drawn; `cell_slot` feeds the Absorb cell past its fence (cell-level: stock 14.7 draws no Absorb row) and repaints HOME's Chassis readout, only in its box, on both pages that draw it. `silence` must name every remaining stock store to the cell that is unfenced, or whose fence admits a value the routine computes differently. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes | 13.6 |
-| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). | yes | 13.6 |
+| [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one `1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no "Heat Pump" OPTIONS row, so with the firmware gate bypassed it refuses `NO_SUCH_LABEL`. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a silent baseline, each later edge one on or off frame while the gate holds, none while it does not. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`suppress_tank_status`](#suppress_tank_status) | g12 | Stop the G12 broadcasting `1FFB7` TANK_STATUS for chosen tank instances (2-byte NOPs in the G12 rule program). | Flashed 2026-09-07. PC.62. | yes | 13.6 |
 | [`resolve_register`](#resolve_register) | handle | Name an existing bus-driven register (a variable-table slot) as a handle for later ops. Reuse-existing only. | Tooling-verified; image unchanged. | yes | 13.6 |
@@ -674,9 +674,9 @@ Error codes:
 
 ### add_button
 
-Add a boxed HOME button wired to a G12 pin: status cell bound, command group allocated on the target channel.
+Add a boxed button wired to a G12 pin, on HOME or, with `at`, at a free spot on any page: status cell bound, command group allocated on the target channel.
 
-- **Hardware status:** Flashed 2026-08-17.
+- **Hardware status:** Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws only once the pin's first status arrives, and a tap sends one `1FEDB` toggle. Under the emulator's configuration it changes no pixel outside its box; with slot 102 = 1 the default spot covers the Star Link button and its touch region (reported, 2026-11-09). Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, so with the firmware gate bypassed it refuses `GRAMMAR`.
 - **Proof:** `docs/HARDWARE-VERIFIED.md`
 - **Implementation:** `recipe_ops.AddButton`
 
@@ -688,6 +688,7 @@ Add a boxed HOME button wired to a G12 pin: status cell bound, command group all
 | `font` | integer\|null |  | null | caption font slot; selector must be the 0xff inherit default |
 | `allow_commanded_channel` | boolean |  | false | opt out of the channel-collision check |
 | `allow_named_output` | boolean |  | false | acknowledge an output the G12 OUTPUTS list names for a load |
+| `at` | object |  | {"page": "home", "x": 435, "y": 404} | page and attach origin (box left edge = x + 135) |
 
 Error codes:
 
@@ -696,6 +697,11 @@ Error codes:
 - `BRIDGE_UNKNOWN` — the status bridge does not derive on this image (`status_map.derived_bridge`: the receive-slot base is not followed), so no pin's colour cell is known
 - `COMMANDED_CHANNEL` — build_home_button refused because the channel is already commanded by an existing binding (its own, broader scan); offers=["acknowledge"] — the caller may retry with allow_commanded_channel=True once they've confirmed (as the docstring above describes) that those bindings belong to unreachable controls
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image, so the new button's command group cannot be shown not to be one (`newbutton.unused_command_groups`)
+- `GRAMMAR` — the image's record grammar is not proven 13.6's, so the button template (`donors.button_object`) is not usable (11.23)
+- `NO_TEMPLATE` — the template is not proven on this image: no stock object witnesses the caption's text form, or its label does not fill its field
+- `MODE7_INDEX` — the pin's colour cell is not below the image's mode-7 index limit (the decoder would clamp it to cell 0)
+- `PLACEMENT_OVERLAP` — `at`'s x or y is outside 0..0xFFFF, or in the base switch arm the button's footprint leaves the page root's background or covers a placed record other than a root background fill and one wt-33 card around it
+- `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the group and binding the build writes, is not proven 13.6's (`grammar.prove_lcd`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
@@ -1466,7 +1472,7 @@ Error codes:
 
 Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row.
 
-- **Hardware status:** Flashed 2026-08-31 (the light to pump follower).
+- **Hardware status:** Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one `1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no "Heat Pump" OPTIONS row, so with the firmware gate bypassed it refuses `NO_SUCH_LABEL`.
 - **Proof:** `followchannel.py`, `BUS-BASELINE.md` PC.45
 - **Implementation:** `recipe_ops.FollowChannel`
 
@@ -1475,13 +1481,14 @@ Watch one G12 output's status and mirror its ON/OFF onto another channel, gated 
 | `watch_channel` | integer | yes |  | G12 output instance whose status bit is watched |
 | `target_channel` | integer | yes |  | G12 output instance the follower drives |
 | `on_level` | integer |  | 200 | level byte the on-frame carries |
-| `gate_option` | string |  | "Heat Pump" | stock caption of the gating OPTIONS row (object 46) |
+| `gate_option` | string |  | "Heat Pump" | stock caption of the gating OPTIONS row |
 | `gate_label` | string |  | "Pump Link" | the row's new caption (same-size rename only) |
 
 Error codes:
 
-- `NO_SUCH_LABEL` — object 46 has no label field containing `gate_option`
-- `AMBIGUOUS_LABEL` — object 46 has more than one field containing `gate_option`
+- `NO_OPTIONS_PAGE` — no object's header reads OPTIONS (`cli._resolve_page_root`)
+- `NO_SUCH_LABEL` — the OPTIONS root has no label field containing `gate_option` (11.23, with the firmware gate admitted: it has no "Heat Pump" row)
+- `AMBIGUOUS_LABEL` — the OPTIONS root has more than one field containing `gate_option`
 - `LABEL_TOO_LONG` — `gate_label` does not fit the field `gate_option` was found in
 - `FOLLOW_REFUSED` — `followchannel.resolve`/`build` could not derive an address or author the routine (an unrecoverable option/status join, or the stock hook byte was not the expected `bl`)
 - `UNEXPECTED_APPEND_POINT` — the GuiCode section's append point is below the stock 13.6 address (0x00259BB4) or misaligned; refuses rather than build against an image this op was never proven on. A point BEYOND it (earlier appends) is fine: the routine chains
