@@ -180,6 +180,7 @@ class _Entry(NamedTuple):
     shifts: str          # `CompileResult.shifts` as JSON, so a served copy is never shared
     firmware: str | None = None
     placement: str = "{}"    # `CompileResult.placement` as JSON, likewise
+    coach: str = "{}"        # `CompileResult.coach` as JSON, likewise (`_coach_from_json`)
 
 
 class _FailedEntry(NamedTuple):
@@ -378,23 +379,49 @@ def _served_failure(entry: "_FailedEntry"):
                                  entry.firmware)
 
 
-def _cached_entry(project, stock: bytes):
-    """`compile_project(project, stock)` through `_disk_memo`. Returns `(_Entry, None)` for a
+def _coach_from_json(text: str) -> dict:
+    """`CompileResult.coach` back from JSON: its `slots` keys are value slots, ints."""
+    coach = json.loads(text)
+    if "slots" in coach:
+        coach["slots"] = {int(k): v for k, v in coach["slots"].items()}
+    return coach
+
+
+# The keyword arguments a compile may take and still be served from the cache: the `--config`
+# override (its canonical form joins the key) and its label.
+_COACH_KWARGS = frozenset({"coach", "coach_source"})
+
+
+def _override_key(kwargs: dict) -> list:
+    """The key parts for a compile's `coach`/`coach_source` override; none without one, so a
+    compile without one keys as before."""
+    if not kwargs:
+        return []
+    coach = kwargs.get("coach")
+    return [json.dumps([None if coach is None else _options.coach_canonical(coach),
+                        kwargs.get("coach_source")])]
+
+
+def _cached_entry(project, stock: bytes, **kwargs):
+    """`compile_project(project, stock, **kwargs)` through `_disk_memo`; `kwargs` are only the
+    `coach`/`coach_source` override. Returns `(_Entry, None)` for a
     successful compile, or `(None, CompileResult)` for a failed one. A failure is as pure a
     function of the key as a success and is cached too (a fresh `CompileResult` per caller); one
     whose fields do not survive JSON is returned uncached, and a compile that raises is never
     cached."""
     def produce():
-        result = _UNCACHED_COMPILE(project, stock)
+        result = _UNCACHED_COMPILE(project, stock, **kwargs)
         if not result.ok:
             entry = _failed_entry(result)
             if entry is None:
                 raise _Failed(result)
             return entry
         return _Entry(result.data, tuple(result.manifest), tuple(result.unverified),
-                      json.dumps(result.shifts), result.firmware, json.dumps(result.placement))
+                      json.dumps(result.shifts), result.firmware, json.dumps(result.placement),
+                      json.dumps(result.coach))
 
-    value = _disk_memo("compile", [hashlib.sha256(stock).hexdigest(), project.to_json()],
+    value = _disk_memo("compile", [hashlib.sha256(stock).hexdigest(), project.to_json(),
+                                   *_override_key(kwargs)],
                        produce)
     if isinstance(value, _Entry):
         return value, None
@@ -426,13 +453,14 @@ def _cached_entry(project, stock: bytes):
 # Before session start nothing is tracked, so every compile runs for real. Outside a test's
 # setup/call/teardown (collection, session fixtures) it compiles for real too, as does a compile
 # with user ops loaded, one naming an op type that is not a `fireflymcf` op (one a test
-# registered), or one with extra arguments. The key carries the digest of `src/`, so any library
-# edit misses.
+# registered), or one with extra arguments other than the `coach`/`coach_source` override (whose
+# canonical form joins the key). The key carries the digest of `src/`, so any library edit misses.
 # ---------------------------------------------------------------------------------------
 
 import types  # noqa: E402
 from unittest import mock as _mock  # noqa: E402
 
+from fireflymcf import options as _options  # noqa: E402
 from fireflymcf import recipe as _recipe  # noqa: E402
 
 _UNCACHED_COMPILE = _recipe.compile_project
@@ -527,17 +555,19 @@ def _foreign_ops(project) -> bool:
 
 def _compile_through_cache(project, stock, *args, **kwargs):
     # A compile with user ops loaded (`userop.registered`) reads op folders the key cannot see.
-    if args or kwargs or not _CACHE_ACTIVE[0] or _engine_patched() or _recipe._user_ops() or \
+    if args or set(kwargs) - _COACH_KWARGS or not _CACHE_ACTIVE[0] or _engine_patched() or \
+            _recipe._user_ops() or \
             _foreign_ops(project) or \
             hashlib.sha256(stock).hexdigest() != project.base_sha256:
         return _UNCACHED_COMPILE(project, stock, *args, **kwargs)
-    entry, failed = _cached_entry(project, stock)
+    entry, failed = _cached_entry(project, stock, **kwargs)
     if failed is not None:
         return failed
     return _recipe.CompileResult(True, entry.data, [], list(entry.manifest),
                                  list(entry.unverified), json.loads(entry.shifts),
                                  firmware=entry.firmware,
-                                 placement=json.loads(entry.placement))
+                                 placement=json.loads(entry.placement),
+                                 coach=_coach_from_json(entry.coach))
 
 
 _recipe.compile_project = _compile_through_cache

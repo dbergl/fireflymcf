@@ -454,7 +454,20 @@ class CoachConfig:
         """
         with open(path, encoding="utf-8") as f:
             raw = json.load(f)
-        extra_slots = {int(k): v for k, v in raw.get("extra_slots", {}).items()}
+        return CoachConfig.from_dict(raw)
+
+    @staticmethod
+    def from_dict(raw: dict) -> "CoachConfig":
+        """`from_json`'s parse of an already-loaded object: `extra_slots`' string keys become
+        `int`, and a missing key takes the dataclass default. A recipe's `coach` block loads
+        through this (`recipe.Project` has checked its shape first)."""
+        extra_slots = {}
+        for k, v in raw.get("extra_slots", {}).items():
+            if not (isinstance(k, str) and k.isascii() and k.isdigit()):
+                raise ValueError("extra_slots key %r is not a slot number (ASCII digits)" % (k,))
+            if int(k) in extra_slots:
+                raise ValueError("extra_slots keys name slot %d twice (%r)" % (int(k), k))
+            extra_slots[int(k)] = v
         return CoachConfig(floorplan=raw.get("floorplan"),
                            options=raw.get("options", []),
                            extra_slots=extra_slots,
@@ -718,3 +731,158 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
         values.get(prog_inverter, 0) if prog_inverter is not None else 0,
     )
     return out
+
+
+# ---------------------------------------------------------------------------
+# A coach's settings, as `compile` takes them: a recipe's `coach` block, or `compile --config`
+# in its place (`recipe.resolve_coach`). The same `CoachConfig` form a render takes, resolved the
+# way a render resolves it (`render_slots`), and validated against the image, because a gate
+# that reads these settings must never read a slot or a value the panel cannot draw.
+
+# The firmwares where `derived_slots`' two derivations are located (the 13.6 GuiCode
+# addresses cited above). On any other image they are skipped and their slots stay unset.
+DERIVED_ON: frozenset = frozenset({"13.6"})
+
+
+@dataclass(frozen=True)
+class CoachSlots:
+    """A coach's settings, resolved: `slots` is `{value_slot: value}` (named floorplan and
+    options, then `extra_slots`, then the derived slots where located); `pinned` the sorted
+    slots `extra_slots` names; `source` where the settings came from (`"recipe"` or
+    `"--config <path>"`)."""
+    slots: dict
+    pinned: tuple
+    source: str
+
+    def to_json(self) -> dict:
+        return {"slots": dict(sorted(self.slots.items())), "pinned": list(self.pinned),
+                "source": self.source}
+
+
+def coach_canonical(config: CoachConfig) -> str:
+    """The text that identifies what `config` resolves to, for a cache key: the floorplan, the
+    options in their given order (two names on one slot resolve last-wins), and `extra_slots`
+    sorted. `preview` is not part of it: it is render-only."""
+    opts = config.options
+    options_form = (["dict", [[k, v] for k, v in opts.items()]] if isinstance(opts, dict)
+                    else ["list", list(opts)])
+    return json.dumps([config.floorplan, options_form,
+                       sorted([[k, v] for k, v in config.extra_slots.items()],
+                              key=lambda kv: (str(type(kv[0])), kv[0]))])
+
+
+@memo.content_cached(copy=None)
+def _switch_readers(data: bytes) -> tuple:
+    """`(readers, bases)` over every type-6 switch record in every object: `readers` maps a
+    value slot to `((child_base, candidate match values, has default), ...)`, `bases` a
+    `child_base` to the slots its records read. A switch has a default when its base
+    candidate's match value is 0xFFFF (`layout.Screen._switch_child`: on no match the panel
+    draws the base only then). Returned shared and read-only."""
+    gs, ge = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    match_off = guidata.find_match_table(data)
+    readers: dict[int, list] = {}
+    bases: dict[int, set] = {}
+    for i in range(len(table)):
+        for rec in _own_records(data, gs, ge, table, i):
+            if rec.wtype != 6 or rec.value_slot is None or rec.child_index is None:
+                continue
+            cands = guidata.switch_candidates(data, rec, match_off)
+            default = any(obj == rec.child_index and v == 0xFFFF for v, obj in cands)
+            readers.setdefault(rec.value_slot, []).append(
+                (rec.child_index, frozenset(v for v, _o in cands), default))
+            bases.setdefault(rec.child_index, set()).add(rec.value_slot)
+    return ({s: tuple(r) for s, r in readers.items()},
+            {b: frozenset(s) for b, s in bases.items()})
+
+
+def _is_int(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def coach_slots(data: bytes, config: CoachConfig, source: str,
+                derive_on: frozenset = DERIVED_ON) -> CoachSlots | None:
+    """`config` resolved for `data` and validated, or None when it names nothing (no
+    floorplan, no options, no extra_slots): an empty block is no settings.
+
+    Resolution is `slot_values`, then, only on a firmware in `derive_on`, `derived_slots`
+    merged under `extra_slots` (an extra slot wins, as `render_slots`' override does).
+    Refuses `COACH_CONFIG` (`recipe.RecipeError`), naming the slot or the name:
+    - a floorplan or option name `slot_values` cannot resolve;
+    - a slot `extra_slots` names that no type-6 switch record reads and that the names and
+      the derivations did not produce;
+    - a value `extra_slots` gives that no switch reading its slot has an arm for, unless one
+      of them has a 0xFFFF default arm.
+    Slots that come from a name or a derivation are taken as `slot_values` resolved them.
+
+    The shared-base rule (two slots read by records based at one `child_base`, given different
+    values) is not checked here: the placement gate applies it per page, over the bases that
+    page's walk reaches (`pagewalk.ArmPaths.slots`). Over the whole image it is no error. A base
+    is often a candidate group shared by many independent switch records, each reading its own
+    slot (13.6 base 394, the OPTIONS checkbox group, is read by slots 107-113 among others), and
+    `layout.Screen.walk` picks each record's arm by its own `value_slot` when given slot values
+    (layout.py:688-692). The ambiguity exists only where settings drive switches by base
+    (`switch_values`), as `pagewalk.switch_arm_paths` does.
+    Memoised on the bytes and `coach_canonical(config)`; `derive_on` is an argument."""
+    resolved = _coach_slots(data, coach_canonical(config), derive_on)
+    if resolved is None:
+        return None
+    slots, pinned = resolved
+    return CoachSlots(dict(slots), pinned, source)
+
+
+@memo.content_cached(copy=None)
+def _coach_slots(data: bytes, canonical: str, derive_on: frozenset):
+    from . import firmware
+    from .recipe import RecipeError
+
+    def refuse(message: str):
+        raise RecipeError("COACH_CONFIG", "coach settings: " + message)
+
+    floorplan, (form, items), extra_items = json.loads(canonical)
+    opts = {k: v for k, v in items} if form == "dict" else list(items)
+    for k, v in extra_items:
+        if not _is_int(k) or not _is_int(v):
+            refuse("extra_slots entry %r: %r is not an integer slot and value" % (k, v))
+    extra = {k: v for k, v in extra_items}
+    if isinstance(opts, dict):
+        bad = [(k, v) for k, v in opts.items() if not _is_int(v)]
+        if bad:
+            refuse("option %r: value %r is not an integer" % bad[0])
+    if floorplan is None and not opts and not extra:
+        return None
+
+    named = CoachConfig(floorplan=floorplan, options=opts)
+    try:
+        values = slot_values(data, named)
+        if floorplan is not None and not slot_values(data, CoachConfig(floorplan=floorplan)):
+            refuse("floorplan %r resolves to no value slot on this image" % (floorplan,))
+    except KeyError as e:
+        refuse(str(e.args[0]) if e.args else str(e))
+    except ValueError as e:              # FloorplanSwitchNotFound, an option name on two slots
+        refuse(str(e))
+    produced = set(values)
+    values.update(extra)
+    if firmware.identify(data) in derive_on:
+        derived = derived_slots(data, values)
+        produced |= set(derived)
+        for slot, value in derived.items():
+            if slot not in extra:
+                values[slot] = value
+
+    readers, _bases = _switch_readers(data)
+    for slot in sorted(extra):
+        value = extra[slot]
+        rs = readers.get(slot, ())
+        if not rs:
+            if slot in produced:
+                continue
+            refuse("slot %d: no type-6 switch on this image reads it, and no floorplan, "
+                   "option or derivation produces it" % slot)
+        if any(default for _b, _v, default in rs):
+            continue
+        arms = sorted(set().union(*(v for _b, v, _d in rs)) - {0xFFFF})
+        if value not in arms:
+            refuse("slot %d = %d: no switch reading slot %d has an arm for %d; it takes %s"
+                   % (slot, value, slot, value, ", ".join(map(str, arms))))
+    return tuple(sorted(values.items())), tuple(sorted(extra))

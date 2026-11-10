@@ -1225,6 +1225,11 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     gates run, and every op verifies itself against the finished image. Nothing is written
     unless all of that passes. Exit 0 on success, 1 on a compile error (printed as the
     engine's structured error), 2 on a refused write.
+
+    `--config FILE` (a `options.CoachConfig` JSON) replaces the project's `coach` block whole:
+    the settings `add_button`'s placement gate checks against. They decide only what is refused
+    and reported (the sidecar's `coach`), never a byte. A config that does not resolve refuses
+    with `COACH_CONFIG`, even when no op reads it.
     """
     import hashlib
     from . import recipe, userop
@@ -1233,7 +1238,16 @@ def _cmd_compile(args: argparse.Namespace) -> int:
         raise ValueError(f"refusing to write {out}: the bootloader lists only mcf-*.bin files")
     _check_writable(out, stock_path)
     discovered = []
+    coach = coach_source = None
     try:
+        if args.config:
+            try:
+                coach = options.CoachConfig.from_json(args.config)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                raise recipe.RecipeError(
+                    "COACH_CONFIG", f"--config {args.config} is not a coach configuration: "
+                                    f"{type(exc).__name__}: {exc}")
+            coach_source = f"--config {args.config}"
         project = recipe.Project.from_json(Path(args.project).read_text(encoding="utf-8"))
         # R6: discovery reads manifests only; nothing is imported until the owner has authorised it
         discovered = userop.discover_used_ops(Path(args.project), project)
@@ -1244,7 +1258,8 @@ def _cmd_compile(args: argparse.Namespace) -> int:
         _announce_user_ops(discovered, args.json)
         loaded = userop.import_user_ops(discovered)
         with userop.registered(loaded):
-            result = recipe.compile_project(project, stock)
+            result = recipe.compile_project(project, stock, coach=coach,
+                                            coach_source=coach_source)
     except recipe.RecipeError as exc:
         if args.json:
             print(json.dumps({"ok": False, "errors": [exc.to_json()]}, indent=2))
@@ -1297,7 +1312,8 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     sidecar = {"sha256": sha, "size": len(data), "build_name": patch.build_name(data),
                "project": str(args.project), "stock_sha256": project.base_sha256,
                "manifest": result.manifest, "unverified": result.unverified,
-               "shifts": result.shifts, "placement": result.placement}
+               "shifts": result.shifts, "placement": result.placement,
+               "coach": result.coach or {}}
     if discovered:
         sidecar["user_ops"] = _sidecar_user_ops(project, discovered)
     Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")
@@ -2407,6 +2423,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--allow-user-ops", action="store_true",
                    help="import and run the project's user-written ops (full Python trust; "
                         "only once the owner has been told what they change)")
+    p.add_argument("--config", metavar="FILE",
+                   help="CoachConfig JSON (floorplan/options/extra_slots): the coach's settings "
+                        "add_button's placement gate checks against; replaces the project's "
+                        "`coach` block whole. Decides what is refused and reported, never bytes")
     p.add_argument("--json", action="store_true", help="emit JSON")
     p.set_defaults(func=_cmd_compile)
 

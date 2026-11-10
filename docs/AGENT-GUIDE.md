@@ -109,6 +109,10 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 - Ops apply in order. Where an op consumes another's output (a `{"ref": "<id>"}`), the producer comes
   first. Order otherwise does not change the bytes.
 - `preview` is render-only state and never build input.
+- `coach` (optional, the same JSON as a `CoachConfig` file: `floorplan`, `options`, `extra_slots`)
+  names the settings the owner's coach runs. It decides only what `add_button` refuses and
+  reports (`PLACEMENT_OVERLAP` in the arms those settings draw, and the sidecar's `coach`), never
+  a byte of the image. Without it only each switch's base arm refuses and the other arms are reported, as before; the settings are what make the gate refuse in the arm the coach draws (2026-11-09).
 
 ## Step 4 — compile
 
@@ -122,7 +126,10 @@ a code from `docs/RECIPE-OPS.md` and, where the engine knows one, an `offer` (fo
 `shorten` on `LABEL_TOO_LONG`). Success prints the manifest, one line per op. A project with an op
 whose mechanism has never run on a coach is refused unless `--allow-unverified` is given: that is
 the owner's decision, so ask first, and the build then prints an `UNVERIFIED` line. A sidecar `build/mcf-pump-rename.bin.json`
-records the SHA-256, manifest and unverified list.
+records the SHA-256, manifest and unverified list, and `coach` (the resolved slots, the pinned
+list and where they came from, or `{}`). `--config FILE` (a `CoachConfig` JSON, as `render --config`
+takes) replaces the project's `coach` block whole; it does not merge with it. A config that does
+not resolve refuses `COACH_CONFIG`, even when no op reads it (2026-11-09).
 
 Every compile reseals all nine checksums and runs the structural gates: the object-table boundary
 oracle, record geometry, deep byte coverage, GuiCode→GuiData pointer repair, the LCD-pointer strand

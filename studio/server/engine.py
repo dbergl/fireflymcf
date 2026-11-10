@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import struct
 from collections import OrderedDict
 
@@ -185,8 +186,15 @@ class Engine:
 
     def etag(self, project: recipe.Project) -> str:
         enabled = [s for s in project.ops if s.enabled]
-        key = recipe._prefix_key(project.base_sha256, enabled, project.tick_chain_limit)
-        return hashlib.sha256((key + "|" + (project.build_name or ""))
+        # The coach block can change what compiles, so its resolved settings join the key (the
+        # compile resolves it again, the same way). A block that refuses keys on its own text,
+        # so two different bad blocks are never served one another's refusal.
+        try:
+            coach, bad = recipe.resolve_coach(project, self.stock), ""
+        except recipe.RecipeError:
+            coach, bad = None, "|bad-coach=" + json.dumps(project.coach, sort_keys=True)
+        key = recipe._prefix_key(project.base_sha256, enabled, project.tick_chain_limit, coach)
+        return hashlib.sha256((key + bad + "|" + (project.build_name or ""))
                               .encode()).hexdigest()
 
     def compile(self, name: str, project: recipe.Project):

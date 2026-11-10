@@ -721,10 +721,19 @@ def clone_onto_home(data: bytes, position: tuple[int, int] | None = None, *,
 
 class PlacementOverlap(ValueError):
     """PLACEMENT_OVERLAP: the new button's attach origin is not a u16, its footprint leaves the
-    page's canvas (the page root's background), or, in the base arm of every switch, it covers a
-    placed record other than a root background fill around it and the one wt-33 card that
-    encloses it."""
+    page's canvas (the page root's background), or it covers a placed record other than a root
+    background fill around it and the one wt-33 card that encloses it. Without coach settings
+    that is checked in the base arm of every switch (the other arms are reported); with them, in
+    the arms the settings draw and in every arm of a switch they do not name."""
     code = "PLACEMENT_OVERLAP"
+
+
+class CoachConfigConflict(ValueError):
+    """COACH_CONFIG: the coach's settings give two value slots that records based at one switch
+    `child_base` on the page read different values. The walk drives a switch by its base
+    (`switch_values`, as `pagewalk.switch_arm_paths` does), so one base takes one value; the gate
+    cannot model a base read by independent slots, and the owner can leave them unnamed."""
+    code = "COACH_CONFIG"
 
 
 @dataclass(frozen=True)
@@ -738,9 +747,14 @@ class Placement:
     #   "path": [{"child_base": int, "slots": [value_slot, ...], "value": int}, ...],
     #   "covers": [{"object": int, "caption": str | None, "touch": bool}, ...]}`,
     # `arm` and `path` outermost switch first. A configuration sets the `slots`, not the
-    # child_base. Which arm a coach draws is its configuration, which a compile does not see, so
-    # these do not refuse.
+    # child_base. Without settings, which arm a coach draws is not known, so these do not
+    # refuse. With them (`check_placement`'s `coach`), only the paths the settings do not select
+    # are reported; the ones they select refuse.
     arms: tuple = ()
+    # Whether the coach's settings drove the gate (`check_placement`'s `coach` was given).
+    coach: bool = False
+    # The `switch_values` of every walk the gate refused in, in order: `({},)` without settings.
+    walked: tuple = ()
 
 
 def _bbox(quads) -> tuple:
@@ -789,25 +803,67 @@ def _covered(data: bytes, obj: int) -> dict:
             "touch": any(r.wtype == 12 for r in recs)}
 
 
-def check_placement(data: bytes, root: int, obj: int) -> Placement:
+def _named_bases(paths, coach: dict) -> dict:
+    """`{child_base: value}` for each switch base of `paths` (`ArmPaths.slots`) the settings
+    `coach` name: every slot the base's records read is set, all to one value. A base with some
+    of its slots set is unnamed. CoachConfigConflict if the slots it sets disagree."""
+    named = {}
+    for cb, slots in paths.slots.items():
+        given = {s: coach[s] for s in slots if s in coach}
+        if len(set(given.values())) > 1:
+            raise CoachConfigConflict(
+                "switch base %d is read by independent slots %s, and the coach's settings give "
+                "them different values (%s); the placement gate cannot model a switch base read "
+                "by independent slots. Leave those slots unnamed and the base is checked in "
+                "every arm"
+                % (cb, " and ".join(map(str, slots)),
+                   ", ".join("slot %d = %d" % kv for kv in sorted(given.items()))))
+        if given and len(given) == len(slots):
+            named[cb] = next(iter(given.values()))
+    return named
+
+
+def _steps_text(steps) -> str:
+    """`[{child_base, slots, value}, ...]` as the manifest names a path: `slot 6 = 2 and ...`."""
+    def step(s):
+        slots = s["slots"]
+        if not slots:
+            return "switch %d = %d" % (s["child_base"], s["value"])
+        return "%s %s = %d" % ("slot" if len(slots) == 1 else "slots",
+                               " and ".join(map(str, slots)), s["value"])
+    return " and ".join(step(s) for s in steps)
+
+
+def check_placement(data: bytes, root: int, obj: int,
+                    coach: dict | None = None) -> Placement:
     """The footprint gate over every switch-arm path of the page (`pagewalk.switch_arm_paths`:
     the base, each switch's arms one at a time, and recursively the arms of every switch nested
     inside a non-base arm, combined with the arm path that reaches it), each walked by
     `layout.Screen.walk`, the layout engine's replay.
 
-    In the base arm (`{}`) it refuses `PlacementOverlap` unless object `obj`'s placed records lie
-    inside the page root's background (its first placed wt-4 record: the canvas) and touch no
-    placed record but root wt-4 fills that enclose them (the background, a panel) and one wt-33
-    record of another object that encloses them (the card the button sits on). The root's other
-    records (its header, its own touch regions and rows) are not admitted. Boxes are compared
-    inclusively, so an edge-to-edge neighbour refuses too.
+    Without settings (`coach` None), in the base arm (`{}`) it refuses `PlacementOverlap` unless
+    object `obj`'s placed records lie inside the page root's background (its first placed wt-4
+    record: the canvas) and touch no placed record but root wt-4 fills that enclose them (the
+    background, a panel) and one wt-33 record of another object that encloses them (the card
+    the button sits on). The root's other records (its header, its own touch regions and rows)
+    are not admitted. Boxes are compared inclusively, so an edge-to-edge neighbour refuses too.
 
     Under each other arm path, records the base rule would not admit are reported in
-    `Placement.arms`, not refused: which arm a coach draws depends on its configuration, which
-    the build does not see. Each entry names the value slots the path sets, and each covered
-    object's caption and whether it carries a touch region. A nested path that covers exactly
-    the objects its parent path covers is not repeated. Only the all-base walk refuses."""
-    paths = pagewalk.switch_arm_paths(data, [root])
+    `Placement.arms`, not refused: which arm a coach draws depends on its configuration. Each
+    entry names the value slots the path sets, and each covered object's caption and whether it
+    carries a touch region. A nested path that covers exactly the objects its parent path
+    covers is not repeated. Without settings, only the all-base walk refuses.
+
+    With settings, `coach` is `{value_slot: value}` (`options.CoachSlots.slots`). A switch base
+    the page's walks reach is named when the settings set every slot its records read, all to
+    one value (`CoachConfigConflict`, COACH_CONFIG, when they set them to different values; a
+    base with only some of its slots set is unnamed). `S` drives each named base to its value.
+    The base rule then refuses in `S` and in `S` overlaid with every arm path that agrees with
+    `S` on every named base: an unnamed switch's arms, nested ones included, are all checked,
+    one switch at a time (two independent unnamed switches are not combined). The refusal names
+    the path. The paths that disagree with `S` are reported as above, walked alone.
+    `pagewalk.ArmPathLimit` past `pagewalk.ARM_PATH_LIMIT` sets, read at call time."""
+    paths = pagewalk.switch_arm_paths(data, [root], limit=pagewalk.ARM_PATH_LIMIT)
     screen = layout.Screen(data)
 
     def walk(sv):
@@ -831,6 +887,12 @@ def check_placement(data: bytes, root: int, obj: int) -> Placement:
             return hits, cards[0][0].obj_index
         return hits, None
 
+    def steps(sv):
+        return [{"child_base": k, "slots": list(paths.slots.get(k, ())), "value": v}
+                for k, v in sv.items()]
+
+    named = None if coach is None else _named_bases(paths, coach)
+
     base = walk({})
     mine = [q for q in base if q.obj_index == obj]
     if not mine:
@@ -843,11 +905,37 @@ def check_placement(data: bytes, root: int, obj: int) -> Placement:
     if not _encloses(canvas, box):
         raise PlacementOverlap(f"object {obj}'s footprint {box} leaves the page's canvas "
                                f"{canvas}")
-    hits, card = foreign(base, box)
-    if hits:
-        raise PlacementOverlap(
-            f"object {obj}'s footprint {box} covers "
-            + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
+
+    if named is None:
+        refused = [{}]
+    else:
+        # `S`, then `S` overlaid with each path that agrees with it on every named base
+        refused, seen = [], set()
+        for sv in paths.sets:
+            if any(k in named and named[k] != v for k, v in sv.items()):
+                continue
+            walk_sv = {**named, **sv}
+            key = frozenset(walk_sv.items())
+            if key not in seen:
+                seen.add(key)
+                refused.append(walk_sv)
+    card = None
+    for i, sv in enumerate(refused):
+        hits, c = foreign(base if not sv else walk(sv), box)
+        if i == 0:
+            card = c
+        if hits:
+            where = ""
+            if named is not None:
+                own = {k: v for k, v in sv.items() if k not in named}
+                where = ", under the coach's settings (%s)" % (
+                    _steps_text(steps(named)) or "none read on this page")
+                if own:
+                    where += " and the unnamed arm %s" % _steps_text(steps(own))
+                where += ","
+            raise PlacementOverlap(
+                f"object {obj}'s footprint {box} covers{where} "
+                + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
 
     arms = []
     covered: dict = {frozenset(): []}
@@ -859,29 +947,22 @@ def check_placement(data: bytes, root: int, obj: int) -> Placement:
         parent = frozenset(list(sv.items())[:-1])
         if not objs or (len(sv) > 1 and objs == covered[parent]):
             continue
+        if named is not None and all(named.get(k, v) == v for k, v in sv.items()):
+            continue                     # a path the settings select: walked above, admitted
         arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs,
-                     "path": [{"child_base": k, "slots": list(paths.slots.get(k, ())),
-                               "value": v} for k, v in sv.items()],
-                     "covers": [_covered(data, o) for o in objs]})
-    return Placement(box, canvas, card, tuple(arms))
+                     "path": steps(sv), "covers": [_covered(data, o) for o in objs]})
+    return Placement(box, canvas, card, tuple(arms), coach=named is not None,
+                     walked=tuple(refused))
 
 
 def placement_text(entry: dict) -> str:
     """One `Placement.arms` entry as the manifest prints it, e.g.
     `slot 102 = 1: object 240 "Star Link" (touch)`."""
-    def step(s):
-        slots = s["slots"]
-        if not slots:
-            return "switch %d = %d" % (s["child_base"], s["value"])
-        return "%s %s = %d" % ("slot" if len(slots) == 1 else "slots",
-                               " and ".join(map(str, slots)), s["value"])
-
     def obj(c):
         return "object %d%s%s" % (c["object"],
                                   ' "%s"' % c["caption"] if c["caption"] else "",
                                   " (touch)" if c["touch"] else "")
-    return "%s: %s" % (" and ".join(step(s) for s in entry["path"]),
-                       ", ".join(obj(c) for c in entry["covers"]))
+    return "%s: %s" % (_steps_text(entry["path"]), ", ".join(obj(c) for c in entry["covers"]))
 
 
 # --------------------------------------------------------------------------------------
@@ -1498,7 +1579,8 @@ def build_home_button(data: bytes, *, channel: int | None = None,
                       allow_commanded_channel: bool = False,
                       colour_index: int | None = None,
                       label: str | None = None,
-                      at: tuple[str, int, int] | None = None) -> tuple[bytes, list]:
+                      at: tuple[str, int, int] | None = None,
+                      coach: dict | None = None) -> tuple[bytes, list]:
     """The full byte-verified build: attach the proven button template
     (`donors.button_object`) to a page as its own boxed button placed at `at` (default
     `DEFAULT_AT_136`, HOME (435, 404)), command an RV-C instance with a clean toggle, indicate it
@@ -1520,13 +1602,16 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     exceed it; a longer caption is a relocating edit, not this one.
 
     `at=(page, x, y)` names the page (`cli._resolve_page_root`) and the attach record's origin;
-    the box's left edge lands at x plus the template box's own x offset (135).
+    the box's left edge lands at x plus the template box's own x offset (135). `coach`, the
+    coach's settings as `{value_slot: value}` (`options.CoachSlots.slots`), selects the arms the
+    footprint gate refuses in (`check_placement`); None is the all-base gate.
 
     Gates, in order: the template (`donors.button_object`: DonorError GRAMMAR, NO_TEMPLATE); the
     colour cell (`donors.check_mode7_index`: MODE7_INDEX); the footprint
-    (`check_placement`: PlacementOverlap); the LCD group handling that reads the group and
-    binding the build writes (`grammar.prove_lcd`, the loader `FUN_0021B420` and the sender
-    `FUN_0021B8B4`: DonorError LCD_GRAMMAR), before `retarget_command`.
+    (`check_placement`: PlacementOverlap, CoachConfigConflict, `pagewalk.ArmPathLimit`); the
+    LCD group handling that reads the group and binding the build writes (`grammar.prove_lcd`,
+    the loader `FUN_0021B420` and the sender `FUN_0021B8B4`: DonorError LCD_GRAMMAR), before
+    `retarget_command`.
 
     Composes `clone_onto_home` with a positioned attach -> `retarget_command` ->
     `retarget_indicator`, then one more same-size edit pass of its own -- the label rewrite --
@@ -1561,7 +1646,7 @@ def build_home_button(data: bytes, *, channel: int | None = None,
 
     out, idx, e = clone_onto_home(data, position=(x, y), page=page)
     edits += e
-    check_placement(out, _resolve_page_root(out, page), idx)
+    check_placement(out, _resolve_page_root(out, page), idx, coach)
     try:
         grammar.prove_lcd(data)
     except grammar.LcdGrammarError as err:

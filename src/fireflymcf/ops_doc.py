@@ -120,7 +120,18 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "only once the pin's first status arrives, and a tap sends one `1FEDB` toggle. Under "
         "the emulator's configuration it changes no pixel outside its box; with slot 102 = 1 "
         "the default spot covers the Star Link button and its touch region (reported, "
-        "2026-11-09). Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
+        "2026-11-09; with the coach's settings naming slot 102 = 1 it refuses). On 14.7 the "
+        "settings must name slot 11 (the battery card) as well as slot 102: left unnamed, slot "
+        "11's arm 2 covers objects 117 and 132 at the default spot and the build refuses "
+        "(2026-11-09). A 14.7 add_button compile needs `--allow-unverified`, the op being "
+        "emulated there, not hardware-verified. The placement "
+        "gate checks the arms the coach's settings draw when the build has them, and every arm "
+        "of a switch they leave out, one switch at a time (2026-11-09: all 6,336 combinations "
+        "at the 13.6 default spot under the reference coach's settings found no overlap the "
+        "per-switch check misses). A slot the settings name is taken as stated, a live one too "
+        "(the sidecar's `coach` lists those as `pinned`); 13.6's derived slots 6 and 453 are "
+        "added only on 13.6; elsewhere a switch they would drive is unnamed until the settings "
+        "name its slot. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
         "so with the firmware gate bypassed it refuses `GRAMMAR`.",
         "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",

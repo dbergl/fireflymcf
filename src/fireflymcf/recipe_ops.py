@@ -1809,17 +1809,42 @@ class AddButton(Op):
              The footprint gate walks the page under every switch-arm path
              (`pagewalk.switch_arm_paths`): the base, each type-6 switch's arms one at a time,
              and, recursively, the arms of each switch nested inside a non-base arm combined
-             with the path that reaches it. In the all-base walk the footprint must lie on the
-             page root's background and cover nothing but root background fills around it and
-             one wt-33 card around it (PLACEMENT_OVERLAP); only that walk refuses. What it
-             covers only under another path does not refuse, because which arm a coach draws is
-             its configuration: it is reported per path in `CompileResult.placement` and the
-             sidecar's `placement` (each entry: `arm` {child_base: value}, `objects`, `path`
-             [{child_base, slots, value}], `covers` [{object, caption, touch}]), and at the end
-             of the op's manifest line keyed by the value slots a configuration sets, e.g.
-             `slot 102 = 1: object 240 "Star Link" (touch)` (the first six paths; the sidecar
-             lists all). A nested path covering exactly what its parent covers is not
-             repeated
+             with the path that reaches it. The footprint must lie on the page root's
+             background and cover nothing but root background fills around it and one wt-33
+             card around it (PLACEMENT_OVERLAP). Which walks refuse depends on whether the
+             build has the coach's settings (the recipe's `coach` block, or
+             `compile --config`):
+             - without settings, only the all-base walk refuses;
+             - with them, the walk under the settings refuses, and so does that walk overlaid
+               with every arm path that agrees with the settings on each switch they name. A
+               switch is named when the settings set every value slot its records read, all
+               to one value; a switch whose slots are set to different values refuses
+               COACH_CONFIG (the gate cannot model a base read by independent slots; leave
+               them unnamed and the base is checked in every arm), and one with only some of
+               its slots set is unnamed. An unnamed
+               switch's arms (nested ones included) are all checked, so a slot the settings
+               leave out refuses on any arm that covers the spot, and the refusal names it
+               (`slot 102 = 1`), for the owner to add. On 14.7 the settings must name slot 11
+               (the battery card) as well as slot 102: left unnamed, slot 11's arm 2 covers
+               objects 117 and 132 at the default spot and the build refuses (2026-11-09).
+               A 14.7 add_button compile also needs `--allow-unverified`, the op being
+               emulated there, not hardware-verified. A slot the settings name is taken as
+               stated even if a live status drives it (`extra_slots`; the sidecar's `coach`
+               entry lists those as `pinned`). 13.6's derived slots 6 and 453 are added only
+               on 13.6, where their derivation is located; elsewhere they are unnamed. The
+               check is one switch at a time with its nested arms, never every combination of
+               independent unnamed switches: an overlap only two of them moving together
+               draws is not seen (2026-11-09: all 6,336 combinations at the 13.6 default spot
+               under the reference coach's settings found none). Past 512 arm paths the build
+               refuses ARM_PATH_LIMIT, with or without settings.
+             What the footprint covers under the other paths does not refuse: it is reported
+             per path in `CompileResult.placement` and the sidecar's `placement` (each entry:
+             `arm` {child_base: value}, `objects`, `path` [{child_base, slots, value}],
+             `covers` [{object, caption, touch}]), and at the end of the op's manifest line
+             keyed by the value slots a configuration sets, e.g. `slot 102 = 1: object 240
+             "Star Link" (touch)` (the first six paths; the sidecar lists all). A nested path
+             covering exactly what its parent covers is not repeated. With settings the line
+             ends `; checked against the coach's settings (<source>)`
 
     Error codes:
       NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
@@ -1848,9 +1873,19 @@ class AddButton(Op):
         caption's text form, or its label does not fill its field
       MODE7_INDEX — the pin's colour cell is not below the image's mode-7 index limit (the
         decoder would clamp it to cell 0)
-      PLACEMENT_OVERLAP — `at`'s x or y is outside 0..0xFFFF, or in the base switch arm the
-        button's footprint leaves the page root's background or covers a placed record other
-        than a root background fill and one wt-33 card around it
+      PLACEMENT_OVERLAP — `at`'s x or y is outside 0..0xFFFF, or the button's footprint leaves
+        the page root's background, or, in a walk the gate refuses in (the base switch arm
+        without settings; with them, the settings' arms and every arm of a switch they do not
+        name), covers a placed record other than a root background fill and one wt-33 card
+        around it
+      COACH_CONFIG — the coach's settings set two value slots that switch records sharing one
+        base on the page read to different values (13.6 base 441 reads slots 204 and 208): the
+        placement gate cannot model a switch base read by independent slots; leave them unnamed
+        and the base is checked in every arm. The project-level settings check
+        (`options.coach_slots`) refuses a bad slot, value, option or floorplan with this code
+        before any op runs
+      ARM_PATH_LIMIT — the page has more than `pagewalk.ARM_PATH_LIMIT` (512) switch-arm paths,
+        so the gate cannot walk them all; with or without settings
       LCD_GRAMMAR — the LCD firmware's group handling, which reads the group and binding the
         build writes, is not proven 13.6's (`grammar.prove_lcd`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
@@ -1920,13 +1955,17 @@ class AddButton(Op):
         except statusbind.StatusBindError as err:
             raise RecipeError("BIND_REFUSED", str(err))
         ctx.edits.extend(e)
+        coach = ctx.coach.slots if ctx.coach else None
         try:
             data, e = newbutton.build_home_button(
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
-                colour_index=cell, label=self.label, at=self.at)
-        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap) as err:
+                colour_index=cell, label=self.label, at=self.at, coach=coach)
+        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap,
+                newbutton.CoachConfigConflict) as err:
             raise RecipeError(err.code, str(err), op_id=self.spec.id)
+        except pagewalk.ArmPathLimit as err:
+            raise RecipeError("ARM_PATH_LIMIT", str(err), op_id=self.spec.id)
         except ValueError as err:
             # Match only the specific "already commanded by" refusal wording
             # (newbutton.py:354-358). A bare "command" substring also appears in the
@@ -1963,10 +2002,12 @@ class AddButton(Op):
         data, _ = patch.reseal(data)
         page = (self.at or newbutton.DEFAULT_AT_136)[0]
         placement = newbutton.check_placement(data, newbutton._resolve_page_root(data, page),
-                                              idx)
+                                              idx, coach)
         ctx.handles[self.spec.id] = {"object": idx, "cell": cell,
                                      "group": newbutton.object_group(data, idx),
                                      "placement_arms": list(placement.arms)}
+        if placement.coach:
+            ctx.handles[self.spec.id]["placement_coach"] = ctx.coach.source
         return data
 
     def capability_delta(self, ctx):
@@ -2004,6 +2045,9 @@ class AddButton(Op):
             if len(arms) > cap:
                 line += "; ... and %d more arm paths (the sidecar's placement lists all)" % (
                     len(arms) - cap)
+        if h.get("placement_coach") and ctx.coach is not None:
+            # the live source: the handle is snapshotted under a cache key without it
+            line += "; checked against the coach's settings (%s)" % ctx.coach.source
         return line
 
 
