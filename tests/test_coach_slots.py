@@ -215,3 +215,53 @@ def test_compile_cached_carries_the_settings(mcf_136):
     p = _empty_project(mcf_136, {"extra_slots": {"6": 1}})
     res = recipe.compile_cached(p, mcf_136, {})
     assert res.ok and res.coach["slots"][6] == 1
+
+
+# --- malformed slot keys, and the manifest's source across a cache (2026-11-09) ----------------
+
+@pytest.mark.parametrize("keys", [{"²": 1}, {"٣": 1}, {"6": 1, "06": 1}, {"6": 1, "006": 2}])
+def test_malformed_slot_keys_refuse(mcf_136, keys):
+    """A non-ASCII digit passes str.isdigit(), and two spellings of one slot collapse silently:
+    both refuse BAD_PROJECT rather than crash or pick one."""
+    doc = json.loads(_project(hashlib.sha256(mcf_136).hexdigest()).to_json())
+    doc["coach"] = {"extra_slots": keys}
+    with pytest.raises(recipe.RecipeError) as e:
+        recipe.Project.from_json(json.dumps(doc))
+    assert e.value.code == "BAD_PROJECT"
+    # a block built in memory (not through from_json) refuses COACH_CONFIG-side, not by crash
+    with pytest.raises(ValueError):
+        options.CoachConfig.from_dict({"extra_slots": keys})
+
+
+@pytest.mark.parametrize("keys", [{"²": 1}, {"6": 1, "06": 1}])
+def test_compile_config_file_with_bad_keys_is_coach_config(tmp_path, keys):
+    from tests.conftest import REPO_ROOT
+    from tests.test_cli import _run
+    cfg = tmp_path / "cfg.json"
+    cfg.write_text(json.dumps({"extra_slots": keys}), encoding="utf-8")
+    stock = (REPO_ROOT / "firefly-13.6/mcf.bin").read_bytes()
+    proj = tmp_path / "p.ffproj.json"
+    proj.write_text(json.dumps({"schema": 1, "base_sha256": hashlib.sha256(stock).hexdigest(),
+                                "build_name": "x", "ops": []}))
+    r = _run("compile", str(proj), "firefly-13.6/mcf.bin", "-o", str(tmp_path / "mcf-x.bin"),
+             "--config", str(cfg), "--json", cwd=REPO_ROOT)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert json.loads(r.stdout)["errors"][0]["code"] == "COACH_CONFIG", r.stdout
+
+
+def test_manifest_source_is_live_through_a_shared_cache(mcf_136):
+    """The cache key leaves the settings' label out, so the second compile reuses the first's
+    snapshot; its manifest line still names its own source."""
+    sha = hashlib.sha256(mcf_136).hexdigest()
+    p = recipe.Project(base_sha256=sha, build_name=None, coach={"extra_slots": {"6": 1}},
+                       ops=[recipe.OpSpec(id="b", type="add_button",
+                                          params={"channel": 15, "label": "Pin 15",
+                                                  "off_colour": [65, 81, 163]})])
+    cache = {}
+    a = recipe.compile_cached(p, mcf_136, cache)
+    b = recipe.compile_cached(p, mcf_136, cache, coach=_cfg(extra_slots={6: 1}),
+                              coach_source="--config two.json")
+    assert a.ok and b.ok, (a.errors, b.errors)
+    line = lambda r: next(m for m in r.manifest if m.startswith("button:"))
+    assert "(recipe)" in line(a) and "two.json" not in line(a)
+    assert "(--config two.json)" in line(b) and "(recipe)" not in line(b)

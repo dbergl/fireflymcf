@@ -112,7 +112,7 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 - `coach` (optional, the same JSON as a `CoachConfig` file: `floorplan`, `options`, `extra_slots`)
   names the settings the owner's coach runs. It decides only what `add_button` refuses and
   reports (`PLACEMENT_OVERLAP` in the arms those settings draw, and the sidecar's `coach`), never
-  a byte of the image. Without it the gate checks every arm, as before (2026-11-09).
+  a byte of the image. Without it only each switch's base arm refuses and the other arms are reported, as before; the settings are what make the gate refuse in the arm the coach draws (2026-11-09).
 
 ## Step 4 — compile
 

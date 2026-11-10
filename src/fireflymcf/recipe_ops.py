@@ -1819,10 +1819,16 @@ class AddButton(Op):
                with every arm path that agrees with the settings on each switch they name. A
                switch is named when the settings set every value slot its records read, all
                to one value; a switch whose slots are set to different values refuses
-               COACH_CONFIG, and one with only some of its slots set is unnamed. An unnamed
+               COACH_CONFIG (the gate cannot model a base read by independent slots; leave
+               them unnamed and the base is checked in every arm), and one with only some of
+               its slots set is unnamed. An unnamed
                switch's arms (nested ones included) are all checked, so a slot the settings
                leave out refuses on any arm that covers the spot, and the refusal names it
-               (`slot 102 = 1`), for the owner to add. A slot the settings name is taken as
+               (`slot 102 = 1`), for the owner to add. On 14.7 the settings must name slot 11
+               (the battery card) as well as slot 102: left unnamed, slot 11's arm 2 covers
+               objects 117 and 132 at the default spot and the build refuses (2026-11-09).
+               A 14.7 add_button compile also needs `--allow-unverified`, the op being
+               emulated there, not hardware-verified. A slot the settings name is taken as
                stated even if a live status drives it (`extra_slots`; the sidecar's `coach`
                entry lists those as `pinned`). 13.6's derived slots 6 and 453 are added only
                on 13.6, where their derivation is located; elsewhere they are unnamed. The
@@ -1874,7 +1880,8 @@ class AddButton(Op):
         around it
       COACH_CONFIG — the coach's settings set two value slots that switch records sharing one
         base on the page read to different values (13.6 base 441 reads slots 204 and 208): the
-        gate drives a switch by its base, so they must agree. The project-level settings check
+        placement gate cannot model a switch base read by independent slots; leave them unnamed
+        and the base is checked in every arm. The project-level settings check
         (`options.coach_slots`) refuses a bad slot, value, option or floorplan with this code
         before any op runs
       ARM_PATH_LIMIT — the page has more than `pagewalk.ARM_PATH_LIMIT` (512) switch-arm paths,
@@ -2038,8 +2045,9 @@ class AddButton(Op):
             if len(arms) > cap:
                 line += "; ... and %d more arm paths (the sidecar's placement lists all)" % (
                     len(arms) - cap)
-        if h.get("placement_coach"):
-            line += "; checked against the coach's settings (%s)" % h["placement_coach"]
+        if h.get("placement_coach") and ctx.coach is not None:
+            # the live source: the handle is snapshotted under a cache key without it
+            line += "; checked against the coach's settings (%s)" % ctx.coach.source
         return line
 
 

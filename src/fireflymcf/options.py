@@ -461,7 +461,13 @@ class CoachConfig:
         """`from_json`'s parse of an already-loaded object: `extra_slots`' string keys become
         `int`, and a missing key takes the dataclass default. A recipe's `coach` block loads
         through this (`recipe.Project` has checked its shape first)."""
-        extra_slots = {int(k): v for k, v in raw.get("extra_slots", {}).items()}
+        extra_slots = {}
+        for k, v in raw.get("extra_slots", {}).items():
+            if not (isinstance(k, str) and k.isascii() and k.isdigit()):
+                raise ValueError("extra_slots key %r is not a slot number (ASCII digits)" % (k,))
+            if int(k) in extra_slots:
+                raise ValueError("extra_slots keys name slot %d twice (%r)" % (int(k), k))
+            extra_slots[int(k)] = v
         return CoachConfig(floorplan=raw.get("floorplan"),
                            options=raw.get("options", []),
                            extra_slots=extra_slots,

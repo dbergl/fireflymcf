@@ -1028,6 +1028,7 @@ def test_shared_base_partly_named_is_unnamed():
         newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 1})
     assert e.value.code == "COACH_CONFIG"
     assert "441" in str(e.value) and "204" in str(e.value) and "208" in str(e.value)
+    assert "independent slots" in str(e.value) and "unnamed" in str(e.value)
 
 
 def test_arm_path_limit_has_its_code(monkeypatch):

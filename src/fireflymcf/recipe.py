@@ -208,8 +208,11 @@ def _check_coach_block(block) -> dict:
         bad("'options' must be a list of names or a {name: value} object")
     extra = block.get("extra_slots", {})
     if not isinstance(extra, dict) or not all(
-            isinstance(k, str) and k.isdigit() and _is_int(v) for k, v in extra.items()):
+            isinstance(k, str) and k.isascii() and k.isdigit() and _is_int(v)
+            for k, v in extra.items()):
         bad("'extra_slots' must map slot numbers to integer values")
+    if len({int(k) for k in extra}) != len(extra):
+        bad("'extra_slots' names a slot twice (keys that read as one number, e.g. '6' and '06')")
     return block
 
 

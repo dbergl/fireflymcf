@@ -721,16 +721,18 @@ def clone_onto_home(data: bytes, position: tuple[int, int] | None = None, *,
 
 class PlacementOverlap(ValueError):
     """PLACEMENT_OVERLAP: the new button's attach origin is not a u16, its footprint leaves the
-    page's canvas (the page root's background), or, in the base arm of every switch, it covers a
-    placed record other than a root background fill around it and the one wt-33 card that
-    encloses it."""
+    page's canvas (the page root's background), or it covers a placed record other than a root
+    background fill around it and the one wt-33 card that encloses it. Without coach settings
+    that is checked in the base arm of every switch (the other arms are reported); with them, in
+    the arms the settings draw and in every arm of a switch they do not name."""
     code = "PLACEMENT_OVERLAP"
 
 
 class CoachConfigConflict(ValueError):
     """COACH_CONFIG: the coach's settings give two value slots that records based at one switch
     `child_base` on the page read different values. The walk drives a switch by its base
-    (`switch_values`, as `pagewalk.switch_arm_paths` does), so one base takes one value."""
+    (`switch_values`, as `pagewalk.switch_arm_paths` does), so one base takes one value; the gate
+    cannot model a base read by independent slots, and the owner can leave them unnamed."""
     code = "COACH_CONFIG"
 
 
@@ -810,8 +812,10 @@ def _named_bases(paths, coach: dict) -> dict:
         given = {s: coach[s] for s in slots if s in coach}
         if len(set(given.values())) > 1:
             raise CoachConfigConflict(
-                "switch base %d is read by slots %s, and the coach's settings give them "
-                "different values (%s); the gate drives a switch by its base, so they must agree"
+                "switch base %d is read by independent slots %s, and the coach's settings give "
+                "them different values (%s); the placement gate cannot model a switch base read "
+                "by independent slots. Leave those slots unnamed and the base is checked in "
+                "every arm"
                 % (cb, " and ".join(map(str, slots)),
                    ", ".join("slot %d = %d" % kv for kv in sorted(given.items()))))
         if given and len(given) == len(slots):
