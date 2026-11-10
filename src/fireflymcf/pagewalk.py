@@ -186,7 +186,8 @@ class ArmPaths:
     insertion order is its arm path, outermost switch first. `slots` maps each switch
     `child_base` a set drives to the sorted `value_slot`s of the type-6 records based there
     (the variable a configuration sets; two records can share a base, and one `switch_values`
-    entry drives both)."""
+    entry drives both, unless `slot_values` pins one: a pinned record follows its slot and
+    ignores the `switch_values` entry for its base)."""
     sets: tuple
     slots: dict
 

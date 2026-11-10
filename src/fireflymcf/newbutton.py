@@ -741,9 +741,9 @@ class Placement:
     #   "covers": [{"object": int, "caption": str | None, "touch": bool}, ...]}`,
     # `arm` and `path` outermost switch first. A configuration sets the `slots`, not the
     # child_base. Without settings, which arm a coach draws is not known, so these do not
-    # refuse. With them (`check_placement`'s `coach`), a path every step of which the settings
-    # select (every slot its base's records read is named, to the step's value) is not
-    # reported: the settings' walks refuse instead.
+    # refuse. With them (`check_placement`'s `coach`), only a path with a step the settings
+    # exclude (a named slot its base's records read is set to another value) is reported; the
+    # rest the settings' walks checked, and refuse in.
     arms: tuple = ()
     # Whether the coach's settings drove the gate (`check_placement`'s `coach` was given).
     coach: bool = False
@@ -837,7 +837,8 @@ def check_placement(data: bytes, root: int, obj: int,
     (`pagewalk.switch_arm_paths` under the settings; two independent unnamed switches are not
     combined). The base rule refuses in each of those walks (`{}` first, the settings alone),
     and the refusal names the settings and the unnamed arm. The plain paths are reported as
-    above, less those every step of which the settings select.
+    above, but only those with a step the settings exclude (a named slot its base reads is set
+    to another value): the others the refusal walks checked.
     `pagewalk.ArmPathLimit` past `pagewalk.ARM_PATH_LIMIT` sets, read at call time."""
     paths = pagewalk.switch_arm_paths(data, [root], limit=pagewalk.ARM_PATH_LIMIT)
     screen = layout.Screen(data)
@@ -872,9 +873,12 @@ def check_placement(data: bytes, root: int, obj: int,
                 for k, v in sv.items()]
 
     def selected(sv):
-        """Whether the settings select every step of plain path `sv`: each step's base is read
-        only by named slots, all set to the step's value."""
-        return all(paths.slots.get(k) and all(coach.get(s) == v for s in paths.slots[k])
+        """Whether the settings' walks already checked plain path `sv`: no named slot a step's
+        base reads disagrees with the step's value. A step whose base reads only unnamed slots
+        is one the refusal walks crossed under the settings; the plain walk holds the named
+        switches at their base, a configuration the settings may exclude, so reporting it
+        would blame the unnamed slot for what only that excluded arm draws."""
+        return all(all(coach.get(sl, v) == v for sl in paths.slots.get(k, ()))
                    for k, v in sv.items())
 
     base = walk({})
@@ -924,7 +928,7 @@ def check_placement(data: bytes, root: int, obj: int,
         if not objs or (len(sv) > 1 and objs == covered[parent]):
             continue
         if coach is not None and selected(sv):
-            continue                     # a path the settings select: walked above, admitted
+            continue                     # no step the settings exclude: walked above, admitted
         arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs,
                      "path": steps(sv), "covers": [_covered(data, o) for o in objs]})
     return Placement(box, canvas, card, tuple(arms), coach=coach is not None,

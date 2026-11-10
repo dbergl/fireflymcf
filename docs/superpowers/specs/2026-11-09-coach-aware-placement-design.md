@@ -99,9 +99,9 @@ The goal: when the recipe or the command line says which settings the coach runs
     - Locating the derivation on 14.7 is out of scope.
 13. **One switch base that reads two slots** (13.6: 441 reads slots 204 and 208; 1411 reads 647 and 649; 635 reads 648 and 650).
     - Superseded 2026-11-10: each named slot drives the records that read it (`slot_values`); a partly named base walks its unnamed records' arms; no conflict refusal.
-    - The base counts as named only when `S` names every slot it reads, all with the same value.
-    - If `S` gives those slots different values, the build refuses `COACH_CONFIG`.
-    - If `S` names some but not all of them, the base counts as unnamed and is checked strictly.
+      - Originally: the base counted as named only when `S` named every slot it read, all with the same value.
+      - Originally: if `S` gave those slots different values, the build refused `COACH_CONFIG`.
+      - Originally: if `S` named some but not all of them, the base counted as unnamed and was checked strictly.
 
 ## Left to the builder
 

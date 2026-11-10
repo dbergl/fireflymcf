@@ -1049,6 +1049,29 @@ def test_settings_pin_named_switches_and_reach_nested_ones():
     assert all(cb not in sv for sv in nested for cb in base6), nested
 
 
+def test_settings_report_only_paths_they_exclude():
+    """13.6 HOME at (100, 395): the plain base walk covers object 1409, which the settings
+    (the reference coach's resolved slots, as `options.coach_slots` gives them) never draw, so
+    the build is admitted only with settings. The report then lists only paths with a step the
+    settings exclude: an all-unnamed path such as {523: 1} (slot 234), {441: 1} or {124: ...}
+    (slot 239) was checked by the settings' own walks, and blaming it for object 1409, which
+    only the excluded base arm draws, would be false (final review, 2026-11-10)."""
+    from fireflymcf import pagewalk
+    S = {5: 8, 6: 1, 37: 3, 38: 0, 39: 0, 108: 1, 109: 1, 110: 1, 112: 1, 113: 0, 453: 1,
+         512: 1}
+    out, root, idx = _home_clone(_d(), at=("home", 100, 395))
+    with pytest.raises(newbutton.PlacementOverlap, match="object 1409"):
+        newbutton.check_placement(out, root, idx)
+    p = newbutton.check_placement(out, root, idx, coach=S)
+    assert p.arms
+    slots = pagewalk.switch_arm_paths(out, [root]).slots
+    for entry in p.arms:
+        arm = {int(k): v for k, v in entry["arm"].items()}
+        assert arm not in ({523: 1}, {441: 1}) and set(arm) != {124}, entry
+        assert any(S.get(sl, v) != v for k, v in arm.items() for sl in slots.get(k, ())), entry
+    assert len(p.arms) == 21
+
+
 def test_shared_base_records_follow_their_own_slot(monkeypatch):
     """Under {6: 0, 204: 0} the gate walks base 441's arm 1 for the record reading 208 (443:4)
     while the record reading 204 (440:4) stays on its arm 0 (object 441, not 442): each walk the

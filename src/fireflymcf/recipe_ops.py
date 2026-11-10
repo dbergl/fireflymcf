@@ -1816,7 +1816,9 @@ class AddButton(Op):
              `compile --config`):
              - without settings, only the all-base walk refuses;
              - with them, the walk under the settings refuses, and so does that walk overlaid
-               with every arm path that agrees with the settings on each switch they name. Each
+               with each arm path enumerated under the settings (`pagewalk.switch_arm_paths`
+               with the settings as `slot_values`), where a switch record reading a named slot
+               adds no arms. Each
                slot the settings set drives the switch records that read it, record by record:
                records sharing a base but reading different slots (13.6 base 441 reads slots
                204 and 208) follow their own slots, and a record reading a slot the settings
