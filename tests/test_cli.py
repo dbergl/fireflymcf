@@ -397,7 +397,7 @@ def test_pins_survives_a_bridge_refusal_in_state_loads(mcf_136, tmp_path, monkey
 
 # --- compile --config: the coach's settings for add_button's placement gate (2026-11-09) -----
 
-def _add_button_project(path, stock, coach=None, op_id="b", fw_stock=None):
+def _add_button_project(path, stock, coach=None, op_id="b"):
     import hashlib
     import json
     proj = {"schema": 1, "base_sha256": hashlib.sha256(stock).hexdigest(),
@@ -412,28 +412,26 @@ def _add_button_project(path, stock, coach=None, op_id="b", fw_stock=None):
     return path
 
 
-def test_compile_config_overrides_the_recipe(tmp_path, monkeypatch, capsys):
+def test_compile_config_overrides_the_recipe(tmp_path):
     """The recipe's `coach` block puts Star Link (slot 102 = 1) under the default spot on 14.7,
     so it refuses; `--config` replaces the block whole and builds. On 14.7 `{102: 0}` alone
     would refuse (slot 11 unnamed), so the file names both."""
     import json
-    from fireflymcf import cli, recipe
-    monkeypatch.setattr(recipe.REGISTRY["add_button"], "firmwares", frozenset({"13.6", "14.7"}))
+    from tests.conftest import REPO_ROOT
     stock_path = "firefly-14.7 (Terrain)/mcf.bin"
-    stock = open(stock_path, "rb").read()
+    stock = (REPO_ROOT / stock_path).read_bytes()
     proj = _add_button_project(tmp_path / "p.ffproj.json", stock,
                                coach={"extra_slots": {"102": 1}})
-    rc = cli.main(["compile", str(proj), stock_path, "-o", str(tmp_path / "mcf-a.bin"),
-                   "--allow-unverified", "--json"])
-    out = json.loads(capsys.readouterr().out)
-    assert rc == 1 and out["errors"][0]["code"] == "PLACEMENT_OVERLAP", out
+    r = _run("compile", str(proj), stock_path, "-o", str(tmp_path / "mcf-a.bin"),
+             "--allow-unverified", "--json", cwd=REPO_ROOT)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert json.loads(r.stdout)["errors"][0]["code"] == "PLACEMENT_OVERLAP", r.stdout
     cfg = tmp_path / "cfg.json"
     cfg.write_text(json.dumps({"extra_slots": {"102": 0, "11": 0}}), encoding="utf-8")
     built = tmp_path / "mcf-b.bin"
-    rc = cli.main(["compile", str(proj), stock_path, "-o", str(built), "--config", str(cfg),
-                   "--allow-unverified", "--json"])
-    out = json.loads(capsys.readouterr().out)
-    assert rc == 0 and out["ok"], out
+    r = _run("compile", str(proj), stock_path, "-o", str(built), "--config", str(cfg),
+             "--allow-unverified", "--json", cwd=REPO_ROOT)
+    assert r.returncode == 0, r.stdout + r.stderr
     side = json.loads((tmp_path / "mcf-b.bin.json").read_text(encoding="utf-8"))
     assert side["coach"]["slots"] == {"102": 0, "11": 0}
     assert side["coach"]["source"] == f"--config {cfg}"
