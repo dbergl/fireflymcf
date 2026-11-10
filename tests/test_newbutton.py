@@ -1013,22 +1013,97 @@ def test_unnamed_slot_is_strict(monkeypatch):
     assert "slot 102 = 1" in r.errors[0]["message"]
 
 
-def test_shared_base_partly_named_is_unnamed():
-    """13.6 base 441 is read by slots 204 and 208 on HOME. Naming only 204 leaves the base
-    unnamed, so its non-base arm (441 = 1) is walked; naming both alike names it; naming them
-    differently refuses COACH_CONFIG. Slot 6 = 1 is named throughout so the spot is admitted
-    (unnamed, slot 6 = 2 refuses) and `walked` can be read."""
+def test_shared_base_mixed_values_build():
+    """13.6 base 441 is read by slots 204 and 208 on HOME. Each record follows its own slot, so
+    naming them differently is no longer a conflict. Slot 6 = 0 draws card 901, which holds
+    both records (440:4 reads 204, 443:4 reads 208); slot 6 = 1 draws card 902, which holds
+    only 204's."""
     out, root, idx = _home_clone(_d())
-    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0})
+    p = newbutton.check_placement(out, root, idx, coach={6: 0, 204: 0, 208: 1})
+    assert p.coach
+    assert all(441 not in sv for sv in p.walked), p.walked     # both slots pinned
+
+
+def test_partly_named_base_walks_the_unnamed_record():
+    """Naming 204 only: the record reading 208 is unnamed, so base 441's arms are walked. Slot
+    6 = 0, so card 901 draws the 208 record at all (under slot 6 = 1 it is not drawn)."""
+    out, root, idx = _home_clone(_d())
+    p = newbutton.check_placement(out, root, idx, coach={6: 0, 204: 0})
+    assert p.walked[0] == {}
     assert any(sv.get(441) == 1 for sv in p.walked), p.walked
-    assert 441 not in p.walked[0]            # `S` itself: the unnamed base at its base arm
-    p = newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 0})
-    assert all(sv.get(441) == 0 for sv in p.walked), p.walked
-    with pytest.raises(newbutton.CoachConfigConflict) as e:
-        newbutton.check_placement(out, root, idx, coach={6: 1, 204: 0, 208: 1})
-    assert e.value.code == "COACH_CONFIG"
-    assert "441" in str(e.value) and "204" in str(e.value) and "208" in str(e.value)
-    assert "independent slots" in str(e.value) and "unnamed" in str(e.value)
+
+
+def test_settings_pin_named_switches_and_reach_nested_ones():
+    """Under slot 6 = 1, slot 6's switch is pinned (its base never appears in a walked set)."""
+    from fireflymcf import pagewalk
+    out, root, idx = _home_clone(_d())
+    p = newbutton.check_placement(out, root, idx, coach={6: 1})
+    paths = pagewalk.switch_arm_paths(out, [root])
+    base6 = [cb for cb, s in paths.slots.items() if s == (6,)]
+    assert base6 and all(cb not in sv for sv in p.walked for cb in base6), p.walked
+    # Nested reach: slot 6 = 2 draws card 903, inside which the switch based at 163 (slot 37)
+    # sits. Pinned, slot 6's base gives no arms, yet 163's arms are still enumerated. The gate
+    # refuses the default spot under {6: 2}, so the paths are read directly.
+    nested = pagewalk.switch_arm_paths(out, [root], slot_values={6: 2}).sets
+    assert any(163 in sv for sv in nested), nested
+    assert all(cb not in sv for sv in nested for cb in base6), nested
+
+
+def test_settings_report_only_paths_they_exclude():
+    """13.6 HOME at (100, 395): the plain base walk covers object 1409, which the settings
+    (the reference coach's resolved slots, as `options.coach_slots` gives them) never draw, so
+    the build is admitted only with settings. The report then lists only paths with a step the
+    settings exclude: an all-unnamed path such as {523: 1} (slot 234), {441: 1} or {124: ...}
+    (slot 239) was checked by the settings' own walks, and blaming it for object 1409, which
+    only the excluded base arm draws, would be false (final review, 2026-11-10)."""
+    from fireflymcf import pagewalk
+    S = {5: 8, 6: 1, 37: 3, 38: 0, 39: 0, 108: 1, 109: 1, 110: 1, 112: 1, 113: 0, 453: 1,
+         512: 1}
+    out, root, idx = _home_clone(_d(), at=("home", 100, 395))
+    with pytest.raises(newbutton.PlacementOverlap, match="object 1409"):
+        newbutton.check_placement(out, root, idx)
+    p = newbutton.check_placement(out, root, idx, coach=S)
+    assert p.arms
+    slots = pagewalk.switch_arm_paths(out, [root]).slots
+    for entry in p.arms:
+        arm = {int(k): v for k, v in entry["arm"].items()}
+        assert arm not in ({523: 1}, {441: 1}) and set(arm) != {124}, entry
+        assert any(S.get(sl, v) != v for k, v in arm.items() for sl in slots.get(k, ())), entry
+    assert len(p.arms) == 21
+
+
+def test_shared_base_records_follow_their_own_slot(monkeypatch):
+    """Under {6: 0, 204: 0} the gate walks base 441's arm 1 for the record reading 208 (443:4)
+    while the record reading 204 (440:4) stays on its arm 0 (object 441, not 442): each walk the
+    gate makes passes the settings as `slot_values`, and the walk prefers them record by
+    record. The arms draw only wt-9 directives, so no refusal at any spot can show this; the
+    gate's own walks are captured and replayed."""
+    from fireflymcf import layout, pagewalk
+    out, root, idx = _home_clone(_d())
+    calls = []
+    real = layout.Screen.walk
+
+    def spy(self, r, *args, **kw):
+        if not args and r == root and "switch_values" in kw and "trace" not in kw:
+            # the gate's own walks (`pagewalk.walk_records` passes a trace)
+            calls.append((kw.get("switch_values"), kw.get("slot_values")))
+        return real(self, r, *args, **kw)
+
+    monkeypatch.setattr(layout.Screen, "walk", spy)
+    newbutton.check_placement(out, root, idx, coach={6: 0, 204: 0})
+    monkeypatch.setattr(layout.Screen, "walk", real)
+
+    def arm(recs, rec):
+        return {r.key[r.key.index(rec) + 1][0] for r in recs
+                if rec in r.key and r.key[-1] != rec}
+
+    # the refusal walks carry the settings; the report's plain walks (`slot_values` None) don't
+    driven = [(sw, sl) for sw, sl in calls if sl and sw and sw.get(441) == 1]
+    assert driven, calls
+    for sw, sl in driven:
+        recs = pagewalk.walk_records(out, root, switch_values=sw, slot_values=sl)
+        assert arm(recs, (443, 4)) == {442}       # 208 unnamed: driven to arm 1
+        assert arm(recs, (440, 4)) == {441}       # 204 named 0: stays at its base
 
 
 def test_arm_path_limit_has_its_code(monkeypatch):

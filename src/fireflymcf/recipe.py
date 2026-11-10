@@ -658,7 +658,7 @@ _CODED = (donors.DonorError, grammar.GrammarError, grammar.LcdGrammarError,
           celltables.CellTableError,
           sramreach.SramReachError, statusbind.SpareRowsUnknown, statusbind.BridgeUnknown,
           newbutton.VariantSetterUnknown, newbutton.ReservedGroupUnknown,
-          newbutton.PlacementOverlap, newbutton.CoachConfigConflict,
+          newbutton.PlacementOverlap,
           decodeguards.DecoderRangeUnknown)
 
 

@@ -1816,12 +1816,13 @@ class AddButton(Op):
              `compile --config`):
              - without settings, only the all-base walk refuses;
              - with them, the walk under the settings refuses, and so does that walk overlaid
-               with every arm path that agrees with the settings on each switch they name. A
-               switch is named when the settings set every value slot its records read, all
-               to one value; a switch whose slots are set to different values refuses
-               COACH_CONFIG (the gate cannot model a base read by independent slots; leave
-               them unnamed and the base is checked in every arm), and one with only some of
-               its slots set is unnamed. An unnamed
+               with each arm path enumerated under the settings (`pagewalk.switch_arm_paths`
+               with the settings as `slot_values`), where a switch record reading a named slot
+               adds no arms. Each
+               slot the settings set drives the switch records that read it, record by record:
+               records sharing a base but reading different slots (13.6 base 441 reads slots
+               204 and 208) follow their own slots, and a record reading a slot the settings
+               leave out is unnamed. An unnamed
                switch's arms (nested ones included) are all checked, so a slot the settings
                leave out refuses on any arm that covers the spot, and the refusal names it
                (`slot 102 = 1`), for the owner to add. On 14.7 the settings must name slot 11
@@ -1878,11 +1879,8 @@ class AddButton(Op):
         without settings; with them, the settings' arms and every arm of a switch they do not
         name), covers a placed record other than a root background fill and one wt-33 card
         around it
-      COACH_CONFIG — the coach's settings set two value slots that switch records sharing one
-        base on the page read to different values (13.6 base 441 reads slots 204 and 208): the
-        placement gate cannot model a switch base read by independent slots; leave them unnamed
-        and the base is checked in every arm. The project-level settings check
-        (`options.coach_slots`) refuses a bad slot, value, option or floorplan with this code
+      COACH_CONFIG — the project-level settings check (`options.coach_slots`) refuses a bad slot,
+        value, option or floorplan with this code
         before any op runs
       ARM_PATH_LIMIT — the page has more than `pagewalk.ARM_PATH_LIMIT` (512) switch-arm paths,
         so the gate cannot walk them all; with or without settings
@@ -1961,8 +1959,7 @@ class AddButton(Op):
                 data, channel=self.channel,
                 allow_commanded_channel=self.allow_commanded,
                 colour_index=cell, label=self.label, at=self.at, coach=coach)
-        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap,
-                newbutton.CoachConfigConflict) as err:
+        except (newbutton.VariantSetterUnknown, newbutton.PlacementOverlap) as err:
             raise RecipeError(err.code, str(err), op_id=self.spec.id)
         except pagewalk.ArmPathLimit as err:
             raise RecipeError("ARM_PATH_LIMIT", str(err), op_id=self.spec.id)

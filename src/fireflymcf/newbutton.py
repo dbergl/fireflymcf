@@ -724,16 +724,9 @@ class PlacementOverlap(ValueError):
     page's canvas (the page root's background), or it covers a placed record other than a root
     background fill around it and the one wt-33 card that encloses it. Without coach settings
     that is checked in the base arm of every switch (the other arms are reported); with them, in
-    the arms the settings draw and in every arm of a switch they do not name."""
+    the arm each switch reading a named slot draws, and in every arm of a switch reading an
+    unnamed one."""
     code = "PLACEMENT_OVERLAP"
-
-
-class CoachConfigConflict(ValueError):
-    """COACH_CONFIG: the coach's settings give two value slots that records based at one switch
-    `child_base` on the page read different values. The walk drives a switch by its base
-    (`switch_values`, as `pagewalk.switch_arm_paths` does), so one base takes one value; the gate
-    cannot model a base read by independent slots, and the owner can leave them unnamed."""
-    code = "COACH_CONFIG"
 
 
 @dataclass(frozen=True)
@@ -748,12 +741,14 @@ class Placement:
     #   "covers": [{"object": int, "caption": str | None, "touch": bool}, ...]}`,
     # `arm` and `path` outermost switch first. A configuration sets the `slots`, not the
     # child_base. Without settings, which arm a coach draws is not known, so these do not
-    # refuse. With them (`check_placement`'s `coach`), only the paths the settings do not select
-    # are reported; the ones they select refuse.
+    # refuse. With them (`check_placement`'s `coach`), only a path with a step the settings
+    # exclude (a named slot its base's records read is set to another value) is reported; the
+    # rest the settings' walks checked, and refuse in.
     arms: tuple = ()
     # Whether the coach's settings drove the gate (`check_placement`'s `coach` was given).
     coach: bool = False
-    # The `switch_values` of every walk the gate refused in, in order: `({},)` without settings.
+    # The `switch_values` of every walk the gate refused in, in order, `{}` first: `({},)`
+    # without settings. With them each was walked with `slot_values` = the settings too.
     walked: tuple = ()
 
 
@@ -803,26 +798,6 @@ def _covered(data: bytes, obj: int) -> dict:
             "touch": any(r.wtype == 12 for r in recs)}
 
 
-def _named_bases(paths, coach: dict) -> dict:
-    """`{child_base: value}` for each switch base of `paths` (`ArmPaths.slots`) the settings
-    `coach` name: every slot the base's records read is set, all to one value. A base with some
-    of its slots set is unnamed. CoachConfigConflict if the slots it sets disagree."""
-    named = {}
-    for cb, slots in paths.slots.items():
-        given = {s: coach[s] for s in slots if s in coach}
-        if len(set(given.values())) > 1:
-            raise CoachConfigConflict(
-                "switch base %d is read by independent slots %s, and the coach's settings give "
-                "them different values (%s); the placement gate cannot model a switch base read "
-                "by independent slots. Leave those slots unnamed and the base is checked in "
-                "every arm"
-                % (cb, " and ".join(map(str, slots)),
-                   ", ".join("slot %d = %d" % kv for kv in sorted(given.items()))))
-        if given and len(given) == len(slots):
-            named[cb] = next(iter(given.values()))
-    return named
-
-
 def _steps_text(steps) -> str:
     """`[{child_base, slots, value}, ...]` as the manifest names a path: `slot 6 = 2 and ...`."""
     def step(s):
@@ -854,20 +829,26 @@ def check_placement(data: bytes, root: int, obj: int,
     carries a touch region. A nested path that covers exactly the objects its parent path
     covers is not repeated. Without settings, only the all-base walk refuses.
 
-    With settings, `coach` is `{value_slot: value}` (`options.CoachSlots.slots`). A switch base
-    the page's walks reach is named when the settings set every slot its records read, all to
-    one value (`CoachConfigConflict`, COACH_CONFIG, when they set them to different values; a
-    base with only some of its slots set is unnamed). `S` drives each named base to its value.
-    The base rule then refuses in `S` and in `S` overlaid with every arm path that agrees with
-    `S` on every named base: an unnamed switch's arms, nested ones included, are all checked,
-    one switch at a time (two independent unnamed switches are not combined). The refusal names
-    the path. The paths that disagree with `S` are reported as above, walked alone.
+    With settings, `coach` is `{value_slot: value}` (`options.CoachSlots.slots`). Each named
+    slot drives the switch records that read it (`layout.Screen.walk`'s `slot_values`), record
+    by record: two records based at one switch base follow their own slots, so naming them
+    differently is no conflict, and naming one of them leaves the other unnamed. A switch
+    reading an unnamed slot is checked in every arm, nested ones included, one switch at a time
+    (`pagewalk.switch_arm_paths` under the settings; two independent unnamed switches are not
+    combined). The base rule refuses in each of those walks (`{}` first, the settings alone),
+    and the refusal names the settings and the unnamed arm. The plain paths are reported as
+    above, but only those with a step the settings exclude (a named slot its base reads is set
+    to another value): the others the refusal walks checked.
     `pagewalk.ArmPathLimit` past `pagewalk.ARM_PATH_LIMIT` sets, read at call time."""
     paths = pagewalk.switch_arm_paths(data, [root], limit=pagewalk.ARM_PATH_LIMIT)
     screen = layout.Screen(data)
 
-    def walk(sv):
-        return list(screen.walk(root, switch_values=sv))
+    pinned = (paths if coach is None else
+              pagewalk.switch_arm_paths(data, [root], limit=pagewalk.ARM_PATH_LIMIT,
+                                        slot_values=coach))
+
+    def walk(sv, slot_values=None):
+        return list(screen.walk(root, switch_values=sv or None, slot_values=slot_values))
 
     def foreign(placed, box):
         """`(records box touches that are not admitted, the admitted card's object or None)`:
@@ -887,11 +868,18 @@ def check_placement(data: bytes, root: int, obj: int,
             return hits, cards[0][0].obj_index
         return hits, None
 
-    def steps(sv):
-        return [{"child_base": k, "slots": list(paths.slots.get(k, ())), "value": v}
+    def steps(sv, slots=paths.slots):
+        return [{"child_base": k, "slots": list(slots.get(k, ())), "value": v}
                 for k, v in sv.items()]
 
-    named = None if coach is None else _named_bases(paths, coach)
+    def selected(sv):
+        """Whether the settings' walks already checked plain path `sv`: no named slot a step's
+        base reads disagrees with the step's value. A step whose base reads only unnamed slots
+        is one the refusal walks crossed under the settings; the plain walk holds the named
+        switches at their base, a configuration the settings may exclude, so reporting it
+        would blame the unnamed slot for what only that excluded arm draws."""
+        return all(all(coach.get(sl, v) == v for sl in paths.slots.get(k, ()))
+                   for k, v in sv.items())
 
     base = walk({})
     mine = [q for q in base if q.obj_index == obj]
@@ -906,37 +894,29 @@ def check_placement(data: bytes, root: int, obj: int,
         raise PlacementOverlap(f"object {obj}'s footprint {box} leaves the page's canvas "
                                f"{canvas}")
 
-    if named is None:
-        refused = [{}]
-    else:
-        # `S`, then `S` overlaid with each path that agrees with it on every named base
-        refused, seen = [], set()
-        for sv in paths.sets:
-            if any(k in named and named[k] != v for k, v in sv.items()):
-                continue
-            walk_sv = {**named, **sv}
-            key = frozenset(walk_sv.items())
-            if key not in seen:
-                seen.add(key)
-                refused.append(walk_sv)
+    refused = [{}] if coach is None else [dict(sv) for sv in pinned.sets]
+    if coach is not None:
+        read = sorted({sl for slots in (*paths.slots.values(), *pinned.slots.values())
+                       for sl in slots if sl in coach})
+        settings = _steps_text([{"child_base": None, "slots": [sl], "value": coach[sl]}
+                                for sl in read]) or "none read on this page"
     card = None
     for i, sv in enumerate(refused):
-        hits, c = foreign(base if not sv else walk(sv), box)
+        hits, c = foreign(base if coach is None and not sv else walk(sv, coach), box)
         if i == 0:
             card = c
         if hits:
             where = ""
-            if named is not None:
-                own = {k: v for k, v in sv.items() if k not in named}
-                where = ", under the coach's settings (%s)" % (
-                    _steps_text(steps(named)) or "none read on this page")
-                if own:
-                    where += " and the unnamed arm %s" % _steps_text(steps(own))
+            if coach is not None:
+                where = ", under the coach's settings (%s)" % settings
+                if sv:                   # the arm drives only the records reading unnamed slots
+                    unnamed = {k: tuple(sl for sl in v if sl not in coach)
+                               for k, v in pinned.slots.items()}
+                    where += " and the unnamed arm %s" % _steps_text(steps(sv, unnamed))
                 where += ","
             raise PlacementOverlap(
                 f"object {obj}'s footprint {box} covers{where} "
                 + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
-
     arms = []
     covered: dict = {frozenset(): []}
     for sv in paths.sets:
@@ -947,11 +927,11 @@ def check_placement(data: bytes, root: int, obj: int,
         parent = frozenset(list(sv.items())[:-1])
         if not objs or (len(sv) > 1 and objs == covered[parent]):
             continue
-        if named is not None and all(named.get(k, v) == v for k, v in sv.items()):
-            continue                     # a path the settings select: walked above, admitted
+        if coach is not None and selected(sv):
+            continue                     # no step the settings exclude: walked above, admitted
         arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs,
                      "path": steps(sv), "covers": [_covered(data, o) for o in objs]})
-    return Placement(box, canvas, card, tuple(arms), coach=named is not None,
+    return Placement(box, canvas, card, tuple(arms), coach=coach is not None,
                      walked=tuple(refused))
 
 
@@ -1608,7 +1588,7 @@ def build_home_button(data: bytes, *, channel: int | None = None,
 
     Gates, in order: the template (`donors.button_object`: DonorError GRAMMAR, NO_TEMPLATE); the
     colour cell (`donors.check_mode7_index`: MODE7_INDEX); the footprint
-    (`check_placement`: PlacementOverlap, CoachConfigConflict, `pagewalk.ArmPathLimit`); the
+    (`check_placement`: PlacementOverlap, `pagewalk.ArmPathLimit`); the
     LCD group handling that reads the group and binding the build writes (`grammar.prove_lcd`,
     the loader `FUN_0021B420` and the sender `FUN_0021B8B4`: DonorError LCD_GRAMMAR), before
     `retarget_command`.

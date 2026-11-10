@@ -701,7 +701,7 @@ Error codes:
 - `NO_TEMPLATE` — the template is not proven on this image: no stock object witnesses the caption's text form, or its label does not fill its field
 - `MODE7_INDEX` — the pin's colour cell is not below the image's mode-7 index limit (the decoder would clamp it to cell 0)
 - `PLACEMENT_OVERLAP` — `at`'s x or y is outside 0..0xFFFF, or the button's footprint leaves the page root's background, or, in a walk the gate refuses in (the base switch arm without settings; with them, the settings' arms and every arm of a switch they do not name), covers a placed record other than a root background fill and one wt-33 card around it
-- `COACH_CONFIG` — the coach's settings set two value slots that switch records sharing one base on the page read to different values (13.6 base 441 reads slots 204 and 208): the placement gate cannot model a switch base read by independent slots; leave them unnamed and the base is checked in every arm. The project-level settings check (`options.coach_slots`) refuses a bad slot, value, option or floorplan with this code before any op runs
+- `COACH_CONFIG` — the project-level settings check (`options.coach_slots`) refuses a bad slot, value, option or floorplan with this code before any op runs
 - `ARM_PATH_LIMIT` — the page has more than `pagewalk.ARM_PATH_LIMIT` (512) switch-arm paths, so the gate cannot walk them all; with or without settings
 - `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the group and binding the build writes, is not proven 13.6's (`grammar.prove_lcd`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
