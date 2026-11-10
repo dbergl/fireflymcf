@@ -66,7 +66,8 @@ TESTED_147 = frozenset({
     "set_corner_radius", "fill_to_capsule", "remove_records", "remove_control", "set_icon",
     "install_glyph", "append_filter", "drop_from_master", "set_theme", "add_text_label",
     "add_register_readout", "add_enum_label", "follow_register", "add_rvc_button",
-    "add_button_status", "add_button_states", "add_glyph_button", "wire_button"})
+    "add_button", "add_button_status", "add_button_states", "add_glyph_button",
+    "wire_button"})
 
 
 class _PinnedTime:
@@ -495,6 +496,50 @@ def test_every_147_op_is_tested_here():
     for n in TESTED_147:
         cls = recipe.REGISTRY[n]
         assert "14.7" in cls.emulated_on and "14.7" not in cls.verified_on, n
+
+
+# --- add_button ---------------------------------------------------------------------------------
+
+ADD_BUTTON_PIN = 15
+ADD_BUTTON_TAP = bytes.fromhex("0fffc805ff00ffff")     # 1FEDB: instance 15, toggle (command 5)
+
+
+def test_add_button(mcf_147, tmp_path):
+    """A new HOME button on pin 15 (the op's default spot, the template button of
+    `donors.button_object`): invisible until the pin's first status arrives; then every changed
+    pixel lies in its box, off draws the off colour confined to the box, a tap sends one 1FEDB
+    toggle, and the G12's echo repaints inside the box only (emulated 2026-11-09)."""
+    img = _build(mcf_147, [("b", "add_button", {"channel": ADD_BUTTON_PIN, "label": "Pin 15",
+                                                "off_colour": list(OFF)})])
+    base = _settled(mcf_147)
+    base.goto("HOME")
+    base.run(2.0)
+    stock_home = _shot(base, tmp_path, "stock")
+    s = _settled(img)
+    s.goto("HOME")
+    s.run(2.0)
+    s.set_g12_output(ADD_BUTTON_PIN, 200)
+    s.run(2.0)
+    box = s.control_box("Pin 15")
+    on = _shot(s, tmp_path, "on")
+    assert _inside(_diff_bbox(stock_home, on), box), (_diff_bbox(stock_home, on), box)
+
+    s.set_g12_output(ADD_BUTTON_PIN, 0)
+    s.run(2.0)
+    off = _shot(s, tmp_path, "off")
+    bbox = _diff_bbox(stock_home, off)
+    assert _inside(bbox, box), (bbox, box)
+    assert _near(_crop(off, box), OFF) > 0, "the box does not draw the off colour"
+    assert _diff_bbox(off, on) is not None and _inside(_diff_bbox(off, on), box)
+
+    t = s.now
+    s.tap("Pin 15")
+    s.run(1.0)
+    assert [bytes(f.data) for f in _panel_sends(s, DC_DIMMER_COMMAND_2, t)] == [ADD_BUTTON_TAP]
+    lit = _shot(s, tmp_path, "lit")
+    assert _inside(_diff_bbox(stock_home, lit), box)
+    assert _inside(_diff_bbox(off, lit), box) and _diff_bbox(off, lit) is not None
+    assert _near(_crop(lit, box), OFF) < _near(_crop(off, box), OFF), "the echo did not light it"
 
 
 # --- a new button -------------------------------------------------------------------------------

@@ -1858,6 +1858,10 @@ class AddButton(Op):
     can target this button via {"ref": op_id}. Declares gained {(channel, 5)} —
     exactly the single command-5 toggle binding this button carries.
     """
+    # 14.7: tests/emu/test_ops147.py (emulator only; no coach has run it there)
+    firmwares = frozenset({"13.6", "14.7"})
+    emulated_on = frozenset({"14.7"})
+
     PARAMS = {
         "properties": {
             "channel": {"type": "integer", "description": "G12 output pin (RV-C instance)"},

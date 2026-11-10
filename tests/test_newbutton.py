@@ -830,3 +830,9 @@ def test_on_11_23_the_build_refuses_grammar(monkeypatch):
     r = _compile(data, monkeypatch, firmwares={"13.6", "11.23"})
     assert not r.ok and r.errors[0]["code"] == "GRAMMAR", r.errors
     assert "IMAGE_OPCODE" not in r.errors[0]["message"]
+
+
+def test_on_11_23_the_op_refuses_unsupported_firmware():
+    """Without the gate admitted, 11.23 is outside the op's `firmwares` ({13.6, 14.7})."""
+    r = _compile(_read(STOCK_1123))
+    assert not r.ok and r.errors[0]["code"] == "UNSUPPORTED_FIRMWARE", r.errors

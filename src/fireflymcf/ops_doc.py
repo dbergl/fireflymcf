@@ -116,7 +116,10 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
     "add_button": ("structural",
         "Add a boxed HOME button wired to a G12 pin: status cell bound, command group "
         "allocated on the target channel.",
-        "Flashed 2026-08-17.", "`docs/HARDWARE-VERIFIED.md`"),
+        "Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws "
+        "only once the pin's first status arrives, changes no pixel outside its box, and a "
+        "tap sends one `1FEDB` toggle. Refuses on 11.23 (`GRAMMAR`).",
+        "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",
         "Clone a donor control into a bare button shell on a page, sized w x h, unwired.",
         "Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated "
