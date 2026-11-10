@@ -1297,7 +1297,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     sidecar = {"sha256": sha, "size": len(data), "build_name": patch.build_name(data),
                "project": str(args.project), "stock_sha256": project.base_sha256,
                "manifest": result.manifest, "unverified": result.unverified,
-               "shifts": result.shifts}
+               "shifts": result.shifts, "placement": result.placement}
     if discovered:
         sidecar["user_ops"] = _sidecar_user_ops(project, discovered)
     Path(str(out) + ".json").write_text(json.dumps(sidecar, indent=2), encoding="utf-8")

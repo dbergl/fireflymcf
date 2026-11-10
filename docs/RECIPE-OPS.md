@@ -700,7 +700,7 @@ Error codes:
 - `GRAMMAR` — the image's record grammar is not proven 13.6's, so the button template (`donors.button_object`) is not usable (11.23)
 - `NO_TEMPLATE` — the template is not proven on this image: no stock object witnesses the caption's text form, or its label does not fill its field
 - `MODE7_INDEX` — the pin's colour cell is not below the image's mode-7 index limit (the decoder would clamp it to cell 0)
-- `PLACEMENT_OVERLAP` — the button's footprint at `at` leaves the page's canvas or covers a placed record other than the page root and one enclosing wt-33 card
+- `PLACEMENT_OVERLAP` — `at`'s x or y is outside 0..0xFFFF, or in the base switch arm the button's footprint leaves the page root's background or covers a placed record other than a root background fill and one wt-33 card around it
 - `LCD_GRAMMAR` — the LCD firmware's group handling, which reads the group and binding the build writes, is not proven 13.6's (`grammar.prove_lcd`)
 - `BUILD_REFUSED` — any other newbutton.build_home_button refusal
 - `NO_FONT_SELECTOR` — font was given but the new caption's R38 selector isn't the expected 0xff inherit byte

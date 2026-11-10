@@ -26,8 +26,8 @@ import re
 import struct
 from dataclasses import dataclass
 
-from . import (donors, firmware, grammar, guidata, insert, layout, memo, patch, records,
-               relocate)
+from . import (donors, firmware, grammar, guidata, insert, layout, memo, pagewalk, patch,
+               records, relocate)
 from .cli import _resolve_page_root
 
 
@@ -720,17 +720,23 @@ def clone_onto_home(data: bytes, position: tuple[int, int] | None = None, *,
 
 
 class PlacementOverlap(ValueError):
-    """PLACEMENT_OVERLAP: the new button's footprint leaves the page's canvas (the page root's
-    own placed records), or covers a placed record other than the page root's and the one wt-33
-    card that encloses it."""
+    """PLACEMENT_OVERLAP: the new button's attach origin is not a u16, its footprint leaves the
+    page's canvas (the page root's background), or, in the base arm of every switch, it covers a
+    placed record other than a root background fill around it and the one wt-33 card that
+    encloses it."""
     code = "PLACEMENT_OVERLAP"
 
 
 @dataclass(frozen=True)
 class Placement:
     box: tuple          # (x0, y0, x1, y1): the new object's placed records' bounding box
-    canvas: tuple       # the page root's own placed records' bounding box
+    canvas: tuple       # the page root's background (its first placed wt-4 record)
     card: int | None    # the object of the one wt-33 card that encloses `box`, if any
+    # Report only: the switch arms (other than the base) under which the footprint covers a
+    # record the base arm does not admit, as `{"arm": {"<switch child_base>": value},
+    # "objects": [object, ...]}`. Which arm a coach draws is its configuration, which a compile
+    # does not see, so these do not refuse.
+    arms: tuple = ()
 
 
 def _bbox(quads) -> tuple:
@@ -738,39 +744,86 @@ def _bbox(quads) -> tuple:
             max(max(q.x0, q.x1) for q in quads), max(max(q.y0, q.y1) for q in quads))
 
 
+def _encloses(outer: tuple, inner: tuple) -> bool:
+    return (outer[0] <= inner[0] and outer[1] <= inner[1]
+            and inner[2] <= outer[2] and inner[3] <= outer[3])
+
+
+def _touches(a: tuple, b: tuple) -> bool:
+    return not (a[2] < b[0] or a[0] > b[2] or a[3] < b[1] or a[1] > b[3])
+
+
+def check_origin(x: int, y: int) -> None:
+    """PlacementOverlap unless `(x, y)` fits the attach record's u16 geometry fields."""
+    for name, v in (("x", x), ("y", y)):
+        if not 0 <= v <= 0xFFFF:
+            raise PlacementOverlap(f"attach origin {name}={v} is outside 0..0xFFFF")
+
+
 def check_placement(data: bytes, root: int, obj: int) -> Placement:
-    """The footprint gate: walk the page (`layout.Screen(data).walk(root)`, the layout engine's
-    replay, type-6 switches on their base arm) and refuse `PlacementOverlap` unless object
-    `obj`'s placed records lie inside the page root's own placed records (the canvas) and touch
-    no placed record but the root's and one wt-33 record that encloses them all (the card the
-    button sits on). Boxes are compared inclusively, so an edge-to-edge neighbour refuses too."""
-    placed = layout.Screen(data).walk(root)
-    mine = [q for q in placed if q.obj_index == obj]
-    canvas_q = [q for q in placed if q.obj_index == root]
+    """The footprint gate over every switch arm of the page (`pagewalk.switch_arm_sets`, each
+    walked by `layout.Screen.walk`, the layout engine's replay).
+
+    In the base arm (`{}`) it refuses `PlacementOverlap` unless object `obj`'s placed records lie
+    inside the page root's background (its first placed wt-4 record: the canvas) and touch no
+    placed record but root wt-4 fills that enclose them (the background, a panel) and one wt-33
+    record of another object that encloses them (the card the button sits on). The root's other
+    records (its header, its own touch regions and rows) are not admitted. Boxes are compared
+    inclusively, so an edge-to-edge neighbour refuses too.
+
+    Under each other arm set, records the base rule would not admit are reported in
+    `Placement.arms`, not refused: which arm a coach draws depends on its configuration, which
+    the build does not see."""
+    sets = pagewalk.switch_arm_sets(data, [root])
+    screen = layout.Screen(data)
+
+    def walk(sv):
+        return list(screen.walk(root, switch_values=sv))
+
+    def foreign(placed, box):
+        """`(records box touches that are not admitted, the admitted card's object or None)`:
+        root wt-4 fills around `box` are admitted, and so is one wt-33 record of another object
+        around it (two such cards are both foreign)."""
+        hits = []
+        for q in placed:
+            b = _bbox([q])
+            if q.obj_index == obj or not _touches(b, box):
+                continue
+            if not (q.obj_index == root and q.wtype == 4 and _encloses(b, box)):
+                hits.append((q, b))
+        cards = [h for h in hits if h[0].obj_index != root and h[0].wtype == 33
+                 and _encloses(h[1], box)]
+        if len(cards) == 1:
+            hits.remove(cards[0])
+            return hits, cards[0][0].obj_index
+        return hits, None
+
+    base = walk({})
+    mine = [q for q in base if q.obj_index == obj]
     if not mine:
         raise PlacementOverlap(f"object {obj} places nothing under page root {root}")
-    if not canvas_q:
-        raise PlacementOverlap(f"page root {root} places no record of its own, so its canvas "
-                               f"is not known")
-    box, canvas = _bbox(mine), _bbox(canvas_q)
-    if not (canvas[0] <= box[0] and canvas[1] <= box[1]
-            and box[2] <= canvas[2] and box[3] <= canvas[3]):
+    bg = next((q for q in base if q.obj_index == root and q.wtype == 4), None)
+    if bg is None:
+        raise PlacementOverlap(f"page root {root} places no wt-4 background, so its canvas is "
+                               f"not known")
+    box, canvas = _bbox(mine), _bbox([bg])
+    if not _encloses(canvas, box):
         raise PlacementOverlap(f"object {obj}'s footprint {box} leaves the page's canvas "
                                f"{canvas}")
-    hits = []
-    for q in placed:
-        if q.obj_index in (obj, root):
-            continue
-        b = _bbox([q])
-        if not (b[2] < box[0] or b[0] > box[2] or b[3] < box[1] or b[1] > box[3]):
-            hits.append((q, b))
-    cards = [(q, b) for q, b in hits if q.wtype == 33 and b[0] <= box[0] and b[1] <= box[1]
-             and box[2] <= b[2] and box[3] <= b[3]]
-    if len(hits) > 1 or (hits and not cards):
+    hits, card = foreign(base, box)
+    if hits:
         raise PlacementOverlap(
             f"object {obj}'s footprint {box} covers "
             + ", ".join(f"object {q.obj_index} wt {q.wtype} {b}" for q, b in hits))
-    return Placement(box, canvas, cards[0][0].obj_index if cards else None)
+
+    arms = []
+    for sv in sets:
+        if not sv:
+            continue
+        objs = sorted({q.obj_index for q, _b in foreign(walk(sv), box)[0]})
+        if objs:
+            arms.append({"arm": {str(k): v for k, v in sv.items()}, "objects": objs})
+    return Placement(box, canvas, card, tuple(arms))
 
 
 # --------------------------------------------------------------------------------------
@@ -1431,6 +1484,7 @@ def build_home_button(data: bytes, *, channel: int | None = None,
     """
     edits: list = []
     page, x, y = DEFAULT_AT_136 if at is None else at
+    check_origin(x, y)
 
     _obj, proof = donors.button_object(data)
     field = proof.caption_width

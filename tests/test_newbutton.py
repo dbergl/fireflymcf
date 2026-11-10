@@ -712,25 +712,62 @@ def test_placement_defaults_to_the_13_6_home_spot():
     assert default == explicit
 
 
-@pytest.mark.parametrize("path,card", [(BUILD, 901), (STOCK_147, 765)])
-def test_the_default_spot_is_inside_one_card(path, card):
-    """The footprint gate admits the page root and the one wt-33 card around the box (13.6 card
-    901, 14.7 card 765: test expectations, located by the walk)."""
+@pytest.mark.parametrize("path,card,arm,objects", [
+    (BUILD, 901, {"901": 2}, {148, 163}),
+    (STOCK_147, 765, {"239": 1}, {240})])
+def test_the_default_spot_is_inside_one_card_in_the_base_arm(path, card, arm, objects):
+    """In the base switch arm the gate admits the page root's background and the one wt-33 card
+    around the box (13.6 card 901, 14.7 card 765: test expectations, located by the walk). The
+    spot is NOT clear under every arm: other arms draw records over it (14.7 arm 239=1 draws
+    object 240, a full button), and those are reported per arm, not refused, because which arm
+    a coach draws is its configuration."""
     from fireflymcf import cli
     data = _read(path)
     out, idx, _ = newbutton.clone_onto_home(data, position=newbutton.DEFAULT_AT_136[1:])
     p = newbutton.check_placement(out, cli._resolve_page_root(out, "home"), idx)
     assert p.box == (570, 404, 654, 454)
+    assert p.canvas == (0, 0, 799, 479)
     assert p.card == card
+    hit = next(a for a in p.arms if a["arm"] == arm)
+    assert objects <= set(hit["objects"])
+    assert all(a["arm"] for a in p.arms), "the base arm never appears in the report"
 
 
 @pytest.mark.parametrize("at", [("home", 560, 340),     # box over the Chassis battery (obj 440)
                                 ("home", 790, 404),     # box past the canvas's right edge
-                                ("home", 435, 460)])    # box past the canvas's bottom edge
+                                ("home", 581, 404),     # box right edge 800, one past 799
+                                ("home", 435, 460),     # box past the canvas's bottom edge
+                                ("home", -1000, 404),   # origin not a u16
+                                ("home", 70000, 404),
+                                ("home", 435, -5)])
 def test_an_overlapping_or_off_canvas_spot_refuses(at):
     with pytest.raises(newbutton.PlacementOverlap) as e:
         newbutton.build_home_button(_d(), at=at)
     assert e.value.code == "PLACEMENT_OVERLAP"
+
+
+def test_the_gate_walks_the_named_page():
+    """On SETTINGS the gate walks that page's root: (300, 300) refuses on object 1056, a
+    SETTINGS card no HOME walk reaches, and (15, 200) lands in its free left column."""
+    from fireflymcf import cli
+    data = _d()
+    with pytest.raises(newbutton.PlacementOverlap, match="object 1056 "):
+        newbutton.build_home_button(data, at=("settings", 300, 300))
+    out, _ = newbutton.build_home_button(data, at=("settings", 15, 200))
+    root = cli._resolve_page_root(out, "settings")
+    assert root != cli._resolve_page_root(out, "home")
+    p = newbutton.check_placement(out, root, newbutton.last_object_index(out))
+    assert p.box == (150, 200, 234, 250) and p.card is None
+
+
+def test_the_op_reports_other_arms_without_refusing(monkeypatch):
+    r = _compile(_d())
+    assert r.ok, r.errors
+    assert {"arm": {"901": 2}, "objects": [148, 163]} in r.placement["b"]
+    assert "under other switch arms only" in r.manifest[0] and "901=2" in r.manifest[0]
+    r = _compile(_read(STOCK_147), monkeypatch, firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    assert any(a["arm"] == {"239": 1} and 240 in a["objects"] for a in r.placement["b"])
 
 
 def test_the_op_takes_at_and_refuses_an_overlap():

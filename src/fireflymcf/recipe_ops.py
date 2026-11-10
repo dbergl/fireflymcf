@@ -1804,9 +1804,14 @@ class AddButton(Op):
              names `channel` for a load and the owner's load is on it anyway
       at: {page, x, y} (default {page: "home", x: 435, y: 404}, the 13.6 spot) — the
              page (`pages` names) and the attach origin; the box's left edge lands at x plus
-             the template box's own x offset (135), its top at y. The footprint must lie on
-             the page's canvas and cover nothing but the page root and the one wt-33 card
-             around it (PLACEMENT_OVERLAP)
+             the template box's own x offset (135), its top at y. x and y must fit a u16.
+             The footprint gate walks the page under every switch arm set
+             (`pagewalk.switch_arm_sets`). In the base arm the footprint must lie on the page
+             root's background and cover nothing but root background fills around it and
+             one wt-33 card around it (PLACEMENT_OVERLAP). What it covers only under another
+             arm does not refuse, because which arm a coach draws is its configuration: it is
+             reported per arm (switch -> value, objects) in `CompileResult.placement`, the
+             sidecar's `placement`, and at the end of the op's manifest line
 
     Error codes:
       NAMED_OUTPUT — the G12 OUTPUTS list names `channel` for a load under some
@@ -1835,8 +1840,9 @@ class AddButton(Op):
         caption's text form, or its label does not fill its field
       MODE7_INDEX — the pin's colour cell is not below the image's mode-7 index limit (the
         decoder would clamp it to cell 0)
-      PLACEMENT_OVERLAP — the button's footprint at `at` leaves the page's canvas or covers a
-        placed record other than the page root and one enclosing wt-33 card
+      PLACEMENT_OVERLAP — `at`'s x or y is outside 0..0xFFFF, or in the base switch arm the
+        button's footprint leaves the page root's background or covers a placed record other
+        than a root background fill and one wt-33 card around it
       LCD_GRAMMAR — the LCD firmware's group handling, which reads the group and binding the
         build writes, is not proven 13.6's (`grammar.prove_lcd`)
       BUILD_REFUSED — any other newbutton.build_home_button refusal
@@ -1943,8 +1949,12 @@ class AddButton(Op):
                                            % self.font))
             data = bytes(buf)
         data, _ = patch.reseal(data)
+        page = (self.at or newbutton.DEFAULT_AT_136)[0]
+        placement = newbutton.check_placement(data, newbutton._resolve_page_root(data, page),
+                                              idx)
         ctx.handles[self.spec.id] = {"object": idx, "cell": cell,
-                                     "group": newbutton.object_group(data, idx)}
+                                     "group": newbutton.object_group(data, idx),
+                                     "placement_arms": list(placement.arms)}
         return data
 
     def capability_delta(self, ctx):
@@ -1972,8 +1982,14 @@ class AddButton(Op):
             cap = next(r for r in recs if r.wtype == 11 and r.label
                        and records.label_text(r.label) == records.label_text(self.label))
             assert cap.font == self.font
-        return "button: object %d %r on pin %d (cell %d)" % (
+        line = "button: object %d %r on pin %d (cell %d)" % (
             idx, self.label.replace("\n", "\\n"), self.channel, cell)
+        if h.get("placement_arms"):
+            line += "; covers, under other switch arms only: " + "; ".join(
+                "%s: objects %s" % (", ".join("%s=%s" % kv for kv in a["arm"].items()),
+                                    ", ".join(map(str, a["objects"])))
+                for a in h["placement_arms"])
+        return line
 
 
 @op("add_glyph_button")
@@ -3987,6 +4003,18 @@ def _shift_line(entries, roots, cap=_SHIFT_CAP):
     rest = len(items) - cap
     return "%s: %s%s" % (head, ", ".join(items[:cap]),
                          ", ... and %d more" % rest if rest > 0 else "")
+
+
+def placement_report(ops, ctx):
+    """`{op_id: arms}` for every op whose handle carries a non-empty `placement_arms` report
+    (`newbutton.Placement.arms`: switch arms other than the base under which its new button
+    covers another record). Report only."""
+    out = {}
+    for o in ops:
+        h = ctx.handles.get(o.spec.id)
+        if isinstance(h, dict) and h.get("placement_arms"):
+            out[o.spec.id] = [dict(a) for a in h["placement_arms"]]
+    return out
 
 
 def shift_report(ops, ctx):
