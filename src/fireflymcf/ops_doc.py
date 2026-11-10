@@ -118,7 +118,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "allocated on the target channel.",
         "Flashed 2026-08-17. On 14.7, emulated 2026-11-09 (HOME, pin 15): the button draws "
         "only once the pin's first status arrives, changes no pixel outside its box, and a "
-        "tap sends one `1FEDB` toggle. Refuses on 11.23 (`GRAMMAR`).",
+        "tap sends one `1FEDB` toggle. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no button template form, "
+        "so with the firmware gate bypassed it refuses `GRAMMAR`.",
         "`docs/HARDWARE-VERIFIED.md`"),
     "add_glyph_button": ("structural",
         "Clone a donor control into a bare button shell on a page, sized w x h, unwired.",

@@ -530,7 +530,8 @@ def test_add_button(mcf_147, tmp_path):
     bbox = _diff_bbox(stock_home, off)
     assert _inside(bbox, box), (bbox, box)
     assert _near(_crop(off, box), OFF) > 0, "the box does not draw the off colour"
-    assert _diff_bbox(off, on) is not None and _inside(_diff_bbox(off, on), box)
+    on_off = _diff_bbox(off, on)
+    assert on_off is not None and _inside(on_off, box)
 
     t = s.now
     s.tap("Pin 15")
@@ -540,6 +541,9 @@ def test_add_button(mcf_147, tmp_path):
     assert _inside(_diff_bbox(stock_home, lit), box)
     assert _inside(_diff_bbox(off, lit), box) and _diff_bbox(off, lit) is not None
     assert _near(_crop(lit, box), OFF) < _near(_crop(off, box), OFF), "the echo did not light it"
+    lit_box, stock_box = _crop(lit, box), _crop(stock_home, box)
+    other = (np.abs(lit_box - np.array(OFF)) > 8).any(axis=2) & (lit_box != stock_box).any(axis=2)
+    assert other.any(), "the lit box has no pixel that is neither off colour nor stock background"
 
 
 # --- a new button -------------------------------------------------------------------------------
