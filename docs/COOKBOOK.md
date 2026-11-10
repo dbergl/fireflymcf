@@ -113,7 +113,12 @@ Refuses a stock whose hash is not `base_sha256`, refuses a name not matching `mc
 overwrite, and writes nothing if any op fails. Refuses a project with an op whose mechanism has
 never run on a coach unless you pass `--allow-unverified` (you are then the first to run it; flash
 with stock on the stick). Prints the manifest (one line per op). Writes
-`build/mcf-mine.bin.json` with the hash, manifest and unverified list.
+`build/mcf-mine.bin.json` with the hash, manifest, unverified list and `coach`.
+
+An optional `"coach"` block in the project (the `CoachConfig` JSON: `floorplan`, `options`,
+`extra_slots`), or `compile --config coach.json`, tells `add_button`'s placement check which
+settings your coach runs. It changes only what is refused and reported, never the bytes; `preview`
+stays render-only. `--config` replaces the project's block whole (2026-11-09).
 
 Check the whole build against stock before flashing:
 
