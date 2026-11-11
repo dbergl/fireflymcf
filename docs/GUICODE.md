@@ -6540,7 +6540,12 @@ caller set always wins) and computes every AGS-keyed slot from that mode:
 The cost: a coach with AGS or AES whose settings omit the mode is drawn and checked as one with
 no generator. An empty `values` still derives nothing.
 
-Tests: `tests/test_coach_slots.py` (the 14.7 rules for each input, 13.6 unchanged, the located
+Which arm of slot 7's switch is which layout is read from the candidates' content (Finding 31:
+829, value 0, the AES sub-view; 830, value 1, the AGS sub-view), not from the routine, which
+proves only the value stored.
+
+Tests: `tests/test_coach_slots.py` (the 14.7 rules for each input, 13.6 unchanged (changed
+2026-11-11: slot 7 and the derived AGS slot, `test_136_derivation`), the located
 firmware of each corpus image, one changed byte in either routine deriving nothing while a byte
 outside it still derives, 11.23 deriving nothing, 14.7 settings with only `extra_slots`);
 `tests/test_newbutton.py::test_147_derived_slot_11`; `tests/test_livecfg.py` (14.7's counts on

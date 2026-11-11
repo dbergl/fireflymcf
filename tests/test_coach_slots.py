@@ -133,6 +133,21 @@ def test_136_derivation(mcf_136, values, want):
     assert options.derived_slots(mcf_136, values) == want
 
 
+@pytest.mark.parametrize("extra, want", [
+    ({6: 2, 7: 0}, {6: 2, 7: 0, 37: 0, 453: 0}),
+    ({37: 3}, {37: 3, 6: 1, 7: 0, 453: 1}),
+    ({37: 0, 7: 0}, {37: 0, 6: 0, 7: 0, 453: 0}),
+], ids=["extra-6-7", "extra-37", "extra-37-and-7"])
+def test_render_slots_and_coach_slots_agree_on_extra_slots(mcf_136, extra, want):
+    """A config's `extra_slots` win over the derived slots in a render as in the settings check
+    (2026-11-11 review): render/verify and the placement gate read one set of settings."""
+    cfg = _cfg(extra_slots=extra)
+    assert options.render_slots(mcf_136, cfg) == want
+    assert options.coach_slots(mcf_136, cfg, "recipe").slots == want
+    # a `render --slot` override still wins over both
+    assert options.render_slots(mcf_136, cfg, {7: 1})[7] == 1
+
+
 def test_located_derivation(mcf_136, mcf_147, mcf_1123):
     assert options.located_derivation(mcf_136) == "13.6"
     assert options.located_derivation(mcf_147) == "14.7"

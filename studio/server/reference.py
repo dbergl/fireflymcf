@@ -380,6 +380,8 @@ def derives(stock: bytes, opts: list) -> list:
                                   "so it is not a separate choice."})
             out.append({"source_slot": ags,
                         "what": "the ELECTRICAL page layout",
+                        # arm names from the candidates' content (GUICODE.md Finding 31:
+                        # 829 AES sub-view, 830 AGS sub-view), not from the routine
                         "detail": "The panel shows the AES layout of the ELECTRICAL page "
                                   "when the mode is AES (AES or AES Single Output) and the "
                                   "AGS layout otherwise, so it is not a separate choice."})

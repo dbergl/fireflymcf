@@ -633,6 +633,10 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #
 #    `slot-source` lists those two stores as its only writers; a switch based at 829, arms
 #    {0, 1} and no default, reads it. It is 13.6's counterpart of 14.7's slot 12 below.
+#    Which arm is which layout is read from the candidates' content, not from this code:
+#    829 (value 0) carries the AES sub-view ("Engine Not Running", "Max Engine Run Time"),
+#    830 (value 1) the AGS one (GEN, Triggers, Go Power! Solar) (`GUICODE.md` Finding 31);
+#    the reference coach, AES (slot 37 = 3), draws 829's records on its ELECTRICAL page.
 #    Modelled since 2026-11-11 (it was left out while 13.6's output was pinned unchanged).
 #
 # 2. THE LEFT NAV RAIL, slot 453. Object 974's type-6 switch has `child_base` 385 and
@@ -827,13 +831,16 @@ def source_slot(data: bytes, name: str) -> int | None:
 def render_slots(data: bytes, config: CoachConfig | None,
                  overrides: dict[int, int] | None = None) -> dict[int, int]:
     """The `{value_slot: value}` map a render of `data` uses for `config`: its named
-    floorplan and options, then `overrides` (`render --slot`), then the slots GuiCode
-    derives for itself, which never replace an override. `render` and `verify` share it;
-    Studio's engine applies the same `derived_slots` (`studio/server/engine.py`)."""
+    floorplan and options, its `extra_slots`, then `overrides` (`render --slot`), then the
+    slots GuiCode derives for itself, which never replace an `extra_slots` entry or an
+    override -- as `coach_slots` merges them, so render, verify and the placement gate read
+    one set of settings alike. `render` and `verify` share it; Studio's engine applies the
+    same `derived_slots` (`studio/server/engine.py`)."""
     values = slot_values(data, config) if config is not None else {}
     values.update(overrides or {})
+    named = set(overrides or {}) | (set(config.extra_slots) if config is not None else set())
     for slot, value in derived_slots(data, values).items():
-        if slot not in (overrides or {}):
+        if slot not in named:
             values[slot] = value
     return values
 
@@ -855,7 +862,8 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
       3 AES Single Output -- and settings that name no generator mode mean 0. The AGS slot
       itself is derived as 0 (an explicit value always wins and is never returned here), and
       slots 6 and 7 (13.6) and 11 and 12 (14.7) follow from it, so they are always derived:
-      the no-generator block (6 = 0), the AGS-layout ELECTRICAL page (7 = 1), the
+      the no-generator block (6 = 0), ELECTRICAL arm 1 (7 = 1; the AGS sub-view, object
+      830, by its decoded content, `GUICODE.md` Finding 31), the
       no-generator card (11 = 0) and generator flag 1 (12 = 1). The cost: a coach that has
       AGS or AES but whose settings omit the mode is drawn, and checked by the placement
       gate, as a coach with no generator; name the mode to get its arms. Slot 11 with

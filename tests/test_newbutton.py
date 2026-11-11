@@ -957,6 +957,11 @@ def test_settings_refuse_an_overlap_the_base_arm_admits(monkeypatch):
     with pytest.raises(newbutton.PlacementOverlap, match="slot 6 = 2") as e:
         newbutton.check_placement(out, root, idx, coach={6: 2})
     assert "object 148" in str(e.value) and "object 163" in str(e.value)
+    # The cost of the 2026-11-11 ruling, pinned: without the mode, slot 37 is derived 0 (none)
+    # and card 903 draws neither object, so the same slot 6 builds.
+    loose = _compile_coach(data, options.CoachConfig(extra_slots={6: 2}))
+    assert loose.ok, loose.errors
+    assert loose.coach["slots"][37] == 0
     r = _compile_coach(data, options.CoachConfig(extra_slots={6: 2, 37: 1}))
     assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
     assert "slot 6 = 2" in r.errors[0]["message"]
