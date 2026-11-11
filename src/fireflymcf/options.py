@@ -690,7 +690,8 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #      0x0024A308  strb r2,[r3]          ;   r2 = 0       -> slot 11 = 0 (literal 0x0024a548)
 #      0x0024A310  strb r2,[r3]          ;   r2 = 2, AGS  -> slot 11 = 2
 #
-#    Lithionics wins over AGS; value 1 is never written (its arm is unreachable).
+#    Lithionics wins over AGS, and decides slot 11 without reading slot 33 at all; value 1
+#    is never written (its arm is unreachable).
 #
 # 4. THE GENERATOR FLAG, slot 12 (switch based at 428, arms {1, default}):
 #
@@ -844,13 +845,15 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
 
     - **slot 6** (13.6) and **slots 11 and 12** (14.7) are keyed on the AGS slot being
       present, so nothing is invented for a configuration that never chose a generator
-      mode: they stay unset. An unset slot 6 or 11 draws its switch's base arm, the
-      no-generator block (901; 765) the panel draws. An unset slot 12 does NOT draw the
+      mode: they stay unset. The one exception is slot 11 with Lithionics (slot 105)
+      present and non-zero: the routine stores 3 without reading slot 33 (the branch at
+      0x0024A134), so slot 11 = 3 is derived whether or not slot 33 is named. A zero or
+      absent Lithionics value leaves slot 11 to slot 33's test. An unset slot 6 or 11
+      draws its switch's base arm, the no-generator block (901; 765) the panel draws. An unset slot 12 does NOT draw the
       panel's no-generator arm: its switch (base 428) has a 0xFFFF default, which is the
       AES arm (slot 33 in {2, 3}), while the panel draws arm 1 for 33 = 0 or 1. A render of
       such a configuration shows the AES arm there; the placement gate treats slot 12 as
-      unnamed and checks every arm, so it refuses nothing it should build. Given the AGS
-      slot, an absent Lithionics value reads as 0.
+      unnamed and checks every arm, so it refuses nothing it should build.
     - **slot 453** (13.6) and **slot 319** (14.7) read an absent source as 0. That is the
       faithful reading here and it is the case that matters: the panel always holds a
       concrete byte for all three sources (the config payload carries all three), an option
@@ -891,10 +894,14 @@ def _derived_slots_136(data: bytes, values: dict[int, int]) -> dict[int, int]:
 
 def _derived_slots_147(data: bytes, values: dict[int, int]) -> dict[int, int]:
     ags = source_slot(data, "AGS")
+    lithionics = source_slot(data, "Lithionics Batteries")
     out: dict[int, int] = {}
+    if lithionics is not None and values.get(lithionics, 0):
+        # 0x0024A134: a non-zero Lithionics byte stores 3 without reading slot 33
+        out[BATTERY_CARD_SLOT_147] = 3
+    elif ags is not None and ags in values:
+        out[BATTERY_CARD_SLOT_147] = _battery_card_for_147(values[ags], 0)
     if ags is not None and ags in values:
-        out[BATTERY_CARD_SLOT_147] = _battery_card_for_147(
-            values[ags], _source_value(data, values, "Lithionics Batteries"))
         out[GENERATOR_FLAG_SLOT_147] = _generator_flag_for_147(values[ags])
     out[NAV_RAIL_SLOT_147] = _nav_rail_for(
         _source_value(data, values, "AGS"),

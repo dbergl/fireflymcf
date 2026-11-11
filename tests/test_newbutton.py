@@ -969,9 +969,10 @@ def test_147_star_link(monkeypatch):
 
     `{102: 0}` alone still refuses: slot 11 (the battery card's switch, based at 765) is then
     unnamed, and its arm 2 draws object 117 "DISABLED" and object 132 (touch) over the spot
-    (the no-settings report's `slot 11 = 2` entry). 14.7 derives slot 11 only from the AGS slot
-    (33), which `extra_slots` alone does not name, so the owner names slot 11 (or the generator
-    option: `test_147_derived_slot_11`); `{102: 0, 11: 0}` builds."""
+    (the no-settings report's `slot 11 = 2` entry). 14.7 derives slot 11 from the AGS slot (33),
+    or as 3 from Lithionics (105) when it is on; `extra_slots` naming neither leaves it unset, so
+    the owner names slot 11 (or the generator option: `test_147_derived_slot_11`);
+    `{102: 0, 11: 0}` builds."""
     from fireflymcf import options
     data = _read(STOCK_147)
     out, root, idx = _home_clone(data)

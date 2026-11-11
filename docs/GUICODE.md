@@ -6494,8 +6494,13 @@ facts live in the copy block and the setters, which the derivation guard does no
 
 **Rulings.**
 
-- **An unset slot 12 draws its default arm, the AES arm.** Slots 11 and 12 are derived only when
-  the settings name slot 33 (as 13.6's slot 6 is keyed on its AGS slot). Left unset, slot 11 draws
+- **Slot 11 = 3 needs no slot 33.** With Lithionics present and non-zero, `0x0024A134` skips the
+  slot-33 test and the routine stores 3 (`0x0024A13C`), so `derived_slots` derives slot 11 = 3
+  whether or not the settings name slot 33 (`options=['Lithionics Batteries']` alone gives
+  `{105: 1}` and so slot 11 = 3). A zero or absent Lithionics value leaves slot 11 to slot 33.
+- **An unset slot 12 draws its default arm, the AES arm.** Slot 12, and slot 11 when Lithionics is
+  not on, are derived only when the settings name slot 33 (as 13.6's slot 6 is keyed on its AGS
+  slot). Left unset, slot 11 draws
   its base arm (765, the no-generator card the panel draws), but slot 12's switch has a `0xFFFF`
   default, which is the arm the panel draws for 33 in {2, 3}, while for 33 = 0 or 1 the panel
   draws arm 1. A render of settings that name no generator mode shows the AES arm there; the

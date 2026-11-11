@@ -103,7 +103,8 @@ def test_a_default_arm_admits_any_value(mcf_136):
     ({33: 0, 95: 1}, {11: 0, 12: 1, 319: 1}),
     ({33: 0, 104: 1}, {11: 0, 12: 1, 319: 1}),
     ({102: 0}, {319: 0}),                              # no AGS slot: no 11, no 12
-    ({105: 1}, {319: 0}),
+    ({105: 1}, {11: 3, 319: 0}),                       # Lithionics decides 11 without 33
+    ({105: 0}, {319: 0}),                              # ...but a zero needs 33's test
     ({}, {}),
 ])
 def test_147_derivation(mcf_147, values, want):
