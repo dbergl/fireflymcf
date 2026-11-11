@@ -595,11 +595,19 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 # Slots GuiCode COMPUTES from other slots, rather than receiving.
 #
 # `slot_values` above turns a coach configuration into the registers the panel is
-# *handed* over the bus. Two display slots are not among them: the panel works them out
-# for itself, in `FUN_00247BF8`, every time a config payload lands. A render that does
-# not do the same arithmetic draws a screen the panel never draws -- which is why this
-# lives in the tools layer and not in the studio server, so `cli render` and Studio
-# cannot disagree about it.
+# *handed* over the bus. A few display slots are not among them: the panel works them out
+# for itself, in the config-payload handler (13.6 `FUN_00247BF8`), every time a config
+# payload lands. A render that does not do the same arithmetic draws a screen the panel
+# never draws -- which is why this lives in the tools layer and not in the studio server,
+# so `cli render` and Studio cannot disagree about it.
+#
+# The arithmetic is per firmware, and each firmware's is used only on an image that still
+# carries the routine it transcribes: `located_derivation` hashes the routine's cited
+# instructions and literal-pool words (`DERIVATION_GUARDS`) and compares them to stock. An
+# image whose bytes differ there -- another firmware, or a build that rewrote the routine --
+# derives nothing rather than a guess.
+#
+# ---- 13.6 (GuiCode maps at 0x00240000) ------------------------------------------------
 #
 # 1. THE HOME BATTERY BLOCK, slot 6. Object 4's type-6 switch picks between four blocks
 #    (901/902/903/904 for values 0/1/2/3) and nothing writes slot 6 but this:
@@ -611,6 +619,7 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #      0x00249D08  cmp r2,#0x1           ; AGS == 1 (AGS proper)?
 #      0x00249D0A  beq.w 0x00249ED4      ;   -> slot 6 = 2  (object 903)
 #      0x00249D12  strb r1,[r2,#0x0]     ; else            0  (object 901), r1 = 0
+#                                        ; (slot 6 = 0x2003A03E, literals 0x00249e30/0x00249f24)
 #
 #    so object 904 (value 3) is a candidate the firmware never selects.
 #
@@ -650,13 +659,112 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #    exactly one stock floorplan comes out with the four-icon rail -- **SY**, the one
 #    CLAUDE.md already records as the AGS-mode exception (`EF = 0`, none).
 #
+# ---- 14.7 (GuiCode maps at 0x00240000) ------------------------------------------------
+#
+# The same handler, with a Lithionics row (slot 105) added ahead of the battery block, and
+# the generator test split out into its own slot. Registers: slot 11 = 0x20039BF5, slot 12 =
+# 0x20039D9D, slot 319 = 0x2003A14F; sources slot 33 (AGS / AES selector) = 0x20039F08,
+# slot 95 (Go Power! count) = 0x2003A037, slot 104 (Progressive Inverter) = 0x2003A169,
+# slot 105 (Lithionics Batteries) = 0x2003A009.
+#
+# 3. THE HOME BATTERY CARD, slot 11 (switch based at 765, arms {0,1,2,3}, no default):
+#
+#      0x0024A12E  ldr r3,[0x0024a250]   ; = 0x2003A009  Lithionics (slot 105)
+#      0x0024A134  beq.w 0x0024A2FC      ;   zero -> the AGS test
+#      0x0024A138  ldr r3,[0x0024a260]   ; = 0x20039BF5
+#      0x0024A13C  strb r2,[r3]          ;   r2 = 3       -> slot 11 = 3
+#      0x0024A2FC  ldr r3,[0x0024a544]   ; = 0x20039F08  AGS / AES selector (slot 33)
+#      0x0024A300  cmp r3,#1 ; beq 0x0024A30C
+#      0x0024A308  strb r2,[r3]          ;   r2 = 0       -> slot 11 = 0 (literal 0x0024a548)
+#      0x0024A310  strb r2,[r3]          ;   r2 = 2, AGS  -> slot 11 = 2
+#
+#    Lithionics wins over AGS; value 1 is never written (its arm is unreachable).
+#
+# 4. THE GENERATOR FLAG, slot 12 (switch based at 428, arms {1, default}):
+#
+#      0x0024A13E  ldr r3,[0x0024a24c]   ; = 0x20039F08  slot 33
+#      0x0024A142  subs r3,#2 ; uxtb ; cmp r3,#1
+#      0x0024A148  bls.w 0x0024A314      ;   33 in {2,3} -> slot 12 = 0 (strb 0x0024A318,
+#                                        ;                  literal 0x0024a54c)
+#      0x0024A150  strb r2,[r3]          ;   else r2 = 1 -> slot 12 = 1 (literal 0x0024a264)
+#
+# 5. THE LEFT NAV RAIL, slot 319 (switch based at 343, arms {0,2,4, default}; as 13.6's 453,
+#    0 draws the four-icon rail, 2 and 4 are unreachable):
+#
+#      0x0024A170  ldr r3,[0x0024a24c]   ; = 0x20039F08  slot 33       bne.w 0x0024A33A
+#      0x0024A17A  ldr r2,[0x0024a254]   ; = 0x2003A037  slot 95       bne.w 0x0024A33A
+#      0x0024A184  ldr r2,[0x0024a23c]   ; = 0x2003A169  slot 104      bne.w 0x0024A33A
+#      0x0024A18E  ldr r3,[0x0024a274]   ; = 0x2003A14F
+#      0x0024A190  strb r2,[r3]          ;   all three zero (r2 = 0) -> slot 319 = 0
+#      0x0024A33A  ldr r2,[0x0024a55c] ; movs r1,#1 ; strb @0x0024A33E -> slot 319 = 1
+#
+#    Slot 95 is the Go Power! count: the same clamp setter as 13.6's slot 39 at 0x002477D0
+#    (`cmp r0,#5; bhi`, store 0x002477DE), and the config-payload byte +0x0B stored at
+#    0x00247D06 (13.6: 0x00247C50, slot 39).
+#
 # The SOURCE slots are looked up by option name (build-derived) where the OPTIONS page
 # binds them. Only the target slots, the Go Power! count slot (not an OPTIONS row -- it
-# arrives as selector 0xD7 in the floorplan burst) and the arithmetic are transcribed,
-# and those are 13.6's.
+# arrives as selector 0xD7 in the floorplan burst) and the arithmetic are transcribed, per
+# firmware.
 BATTERY_BLOCK_SLOT = 6
 NAV_RAIL_SLOT = 453
 GO_POWER_SLOT = 39
+
+# 14.7's targets and Go Power! count (cited above).
+BATTERY_CARD_SLOT_147 = 11
+GENERATOR_FLAG_SLOT_147 = 12
+NAV_RAIL_SLOT_147 = 319
+GO_POWER_SLOT_147 = 95
+
+# `(firmware, ((start, end), ...), sha256)`: the GuiCode address ranges (end exclusive) of
+# each derivation's cited instructions -- every load, compare, branch and store above -- and
+# literal-pool words, and the sha256 of their bytes concatenated, read from stock. The
+# ranges skip the config-block copies between the cited runs (13.6 0x00249D14..0x00249D3C,
+# 14.7 0x0024A152..0x0024A16E) and the pool words those read.
+DERIVATION_GUARDS: tuple = (
+    ("13.6",
+     ((0x00249CFA, 0x00249D14), (0x00249D3E, 0x00249D62), (0x00249ECC, 0x00249EDC),
+      (0x00249F02, 0x00249F08),
+      (0x00249E0C, 0x00249E10), (0x00249E24, 0x00249E28), (0x00249E2C, 0x00249E34),
+      (0x00249E44, 0x00249E48), (0x00249F24, 0x00249F28), (0x00249F38, 0x00249F3C)),
+     "4617fc22521683e8c7be78a0c9a0a55da36dd2682040e169a587ad60d7888806"),
+    ("14.7",
+     ((0x0024A12E, 0x0024A152), (0x0024A170, 0x0024A192), (0x0024A2FC, 0x0024A31A),
+      (0x0024A33A, 0x0024A340),
+      (0x0024A23C, 0x0024A240), (0x0024A24C, 0x0024A258), (0x0024A260, 0x0024A268),
+      (0x0024A274, 0x0024A278), (0x0024A544, 0x0024A550), (0x0024A55C, 0x0024A560)),
+     "ca1c4809b6e1ad1a8f56f341180e4bbb4f810b5b75aff25138d6b1fa5a8d125e"),
+)
+
+
+def located_derivation(data: bytes, guards: tuple = DERIVATION_GUARDS) -> str | None:
+    """`"13.6"`, `"14.7"` or None: the firmware whose derivation routine `data`'s GuiCode
+    carries byte for byte (`guards`, default `DERIVATION_GUARDS`). Memoised on content; the
+    table is an argument (the memo trap)."""
+    return _located_derivation(data, guards)
+
+
+@memo.content_cached(copy=None)
+def _located_derivation(data: bytes, guards: tuple) -> str | None:
+    import hashlib
+    from . import theme
+    try:
+        section = theme.guicode_section(data)
+        base = theme.guicode_base(section)
+    except Exception:                      # no container, no GuiCode: nothing is located
+        return None
+    code = data[section.offset:section.offset + section.length]
+    for firmware, ranges, sha in guards:
+        parts = []
+        for start, end in ranges:
+            lo, hi = start - base, end - base
+            if lo < 0 or hi > len(code):
+                break
+            parts.append(code[lo:hi])
+        else:
+            if hashlib.sha256(b"".join(parts)).hexdigest() == sha:
+                return firmware
+    return None
 
 
 def _battery_block_for(ags: int) -> int:
@@ -667,6 +775,16 @@ def _battery_block_for(ags: int) -> int:
 
 def _nav_rail_for(ags: int, go_power: int, prog_inverter: int) -> int:
     return 1 if (ags or go_power or prog_inverter) else 0
+
+
+def _battery_card_for_147(ags: int, lithionics: int) -> int:
+    if lithionics:
+        return 3
+    return 2 if ags == 1 else 0
+
+
+def _generator_flag_for_147(ags: int) -> int:
+    return 0 if ags in (2, 3) else 1
 
 
 def source_slot(data: bytes, name: str) -> int | None:
@@ -703,32 +821,65 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
     it, letting anything the caller set by hand win -- an explicit override stays the
     escape hatch it is everywhere else.
 
-    The two derivations differ in how they treat an ABSENT source, on purpose:
+    Which derivation runs is `located_derivation(data)`'s answer: 13.6's (slots 6 and 453)
+    or 14.7's (slots 11, 12 and 319). An image that carries neither routine byte for byte
+    derives nothing (`{}`).
 
-    - **slot 6** is keyed on the AGS slot being present, so nothing is invented for a
-      configuration that never chose a generator mode: slot 6 stays unset and the walk
-      draws the same default block (901) the panel does.
-    - **slot 453** reads an absent source as 0. That is the faithful reading here and it
-      is the case that matters: the panel always holds a concrete byte for all three
-      sources (the config payload carries all three), an option not selected IS off, and
-      "no generator, no solar, no inverter" is precisely when the icon goes away. Since
-      the rail's default candidate is the FIVE-icon one, treating absent as unknown
-      would draw the Electrical icon for exactly the coach that does not have it.
+    The derivations differ in how they treat an ABSENT source, on purpose:
+
+    - **slot 6** (13.6) and **slots 11 and 12** (14.7) are keyed on the AGS slot being
+      present, so nothing is invented for a configuration that never chose a generator
+      mode: they stay unset and the walk draws the same default arms the panel does. Given
+      the AGS slot, an absent Lithionics value reads as 0.
+    - **slot 453** (13.6) and **slot 319** (14.7) read an absent source as 0. That is the
+      faithful reading here and it is the case that matters: the panel always holds a
+      concrete byte for all three sources (the config payload carries all three), an option
+      not selected IS off, and "no generator, no solar, no inverter" is precisely when the
+      icon goes away. Since the rail's default candidate is the FIVE-icon one, treating
+      absent as unknown would draw the Electrical icon for exactly the coach that does not
+      have it.
 
     An empty `values` -- no configuration expressed at all -- derives nothing either way.
     """
     if not values:
         return {}
-    ags = source_slot(data, "AGS")
-    prog_inverter = source_slot(data, "Progressive Inverter")
+    firmware = located_derivation(data)
+    if firmware == "13.6":
+        return _derived_slots_136(data, values)
+    if firmware == "14.7":
+        return _derived_slots_147(data, values)
+    return {}
 
+
+def _source_value(data: bytes, values: dict[int, int], name: str) -> int:
+    slot = source_slot(data, name)
+    return values.get(slot, 0) if slot is not None else 0
+
+
+def _derived_slots_136(data: bytes, values: dict[int, int]) -> dict[int, int]:
+    ags = source_slot(data, "AGS")
     out: dict[int, int] = {}
     if ags is not None and ags in values:
         out[BATTERY_BLOCK_SLOT] = _battery_block_for(values[ags])
     out[NAV_RAIL_SLOT] = _nav_rail_for(
-        values.get(ags, 0) if ags is not None else 0,
+        _source_value(data, values, "AGS"),
         values.get(GO_POWER_SLOT, 0),
-        values.get(prog_inverter, 0) if prog_inverter is not None else 0,
+        _source_value(data, values, "Progressive Inverter"),
+    )
+    return out
+
+
+def _derived_slots_147(data: bytes, values: dict[int, int]) -> dict[int, int]:
+    ags = source_slot(data, "AGS")
+    out: dict[int, int] = {}
+    if ags is not None and ags in values:
+        out[BATTERY_CARD_SLOT_147] = _battery_card_for_147(
+            values[ags], _source_value(data, values, "Lithionics Batteries"))
+        out[GENERATOR_FLAG_SLOT_147] = _generator_flag_for_147(values[ags])
+    out[NAV_RAIL_SLOT_147] = _nav_rail_for(
+        _source_value(data, values, "AGS"),
+        values.get(GO_POWER_SLOT_147, 0),
+        _source_value(data, values, "Progressive Inverter"),
     )
     return out
 
@@ -739,9 +890,10 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
 # way a render resolves it (`render_slots`), and validated against the image, because a gate
 # that reads these settings must never read a slot or a value the panel cannot draw.
 
-# The firmwares where `derived_slots`' two derivations are located (the 13.6 GuiCode
-# addresses cited above). On any other image they are skipped and their slots stay unset.
-DERIVED_ON: frozenset = frozenset({"13.6"})
+# The firmwares whose `derived_slots` derivation `coach_slots` applies, when
+# `located_derivation` finds that firmware's routine in the image. On any other image the
+# derivations are skipped and their slots stay unset.
+DERIVED_ON: frozenset = frozenset({"13.6", "14.7"})
 
 
 @dataclass(frozen=True)
@@ -805,8 +957,9 @@ def coach_slots(data: bytes, config: CoachConfig, source: str,
     """`config` resolved for `data` and validated, or None when it names nothing (no
     floorplan, no options, no extra_slots): an empty block is no settings.
 
-    Resolution is `slot_values`, then, only on a firmware in `derive_on`, `derived_slots`
-    merged under `extra_slots` (an extra slot wins, as `render_slots`' override does).
+    Resolution is `slot_values`, then, only where `located_derivation` names a firmware in
+    `derive_on`, `derived_slots` merged under `extra_slots` (an extra slot wins, as
+    `render_slots`' override does).
     Refuses `COACH_CONFIG` (`recipe.RecipeError`), naming the slot or the name:
     - a floorplan or option name `slot_values` cannot resolve;
     - a slot `extra_slots` names that no type-6 switch record reads and that the names and
@@ -833,7 +986,6 @@ def coach_slots(data: bytes, config: CoachConfig, source: str,
 
 @memo.content_cached(copy=None)
 def _coach_slots(data: bytes, canonical: str, derive_on: frozenset):
-    from . import firmware
     from .recipe import RecipeError
 
     def refuse(message: str):
@@ -863,7 +1015,7 @@ def _coach_slots(data: bytes, canonical: str, derive_on: frozenset):
         refuse(str(e))
     produced = set(values)
     values.update(extra)
-    if firmware.identify(data) in derive_on:
+    if located_derivation(data) in derive_on:
         derived = derived_slots(data, values)
         produced |= set(derived)
         for slot, value in derived.items():
