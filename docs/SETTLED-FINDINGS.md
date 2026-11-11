@@ -508,7 +508,8 @@ Three things worth carrying beyond the fix:
   value-0 block, so deriving nothing draws the right thing; slot 453's default is the *five*-icon
   rail, so deriving nothing draws the icon exactly for the coach that lacks it. `derived_slots`
   therefore treats an absent source as **0** for the rail and as **unset** for the battery block,
-  and says why in its docstring.
+  and says why in its docstring. *(Superseded 2026-11-11, `GUICODE.md` Finding 92: settings that
+  name no generator mode mean "none", so the AGS slot is derived 0 and the battery block follows.)*
 - **The arithmetic moved down a layer.** It now lives in `options.derived_slots` (tools), not in
   the studio server, because `cli render` applies it too — two renderers disagreeing about what
   the panel computes is worse than neither doing it. `studio.server.reference.derived_slots`
@@ -605,4 +606,6 @@ they are other registers). The derivation is now per firmware and runs only on a
 routine matches stock byte for byte (`options.located_derivation`): 13.6 derives slots 6 and 453
 from Go Power! slot 39, 14.7 derives slots 11, 12 and 319 from slot 95, and 11.23 derives nothing.
 `livecfg._COUNT_SLOTS` is keyed by firmware too (`GUICODE.md` Finding 92).
+*2026-11-11:* 13.6 also derives slot 7 (stores `0x00249D1E` / `0x00249EE0`), and both firmwares
+derive their AGS slot as 0 (none) when non-empty settings omit it (Finding 92).
 

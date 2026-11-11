@@ -2553,6 +2553,7 @@ the config load but independent registers, set in a render via `extra_slots`/`--
 *Superseded for slot 7, 2026-11-10 (Finding 92):* slot 7 is computed, not bus-delivered. Its
 register `0x20039F24` has only two writers, both in the same routine as slot 6: `0x00249D1E`
 (AGS not in {2,3} -> 1) and `0x00249EE0` (AGS in {2,3} -> 0). It is not yet derived in a render.
+*(Superseded 2026-11-11, Finding 92: `derived_slots` derives slot 7 on 13.6.)*
 
 > **Sharpened for slot 6, 2026-08-21 (`proven-from-code`).** "Correlated with AGS/AES by the
 > config load" understates it: slot 6's register `0x2003A03E` is **computed** from the AGS
@@ -2579,7 +2580,7 @@ register `0x20039F24` has only two writers, both in the same routine as slot 6: 
 > (`studio/server/reference.py` `derived_slots`) instead of asking for slot 6 by hand. **Slot 7
 > was not traced** — nothing here should be read as applying to the ELECTRICAL selector.
 > *(Superseded 2026-11-10: Finding 92 traces slot 7 to the same AGS test, stores at
-> `0x00249D1E` and `0x00249EE0`.)* The
+> `0x00249D1E` and `0x00249EE0`; derived since 2026-11-11.)* The
 `Screen.walk` switch machinery already honours them; nothing new was needed in the engine — the
 earlier bug was only that the *label* bypassed them by reading the option name.
 
@@ -6503,7 +6504,8 @@ facts live in the copy block and the setters, which the derivation guard does no
   slot-33 test and the routine stores 3 (`0x0024A13C`), so `derived_slots` derives slot 11 = 3
   whether or not the settings name slot 33 (`options=['Lithionics Batteries']` alone gives
   `{105: 1}` and so slot 11 = 3). A zero or absent Lithionics value leaves slot 11 to slot 33.
-- **An unset slot 12 draws its default arm, the AES arm.** Slot 12, and slot 11 when Lithionics is
+- *(Superseded 2026-11-11, below: an absent AGS slot is now derived as 0, so slots 11 and 12 are
+  always derived.)* **An unset slot 12 draws its default arm, the AES arm.** Slot 12, and slot 11 when Lithionics is
   not on, are derived only when the settings name slot 33 (as 13.6's slot 6 is keyed on its AGS
   slot). Left unset, slot 11 draws
   its base arm (765, the no-generator card the panel draws), but slot 12's switch has a `0xFFFF`
@@ -6511,13 +6513,39 @@ facts live in the copy block and the setters, which the derivation guard does no
   draws arm 1. A render of settings that name no generator mode shows the AES arm there; the
   placement gate treats slot 12 as unnamed and checks every arm, so it refuses nothing it should
   build.
-- **13.6's slot 7 is the unmodelled counterpart of 14.7's slot 12.** The same test after 13.6's
+- *(Superseded 2026-11-11, below: slot 7 is modelled.)* **13.6's slot 7 is the unmodelled
+  counterpart of 14.7's slot 12.** The same test after 13.6's
   slot 6 store writes `0x20039F24`: `0x00249D14 cmp r3,#1; bls.w 0x249EDC` (AGS in {2,3} -> 0,
   `strb` at `0x00249EE0`), else 1 at `0x00249D1E`. `slot-source` lists those two stores as its
   only writers, and a switch based at 829, arms {0, 1}, no default, reads it. Deriving it would
   change 13.6's pinned output; it is a follow-up.
 
-Tests: `tests/test_coach_slots.py` (the 14.7 rules for each input, 13.6 unchanged, the located
+**2026-11-11: an absent generator mode is "none", and 13.6's slot 7 is modelled.** The AGS slot
+(13.6 slot 37 `0x2003A38C`, 14.7 slot 33 `0x20039F08`) is a radio: 0 none, 1 AGS, 2 AES, 3 AES
+Single Output. The owner's ruling: settings that name options but no generator mode mean none.
+So whenever `values` is non-empty (the trigger the rail already used; settings with only
+`extra_slots` count), `derived_slots` derives the AGS slot as 0 when it is absent (a value the
+caller set always wins) and computes every AGS-keyed slot from that mode:
+
+- 13.6 slot 6 from the test at `0x00249CFE subs r3,r2,#0x2` / `0x00249D04 bls.w 0x249ECC` /
+  `0x00249D08 cmp r2,#0x1` (unchanged rule), and **slot 7** (`0x20039F24`) from
+  `0x00249D14 cmp r3,#0x1; 0x00249D16 bls.w 0x249EDC`: AGS in {2, 3} -> 0 (`strb` at
+  `0x00249EE0`, literal `0x00249F28`), else 1 (`strb r2,[r3]` at `0x00249D1E`, literal
+  `0x00249E34`). Both literal words hold `0x20039F24`; the 13.6 guard now covers them
+  (`DERIVATION_GUARDS` ranges `0x00249E2C`-`0x00249E38` and `0x00249F24`-`0x00249F2C`), so a
+  changed byte there derives nothing.
+- 14.7 slots 11 and 12 by the table above, with A = 0 when slot 33 is absent (Lithionics still
+  wins for slot 11).
+
+The cost: a coach with AGS or AES whose settings omit the mode is drawn and checked as one with
+no generator. An empty `values` still derives nothing.
+
+Which arm of slot 7's switch is which layout is read from the candidates' content (Finding 31:
+829, value 0, the AES sub-view; 830, value 1, the AGS sub-view), not from the routine, which
+proves only the value stored.
+
+Tests: `tests/test_coach_slots.py` (the 14.7 rules for each input, 13.6 unchanged (changed
+2026-11-11: slot 7 and the derived AGS slot, `test_136_derivation`), the located
 firmware of each corpus image, one changed byte in either routine deriving nothing while a byte
 outside it still derives, 11.23 deriving nothing, 14.7 settings with only `extra_slots`);
 `tests/test_newbutton.py::test_147_derived_slot_11`; `tests/test_livecfg.py` (14.7's counts on

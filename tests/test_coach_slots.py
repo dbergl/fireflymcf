@@ -16,8 +16,9 @@ from fireflymcf import options, recipe
 COACH_WD = "build/coach-wd.json"
 
 # The builder check's resolution of `build/coach-wd.json` on 13.6 (2026-11-09).
-REFERENCE_SLOTS = {5: 8, 6: 1, 37: 3, 38: 0, 39: 0, 108: 1, 109: 1, 110: 1, 112: 1, 113: 0,
-                   453: 1, 512: 1}
+# Slot 7 (AGS 3 -> 0) since 13.6's slot 7 was modelled (2026-11-11).
+REFERENCE_SLOTS = {5: 8, 6: 1, 7: 0, 37: 3, 38: 0, 39: 0, 108: 1, 109: 1, 110: 1, 112: 1,
+                   113: 0, 453: 1, 512: 1}
 
 
 def _cfg(**kw):
@@ -40,9 +41,9 @@ def test_empty_block_is_no_settings(mcf_136):
 
 def test_147_extra_slots_only_derive_the_rail(mcf_147):
     got = options.coach_slots(mcf_147, _cfg(extra_slots={102: 1}), "--config x.json")
-    # no slot 6, no slot 453: those are 13.6's. 14.7's own rail (319) reads absent sources
-    # as 0; its 11 and 12 wait for the AGS slot.
-    assert got.slots == {102: 1, 319: 0}
+    # no slot 6, no slot 453: those are 13.6's. Settings that name no generator mode mean
+    # "none" (2026-11-11): slot 33 is derived 0, and 11, 12 and 319 follow from it.
+    assert got.slots == {102: 1, 33: 0, 11: 0, 12: 1, 319: 0}
     assert got.pinned == (102,)
     assert got.source == "--config x.json"
 
@@ -52,7 +53,7 @@ def test_derivation_is_an_argument(mcf_136):
     with_derive = options.coach_slots(mcf_136, _cfg(extra_slots={37: 3}), "recipe")
     without = options.coach_slots(mcf_136, _cfg(extra_slots={37: 3}), "recipe",
                                   frozenset())
-    assert with_derive.slots == {37: 3, 6: 1, 453: 1}
+    assert with_derive.slots == {37: 3, 6: 1, 7: 0, 453: 1}
     assert without.slots == {37: 3}
 
 
@@ -102,30 +103,49 @@ def test_a_default_arm_admits_any_value(mcf_136):
     ({33: 0}, {11: 0, 12: 1, 319: 0}),
     ({33: 0, 95: 1}, {11: 0, 12: 1, 319: 1}),
     ({33: 0, 104: 1}, {11: 0, 12: 1, 319: 1}),
-    ({102: 0}, {319: 0}),                              # no AGS slot: no 11, no 12
-    ({105: 1}, {11: 3, 319: 0}),                       # Lithionics decides 11 without 33
-    ({105: 0}, {319: 0}),                              # ...but a zero needs 33's test
+    # an absent AGS slot is "none" (2026-11-11): 33 is derived 0 and 11, 12 follow
+    ({102: 0}, {33: 0, 11: 0, 12: 1, 319: 0}),
+    ({102: 1}, {33: 0, 11: 0, 12: 1, 319: 0}),
+    ({105: 1}, {33: 0, 11: 3, 12: 1, 319: 0}),         # Lithionics decides 11 without 33
+    ({105: 0}, {33: 0, 11: 0, 12: 1, 319: 0}),
     ({}, {}),
 ])
 def test_147_derivation(mcf_147, values, want):
     assert options.derived_slots(mcf_147, values) == want
 
 
+# Slot 7 (AGS in {2,3} -> 0, else 1) is modelled, and an absent slot 37 is "none" (37 derived
+# 0), since 2026-11-11.
 @pytest.mark.parametrize("values, want", [
-    # the outputs the derivation gave before it was per firmware
-    ({37: 0}, {6: 0, 453: 0}),
-    ({37: 1}, {6: 2, 453: 1}),
-    ({37: 2}, {6: 1, 453: 1}),
-    ({37: 3}, {6: 1, 453: 1}),
-    ({5: 8}, {453: 0}),
-    ({5: 8, 113: 1}, {453: 1}),
-    ({5: 8, 39: 2}, {453: 1}),
-    ({5: 8, 37: 0, 113: 0}, {6: 0, 453: 0}),
-    ({37: 0, 39: 1}, {6: 0, 453: 1}),
+    ({37: 0}, {6: 0, 7: 1, 453: 0}),
+    ({37: 1}, {6: 2, 7: 1, 453: 1}),
+    ({37: 2}, {6: 1, 7: 0, 453: 1}),
+    ({37: 3}, {6: 1, 7: 0, 453: 1}),
+    ({39: 0}, {37: 0, 6: 0, 7: 1, 453: 0}),
+    ({5: 8}, {37: 0, 6: 0, 7: 1, 453: 0}),
+    ({5: 8, 113: 1}, {37: 0, 6: 0, 7: 1, 453: 1}),
+    ({5: 8, 39: 2}, {37: 0, 6: 0, 7: 1, 453: 1}),
+    ({5: 8, 37: 0, 113: 0}, {6: 0, 7: 1, 453: 0}),
+    ({37: 0, 39: 1}, {6: 0, 7: 1, 453: 1}),
     ({}, {}),
 ])
-def test_136_derivation_unchanged(mcf_136, values, want):
+def test_136_derivation(mcf_136, values, want):
     assert options.derived_slots(mcf_136, values) == want
+
+
+@pytest.mark.parametrize("extra, want", [
+    ({6: 2, 7: 0}, {6: 2, 7: 0, 37: 0, 453: 0}),
+    ({37: 3}, {37: 3, 6: 1, 7: 0, 453: 1}),
+    ({37: 0, 7: 0}, {37: 0, 6: 0, 7: 0, 453: 0}),
+], ids=["extra-6-7", "extra-37", "extra-37-and-7"])
+def test_render_slots_and_coach_slots_agree_on_extra_slots(mcf_136, extra, want):
+    """A config's `extra_slots` win over the derived slots in a render as in the settings check
+    (2026-11-11 review): render/verify and the placement gate read one set of settings."""
+    cfg = _cfg(extra_slots=extra)
+    assert options.render_slots(mcf_136, cfg) == want
+    assert options.coach_slots(mcf_136, cfg, "recipe").slots == want
+    # a `render --slot` override still wins over both
+    assert options.render_slots(mcf_136, cfg, {7: 1})[7] == 1
 
 
 def test_located_derivation(mcf_136, mcf_147, mcf_1123):
@@ -147,6 +167,8 @@ def test_1123_derives_nothing(mcf_1123):
     ("mcf_136", 0x00249F38, 5),    # slot 453's literal for the 1 store
     ("mcf_147", 0x0024A338, 102),  # b 0x24A170: the A in {2,3} path rejoining the rail test
     ("mcf_136", 0x00249F00, 5),    # b 0x249D3E: the same rejoin on 13.6
+    ("mcf_136", 0x00249E34, 5),    # slot 7's literal for the 1 store (0x00249D1E)
+    ("mcf_136", 0x00249F28, 5),    # slot 7's literal for the 0 store (0x00249EE0)
 ])
 def test_one_changed_byte_derives_nothing(request, image, addr, named):
     from fireflymcf import theme
@@ -189,6 +211,9 @@ def test_147_coach_slots_derive(mcf_147):
     got = options.coach_slots(mcf_147, _cfg(options={"AGS": 1}, extra_slots={11: 0}),
                               "recipe")
     assert got.slots[11] == 0 and got.slots[12] == 1
+    # an explicit AGS slot is never overwritten by the derived "none"
+    got = options.coach_slots(mcf_147, _cfg(extra_slots={33: 1}), "recipe")
+    assert got.slots[33] == 1 and got.slots[11] == 2 and got.slots[12] == 1
 
 
 # --- the recipe ------------------------------------------------------------------------------
