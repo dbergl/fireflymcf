@@ -102,3 +102,33 @@ def test_to_preview_picks_one_generator_mode_by_value(stock):
 def test_to_preview_omits_a_floorplan_it_cannot_name(stock):
     live = livecfg.LiveConfig(source=0x9C, frames=1, selectors={0xF5: 99})
     assert "floorplan" not in livecfg.to_preview(stock, live)
+
+
+# The counts are per firmware: the selector -> slot facts live in each release's
+# config-payload copy block, so a 14.7 image must not be handed 13.6's slot numbers.
+STOCK_147 = "firefly-14.7 (Terrain)/mcf.bin"
+STOCK_1123 = "firefly-11.23/mcf.bin"
+COUNTS = livecfg.LiveConfig(source=0x9C, frames=2, selectors={0xD7: 2, 0xD8: 1})
+
+
+def _image(path):
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def test_counts_on_136_are_unchanged(stock):
+    assert livecfg._counts(stock, COUNTS) == {"39": 2, "599": 1}
+
+
+def test_counts_on_147_land_on_its_own_slots():
+    """14.7's Go Power! count is slot 95 (config payload +0x0B stored at 0x00247D06) and
+    its battery count slot 458 (+0x18 stored at 0x00247D3C); 13.6's 39 and 599 are other
+    registers there and are never emitted."""
+    counts = livecfg._counts(_image(STOCK_147), COUNTS)
+    assert counts == {"95": 2, "458": 1}
+    assert "39" not in counts and "599" not in counts
+
+
+def test_counts_on_1123_emit_nothing():
+    """No count selector is located on 11.23: nothing is guessed."""
+    assert livecfg._counts(_image(STOCK_1123), COUNTS) == {}

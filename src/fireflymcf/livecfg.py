@@ -122,20 +122,45 @@ def canonical_option(name: str) -> str:
     return name.split("\n")[0].strip()
 
 
-# Selector -> the value slot its count drives. None is an OPTIONS-page binding, so none
-# can be derived from the row records; all were established on the bus and in GuiCode
-# (the battery count reaches slot 599 via config payload +0x18 -> 0x2003A804 -> the
-# setter at 0x002477E8, which accepts only 0 or 1; the Go Power! controller count
-# reaches slot 39 via 0x2003A4E9 -- `strb r2,[=0x2003a4e9]` @0x00247C50 -- with the
-# sibling clamp at 0x002477D0 rejecting > 5, `GUICODE.md` Findings 41/42).
+# Selector -> the value slot its count drives, per firmware. None is an OPTIONS-page
+# binding, so none can be derived from the row records; each is transcribed from that
+# release's config-payload copy block (`GUICODE.md` Findings 41/42/45, 92):
+#
+#   13.6  0xD7 Go Power! count -> slot 39: payload +0x0B, `strb r2,[=0x2003a4e9]`
+#         @0x00247C50, with the sibling setter at 0x002477D0 rejecting > 5.
+#         0xD8 battery count -> slot 599: payload +0x18 -> 0x2003A804 (0x00247C84), passed
+#         at 0x00247D5A-0x00247D5E to the setter at 0x002477E8, which accepts only 0 or 1
+#         and stores 0x20039E58.
+#   14.7  0xD7 -> slot 95: payload +0x0B stored to 0x2003A037 at 0x00247D06 (the same
+#         clamp setter at 0x002477D0, store 0x002477DE).
+#         0xD8 -> slot 458: payload +0x18 normalised to 0/1 (`adds r2,#0; it ne; movne
+#         r2,#1`, 0x00247D32-0x00247D38) and stored straight to 0x20039A83 at 0x00247D3C.
+#         The setter at 0x002477E8 survives but is handed its own register (0x00247DF6),
+#         so it never changes it. The receive compare block joins selector 0xD8 to offset
+#         +0x18 (0x0024A0FE, `movs r1,#0x18` @0x0024A2E6; `GUICODE.md` Finding 82).
+#   11.23 none located: no count slot is emitted.
+#
+# The table is keyed by `firmware.identify`, not `options.located_derivation`: these
+# facts live in the config-payload copy block and the setters, which the derivation
+# guard does not cover, and the battery count is not a derivation input at all. A built
+# image keeps its GuiCode name and LCD section, so it identifies as its stock.
+#
+# The value is emitted raw, as the bus carries it; neither firmware's clamps (Go Power!
+# > 5 -> 1; 13.6's battery setter rejecting > 1; 14.7's nonzero -> 1) are modelled.
 #
 # The Go Power! count is one of the three sources `options.derived_slots` reads for the
 # nav rail, so importing a live config is what makes an imported coach's icon column
 # right for a floorplan whose burst turns controllers on.
-_COUNT_SLOTS = {0xD8: 599, 0xD7: 39}
+_COUNT_SLOTS: dict = {
+    "13.6": {0xD8: 599, 0xD7: 39},
+    "14.7": {0xD8: 458, 0xD7: 95},
+}
 
 
-def _counts(data: bytes, live: LiveConfig) -> dict:
+def _counts(data: bytes, live: LiveConfig, table: dict = _COUNT_SLOTS) -> dict:
+    from . import firmware
+
+    slots = table.get(firmware.identify(data), {})
     return {str(slot): live.selectors[sel]
-            for sel, slot in sorted(_COUNT_SLOTS.items())
+            for sel, slot in sorted(slots.items())
             if sel in live.selectors}

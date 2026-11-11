@@ -1825,14 +1825,18 @@ class AddButton(Op):
                leave out is unnamed. An unnamed
                switch's arms (nested ones included) are all checked, so a slot the settings
                leave out refuses on any arm that covers the spot, and the refusal names it
-               (`slot 102 = 1`), for the owner to add. On 14.7 the settings must name slot 11
-               (the battery card) as well as slot 102: left unnamed, slot 11's arm 2 covers
-               objects 117 and 132 at the default spot and the build refuses (2026-11-09).
+               (`slot 102 = 1`), for the owner to add. On 14.7 slots 11 (the battery card), 12
+               and 319 are derived from the options where 14.7's routine is located
+               (`options.located_derivation`, `GUICODE.md` Finding 92); slots 11 and 12 only
+               once the settings name slot 33 (a generator option, or the slot itself), so
+               settings with no options leave slot 11 unnamed: its arm 2 covers objects 117
+               and 132 at the default spot and the build refuses (2026-11-09).
                A 14.7 add_button compile also needs `--allow-unverified`, the op being
                emulated there, not hardware-verified. A slot the settings name is taken as
                stated even if a live status drives it (`extra_slots`; the sidecar's `coach`
-               entry lists those as `pinned`). 13.6's derived slots 6 and 453 are added only
-               on 13.6, where their derivation is located; elsewhere they are unnamed. The
+               entry lists those as `pinned`). Derived slots (13.6's 6 and 453, 14.7's 11, 12
+               and 319) are added only where `options.located_derivation` finds their
+               routine byte for byte; elsewhere they are unnamed. The
                check is one switch at a time with its nested arms, never every combination of
                independent unnamed switches: an overlap only two of them moving together
                draws is not seen (2026-11-09: all 6,336 combinations at the 13.6 default spot

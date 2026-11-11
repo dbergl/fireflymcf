@@ -600,4 +600,9 @@ Power is not an OPTIONS binding so it cannot be name-resolved), and `derived_slo
 so it can never change a flashed byte. Skipping the derivation is NOT the safe default here — the nav
 rail's unset state is the five-icon rail, so not deriving draws the Electrical icon for a coach that
 lacks it (the standing "an unset switch is not a safe default" rule).
+*Superseded in part, 2026-11-10:* the slot numbers are not build-stable across firmwares (on 14.7
+they are other registers). The derivation is now per firmware and runs only on an image whose
+routine matches stock byte for byte (`options.located_derivation`): 13.6 derives slots 6 and 453
+from Go Power! slot 39, 14.7 derives slots 11, 12 and 319 from slot 95, and 11.23 derives nothing.
+`livecfg._COUNT_SLOTS` is keyed by firmware too (`GUICODE.md` Finding 92).
 
