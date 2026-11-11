@@ -753,6 +753,8 @@ DERIVATION_GUARDS: tuple = (
 )
 
 
+# The table is bound as a default argument, so the memo stays content-keyed and
+# monkeypatching DERIVATION_GUARDS has no effect: a test passes `guards=` instead.
 def located_derivation(data: bytes, guards: tuple = DERIVATION_GUARDS) -> str | None:
     """`"13.6"`, `"14.7"` or None: the firmware whose derivation routine `data`'s GuiCode
     carries byte for byte (`guards`, default `DERIVATION_GUARDS`). Memoised on content; the

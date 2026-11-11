@@ -175,8 +175,11 @@ canonical_option = livecfg.canonical_option
 RUNTIME_GATE_SLOTS = {512: 1}
 
 
-# Slots GuiCode COMPUTES from other slots, rather than receiving -- the HOME battery
-# block (slot 6) and the left nav rail (slot 453). The arithmetic, the traced branches
+# Slots GuiCode COMPUTES from other slots, rather than receiving, per firmware: on 13.6
+# the HOME battery block (slot 6) and the left nav rail (slot 453); on 14.7 the HOME
+# battery card (slot 11), the generator flag (slot 12) and the nav rail (slot 319), each
+# only on an image that carries that firmware's routine (`options.located_derivation`,
+# `GUICODE.md` Finding 92). The arithmetic, the traced branches
 # and the reason the two treat an absent source differently all live in ONE place,
 # `options.derived_slots`, because `cli render` applies it too and two renderers that
 # disagreed about what the panel computes would be worse than neither doing it.
@@ -185,6 +188,7 @@ RUNTIME_GATE_SLOTS = {512: 1}
 # offering one would let someone preview a battery block, or a rail, that cannot occur
 # with the settings they chose -- a picture the panel would never draw. Picking AES in
 # the coach config is what changes them, exactly as on the coach.
+# 13.6's numbers (the 14.7 ones are `optmod.*_147`).
 BATTERY_BLOCK_SLOT = optmod.BATTERY_BLOCK_SLOT
 NAV_RAIL_SLOT = optmod.NAV_RAIL_SLOT
 GO_POWER_SLOT = optmod.GO_POWER_SLOT
@@ -351,7 +355,10 @@ def derives(stock: bytes, opts: list) -> list:
     the battery block" cannot.
 
     Returned per SOURCE slot so the picker can put the note beside the control that
-    causes it, without knowing which control that is.
+    causes it, without knowing which control that is. Per firmware, as `derived_slots`
+    is: 13.6's notes (battery block, rail), 14.7's (Lithionics and the generator mode
+    drive the battery card, the generator mode the generator flag, and the rail), and
+    none on an image whose derivation routine is not located.
     """
     def slot_of(name):
         return next((o["slot"] for o in opts if o["name"] == name
@@ -359,13 +366,36 @@ def derives(stock: bytes, opts: list) -> list:
 
     ags = slot_of("AGS")
     pi = slot_of("Progressive Inverter")
+    firmware = optmod.located_derivation(stock)
+    if firmware not in ("13.6", "14.7"):
+        return []                       # nothing is derived on this image
 
     out = []
-    if ags is not None:
-        out.append({"source_slot": ags,
-                    "what": "the HOME battery block",
-                    "detail": "The panel picks the battery display from this setting, "
-                              "so it is not a separate choice."})
+    if firmware == "13.6":
+        if ags is not None:
+            out.append({"source_slot": ags,
+                        "what": "the HOME battery block",
+                        "detail": "The panel picks the battery display from this setting, "
+                                  "so it is not a separate choice."})
+    else:
+        lith = slot_of("Lithionics Batteries")
+        if lith is not None:
+            out.append({"source_slot": lith,
+                        "what": "the HOME battery card",
+                        "detail": "With Lithionics batteries on, the panel shows the "
+                                  "Lithionics battery card whatever the generator mode, "
+                                  "so it is not a separate choice."})
+        if ags is not None:
+            out.append({"source_slot": ags,
+                        "what": "the HOME battery card",
+                        "detail": "Without Lithionics batteries, the panel picks the "
+                                  "battery card from the generator mode, so it is not a "
+                                  "separate choice."})
+            out.append({"source_slot": ags,
+                        "what": "the generator flag",
+                        "detail": "The panel sets a flag from whether the mode is AES "
+                                  "(AES or AES Single Output), and the controls that read "
+                                  "it follow the mode."})
     # Both settings feed the nav rail, so the note goes beside each of them. The rail
     # has a third source, the Go Power! controller count, which is not a pickable
     # control here -- naming it in the detail is how someone reconciles a rail that

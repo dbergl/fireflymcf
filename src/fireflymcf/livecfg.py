@@ -157,6 +157,8 @@ _COUNT_SLOTS: dict = {
 }
 
 
+# The table is bound as a default argument, so monkeypatching _COUNT_SLOTS has no
+# effect: a test passes `table=` instead.
 def _counts(data: bytes, live: LiveConfig, table: dict = _COUNT_SLOTS) -> dict:
     from . import firmware
 

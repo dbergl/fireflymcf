@@ -2550,6 +2550,9 @@ slot 37 chooses the wording: slot37=1 → "GEN"/"Unknown" (AGS), slot37=2/3 → 
 cand 830 (slot7=1) is the AGS page (GEN, Triggers, Go Power! Solar). Slots 6/7 are **not named
 options** — they are config-payload state (bus-delivered, Finding 19), correlated with AGS/AES by
 the config load but independent registers, set in a render via `extra_slots`/`--slot`.
+*Superseded for slot 7, 2026-11-10 (Finding 92):* slot 7 is computed, not bus-delivered. Its
+register `0x20039F24` has only two writers, both in the same routine as slot 6: `0x00249D1E`
+(AGS not in {2,3} -> 1) and `0x00249EE0` (AGS in {2,3} -> 0). It is not yet derived in a render.
 
 > **Sharpened for slot 6, 2026-08-21 (`proven-from-code`).** "Correlated with AGS/AES by the
 > config load" understates it: slot 6's register `0x2003A03E` is **computed** from the AGS
@@ -2574,7 +2577,9 @@ the config load but independent registers, set in a render via `extra_slots`/`--
 >
 > This is what lets Firefly Studio show the right battery block from the generator setting alone
 > (`studio/server/reference.py` `derived_slots`) instead of asking for slot 6 by hand. **Slot 7
-> was not traced** — nothing here should be read as applying to the ELECTRICAL selector. The
+> was not traced** — nothing here should be read as applying to the ELECTRICAL selector.
+> *(Superseded 2026-11-10: Finding 92 traces slot 7 to the same AGS test, stores at
+> `0x00249D1E` and `0x00249EE0`.)* The
 `Screen.walk` switch machinery already honours them; nothing new was needed in the engine — the
 earlier bug was only that the *label* bypassed them by reading the option name.
 
