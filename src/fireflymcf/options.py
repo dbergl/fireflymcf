@@ -623,17 +623,17 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #
 #    so object 904 (value 3) is a candidate the firmware never selects.
 #
-#    Not modelled: the instructions after that store write slot 7 (0x20039F24) from the
-#    same test --
+# 1a. THE ELECTRICAL LAYOUT FLAG, slot 7 (0x20039F24). The instructions after that store
+#    write slot 7 from the same test --
 #
 #      0x00249D14  cmp r3,#0x1           ; r3 = (AGS - 2) & 0xFF, as above
-#      0x00249D16  bls.w 0x00249EDC      ;   AGS in {2,3} -> slot 7 = 0 (strb 0x00249EE0)
-#      0x00249D1E  strb r2,[r3]          ;   else r2 = 1  -> slot 7 = 1
-#                                        ; (literals 0x00249e34/0x00249f28)
+#      0x00249D16  bls.w 0x00249EDC      ;   AGS in {2,3} -> slot 7 = 0 (strb 0x00249EE0,
+#                                        ;                  literal 0x00249f28)
+#      0x00249D1E  strb r2,[r3]          ;   else r2 = 1  -> slot 7 = 1 (literal 0x00249e34)
 #
 #    `slot-source` lists those two stores as its only writers; a switch based at 829, arms
 #    {0, 1} and no default, reads it. It is 13.6's counterpart of 14.7's slot 12 below.
-#    Deriving it would change 13.6's output, which is pinned; it is left for a follow-up.
+#    Modelled since 2026-11-11 (it was left out while 13.6's output was pinned unchanged).
 #
 # 2. THE LEFT NAV RAIL, slot 453. Object 974's type-6 switch has `child_base` 385 and
 #    count 4; the candidates' match values are 385 = 0xffff (the explicit default),
@@ -720,6 +720,7 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 # arrives as selector 0xD7 in the floorplan burst) and the arithmetic are transcribed, per
 # firmware.
 BATTERY_BLOCK_SLOT = 6
+ELECTRICAL_LAYOUT_SLOT = 7
 NAV_RAIL_SLOT = 453
 GO_POWER_SLOT = 39
 
@@ -738,13 +739,14 @@ GO_POWER_SLOT_147 = 95
 # `b 0x24A170` at 0x0024A338), so every compare, branch and store on the derivation's path
 # is covered, along with the stores between them (13.6's slot 7, the config copies). No
 # stock-derived build differs from stock inside these ranges (every build image checked,
-# 2026-11-10).
+# 2026-11-10). 13.6's slot-7 literal words (0x00249E34, 0x00249F28, both = 0x20039F24) were
+# added on 2026-11-11, when slot 7 was modelled; same check.
 DERIVATION_GUARDS: tuple = (
     ("13.6",
      ((0x00249CFA, 0x00249D64), (0x00249ECC, 0x00249F0A),
-      (0x00249E0C, 0x00249E10), (0x00249E24, 0x00249E28), (0x00249E2C, 0x00249E34),
-      (0x00249E44, 0x00249E48), (0x00249F24, 0x00249F28), (0x00249F38, 0x00249F3C)),
-     "cfeafef9720f38bca1a8dd54b21428fa22fe6faa5e00477ef01416ce603535c5"),
+      (0x00249E0C, 0x00249E10), (0x00249E24, 0x00249E28), (0x00249E2C, 0x00249E38),
+      (0x00249E44, 0x00249E48), (0x00249F24, 0x00249F2C), (0x00249F38, 0x00249F3C)),
+     "24785d5bb751a173e14187a058c4bad60ba920cf1bb34cf785ed59261de11e6a"),
     ("14.7",
      ((0x0024A12E, 0x0024A194), (0x0024A2FC, 0x0024A340),
       (0x0024A23C, 0x0024A240), (0x0024A24C, 0x0024A258), (0x0024A260, 0x0024A268),
@@ -805,6 +807,10 @@ def _generator_flag_for_147(ags: int) -> int:
     return 0 if ags in (2, 3) else 1
 
 
+def _electrical_layout_for(ags: int) -> int:
+    return 0 if ags in (2, 3) else 1
+
+
 def source_slot(data: bytes, name: str) -> int | None:
     """The value slot the OPTIONS page binds `name` to, or None if this build has none.
 
@@ -839,32 +845,35 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
     it, letting anything the caller set by hand win -- an explicit override stays the
     escape hatch it is everywhere else.
 
-    Which derivation runs is `located_derivation(data)`'s answer: 13.6's (slots 6 and 453)
-    or 14.7's (slots 11, 12 and 319). An image that carries neither routine byte for byte
-    derives nothing (`{}`).
+    Which derivation runs is `located_derivation(data)`'s answer: 13.6's (slots 6, 7 and
+    453) or 14.7's (slots 11, 12 and 319). An image that carries neither routine byte for
+    byte derives nothing (`{}`).
 
-    The derivations differ in how they treat an ABSENT source, on purpose:
+    An ABSENT source reads as the panel's "none" (owner ruling 2026-11-11):
 
-    - **slot 6** (13.6) and **slots 11 and 12** (14.7) are keyed on the AGS slot being
-      present, so nothing is invented for a configuration that never chose a generator
-      mode: they stay unset. The one exception is slot 11 with Lithionics (slot 105)
-      present and non-zero: the routine stores 3 without reading slot 33 (the branch at
-      0x0024A134), so slot 11 = 3 is derived whether or not slot 33 is named. A zero or
-      absent Lithionics value leaves slot 11 to slot 33's test. An unset slot 6 or 11
-      draws its switch's base arm, the no-generator block (901; 765) the panel draws. An unset slot 12 does NOT draw the
-      panel's no-generator arm: its switch (base 428) has a 0xFFFF default, which is the
-      AES arm (slot 33 in {2, 3}), while the panel draws arm 1 for 33 = 0 or 1. A render of
-      such a configuration shows the AES arm there; the placement gate treats slot 12 as
-      unnamed and checks every arm, so it refuses nothing it should build.
-    - **slot 453** (13.6) and **slot 319** (14.7) read an absent source as 0. That is the
-      faithful reading here and it is the case that matters: the panel always holds a
-      concrete byte for all three sources (the config payload carries all three), an option
-      not selected IS off, and "no generator, no solar, no inverter" is precisely when the
-      icon goes away. Since the rail's default candidate is the FIVE-icon one, treating
-      absent as unknown would draw the Electrical icon for exactly the coach that does not
-      have it.
+    - **The AGS slot** (13.6 slot 37, 14.7 slot 33) is a radio -- 0 none, 1 AGS, 2 AES,
+      3 AES Single Output -- and settings that name no generator mode mean 0. The AGS slot
+      itself is derived as 0 (an explicit value always wins and is never returned here), and
+      slots 6 and 7 (13.6) and 11 and 12 (14.7) follow from it, so they are always derived:
+      the no-generator block (6 = 0), the AGS-layout ELECTRICAL page (7 = 1), the
+      no-generator card (11 = 0) and generator flag 1 (12 = 1). The cost: a coach that has
+      AGS or AES but whose settings omit the mode is drawn, and checked by the placement
+      gate, as a coach with no generator; name the mode to get its arms. Slot 11 with
+      Lithionics (slot 105) present and non-zero is 3 regardless: the routine stores 3
+      without reading slot 33 (the branch at 0x0024A134).
+    - **slot 453** (13.6) and **slot 319** (14.7) read an absent source as 0 too. The panel
+      always holds a concrete byte for all three sources (the config payload carries all
+      three), an option not selected IS off, and "no generator, no solar, no inverter" is
+      precisely when the icon goes away. Since the rail's default candidate is the
+      FIVE-icon one, treating absent as unknown would draw the Electrical icon for exactly
+      the coach that does not have it.
 
-    An empty `values` -- no configuration expressed at all -- derives nothing either way.
+    (Before 2026-11-11 slots 6, 11 and 12 were derived only when the AGS slot was named,
+    and 13.6's slot 7 was not derived; an unset slot 12 drew its 0xFFFF default, the AES
+    arm, where the panel draws arm 1 for a coach without AES.)
+
+    An empty `values` -- no configuration expressed at all -- derives nothing. Settings with
+    only `extra_slots` are not empty: they derive as above.
     """
     if not values:
         return {}
@@ -884,8 +893,12 @@ def _source_value(data: bytes, values: dict[int, int], name: str) -> int:
 def _derived_slots_136(data: bytes, values: dict[int, int]) -> dict[int, int]:
     ags = source_slot(data, "AGS")
     out: dict[int, int] = {}
-    if ags is not None and ags in values:
-        out[BATTERY_BLOCK_SLOT] = _battery_block_for(values[ags])
+    if ags is not None:
+        mode = values.get(ags, 0)          # absent: "none" (derived_slots' docstring)
+        if ags not in values:
+            out[ags] = 0
+        out[BATTERY_BLOCK_SLOT] = _battery_block_for(mode)
+        out[ELECTRICAL_LAYOUT_SLOT] = _electrical_layout_for(mode)
     out[NAV_RAIL_SLOT] = _nav_rail_for(
         _source_value(data, values, "AGS"),
         values.get(GO_POWER_SLOT, 0),
@@ -898,13 +911,16 @@ def _derived_slots_147(data: bytes, values: dict[int, int]) -> dict[int, int]:
     ags = source_slot(data, "AGS")
     lithionics = source_slot(data, "Lithionics Batteries")
     out: dict[int, int] = {}
+    if ags is not None and ags not in values:
+        out[ags] = 0                       # absent: "none" (derived_slots' docstring)
+    mode = values.get(ags, 0) if ags is not None else 0
     if lithionics is not None and values.get(lithionics, 0):
         # 0x0024A134: a non-zero Lithionics byte stores 3 without reading slot 33
         out[BATTERY_CARD_SLOT_147] = 3
-    elif ags is not None and ags in values:
-        out[BATTERY_CARD_SLOT_147] = _battery_card_for_147(values[ags], 0)
-    if ags is not None and ags in values:
-        out[GENERATOR_FLAG_SLOT_147] = _generator_flag_for_147(values[ags])
+    elif ags is not None:
+        out[BATTERY_CARD_SLOT_147] = _battery_card_for_147(mode, 0)
+    if ags is not None:
+        out[GENERATOR_FLAG_SLOT_147] = _generator_flag_for_147(mode)
     out[NAV_RAIL_SLOT_147] = _nav_rail_for(
         _source_value(data, values, "AGS"),
         values.get(GO_POWER_SLOT_147, 0),

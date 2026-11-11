@@ -176,11 +176,12 @@ RUNTIME_GATE_SLOTS = {512: 1}
 
 
 # Slots GuiCode COMPUTES from other slots, rather than receiving, per firmware: on 13.6
-# the HOME battery block (slot 6) and the left nav rail (slot 453); on 14.7 the HOME
+# the HOME battery block (slot 6), the ELECTRICAL layout (slot 7) and the left nav rail
+# (slot 453); on 14.7 the HOME
 # battery card (slot 11), the generator flag (slot 12) and the nav rail (slot 319), each
 # only on an image that carries that firmware's routine (`options.located_derivation`,
 # `GUICODE.md` Finding 92). The arithmetic, the traced branches
-# and the reason the two treat an absent source differently all live in ONE place,
+# and how an absent source is read (an absent generator mode is "none") all live in ONE place,
 # `options.derived_slots`, because `cli render` applies it too and two renderers that
 # disagreed about what the panel computes would be worse than neither doing it.
 #
@@ -356,7 +357,7 @@ def derives(stock: bytes, opts: list) -> list:
 
     Returned per SOURCE slot so the picker can put the note beside the control that
     causes it, without knowing which control that is. Per firmware, as `derived_slots`
-    is: 13.6's notes (battery block, rail), 14.7's (Lithionics and the generator mode
+    is: 13.6's notes (battery block, ELECTRICAL layout, rail), 14.7's (Lithionics and the generator mode
     drive the battery card, the generator mode the generator flag, and the rail), and
     none on an image whose derivation routine is not located.
     """
@@ -377,6 +378,11 @@ def derives(stock: bytes, opts: list) -> list:
                         "what": "the HOME battery block",
                         "detail": "The panel picks the battery display from this setting, "
                                   "so it is not a separate choice."})
+            out.append({"source_slot": ags,
+                        "what": "the ELECTRICAL page layout",
+                        "detail": "The panel shows the AES layout of the ELECTRICAL page "
+                                  "when the mode is AES (AES or AES Single Output) and the "
+                                  "AGS layout otherwise, so it is not a separate choice."})
     else:
         lith = slot_of("Lithionics Batteries")
         if lith is not None:

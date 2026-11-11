@@ -414,8 +414,8 @@ def _add_button_project(path, stock, coach=None, op_id="b"):
 
 def test_compile_config_overrides_the_recipe(tmp_path):
     """The recipe's `coach` block puts Star Link (slot 102 = 1) under the default spot on 14.7,
-    so it refuses; `--config` replaces the block whole and builds. On 14.7 `{102: 0}` alone
-    would refuse (slot 11 unnamed), so the file names both."""
+    so it refuses; `--config` replaces the block whole and builds. The file names slot 11 too;
+    the derivation agrees (no generator mode named is "none", 2026-11-11: 33 = 0, 11 = 0)."""
     import json
     from tests.conftest import REPO_ROOT
     stock_path = "firefly-14.7 (Terrain)/mcf.bin"
@@ -433,7 +433,8 @@ def test_compile_config_overrides_the_recipe(tmp_path):
              "--allow-unverified", "--json", cwd=REPO_ROOT)
     assert r.returncode == 0, r.stdout + r.stderr
     side = json.loads((tmp_path / "mcf-b.bin.json").read_text(encoding="utf-8"))
-    assert side["coach"]["slots"] == {"102": 0, "11": 0, "319": 0}   # 319 derived: no sources
+    # 33 derived 0 (no generator mode named), 12 and 319 from it; 11 as the file names it
+    assert side["coach"]["slots"] == {"102": 0, "11": 0, "12": 1, "33": 0, "319": 0}
     assert side["coach"]["source"] == f"--config {cfg}"
 
 

@@ -948,14 +948,16 @@ def test_settings_refuse_an_overlap_the_base_arm_admits(monkeypatch):
     x span the base arm already fills on that band (901's labels 440..515 and 613..688, object
     443 at 514..604, object 440 at 687..777), and no other HOME switch reads slot 6 (walk,
     2026-11-09). So the case is shown on card 903, slot 6 = 2: the default spot is clear in the
-    base arm and covers object 148 "DISABLED" and object 163 (touch) in card 903's arm."""
+    base arm and covers object 148 "DISABLED" and object 163 (touch) in card 903's arm. Those
+    two draw under slot 37 = 1 (AGS), so the settings name it: since 2026-11-11 settings that
+    name no generator mode mean none (slot 37 derived 0), under which card 903 draws neither."""
     from fireflymcf import options
     data = _d()
     out, root, idx = _home_clone(data)
     with pytest.raises(newbutton.PlacementOverlap, match="slot 6 = 2") as e:
         newbutton.check_placement(out, root, idx, coach={6: 2})
     assert "object 148" in str(e.value) and "object 163" in str(e.value)
-    r = _compile_coach(data, options.CoachConfig(extra_slots={6: 2}))
+    r = _compile_coach(data, options.CoachConfig(extra_slots={6: 2, 37: 1}))
     assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
     assert "slot 6 = 2" in r.errors[0]["message"]
     r = _compile(data)
@@ -969,10 +971,10 @@ def test_147_star_link(monkeypatch):
 
     `{102: 0}` alone still refuses: slot 11 (the battery card's switch, based at 765) is then
     unnamed, and its arm 2 draws object 117 "DISABLED" and object 132 (touch) over the spot
-    (the no-settings report's `slot 11 = 2` entry). 14.7 derives slot 11 from the AGS slot (33),
-    or as 3 from Lithionics (105) when it is on; `extra_slots` naming neither leaves it unset, so
-    the owner names slot 11 (or the generator option: `test_147_derived_slot_11`);
-    `{102: 0, 11: 0}` builds."""
+    (the no-settings report's `slot 11 = 2` entry), when it is passed to `check_placement` as is.
+    Through the settings, 14.7 derives slot 11 from the AGS slot (33), or as 3 from Lithionics
+    (105) when it is on, and since 2026-11-11 an absent AGS slot is "none" (33 = 0, so 11 = 0):
+    `extra_slots={102: 0}` builds, as does `{102: 0, 11: 0}`."""
     from fireflymcf import options
     data = _read(STOCK_147)
     out, root, idx = _home_clone(data)
@@ -994,6 +996,10 @@ def test_147_star_link(monkeypatch):
                        firmwares={"13.6", "14.7"})
     assert r.ok, r.errors
     assert "checked against the coach's settings (--config test.json)" in r.manifest[0]
+    r = _compile_coach(data, options.CoachConfig(extra_slots={102: 0}), monkeypatch,
+                       firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    assert r.coach["slots"] == {11: 0, 12: 1, 33: 0, 102: 0, 319: 0}
 
 
 def test_147_derived_slot_11(monkeypatch):

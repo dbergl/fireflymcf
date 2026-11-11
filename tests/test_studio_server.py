@@ -1160,10 +1160,10 @@ def test_battery_block_follows_the_generator_setting(client):
     ags_slot = next(o["slot"] for o in opts if o["name"] == "AGS")
     for ags, want in ((0, 0), (1, 2), (2, 1), (3, 1)):
         assert reference.derived_slots(stock, {ags_slot: ags})[6] == want, ags
-    # Nothing is invented for a preview that never chose a generator mode: slot 6 stays
-    # absent, and the canvas draws the same default block the panel does. (The nav rail
-    # beside it IS derived from an absent AGS -- see its own test for why they differ.)
-    assert 6 not in reference.derived_slots(stock, {5: 8})
+    # A preview that never chose a generator mode is "none" (2026-11-11): the AGS slot is
+    # derived 0 and slot 6 follows it, the no-generator block the panel draws.
+    got = reference.derived_slots(stock, {5: 8})
+    assert got[ags_slot] == 0 and got[6] == 0
 
 
 @pytest.mark.slow
@@ -1280,6 +1280,7 @@ def test_config_reports_what_a_setting_derives_without_the_arithmetic(client):
         by_slot.setdefault(d["source_slot"], []).append(d["what"])
     assert set(by_slot) == {ags, pi}
     assert any("battery" in w for w in by_slot[ags])
+    assert any("ELECTRICAL" in w for w in by_slot[ags])     # slot 7, since 2026-11-11
     # Both settings feed the nav rail, so the note has to sit beside each of them.
     assert any("icon column" in w for w in by_slot[ags])
     assert any("icon column" in w for w in by_slot[pi])

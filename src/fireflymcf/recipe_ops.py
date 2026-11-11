@@ -1827,16 +1827,16 @@ class AddButton(Op):
                leave out refuses on any arm that covers the spot, and the refusal names it
                (`slot 102 = 1`), for the owner to add. On 14.7 slots 11 (the battery card), 12
                and 319 are derived from the options where 14.7's routine is located
-               (`options.located_derivation`, `GUICODE.md` Finding 92); slot 12 only once
-               the settings name slot 33 (a generator option, or the slot itself), and slot
-               11 then too, or as 3 whenever Lithionics (slot 105) is on, which the routine
-               tests first. Settings with no options leave slot 11 unnamed: its arm 2 covers
-               objects 117 and 132 at the default spot and the build refuses (2026-11-09).
+               (`options.located_derivation`, `GUICODE.md` Finding 92). Settings that name
+               no generator mode mean none (2026-11-11): the AGS slot (14.7 33, 13.6 37) is
+               derived 0 and 11 and 12 (13.6: 6 and 7) follow from it, slot 11 being 3
+               whenever Lithionics (slot 105) is on, which the routine tests first. A coach
+               with AGS or AES must name its mode for those arms to be checked.
                A 14.7 add_button compile also needs `--allow-unverified`, the op being
                emulated there, not hardware-verified. A slot the settings name is taken as
                stated even if a live status drives it (`extra_slots`; the sidecar's `coach`
-               entry lists those as `pinned`). Derived slots (13.6's 6 and 453, 14.7's 11, 12
-               and 319) are added only where `options.located_derivation` finds their
+               entry lists those as `pinned`). Derived slots (13.6's 37, 6, 7 and 453, 14.7's
+               33, 11, 12 and 319) are added only where `options.located_derivation` finds their
                routine byte for byte; elsewhere they are unnamed. The
                check is one switch at a time with its nested arms, never every combination of
                independent unnamed switches: an overlap only two of them moving together
