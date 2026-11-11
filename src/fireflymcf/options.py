@@ -623,6 +623,18 @@ def slot_values(data: bytes, config: CoachConfig) -> dict[int, int]:
 #
 #    so object 904 (value 3) is a candidate the firmware never selects.
 #
+#    Not modelled: the instructions after that store write slot 7 (0x20039F24) from the
+#    same test --
+#
+#      0x00249D14  cmp r3,#0x1           ; r3 = (AGS - 2) & 0xFF, as above
+#      0x00249D16  bls.w 0x00249EDC      ;   AGS in {2,3} -> slot 7 = 0 (strb 0x00249EE0)
+#      0x00249D1E  strb r2,[r3]          ;   else r2 = 1  -> slot 7 = 1
+#                                        ; (literals 0x00249e34/0x00249f28)
+#
+#    `slot-source` lists those two stores as its only writers; a switch based at 829, arms
+#    {0, 1} and no default, reads it. It is 13.6's counterpart of 14.7's slot 12 below.
+#    Deriving it would change 13.6's output, which is pinned; it is left for a follow-up.
+#
 # 2. THE LEFT NAV RAIL, slot 453. Object 974's type-6 switch has `child_base` 385 and
 #    count 4; the candidates' match values are 385 = 0xffff (the explicit default),
 #    386 = 0, 387 = 2, 388 = 4. So value 0 selects object 386 and everything else falls
@@ -717,23 +729,26 @@ NAV_RAIL_SLOT_147 = 319
 GO_POWER_SLOT_147 = 95
 
 # `(firmware, ((start, end), ...), sha256)`: the GuiCode address ranges (end exclusive) of
-# each derivation's cited instructions -- every load, compare, branch and store above -- and
-# literal-pool words, and the sha256 of their bytes concatenated, read from stock. The
-# ranges skip the config-block copies between the cited runs (13.6 0x00249D14..0x00249D3C,
-# 14.7 0x0024A152..0x0024A16E) and the pool words those read.
+# each derivation and the literal-pool words its cited loads read, and the sha256 of their
+# bytes concatenated, read from stock. Each routine is guarded as two contiguous runs, from
+# its first cited load through the branch that rejoins the rail test or leaves it (13.6
+# 0x00249CFA..0x00249D62 `b 0x249F08`, and 0x00249ECC..0x00249F08 with `b 0x249D3E` at
+# 0x00249F00; 14.7 0x0024A12E..0x0024A192 `b 0x24A352`, and 0x0024A2FC..0x0024A33E with
+# `b 0x24A170` at 0x0024A338), so every compare, branch and store on the derivation's path
+# is covered, along with the stores between them (13.6's slot 7, the config copies). No
+# stock-derived build differs from stock inside these ranges (every build image checked,
+# 2026-11-10).
 DERIVATION_GUARDS: tuple = (
     ("13.6",
-     ((0x00249CFA, 0x00249D14), (0x00249D3E, 0x00249D62), (0x00249ECC, 0x00249EDC),
-      (0x00249F02, 0x00249F08),
+     ((0x00249CFA, 0x00249D64), (0x00249ECC, 0x00249F0A),
       (0x00249E0C, 0x00249E10), (0x00249E24, 0x00249E28), (0x00249E2C, 0x00249E34),
       (0x00249E44, 0x00249E48), (0x00249F24, 0x00249F28), (0x00249F38, 0x00249F3C)),
-     "4617fc22521683e8c7be78a0c9a0a55da36dd2682040e169a587ad60d7888806"),
+     "cfeafef9720f38bca1a8dd54b21428fa22fe6faa5e00477ef01416ce603535c5"),
     ("14.7",
-     ((0x0024A12E, 0x0024A152), (0x0024A170, 0x0024A192), (0x0024A2FC, 0x0024A31A),
-      (0x0024A33A, 0x0024A340),
+     ((0x0024A12E, 0x0024A194), (0x0024A2FC, 0x0024A340),
       (0x0024A23C, 0x0024A240), (0x0024A24C, 0x0024A258), (0x0024A260, 0x0024A268),
       (0x0024A274, 0x0024A278), (0x0024A544, 0x0024A550), (0x0024A55C, 0x0024A560)),
-     "ca1c4809b6e1ad1a8f56f341180e4bbb4f810b5b75aff25138d6b1fa5a8d125e"),
+     "9587cd5e5329f814ddaa356d59ff3af9ad62eb2629825beb7adfac602c0620ed"),
 )
 
 
@@ -829,8 +844,13 @@ def derived_slots(data: bytes, values: dict[int, int]) -> dict[int, int]:
 
     - **slot 6** (13.6) and **slots 11 and 12** (14.7) are keyed on the AGS slot being
       present, so nothing is invented for a configuration that never chose a generator
-      mode: they stay unset and the walk draws the same default arms the panel does. Given
-      the AGS slot, an absent Lithionics value reads as 0.
+      mode: they stay unset. An unset slot 6 or 11 draws its switch's base arm, the
+      no-generator block (901; 765) the panel draws. An unset slot 12 does NOT draw the
+      panel's no-generator arm: its switch (base 428) has a 0xFFFF default, which is the
+      AES arm (slot 33 in {2, 3}), while the panel draws arm 1 for 33 = 0 or 1. A render of
+      such a configuration shows the AES arm there; the placement gate treats slot 12 as
+      unnamed and checks every arm, so it refuses nothing it should build. Given the AGS
+      slot, an absent Lithionics value reads as 0.
     - **slot 453** (13.6) and **slot 319** (14.7) read an absent source as 0. That is the
       faithful reading here and it is the case that matters: the panel always holds a
       concrete byte for all three sources (the config payload carries all three), an option

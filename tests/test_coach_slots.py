@@ -38,7 +38,7 @@ def test_empty_block_is_no_settings(mcf_136):
     assert options.coach_slots(mcf_136, _cfg(options={}), "recipe") is None
 
 
-def test_147_skips_136_derivations(mcf_147):
+def test_147_extra_slots_only_derive_the_rail(mcf_147):
     got = options.coach_slots(mcf_147, _cfg(extra_slots={102: 1}), "--config x.json")
     # no slot 6, no slot 453: those are 13.6's. 14.7's own rail (319) reads absent sources
     # as 0; its 11 and 12 wait for the AGS slot.
@@ -144,6 +144,8 @@ def test_1123_derives_nothing(mcf_1123):
     ("mcf_147", 0x0024A55C, 102),  # slot 319's literal for the 1 store
     ("mcf_136", 0x00249D08, 5),    # cmp r2,#1: the AGS test
     ("mcf_136", 0x00249F38, 5),    # slot 453's literal for the 1 store
+    ("mcf_147", 0x0024A338, 102),  # b 0x24A170: the A in {2,3} path rejoining the rail test
+    ("mcf_136", 0x00249F00, 5),    # b 0x249D3E: the same rejoin on 13.6
 ])
 def test_one_changed_byte_derives_nothing(request, image, addr, named):
     from fireflymcf import theme
@@ -157,13 +159,18 @@ def test_one_changed_byte_derives_nothing(request, image, addr, named):
     assert options.coach_slots(data, _cfg(extra_slots={named: 0}), "recipe").slots == {named: 0}
 
 
-def test_a_byte_outside_the_ranges_still_derives(mcf_147):
-    """The config-block copy between the cited runs (0x0024A152..0x0024A16E) is not guarded."""
+@pytest.mark.parametrize("image, addr, want", [
+    ("mcf_147", 0x00240100, "14.7"),   # GuiCode far from the config-payload handler
+    ("mcf_147", 0x0024A196, "14.7"),   # the next block after the guarded run's `b 0x24A352`
+    ("mcf_136", 0x00240100, "13.6"),
+    ("mcf_136", 0x00249D66, "13.6"),   # the next block after the guarded run's `b 0x249F08`
+])
+def test_a_byte_outside_the_routine_still_derives(request, image, addr, want):
     from fireflymcf import theme
-    data = bytearray(mcf_147)
+    data = bytearray(request.getfixturevalue(image))
     section = theme.guicode_section(data)
-    data[section.offset + 0x0024A160 - theme.guicode_base(section)] ^= 0x01
-    assert options.located_derivation(bytes(data)) == "14.7"
+    data[section.offset + addr - theme.guicode_base(section)] ^= 0x01
+    assert options.located_derivation(bytes(data)) == want
 
 
 def test_guards_are_an_argument(mcf_147):
