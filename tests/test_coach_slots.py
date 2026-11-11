@@ -38,9 +38,11 @@ def test_empty_block_is_no_settings(mcf_136):
     assert options.coach_slots(mcf_136, _cfg(options={}), "recipe") is None
 
 
-def test_147_skips_136_derivations(mcf_147):
+def test_147_extra_slots_only_derive_the_rail(mcf_147):
     got = options.coach_slots(mcf_147, _cfg(extra_slots={102: 1}), "--config x.json")
-    assert got.slots == {102: 1}           # no slot 6, no slot 453: those are 13.6's
+    # no slot 6, no slot 453: those are 13.6's. 14.7's own rail (319) reads absent sources
+    # as 0; its 11 and 12 wait for the AGS slot.
+    assert got.slots == {102: 1, 319: 0}
     assert got.pinned == (102,)
     assert got.source == "--config x.json"
 
@@ -82,6 +84,111 @@ def test_a_default_arm_admits_any_value(mcf_136):
     still one the panel draws (the default)."""
     got = options.coach_slots(mcf_136, _cfg(extra_slots={453: 7}), "recipe", frozenset())
     assert got.slots == {453: 7}
+
+
+# --- derived slots, per located firmware (2026-11-10) ------------------------------------------
+#
+# 13.6 slot 37 = AGS, 39 = Go Power! count, 113 = Progressive Inverter -> 6, 453.
+# 14.7 slot 33 = AGS, 95 = Go Power! count, 104 = Progressive Inverter, 105 = Lithionics -> 11,
+# 12, 319 (options.py's comment block cites the routines).
+
+@pytest.mark.parametrize("values, want", [
+    ({33: 1, 105: 0}, {11: 2, 12: 1, 319: 1}),
+    ({33: 1}, {11: 2, 12: 1, 319: 1}),                 # absent Lithionics reads as 0
+    ({33: 1, 105: 1}, {11: 3, 12: 1, 319: 1}),         # Lithionics wins over AGS
+    ({33: 0, 105: 1}, {11: 3, 12: 1, 319: 0}),
+    ({33: 2}, {11: 0, 12: 0, 319: 1}),
+    ({33: 3}, {11: 0, 12: 0, 319: 1}),
+    ({33: 0}, {11: 0, 12: 1, 319: 0}),
+    ({33: 0, 95: 1}, {11: 0, 12: 1, 319: 1}),
+    ({33: 0, 104: 1}, {11: 0, 12: 1, 319: 1}),
+    ({102: 0}, {319: 0}),                              # no AGS slot: no 11, no 12
+    ({105: 1}, {11: 3, 319: 0}),                       # Lithionics decides 11 without 33
+    ({105: 0}, {319: 0}),                              # ...but a zero needs 33's test
+    ({}, {}),
+])
+def test_147_derivation(mcf_147, values, want):
+    assert options.derived_slots(mcf_147, values) == want
+
+
+@pytest.mark.parametrize("values, want", [
+    # the outputs the derivation gave before it was per firmware
+    ({37: 0}, {6: 0, 453: 0}),
+    ({37: 1}, {6: 2, 453: 1}),
+    ({37: 2}, {6: 1, 453: 1}),
+    ({37: 3}, {6: 1, 453: 1}),
+    ({5: 8}, {453: 0}),
+    ({5: 8, 113: 1}, {453: 1}),
+    ({5: 8, 39: 2}, {453: 1}),
+    ({5: 8, 37: 0, 113: 0}, {6: 0, 453: 0}),
+    ({37: 0, 39: 1}, {6: 0, 453: 1}),
+    ({}, {}),
+])
+def test_136_derivation_unchanged(mcf_136, values, want):
+    assert options.derived_slots(mcf_136, values) == want
+
+
+def test_located_derivation(mcf_136, mcf_147, mcf_1123):
+    assert options.located_derivation(mcf_136) == "13.6"
+    assert options.located_derivation(mcf_147) == "14.7"
+    assert options.located_derivation(mcf_1123) is None
+    assert options.located_derivation(b"not an mcf") is None
+
+
+def test_1123_derives_nothing(mcf_1123):
+    assert options.derived_slots(mcf_1123, {5: 1}) == {}
+    assert options.derived_slots(mcf_1123, {37: 1, 39: 1, 113: 1}) == {}
+
+
+@pytest.mark.parametrize("image, addr, named", [
+    ("mcf_147", 0x0024A13A, 102),  # movs r2,#3: the Lithionics store's value
+    ("mcf_147", 0x0024A55C, 102),  # slot 319's literal for the 1 store
+    ("mcf_136", 0x00249D08, 5),    # cmp r2,#1: the AGS test
+    ("mcf_136", 0x00249F38, 5),    # slot 453's literal for the 1 store
+    ("mcf_147", 0x0024A338, 102),  # b 0x24A170: the A in {2,3} path rejoining the rail test
+    ("mcf_136", 0x00249F00, 5),    # b 0x249D3E: the same rejoin on 13.6
+])
+def test_one_changed_byte_derives_nothing(request, image, addr, named):
+    from fireflymcf import theme
+    data = bytearray(request.getfixturevalue(image))
+    section = theme.guicode_section(data)
+    data[section.offset + addr - theme.guicode_base(section)] ^= 0x01
+    data = bytes(data)
+    assert options.located_derivation(data) is None
+    assert options.derived_slots(data, {33: 1, 37: 1, named: 0}) == {}
+    # and coach_slots derives nothing either: only the named slot comes back
+    assert options.coach_slots(data, _cfg(extra_slots={named: 0}), "recipe").slots == {named: 0}
+
+
+@pytest.mark.parametrize("image, addr, want", [
+    ("mcf_147", 0x00240100, "14.7"),   # GuiCode far from the config-payload handler
+    ("mcf_147", 0x0024A196, "14.7"),   # the next block after the guarded run's `b 0x24A352`
+    ("mcf_136", 0x00240100, "13.6"),
+    ("mcf_136", 0x00249D66, "13.6"),   # the next block after the guarded run's `b 0x249F08`
+])
+def test_a_byte_outside_the_routine_still_derives(request, image, addr, want):
+    from fireflymcf import theme
+    data = bytearray(request.getfixturevalue(image))
+    section = theme.guicode_section(data)
+    data[section.offset + addr - theme.guicode_base(section)] ^= 0x01
+    assert options.located_derivation(bytes(data)) == want
+
+
+def test_guards_are_an_argument(mcf_147):
+    """The table is passed, not read from the module (the memo trap)."""
+    assert options.located_derivation(mcf_147, ()) is None
+    only_136 = tuple(g for g in options.DERIVATION_GUARDS if g[0] == "13.6")
+    assert options.located_derivation(mcf_147, only_136) is None
+
+
+def test_147_coach_slots_derive(mcf_147):
+    got = options.coach_slots(mcf_147, _cfg(options={"AGS": 1}, extra_slots={102: 0}),
+                              "recipe")
+    assert got.slots == {33: 1, 102: 0, 11: 2, 12: 1, 319: 1}
+    # an extra slot still wins over a derived one
+    got = options.coach_slots(mcf_147, _cfg(options={"AGS": 1}, extra_slots={11: 0}),
+                              "recipe")
+    assert got.slots[11] == 0 and got.slots[12] == 1
 
 
 # --- the recipe ------------------------------------------------------------------------------

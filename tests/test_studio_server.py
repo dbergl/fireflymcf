@@ -1397,3 +1397,25 @@ def test_pins_reference_refuses_with_the_bridge_code(client, monkeypatch, reques
     r = client.get("/api/reference/pins")
     assert r.status_code == 422
     assert r.json()["detail"]["code"] == "BRIDGE_UNKNOWN"
+
+
+def test_derives_notes_follow_the_firmware():
+    """14.7's notes are its own: Lithionics and the generator mode drive the battery card
+    (slot 11), the generator mode the generator flag (slot 12), and both the generator mode
+    and the inverter the rail (slot 319). 11.23 derives nothing, so it gets no notes."""
+    from studio.server import reference
+    stock = open("firefly-14.7 (Terrain)/mcf.bin", "rb").read()
+    body = reference.config(stock)
+    slot = {o["name"]: o["slot"] for o in body["options"] if o["slot"] is not None}
+    by_slot = {}
+    for d in body["derives"]:
+        by_slot.setdefault(d["source_slot"], []).append(d["what"])
+    ags, pi, lith = slot["AGS"], slot["Progressive Inverter"], slot["Lithionics Batteries"]
+    assert set(by_slot) == {ags, pi, lith}
+    assert sorted(by_slot[lith]) == ["the HOME battery card"]
+    assert sorted(by_slot[ags]) == ["the HOME battery card", "the generator flag",
+                                    "the left icon column"]
+    assert by_slot[pi] == ["the left icon column"]
+
+    old = open("firefly-11.23/mcf.bin", "rb").read()
+    assert reference.derives(old, reference.config(old)["options"]) == []

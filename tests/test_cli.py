@@ -433,7 +433,7 @@ def test_compile_config_overrides_the_recipe(tmp_path):
              "--allow-unverified", "--json", cwd=REPO_ROOT)
     assert r.returncode == 0, r.stdout + r.stderr
     side = json.loads((tmp_path / "mcf-b.bin.json").read_text(encoding="utf-8"))
-    assert side["coach"]["slots"] == {"102": 0, "11": 0}
+    assert side["coach"]["slots"] == {"102": 0, "11": 0, "319": 0}   # 319 derived: no sources
     assert side["coach"]["source"] == f"--config {cfg}"
 
 

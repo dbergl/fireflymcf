@@ -969,8 +969,10 @@ def test_147_star_link(monkeypatch):
 
     `{102: 0}` alone still refuses: slot 11 (the battery card's switch, based at 765) is then
     unnamed, and its arm 2 draws object 117 "DISABLED" and object 132 (touch) over the spot
-    (the no-settings report's `slot 11 = 2` entry). 13.6's slot-6 derivation is not located on
-    14.7 (spec 12), so the owner names slot 11; `{102: 0, 11: 0}` builds."""
+    (the no-settings report's `slot 11 = 2` entry). 14.7 derives slot 11 from the AGS slot (33),
+    or as 3 from Lithionics (105) when it is on; `extra_slots` naming neither leaves it unset, so
+    the owner names slot 11 (or the generator option: `test_147_derived_slot_11`);
+    `{102: 0, 11: 0}` builds."""
     from fireflymcf import options
     data = _read(STOCK_147)
     out, root, idx = _home_clone(data)
@@ -992,6 +994,27 @@ def test_147_star_link(monkeypatch):
                        firmwares={"13.6", "14.7"})
     assert r.ok, r.errors
     assert "checked against the coach's settings (--config test.json)" in r.manifest[0]
+
+
+def test_147_derived_slot_11(monkeypatch):
+    """14.7 derives slot 11 from the generator option (`options.derived_slots`, 14.7 routine at
+    0x0024A12E): with no generator (slot 33 = 0) slot 11 = 0 and the default spot builds without
+    the owner naming slot 11; with AGS (33 = 1) slot 11 = 2 draws object 117 "DISABLED" and
+    object 132 (touch) over the spot, and the refusal names the derived slot as a setting, not
+    as an unnamed arm."""
+    from fireflymcf import options
+    data = _read(STOCK_147)
+    r = _compile_coach(data, options.CoachConfig(options={"AGS": 0}, extra_slots={102: 0}),
+                       monkeypatch, firmwares={"13.6", "14.7"})
+    assert r.ok, r.errors
+    assert r.coach["slots"] == {11: 0, 12: 1, 33: 0, 102: 0, 319: 0}
+    assert r.coach["pinned"] == [102]
+    r = _compile_coach(data, options.CoachConfig(options=["AGS"], extra_slots={102: 0}),
+                       monkeypatch, firmwares={"13.6", "14.7"})
+    assert not r.ok and r.errors[0]["code"] == "PLACEMENT_OVERLAP", r.errors
+    msg = r.errors[0]["message"]
+    assert "under the coach's settings (slot 11 = 2 and" in msg and "unnamed" not in msg, msg
+    assert "object 117" in msg and "object 132" in msg
 
 
 def test_unnamed_slot_is_strict(monkeypatch):

@@ -2550,6 +2550,9 @@ slot 37 chooses the wording: slot37=1 → "GEN"/"Unknown" (AGS), slot37=2/3 → 
 cand 830 (slot7=1) is the AGS page (GEN, Triggers, Go Power! Solar). Slots 6/7 are **not named
 options** — they are config-payload state (bus-delivered, Finding 19), correlated with AGS/AES by
 the config load but independent registers, set in a render via `extra_slots`/`--slot`.
+*Superseded for slot 7, 2026-11-10 (Finding 92):* slot 7 is computed, not bus-delivered. Its
+register `0x20039F24` has only two writers, both in the same routine as slot 6: `0x00249D1E`
+(AGS not in {2,3} -> 1) and `0x00249EE0` (AGS in {2,3} -> 0). It is not yet derived in a render.
 
 > **Sharpened for slot 6, 2026-08-21 (`proven-from-code`).** "Correlated with AGS/AES by the
 > config load" understates it: slot 6's register `0x2003A03E` is **computed** from the AGS
@@ -2574,7 +2577,9 @@ the config load but independent registers, set in a render via `extra_slots`/`--
 >
 > This is what lets Firefly Studio show the right battery block from the generator setting alone
 > (`studio/server/reference.py` `derived_slots`) instead of asking for slot 6 by hand. **Slot 7
-> was not traced** — nothing here should be read as applying to the ELECTRICAL selector. The
+> was not traced** — nothing here should be read as applying to the ELECTRICAL selector.
+> *(Superseded 2026-11-10: Finding 92 traces slot 7 to the same AGS test, stores at
+> `0x00249D1E` and `0x00249EE0`.)* The
 `Screen.walk` switch machinery already honours them; nothing new was needed in the engine — the
 earlier bug was only that the *label* bypassed them by reading the option name.
 
@@ -6411,6 +6416,112 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 (a redefinition ends a pointer's lifetime; a parameter survives a call only through a copy), the
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
+
+## Finding 92 — 14.7 computes its battery card, generator flag and nav rail from the options in one routine, and its two counts land on slots 95 and 458 — `proven-from-code`, 2026-11-10
+
+**The question.** `options.derived_slots` transcribed 13.6's config-payload arithmetic (slot 6, the HOME
+battery block, Finding 31; slot 453, the left nav rail, Finding 47) and ran it on every image. On 14.7
+those slot numbers are other registers, so a 14.7 or 11.23 render was handed 13.6's slots, while
+the placement gate (`DERIVED_ON`, then 13.6 only) derived nothing there and a 14.7 build had to
+name slot 11 by hand. Which slots does 14.7 compute, from what, and which count selectors feed it?
+
+**The routine** (14.7 GuiCode at `0x00240000`; `fireflymcf slot-source` lists every store).
+Registers: slot 11 = `0x20039BF5`, 12 = `0x20039D9D`, 319 = `0x2003A14F`; sources slot 33 (the
+AGS / AES selector, OPTIONS "AGS" / "AES" / "AES Single Output") = `0x20039F08`, 95 (Go Power!
+count) = `0x2003A037`, 104 (Progressive Inverter) = `0x2003A169`, 105 (Lithionics Batteries) =
+`0x2003A009`.
+
+```
+0x0024A12E ldr r3,[pc,#0x120] ; =0x2003A009 (lit @0x24A250) Lithionics (105)
+0x0024A130 ldrb r3,[r3] ; cmp r3,#0 ; beq.w 0x24A2FC
+0x0024A138 ldr r3,[=0x20039BF5] ; movs r2,#3 ; strb  -> slot 11 = 3   (store @0x24A13C)
+0x0024A2FC ldr r3,[=0x20039F08] (lit @0x24A544) ; ldrb ; cmp r3,#1 ; beq 0x24A30C
+0x0024A304 ... movs r2,#0 ; strb @0x24A308 -> slot 11 = 0 (lit @0x24A548)
+0x0024A30C ... movs r2,#2 ; strb @0x24A310 -> slot 11 = 2
+0x0024A13E ldr r3,[=0x20039F08] ; ldrb ; subs #2 ; uxtb ; cmp #1 ; bls.w 0x24A314
+0x0024A14C ldr r3,[=0x20039D9D] ; movs r2,#1 ; strb @0x24A150 -> slot 12 = 1
+0x0024A314 ldr r3,[=0x20039D9D] ; movs r2,#0 ; strb @0x24A318 -> slot 12 = 0   (33 in {2,3})
+0x0024A170 ldr r3,[=0x20039F08] ; ldrb ; cmp #0 ; bne.w 0x24A33A
+0x0024A17A ldr r2,[=0x2003A037] ; ldrb ; cmp #0 ; bne.w 0x24A33A          (Go Power! count)
+0x0024A184 ldr r2,[=0x2003A169] ; ldrb ; cmp #0 ; bne.w 0x24A33A          (Progressive Inverter)
+0x0024A18E ldr r3,[=0x2003A14F] ; strb r2 (=0) @0x24A190 -> slot 319 = 0
+0x0024A33A ldr r2,[=0x2003A14F] ; movs r1,#1 ; strb @0x24A33E -> slot 319 = 1
+```
+
+Those are the complete writer sets: `slot-source` lists slot 11's stores as `0x24A13C`,
+`0x24A308`, `0x24A310`, slot 12's as `0x24A150`, `0x24A318`, and slot 319's as `0x24A190`,
+`0x24A33E`. So, with L = slot 105, A = slot 33, G = slot 95, P = slot 104:
+
+| slot | rule | read by (type-6 switch) |
+|---|---|---|
+| 11, the HOME battery card | `3 if L else (2 if A == 1 else 0)` | base 765, arms {0,1,2,3}, no default; 1 is never written, so its arm is unreachable |
+| 12, the generator flag | `0 if A in (2, 3) else 1` | base 428, arms {1, default}; slot 33 also drives a base-428 record |
+| 319, the left nav rail | `1 if (A or G or P) else 0` | base 343, arms {0,2,4, default}: as 13.6's 453, 0 draws the four-icon rail and 1 the default; 2 and 4 are unreachable |
+
+It is 13.6's handler with a Lithionics test put ahead of the battery block (Lithionics wins over
+AGS) and the generator test given a slot of its own.
+
+**Slot 95 is the Go Power! count**, by three routes: the clamp setter at `0x002477D0` is 13.6's
+byte for byte (`cmp r0,#5; bhi`, store `0x002477DE`, literal `0x2003A037`); the config-payload
+copy block stores byte `+0x0B` there at `0x00247D06` (`cmp r2,#5; bls; movs r2,#1` first, as 13.6's
+`0x00247C50` for slot 39); and the receive compare block joins selector `0xD7` to offset `+0x0B`
+(`0x0024A0E6` load, `movs r1,#0xb` at `0x0024A2DA` before `bl 0x25B9B0`; Finding 82's join).
+Its switch readers repeat slot 39's on 13.6 (13.6 base 1203 and 14.7 base 985 both carry arms
+{1..5, default}).
+
+**The battery count (`0xD8`) reaches slot 458 by another path than 13.6's.** 13.6 copies
+payload `+0x18` into `0x2003A804` (`0x00247C84`-`0x00247C88`) and passes it at `0x00247D5A`-
+`0x00247D5E` to the setter at `0x002477E8`, which accepts only 0 or 1 and stores `0x20039E58`,
+slot 599 (Finding 45). 14.7 normalises the byte and stores it straight to the slot:
+
+```
+0x00247D32 ldrb r2,[r3,#0x18]
+0x00247D34 adds r2,#0 ; it ne ; movne r2,#1     ; nonzero -> 1
+0x00247D3A ldr  r1,[pc,#0x198]                  ; =0x20039A83 (lit @0x247ED4), slot 458
+0x00247D3C strb r2,[r1]
+```
+
+The setter at `0x002477E8` survives (literal `0x20039A83` at `0x002477FC`) but its one call,
+`0x00247DF6 ldr r3,[=0x20039A83]; ldrb r0,[r3]; bl 0x2477E8`, hands it its own register, so its
+`cmp r3,r0; beq` returns without a store. The receive compare block joins selector `0xD8` to the
+offset (`0x0024A0FE` load of `0x20039A83`, `movs r1,#0x18` at `0x0024A2E6`), and two touch
+handlers send it (`movs r2,#0; movs r1,#0x18` at `0x0024BB3A` for id `0x1772`, `movs r2,#1` at
+`0x0024B1C0` for id `0x1773`; that these are the Batteries `1`/`2` controls is inference). Slot 458 is read by object 1017's two switches (bases 624 and 626, arms {0, 1}, no
+default), the shape of 13.6's object 1235 on slot 599. For a legal count (0 or 1) the two
+firmwares store the same value; for a larger one 13.6 keeps the old value and 14.7 stores 1.
+
+**What changed.** `options.derived_slots` is per firmware: `located_derivation(data)` hashes each
+routine's cited instruction runs and literal words (`DERIVATION_GUARDS`) and runs 13.6's or 14.7's
+arithmetic only on an image that carries one byte for byte; 11.23, and any image whose routine
+differs, derives nothing. `livecfg._COUNT_SLOTS` is keyed by `firmware.identify` (the count
+facts live in the copy block and the setters, which the derivation guard does not cover): 13.6
+`{0xD8: 599, 0xD7: 39}`, 14.7 `{0xD8: 458, 0xD7: 95}`, 11.23 none.
+
+**Rulings.**
+
+- **Slot 11 = 3 needs no slot 33.** With Lithionics present and non-zero, `0x0024A134` skips the
+  slot-33 test and the routine stores 3 (`0x0024A13C`), so `derived_slots` derives slot 11 = 3
+  whether or not the settings name slot 33 (`options=['Lithionics Batteries']` alone gives
+  `{105: 1}` and so slot 11 = 3). A zero or absent Lithionics value leaves slot 11 to slot 33.
+- **An unset slot 12 draws its default arm, the AES arm.** Slot 12, and slot 11 when Lithionics is
+  not on, are derived only when the settings name slot 33 (as 13.6's slot 6 is keyed on its AGS
+  slot). Left unset, slot 11 draws
+  its base arm (765, the no-generator card the panel draws), but slot 12's switch has a `0xFFFF`
+  default, which is the arm the panel draws for 33 in {2, 3}, while for 33 = 0 or 1 the panel
+  draws arm 1. A render of settings that name no generator mode shows the AES arm there; the
+  placement gate treats slot 12 as unnamed and checks every arm, so it refuses nothing it should
+  build.
+- **13.6's slot 7 is the unmodelled counterpart of 14.7's slot 12.** The same test after 13.6's
+  slot 6 store writes `0x20039F24`: `0x00249D14 cmp r3,#1; bls.w 0x249EDC` (AGS in {2,3} -> 0,
+  `strb` at `0x00249EE0`), else 1 at `0x00249D1E`. `slot-source` lists those two stores as its
+  only writers, and a switch based at 829, arms {0, 1}, no default, reads it. Deriving it would
+  change 13.6's pinned output; it is a follow-up.
+
+Tests: `tests/test_coach_slots.py` (the 14.7 rules for each input, 13.6 unchanged, the located
+firmware of each corpus image, one changed byte in either routine deriving nothing while a byte
+outside it still derives, 11.23 deriving nothing, 14.7 settings with only `extra_slots`);
+`tests/test_newbutton.py::test_147_derived_slot_11`; `tests/test_livecfg.py` (14.7's counts on
+slots 95 and 458 and never 39 or 599, 13.6's unchanged, none on 11.23).
 
 ## Finding 91 — the per-tick decoder runs from its entry to its one epilogue, and only one of its seven "range fences" refuses a value — `proven-from-code` (the extent; the classification), checked `observed-in-emulation` (Absorb/Float on 14.7), 2026-11-08
 
