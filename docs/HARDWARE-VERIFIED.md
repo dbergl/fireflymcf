@@ -29,6 +29,14 @@ all three places or stock shows through. Stand-alone colours (`extra`) also reac
 only ever stored straight into SRAM: the battery green and black. HOME's tank fills
 (`tank_fills`) and wells (`tank_wells`) are scoped.
 
+**Temperature readout in the panel's units** (`add_temperature_readout`, `tempreadout.py`; verified
+on the coach 2026-11-12, owner): an RV-C temperature (`1FE94` BATTERY_STATUS_2 bytes 2-3, appended
+with `append_filter`) drawn on the ELECTRICAL Batteries card. A per-tick routine converts the word
+into a signed type-4 cell by the Temp Units flag (display cell 9, `0x2003A2A3`), as GuiCode's own
+ambient conversion does (`0x24A9DE`-`0x24AA8A`). It is drawn under CLIMATE's Celsius/Fahrenheit
+directive switch (872[6] → 93/94) with a `°C`/`°F` label on a second cell-9 switch. In the emulator
+the same day, both units, a sub-zero reading and the stale/no-data dashes all drew as designed.
+
 **Remap** (spec §11–12, `BUS-BASELINE.md` PC.13–16): the `Bath Fan → Starlink` job is
 complete and flashed. The panel **does not cache bindings** — a two-byte GuiData edit
 changed what it transmits (instance 38, not 40). The panel only ever sends **command 5

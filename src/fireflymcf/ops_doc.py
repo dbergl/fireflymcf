@@ -324,6 +324,15 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "829 is verified); it is refused when the paste moves any "
         "other record or a caption would inherit a value slot (LAYOUT_REFUSED).",
         "`cardreadouts.py`, `readout.py`"),
+    "add_temperature_readout": ("guicode",
+        "Show a received RV-C temperature in the unit the Temp Units row selects, as CLIMATE "
+        "does: a per-tick routine converts it into a signed cell (tenths of a degree C, or "
+        "whole degrees F, by display cell 9), drawn under CLIMATE's own Celsius/Fahrenheit "
+        "directive switch with an optional `°C`/`°F` label; no reading draws dashes.",
+        "Coach-verified 2026-11-12 (owner): a battery temperature on the ELECTRICAL "
+        "Batteries card from `1FE94`. Emulated the same day in both units: sub-zero readings "
+        "carry their sign, and no data or a stale filter draws dashes.",
+        "`tempreadout.py`"),
     "add_enum_label": ("structural",
         "Show a received value as text from a table (1-16 entries plus a default for stale and "
         "unlisted values) on any page: a per-tick statusfold routine maps the masked, shifted "

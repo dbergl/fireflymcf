@@ -111,7 +111,8 @@ def check_frame(data: bytes) -> None:
 
 
 def attach(data: bytes, obj_bytes: bytes, parent: int = aescompact.ELECTRICAL_AES_BODY,
-           at: tuple[int, int] | None = None) -> tuple[bytes, int]:
+           at: tuple[int, int] | None = None, after_authored: int | None = None
+           ) -> tuple[bytes, int]:
     """Append the object and attach it. On the default parent (829, aes_card_layout's frame) a
     plain wtype-5 attach goes in at 829[ATTACH_AT]; on any other parent `insert.insert_object`
     clones one of that parent's own wtype-5 attach records (`at` positions it) as the parent's
@@ -152,6 +153,13 @@ def attach(data: bytes, obj_bytes: bytes, parent: int = aescompact.ELECTRICAL_AE
             and all(g is None for g in chk.geom[:4])):
         raise CardReadoutsError("authored attach record failed its self-decode")
     stream = [out[r.offset:r.end] for r in frame]
-    stream.insert(ATTACH_AT, bytes(rec))
+    pos = ATTACH_AT
+    if after_authored is not None:
+        # after every attach already at ATTACH_AT that names an authored object (index >=
+        # `after_authored`, the stock object count): an earlier add_card_readouts keeps 829[8]
+        while (pos < len(frame) and frame[pos].wtype == 5
+               and (frame[pos].child_index or 0) >= after_authored):
+            pos += 1
+    stream.insert(pos, bytes(rec))
     out, _ = relocate.replace_object_records(out, body, bytes([len(stream)]) + b"".join(stream))
     return out, index

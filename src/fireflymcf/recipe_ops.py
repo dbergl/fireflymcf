@@ -44,6 +44,7 @@ from fireflymcf import statelights
 from fireflymcf import statusfold
 from fireflymcf import switchpin
 from fireflymcf import tankbroadcast
+from fireflymcf import tempreadout
 from fireflymcf import variantgates
 from fireflymcf.recipe import Ctx, Op, RecipeError, op, resolve_target
 
@@ -8518,6 +8519,183 @@ class AddCardReadouts(Op):
         assert got == [tuple(x) for x in h["rows"]], "rows read back as %s" % got
         return ("add_card_readouts: %d rows %s in object %d, attached to object %d"
                 % (len(got), [g[0] for g in got], h["readouts"], h["object"]))
+
+
+@op("add_temperature_readout")
+class AddTemperatureReadout(Op):
+    """A live RV-C temperature (1/32 K steps) drawn in the unit the panel's Temp Units row
+    selects, the way CLIMATE draws its own (`tempreadout`): a per-tick routine converts the
+    register into a fresh signed (type-4) cell, tenths of a degree C while display cell 9 is 0
+    and whole degrees F otherwise, as GuiCode's ambient conversion does (13.6 `0x24A9DE`-
+    `0x24AA8A`). The object copies the stock directive switch on cell 9 (CLIMATE's 872[6], arms
+    93/94: width 5 with one place, width 3 with none), draws the cell with a wtype-8 readout
+    right-justified at the pen (`x`, `y`: the digits' right edge and baseline), then a second
+    switch on cell 9 selects a `°C` or `°F` label in `unit` (omit it for CLIMATE's bare `°`-less
+    number). A reading above `0xFAFF` (no data, or the 10-s/30-s staleness sentinel) stores
+    30000, too wide for either field, so the panel draws its own dashes.
+
+    The object attaches like `add_card_readouts`: at 829[8] on aes_card_layout's frame, or by
+    the paste path under another `parent` with the whole-page gates.
+
+    Error codes:
+      BAD_PARAMS      -- a missing x/y, a `unit` box that is not {x, y, w, h}.
+      READOUT_REFUSED -- the register, the units switch (`tempreadout.units_switch`: one stock
+                         Celsius/Fahrenheit directive switch on cell 9), the cell or the
+                         routine could not be resolved or built.
+      GROW_REFUSED    -- GuiCode could not be grown for the routine.
+      DETOUR_REFUSED  -- the per-tick hook did not hold the `bl` the chain expects.
+      NO_GLYPH        -- the unit font has no '°', 'C' or 'F'.
+      WRONG_SHAPE     -- 829 is not aes_card_layout's frame, or a record failed its self-decode.
+      LAYOUT_REFUSED  -- (another `parent`) the placement changes any other record on a page
+                         reaching `parent`.
+      REPLACE_REFUSED -- 829 could not be relocated.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`: decoder,
+        layout engine or renderer not a twin), or a template's wtype is not drawn by a proven
+        renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen readout template cannot be used on this image (`donors`): no
+        stock record witnesses its form, or the value font is missing or cannot draw
+        `donors.READOUT_CHARS`.
+      NO_DONOR -- the frozen readout template pair is not a (directive, wtype-8) pair on this
+        image (`readout._donor_pair`).
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image: a bound compare the grow cannot rebump, or a rebump surface that misses one
+        (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
+    """
+
+    hardware_verified = True        # coach-verified 2026-11-12 (owner), 829 path
+    firmwares = frozenset({"13.6"})
+
+    PARAMS = {
+        "properties": {
+            "register": {"type": "object", "description": "{ref} | {dgn, instance|selector}: "
+                         "an RV-C temperature word (u16, 0.03125 degC from -273)"},
+            "parent": {"description": "object index or {ref}; default 829", "default": 829},
+            "x": {"type": "integer", "description": "the digits' right edge"},
+            "y": {"type": "integer", "description": "the digits' baseline"},
+            "font": {"type": "integer", "default": 15},
+            "unit": {"type": ["object", "null"], "default": None,
+                     "description": "{x, y, w, h, font?}: the box of the °C/°F label"},
+        },
+        "required": ["register", "x", "y"],
+    }
+
+    def validate(self):
+        self.register_spec = self._param("register", kind=dict)
+        self.x = self._param("x", kind=int)
+        self.y = self._param("y", kind=int)
+        self.font = self._param("font", 15, kind=int)
+        self.parent = self._param("parent", aescompact.ELECTRICAL_AES_BODY)
+        unit = self.spec.params.get("unit")
+        if unit is not None:
+            if not isinstance(unit, dict) or any(not isinstance(unit.get(k), int)
+                                                 for k in ("x", "y", "w", "h")):
+                raise RecipeError("BAD_PARAMS", "unit wants {x, y, w, h, font?}, got %r"
+                                  % (unit,), op_id=self.spec.id)
+            self.unit_box = (unit["x"], unit["y"], unit["w"], unit["h"])
+            self.unit_font = int(unit.get("font", self.font))
+        else:
+            self.unit_box = None
+            self.unit_font = None
+        if not (0 <= self.x < render.PANEL_W and 0 <= self.y < render.PANEL_H):
+            raise RecipeError("BAD_PARAMS", "(x, y) = (%d, %d) is off the panel"
+                              % (self.x, self.y), op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        parent = resolve_target(ctx, self.parent)
+        reg = _resolve_register_spec(data, ctx, self.register_spec, self.spec.id)
+        if self.unit_box is not None:
+            bad = [c for c in "°CF" if rvcbutton.glyph_missing(data, self.unit_font, c)]
+            if bad:
+                raise RecipeError("NO_GLYPH", "font %d has no glyph for %r"
+                                  % (self.unit_font, bad[0]), op_id=self.spec.id)
+        try:
+            out, cells, cell_edits = readout.allocate_fresh_cells(
+                data, [(2, tempreadout.VALUE_TYPE)])
+            cell = cells[0]
+            plan = tempreadout.resolve(out, slot_addr=reg.slot_addr, cell=cell, stock=ctx.stock)
+        except (readout.ReadoutError, tempreadout.TempReadoutError,
+                followchannel.FollowChannelError) as e:
+            raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
+        ctx.edits.extend(cell_edits)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
+        try:
+            blob, _ = tempreadout.build(plan, code_load_addr)
+        except tempreadout.TempReadoutError as e:
+            raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
+        try:
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except growsection.GrowSectionError as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(gcs.offset + load_off, b"", blob, "GuiCode",
+                         "add_temperature_readout: %d-byte conversion routine (var %d -> "
+                         "cell %#x)" % (len(blob), reg.var_index, cell.addr)))
+        hook_at, hook_old, hook_new = tempreadout.detour_edit(plan, code_load_addr)
+        file_off = gcs.offset + hook_at
+        pre = grown[file_off:file_off + 4]
+        if pre != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, pre.hex(), hook_old.hex()), op_id=self.spec.id)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, pre, hook_new, "GuiCode",
+                         "add_temperature_readout: detour bl -> %#x"
+                         % (code_load_addr + tempreadout.ENTRY_OFF)))
+        img = bytes(buf)
+        arms_base = None
+        try:
+            if self.unit_box is not None:
+                img, arms_base = tempreadout.append_unit_arms(img, self.unit_box, self.unit_font)
+            obj = tempreadout.build_object(img, x=self.x, y=self.y, display_slot=cell.slot,
+                                           font=self.font, unit_arms_base=arms_base)
+            placed, index = cardreadouts.attach(
+                img, obj, parent, after_authored=len(guidata.object_tables(ctx.stock)[1]))
+        except enumlabel.EnumLabelError as e:
+            raise RecipeError("LAYOUT_REFUSED", str(e), op_id=self.spec.id)
+        except relocate.RelocationError as e:
+            raise RecipeError("REPLACE_REFUSED", str(e), op_id=self.spec.id)
+        except (ValueError, readout.ReadoutError, insert.InsertError) as e:
+            raise RecipeError("WRONG_SHAPE", str(e), op_id=self.spec.id)
+        if parent != aescompact.ELECTRICAL_AES_BODY:
+            _paste_gates(img, placed, parent, index, code="LAYOUT_REFUSED",
+                         whose="the readout's", action="attaching the readout", own="its",
+                         op_id=self.spec.id)
+        sealed, _ = patch.reseal(placed)
+        ctx.handles[self.spec.id] = {
+            "object": parent, "readout": index, "display_slot": cell.slot,
+            "display_addr": cell.addr, "unit_arms": arms_base,
+            "entry": code_load_addr + tempreadout.ENTRY_OFF, "hook_at": hook_at,
+            "var_index": reg.var_index, "slot_addr": reg.slot_addr,
+        }
+        return sealed
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        frame = records.object_records(data, gs + tab[h["object"]])
+        assert any(r.wtype == 5 and r.child_index == h["readout"] for r in frame), \
+            "the readout attach is not in object %d" % h["object"]
+        recs = records.object_records(data, gs + tab[h["readout"]])
+        assert recs[0].wtype == 6 and recs[0].value_slot == tempreadout.UNITS_CELL
+        assert recs[1].wtype == 8 and recs[1].value_slot == h["display_slot"]
+        types = data[gs + celltables.type_table_off(data) + h["display_slot"]]
+        assert types == tempreadout.VALUE_TYPE, "cell %d typed %d" % (h["display_slot"], types)
+        return ("add_temperature_readout: var %d -> cell %d (s16) in object %d under %d%s"
+                % (h["var_index"], h["display_slot"], h["readout"], h["object"],
+                   "" if h["unit_arms"] is None else ", unit arms at %d" % h["unit_arms"]))
 
 
 @op("add_aes_bms_button_status")

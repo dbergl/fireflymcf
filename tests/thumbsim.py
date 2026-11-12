@@ -63,7 +63,7 @@ class Sim:
             t = self.code.get(pc)
             if t is None:
                 raise _Unsupported(f"no instruction at {pc:#x}")
-            size = 4 if (t.startswith(("ldr.w", "strb.w", "pop.w", "b.w", "movw"))) else 2
+            size = 4 if (t.startswith(("ldr.w", "strb.w", "pop.w", "b.w", "movw", "udiv"))) else 2
             nxt = pc + size
 
             m = re.fullmatch(r"push \{(.*)\}", t)
@@ -181,6 +181,12 @@ class Sim:
             if m:
                 assert m.group(1) == m.group(3), t          # MULS <Rdm>,<Rn>,<Rdm>
                 r[int(m.group(1))] = (r[int(m.group(2))] * r[int(m.group(3))]) & 0xFFFFFFFF
+                pc = nxt
+                continue
+            m = re.fullmatch(r"udiv r(\d), r(\d), r(\d)", t)
+            if m:
+                b = r[int(m.group(3))]
+                r[int(m.group(1))] = r[int(m.group(2))] // b if b else 0
                 pc = nxt
                 continue
             m = re.fullmatch(r"cmp r(\d), #(0x[0-9a-f]+|\d+)", t)

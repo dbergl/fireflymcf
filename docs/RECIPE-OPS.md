@@ -93,6 +93,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_option_follower`](#add_option_follower) | guicode | Add a new OPTIONS row (a checkbox on a chosen config selector) that gates a channel follower. | Flashed 2026-08-31. PC.45 (Pump Link). | yes | 13.6 |
 | [`add_pump_auto_off`](#add_pump_auto_off) | guicode | The Water Pump Auto Off feature: minutes stepper, readout, countdown routine, OFF frame. | Flashed 2026-09-04, and 2026-09-06 with `allow_disable`. | yes | 13.6 |
 | [`add_register_readout`](#add_register_readout) | guicode | Show any register as a live number on any page, or feed an existing readout's cell past a stock decode fence (`cell_slot` + `silence`). The value is `(max((slot & mask) - sub, 0) * mul + add) >> shift`. | Flashed 2026-09-04 (tier-2 cell) and 2026-09-05 (`cell_slot`). Tier-3 (fresh SRAM) cells, `sub`, `mul` and an `add` above 255 report unverified per instance. On 14.7, emulated 2026-11-08 (drawn and `draw` false): each published value repaints the digits in the readout's box, and a cell poisoned before reset is never drawn; `cell_slot` feeds the Absorb cell past its fence (cell-level: stock 14.7 draws no Absorb row) and repaints HOME's Chassis readout, only in its box, on both pages that draw it. `silence` must name every remaining stock store to the cell that is unfenced, or whose fence admits a value the routine computes differently. | yes | 13.6, 14.7 (unverified, emulated) |
+| [`add_temperature_readout`](#add_temperature_readout) | guicode | Show a received RV-C temperature in the unit the Temp Units row selects, as CLIMATE does: a per-tick routine converts it into a signed cell (tenths of a degree C, or whole degrees F, by display cell 9), drawn under CLIMATE's own Celsius/Fahrenheit directive switch with an optional `°C`/`°F` label; no reading draws dashes. | Coach-verified 2026-11-12 (owner): a battery temperature on the ELECTRICAL Batteries card from `1FE94`. Emulated the same day in both units: sub-zero readings carry their sign, and no data or a stale filter draws dashes. | yes | 13.6 |
 | [`add_voltage_battery`](#add_voltage_battery) | guicode | Clone a stock battery graphic beside another and drive it from a bus voltage: isolate the clone's colour, gauge-level and value cells onto fresh SRAM, feed them from a per-tick routine that recolours the body green/red at a threshold and levels its fill over a voltage window, then reposition the pair and add the label the donor lacked. Ships as the coach 48V battery beside HOME's chassis 12V battery (object 902): sourced from `DC_SOURCE_STATUS_1` instance 1, red below 50.4V / green at or above, fill empty at 48.0V to full at 54.8V, labelled 'House'. `live_repaint` retargets the clone's enrolled wt5 container to watch the live coach cell so number+fill repaint live; `rescale_donor` repoints the ELECTRICAL coach battery (donor 443) onto the 48V cells so it stops showing always-100%-green. | Flashed and verified 2026-09-12: number, fill and colour update live on HOME and the compact ELECTRICAL page. | yes | 13.6 |
 | [`follow_channel`](#follow_channel) | guicode | Watch one G12 output's status and mirror its ON/OFF onto another channel, gated by a repurposed OPTIONS row. | Flashed 2026-08-31 (the light to pump follower). On 14.7, emulated 2026-11-09 (pin 3 onto pin 4 at level 200): with the renamed OPTIONS row set by a tap, pin 3 on sends one `1FEDB` on frame for pin 4 and pin 3 off one off frame; with the row cleared by a second tap it sends nothing. Refuses on 11.23 (`UNSUPPORTED_FIRMWARE`); the image has no "Heat Pump" OPTIONS row, so with the firmware gate bypassed it refuses `NO_SUCH_LABEL`. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`follow_register`](#follow_register) | guicode | Watch any register for an edge and drive a channel, gated by register conditions. | Routine shared with the flashed follower; no instance has been flashed. A coach check is warranted for a new watch register. On 14.7, emulated 2026-11-08: the first report a silent baseline, each later edge one on or off frame while the gate holds, none while it does not. | yes | 13.6, 14.7 (unverified, emulated) |
@@ -1429,6 +1430,42 @@ Error codes:
 - `NO_DONOR` — a caller-named `donor` that does not exist or is not a (directive, wtype-8) pair.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
 - `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
+- `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+- `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
+- `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
+- `CELL_TABLE_BOUND_FORM`, `CELL_TABLE_BOUND_SITES` — the display-cell table cannot be grown on this image: a bound compare the grow cannot rebump, or a rebump surface that misses one (`tablegrow.cell_table_bound_sites`)
+- `RENDER_STATE_BASES`, `CELL_AREA_NO_CEILING`, `CELL_OUTSIDE_AREA` — the render state or the free SRAM cell area does not prove out on this image (`sramreach`)
+
+### add_temperature_readout
+
+Show a received RV-C temperature in the unit the Temp Units row selects, as CLIMATE does: a per-tick routine converts it into a signed cell (tenths of a degree C, or whole degrees F, by display cell 9), drawn under CLIMATE's own Celsius/Fahrenheit directive switch with an optional `°C`/`°F` label; no reading draws dashes.
+
+- **Hardware status:** Coach-verified 2026-11-12 (owner): a battery temperature on the ELECTRICAL Batteries card from `1FE94`. Emulated the same day in both units: sub-zero readings carry their sign, and no data or a stale filter draws dashes.
+- **Proof:** `tempreadout.py`
+- **Implementation:** `recipe_ops.AddTemperatureReadout`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `register` | object | yes |  | {ref} \| {dgn, instance\|selector}: an RV-C temperature word (u16, 0.03125 degC from -273) |
+| `parent` | any |  | 829 | object index or {ref}; default 829 |
+| `x` | integer | yes |  | the digits' right edge |
+| `y` | integer | yes |  | the digits' baseline |
+| `font` | integer |  | 15 |  |
+| `unit` | object\|null |  | null | {x, y, w, h, font?}: the box of the °C/°F label |
+
+Error codes:
+
+- `BAD_PARAMS` — a missing x/y, a `unit` box that is not {x, y, w, h}.
+- `READOUT_REFUSED` — the register, the units switch (`tempreadout.units_switch`: one stock Celsius/Fahrenheit directive switch on cell 9), the cell or the routine could not be resolved or built.
+- `GROW_REFUSED` — GuiCode could not be grown for the routine.
+- `DETOUR_REFUSED` — the per-tick hook did not hold the `bl` the chain expects.
+- `NO_GLYPH` — the unit font has no '°', 'C' or 'F'.
+- `WRONG_SHAPE` — 829 is not aes_card_layout's frame, or a record failed its self-decode.
+- `LAYOUT_REFUSED` — (another `parent`) the placement changes any other record on a page reaching `parent`.
+- `REPLACE_REFUSED` — 829 could not be relocated.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's (`grammar.prove`: decoder, layout engine or renderer not a twin), or a template's wtype is not drawn by a proven renderer arm (`donors`).
+- `NO_TEMPLATE` — a frozen readout template cannot be used on this image (`donors`): no stock record witnesses its form, or the value font is missing or cannot draw `donors.READOUT_CHARS`.
+- `NO_DONOR` — the frozen readout template pair is not a (directive, wtype-8) pair on this image (`readout._donor_pair`).
 - `MODE7_INDEX` — a mode-7 colour index at or above the image's decoder bound (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
 - `CELL_TABLE_NO_BOUND`, `CELL_TABLE_CANDIDATES`, `CELL_TABLE_BOUND_AMBIGUOUS` — the display-cell table does not locate on this image (`celltables.locate`)
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)

@@ -127,6 +127,7 @@
                 "add_option_follower",
                 "add_pump_auto_off",
                 "add_register_readout",
+                "add_temperature_readout",
                 "add_voltage_battery",
                 "follow_channel",
                 "follow_register",
@@ -2835,6 +2836,58 @@
                 },
                 "required": [
                   "register"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_temperature_readout"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "register": {
+                    "type": "object",
+                    "description": "{ref} | {dgn, instance|selector}: an RV-C temperature word (u16, 0.03125 degC from -273)"
+                  },
+                  "parent": {
+                    "description": "object index or {ref}; default 829",
+                    "default": 829
+                  },
+                  "x": {
+                    "type": "integer",
+                    "description": "the digits' right edge"
+                  },
+                  "y": {
+                    "type": "integer",
+                    "description": "the digits' baseline"
+                  },
+                  "font": {
+                    "type": "integer",
+                    "default": 15
+                  },
+                  "unit": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "{x, y, w, h, font?}: the box of the \u00b0C/\u00b0F label"
+                  }
+                },
+                "required": [
+                  "register",
+                  "x",
+                  "y"
                 ]
               }
             }
