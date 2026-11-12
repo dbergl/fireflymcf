@@ -370,6 +370,18 @@ def muls(rdm: int, rn: int) -> bytes:
     return struct.pack("<H", 0x4340 | (rn << 3) | rdm)
 
 
+def udiv(rd: int, rn: int, rm: int) -> bytes:
+    """`udiv rD,rN,rM` — T1, 4 bytes (rD = rN / rM, unsigned, truncating; 0 when rM is 0).
+
+    Stock 13.6 GuiCode executes `udiv` itself (six sites), so the panel's core has the divider.
+    Authored for `tempreadout`'s Fahrenheit conversion, whose numerator is kept positive so an
+    unsigned divide rounds the way the formula says."""
+    for r in (rd, rn, rm):
+        if not 0 <= r <= 12:
+            raise ValueError(f"udiv needs r0-r12, got r{r}")
+    return struct.pack("<HH", 0xFBB0 | rn, 0xF0F0 | (rd << 8) | rm)
+
+
 def ldr_imm12(rt: int, rn: int, imm12: int) -> bytes:
     """`ldr.w rT,[rN,#imm12]` — T3, 4 bytes. The wide sibling of `ldr_imm`, needed for the
     GuiCodeState millisecond clock at `[r4,#0x204]` (T1's imm5*4 tops out at 124).
