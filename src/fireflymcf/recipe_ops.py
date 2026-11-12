@@ -8570,7 +8570,7 @@ class AddTemperatureReadout(Op):
         SRAM cell area does not prove out on this image (`sramreach`)
     """
 
-    hardware_verified = False       # a new routine and object shape: no coach has run it
+    hardware_verified = True        # coach-verified 2026-11-12 (owner), 829 path
     firmwares = frozenset({"13.6"})
 
     PARAMS = {

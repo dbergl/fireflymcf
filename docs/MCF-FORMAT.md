@@ -453,6 +453,16 @@ is what closed §10 items 3 and 4 (`BUS-BASELINE.md` PC.19) — and the flash *i
 — the post-write verify at `0x200151E4` CRCs straight from the destination address — so the
 missing piece is a route to a file, not a route to the bytes.
 
+**The file list holds at most eight images** — `proven-from-code` in 13.6's `cli.bin`, and
+`observed-on-hardware` 2026-11-12 (owner: a stick with more `mcf*.bin` files than that did not list
+them all). The scan that loads `"mcf*.bin"` (the literal `0xC0400687` in region 2, loaded at
+`0x20015F98`) keeps a count at state `+0x238` and stops before a ninth entry (`cmp r0,#7` / `bhi` at
+`0x20015FBC`). Each entry is an 80-byte filename at `+0x23A + n*0x50` and a 128-byte description at
+`+0x4BA + n*0x80`. The count is incremented (`0x20016036`) only after the file opens and its
+description is read, so an unreadable file takes no slot. Files are taken in directory order, the
+order they were written to the stick, not sorted, so a ninth and later image is never offered. With
+exactly one image found (`cmp r2,#1` at `0x2001605A`) the selection screen is skipped.
+
 ### 4.3 `GUIConfig*.bin` and CONFIGURATOR FILE LOAD — the loader's *other* file format
 
 The loader has a **second, independent load path** that shares the `0:/SpyderConfig` directory

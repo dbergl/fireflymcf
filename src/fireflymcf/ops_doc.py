@@ -329,9 +329,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "does: a per-tick routine converts it into a signed cell (tenths of a degree C, or "
         "whole degrees F, by display cell 9), drawn under CLIMATE's own Celsius/Fahrenheit "
         "directive switch with an optional `°C`/`°F` label; no reading draws dashes.",
-        "UNVERIFIED. Coach check: the value against the source in both units (SETTINGS Temp "
-        "Units), a sub-zero reading drawn with its sign, and dashes once the source has been "
-        "silent past its staleness class.",
+        "Coach-verified 2026-11-12 (owner): a battery temperature on the ELECTRICAL "
+        "Batteries card from `1FE94`. Emulated the same day in both units: sub-zero readings "
+        "carry their sign, and no data or a stale filter draws dashes.",
         "`tempreadout.py`"),
     "add_enum_label": ("structural",
         "Show a received value as text from a table (1-16 entries plus a default for stale and "

@@ -106,7 +106,9 @@ edit has passed every gate but has not been flashed to a coach; flash it with st
 1. Format a USB stick as FAT32.
 2. Create a directory named `SpyderConfig` on it.
 3. Put your build (`mcf-<name>.bin`), your stock `mcf.bin`, and `cli.bin` in that directory. The
-   loader lists every `mcf*.bin`; `cli.bin` is the loader itself and must be present.
+   loader lists the `mcf*.bin` files, **at most eight**, in the order they were copied to the stick
+   (`MCF-FORMAT.md` §4); a ninth never appears, so remove old builds. `cli.bin` is the loader
+   itself and must be present.
 4. Insert the stick and power-cycle the panel. Without a stick the panel boots normally; with a stick
    but no `mcf*.bin` it stops at "Master Config File Missing".
 5. Choose which file to load.
