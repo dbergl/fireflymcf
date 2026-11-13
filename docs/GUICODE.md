@@ -6418,6 +6418,51 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 93 — a new screen is feasible: nothing in GuiCode indexes by screen id, the screen band can move, and one more nesting level costs 272 bytes of an 8 KB stack with 3.3 KB free — `proven-from-code`, stack use `observed-in-emulation`, 2026-11-13
+
+The question: can a build add a screen id and root object stock 13.6 does not have, without a
+GuiCode change? Four things had to hold. All four do (`screenadd.py`; pinned by
+`tests/test_screen_band_facts.py`).
+
+**1. No reader of the screen id breaks on a new id.** A full imm12 scan for `ldrb.w`/`ldrsb.w
+Rt,[Rn,#0x20A]` finds nine loads, any base register (`screenadd.screen_id_readers`):
+
+| site | use |
+|---|---|
+| `0x247D3E`, `0x24813E` | `cmp r3,#0x60` (screen 96) |
+| `0x248116` | `cmp r3,#0x64` (screen 100) |
+| `0x24C8B0` | `cmp r3,#0x11` (SERVICE MODE) |
+| `0x248276`, `0x24F860`, `0x24F87A` | saved to `0x2003A77B` / `0x2003A98F` before a forced screen (100, 20, 21), restored later by `0x24826C`/`0x24F874`; neither cell is read for anything else |
+| `0x24EE56` | `cmp` with the last-drawn id `0x2003A1FC` (display cell 2); unequal sets `state+0x20C` and redraws from object 0 |
+| `0x2509C6` | copied to `0x2003A986`, written only there |
+
+None indexes a table. `state+0x20B` (seven sites) is a 0/1 toggle (`clz`/`lsrs #5` at
+`0x243B86`, `0x24435E`), not a screen map. In GuiData, only the screen switch (object 1 record 0)
+reads cell 2: a scan of every record's `value_slot` finds no other.
+
+**2. The draw enters through the switch, so the band can move.** A screen change calls
+`FUN_00258650(0, -1, …)` (`0x24EE8A movs r0,#0`, `0x24EE8C bl`), drawing from object 0 → the
+switch → the band. The only other entries draw fixed objects 428, 429 and 754 (`0x247B60`,
+`0x247B70`, `0x24EEE0`), outside the band. Whether any GuiCode literal points into the switch record is checked when the
+record is rewritten (`relocate`'s GuiCode-literal gate refuses if one does).
+
+**3. No depth limit; the extra level costs stack only.** `FUN_00258330` (container) increments the
+depth halfword `state+0x6C0C` around its recursion (`0x2583BE`, `0x2583D2`) with no bound compare.
+Depth is stored per draw node (`0x25651E strb.w r2,[r3,#0x189]`, the 120-node pool, bound `#0x77`)
+and read once, by `FUN_00256318` from `0x258966`, where the only use is `0x258906 cbnz r5`: depth
+zero or not. A full draw puts every screen's nodes at depth ≥ 2, so one more level changes no
+node's zero test. Per level the recursion costs 272 bytes (`FUN_00258330` push 36 + `sub sp,#0xC4`;
+`FUN_00257BFC` push 32 + `sub sp,#8`). Stock nests 7 levels from object 0. The draw runs on
+FreeRTOS task `GuiUpdateTask` (TCB `0x20003BF8`, `pxStack` `0x20001BF0`, 8192 bytes, filled
+`0xA5`): visiting every screen in the emulator leaves a low-water mark at `0x200028EC`, 4868 bytes
+used, 3324 free (`observed-in-emulation`).
+
+**4. Leaves and ids are free.** Ten ACTION ids have one dispatcher leaf, an unshared store, and no
+wt-12 region in any object (`screenadd.free_action_leaves`): `0x7D5`, `0x7D6`, `0x7DD`, `0x7E4`,
+`0x7E5`, `0x7E7`, `0x7ED`, `0x7F4`, `0x7F5`, `0x82A`. Screen ids 35-38 have no object, no route,
+and no constant `strb.w` to `+0x20A` writes them (`screenadd.free_screen_id` = 35); 6 has no object
+but `0x7D6` writes it.
+
 ## Finding 92 — 14.7 computes its battery card, generator flag and nav rail from the options in one routine, and its two counts land on slots 95 and 458 — `proven-from-code`, 2026-11-10
 
 **The question.** `options.derived_slots` transcribed 13.6's config-payload arithmetic (slot 6, the HOME
