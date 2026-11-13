@@ -99,3 +99,56 @@ def root_body(data: bytes, root: int, extra: list[bytes]) -> bytes:
     if len(recs) + len(extra) > 0xFF:
         raise PopupPageError(f"root {root} would carry {len(recs) + len(extra)} records (max 255)")
     return bytes([len(recs) + len(extra)]) + bytes(data[start + 1:recs[-1].end]) + b"".join(extra)
+
+
+# ---- the opener: a gear button on a host page --------------------------------------------------
+# The LEVEL page's Setup button shape without its caption: a MAROON capsule (a theme role) holding
+# the nav rail's gear, font 24 'L' (37x37), centred in a 40-px box (`levelpage.SETUP_GEAR*`).
+GEAR_W, GEAR_H = 44, 38
+FILL_REACH = 60          # a readout's fill reaches ~50 px left of its pen on the coach (readoutfill)
+
+
+def gear_records(data: bytes, x: int, y: int, touch_id: int) -> list[bytes]:
+    """The gear button at `(x, y)`: capsule, gear glyph, touch region carrying `touch_id`."""
+    font, char = lp.SETUP_GEAR
+    gw, gh = lp.SETUP_GEAR_BOX, metrics.font_metrics(data, font).height - 1
+    return [pd.capsule(data, x, y, GEAR_W, GEAR_H, ls.RADIUS, lp.MAROON),
+            pd.glyph(data, char, x + (GEAR_W - gw) // 2, y + (GEAR_H - gh) // 2, gw, gh,
+                     font=font, rgb=lp.WHITE),
+            pd.touch(data, x, y, GEAR_W, GEAR_H, touch_id)]
+
+
+def _hit(a: tuple, b: tuple) -> bool:
+    return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
+
+
+def opener_conflicts(data: bytes, root: int, x: int, y: int) -> list[str]:
+    """What the gear box at `(x, y)` would collide with on the page `root` draws: a touch region
+    (a tap would be ambiguous) or a readout's fill band (a live redraw could wipe the gear: the
+    rows the readout's font covers, from `FILL_REACH` left of its pen to its widest fill right)."""
+    box = (x, y, x + GEAR_W, y + GEAR_H)
+    out = []
+    for q in layout.Screen(data).walk(root):
+        if q.x0 is None or q.y0 is None:
+            continue
+        if q.wtype == 12 and _hit(box, (q.x0, q.y0, q.x1, q.y1)):
+            out.append(f"touch region {(q.x0, q.y0, q.x1, q.y1)} in object {q.obj_index}")
+        elif q.wtype == 8 and getattr(q, "font", None) is not None:
+            m = metrics.font_metrics(data, q.font)
+            band = (q.x0 - FILL_REACH, q.y0 - m.top, q.x0 + metrics.worst_fill_width(data, q.font, 8),
+                    q.y0 - m.top + m.height - 1)
+            if _hit(box, band):
+                out.append(f"readout fill {band} in object {q.obj_index}")
+    return out
+
+
+def open_leaf(data: bytes) -> tuple[int, int]:
+    """`(touch_id, current_screen)`: the lowest free ACTION leaf (`screenadd.free_action_leaves`)
+    and the screen its dispatcher stores now."""
+    from . import screenadd
+    free = screenadd.free_action_leaves(data)
+    if not free:
+        raise PopupPageError("no free ACTION leaf to open the popup with")
+    leaf = free[0]
+    route = next(r for r in navmap.routes(data) if r.touch_id == leaf)
+    return leaf, route.screen

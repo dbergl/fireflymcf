@@ -293,6 +293,24 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "BMS heater enable, tap sends off (DGN `0x0EF70` to SA `0x70`).",
         "Flashed 2026-09-21. Coach-verified: frames captured on can1, heater engaged.",
         "`aescompact.py`, `docs/HARDWARE-VERIFIED.md`"),
+    "add_screen": ("structural",
+        "Add a new screen: a screen id stock 13.6 does not use (35) and a root drawn like screen "
+        "12's (background, header bar and title, header widgets, nav rail) over an empty navy "
+        "page area. The screen switch's band is rebuilt at the top of the object table with one "
+        "trampoline per stock screen, so no existing object moves.",
+        "**Unverified.** Emulated 2026-11-13: every 13.6 screen and an unknown id draw pixel for "
+        "pixel as before; the new screen draws empty.",
+        "`src/fireflymcf/screenadd.py`; `GUICODE.md` Finding 93 (no GuiCode reader indexes by "
+        "screen id; one more nesting level costs 272 bytes of an 8 KB stack with 3 KB free)"),
+    "add_popup_page": ("structural",
+        "Draw a LEVEL-SETUP-style dialog on a screen `add_screen` added: the taller LEVEL SETUP "
+        "box, a centred title, and Close, which carries the nav rail's leaf for the `return_to` "
+        "page. With `opener`, a 44x38 gear button on that page opens it, through a free ACTION "
+        "leaf retargeted to the new screen.",
+        "**Unverified.** Emulated 2026-11-13: Close returns to ELECTRICAL; the gear opens the "
+        "dialog.",
+        "`src/fireflymcf/popuppage.py`; the leaf retarget is `navicon.retarget_action_leaf`, as "
+        "the LEVEL SETUP popup's Setup button uses; `GUICODE.md` Finding 93 lists the free leaves"),
     "add_alt_reboot": ("structural",
         "Add a \"REBOOT APS-500\" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a "
         "3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA "

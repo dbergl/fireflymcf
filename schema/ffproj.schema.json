@@ -111,7 +111,9 @@
                 "add_glyph_button",
                 "add_level_page",
                 "add_low_volts_control",
+                "add_popup_page",
                 "add_rvc_button",
+                "add_screen",
                 "add_text_label",
                 "aes_card_layout",
                 "append_filter",
@@ -1911,6 +1913,46 @@
           "if": {
             "properties": {
               "type": {
+                "const": "add_popup_page"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "screen": {
+                    "type": "object",
+                    "description": "{\"ref\": id of an add_screen op}"
+                  },
+                  "title": {
+                    "type": "string",
+                    "description": "the dialog's title"
+                  },
+                  "return_to": {
+                    "type": "string",
+                    "description": "the header of the page Close returns to, reached from the nav rail (e.g. \"ELECTRICAL\")"
+                  },
+                  "opener": {
+                    "type": "object",
+                    "description": "{\"page\": header of a rail page, \"at\": [x, y]}: a 44x38 gear button there opens the popup"
+                  }
+                },
+                "required": [
+                  "screen",
+                  "title",
+                  "return_to"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "add_rvc_button"
               }
             }
@@ -2026,6 +2068,31 @@
                   "w",
                   "h"
                 ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_screen"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "default": "",
+                    "description": "the header title, up to 14 characters (indented three spaces like the stock headers)"
+                  }
+                },
+                "required": []
               }
             }
           }

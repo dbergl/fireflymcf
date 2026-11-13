@@ -596,6 +596,13 @@ class Scenario:
         box, tid, regions = self._resolve(control, self._page_root(None))
         self._press(*self._tap_point(box, tid, regions), hold_s)
 
+    def tap_at(self, x: int, y: int, *, hold_s: float = 0.0) -> None:
+        """Tap (or hold for `hold_s`) the screen point `(x, y)` on the page showing: for a
+        control with no label, such as an icon-only button."""
+        if not self._booted:
+            raise ScenarioError("boot() the scenario before tapping")
+        self._press(x, y, hold_s)
+
     # -- the bus and the G12 -------------------------------------------------------------------
     def _g12(self):
         from .g12 import G12

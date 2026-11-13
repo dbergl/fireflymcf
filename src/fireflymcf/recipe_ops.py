@@ -12607,6 +12607,10 @@ class AddScreen(Op):
       NO_SCREEN -- the band could not be rebuilt (no free screen id, an unexpected switch or
                    root shape, a relocation gate refused), or the title does not fit the
                    17-character header field.
+      GRAMMAR -- the image's record grammar is not proven 13.6's, so the drawing templates
+        (`donors.template`) are not usable.
+      NO_TEMPLATE -- a drawing template is not proven on this image.
+      MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
     """
 
     hardware_verified = False
@@ -12664,6 +12668,18 @@ class AddPopupPage(Op):
       BAD_REF   -- `screen` names no earlier `add_screen`.
       NO_RETURN -- no single nav-rail leaf reaches a page headed `return_to`.
       NO_DIALOG -- the title is wider than the dialog, or the root could not be rewritten.
+      NO_OPENER_PAGE -- `opener.page` is not one rail-reached page.
+      OPENER_OVERLAP -- the gear would overlap a touch region or a readout's fill band there.
+      NO_OPENER -- no free ACTION leaf, or the host page or leaf could not be rewritten.
+      GRAMMAR -- the image's record grammar is not proven 13.6's, so the drawing templates
+        (`donors.template`) are not usable.
+      NO_TEMPLATE -- a drawing template is not proven on this image.
+      MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
+
+    With `opener`, a 44x38 gear button (the LEVEL Setup button's capsule and gear, no caption) is
+    appended last to that page's root; its touch takes the lowest free ACTION leaf
+    (`screenadd.free_action_leaves`) and the leaf is retargeted to the new screen
+    (`navicon.retarget_action_leaf`).
     """
 
     hardware_verified = False
@@ -12674,6 +12690,9 @@ class AddPopupPage(Op):
             "return_to": {"type": "string", "description": "the header of the page Close returns "
                                                            "to, reached from the nav rail "
                                                            "(e.g. \"ELECTRICAL\")"},
+            "opener": {"type": "object",
+                       "description": "{\"page\": header of a rail page, \"at\": [x, y]}: a "
+                                      "44x38 gear button there opens the popup"},
         },
         "required": ["screen", "title", "return_to"],
     }
@@ -12685,6 +12704,14 @@ class AddPopupPage(Op):
                               op_id=self.spec.id)
         self.title = self._param("title", kind=str)
         self.return_to = self._param("return_to", kind=str)
+        self.opener = self._param("opener", None)
+        if self.opener is not None:
+            at = self.opener.get("at") if isinstance(self.opener, dict) else None
+            if (set(self.opener) != {"page", "at"} or not isinstance(self.opener["page"], str)
+                    or not (isinstance(at, list) and len(at) == 2
+                            and all(isinstance(v, int) for v in at))):
+                raise RecipeError("BAD_PARAMS", "add_popup_page: opener must be "
+                                  "{'page': str, 'at': [x, y]}", op_id=self.spec.id)
 
     def apply(self, data, ctx):
         from fireflymcf import popuppage
@@ -12704,9 +12731,37 @@ class AddPopupPage(Op):
             raise RecipeError("NO_DIALOG", str(e), op_id=self.spec.id)
         ctx.edits.extend(edits)
         x, y, w, hh, _r = popuppage.DIALOG
-        ctx.handles[self.spec.id] = {"screen_id": h["screen_id"], "root": h["root"],
-                                     "dialog": (x, y, w, hh), "content_y": popuppage.CONTENT_Y,
-                                     "return_screen": ret_screen, "close_id": leaf}
+        handle = {"screen_id": h["screen_id"], "root": h["root"], "dialog": (x, y, w, hh),
+                  "content_y": popuppage.CONTENT_Y, "return_screen": ret_screen, "close_id": leaf}
+        if self.opener is not None:
+            out = self._add_opener(out, ctx, handle)
+        ctx.handles[self.spec.id] = handle
+        return out
+
+    def _add_opener(self, data, ctx, handle):
+        from fireflymcf import popuppage
+        gx, gy = self.opener["at"]
+        try:
+            host_screen, _rail = popuppage.return_leaf(data, self.opener["page"])
+        except popuppage.PopupPageError as e:
+            raise RecipeError("NO_OPENER_PAGE", str(e), op_id=self.spec.id)
+        host = layout.screen_object_map(data)[host_screen]
+        clash = popuppage.opener_conflicts(data, host, gx, gy)
+        if clash:
+            raise RecipeError("OPENER_OVERLAP", "gear at %s collides with: %s"
+                              % ((gx, gy), "; ".join(clash)), op_id=self.spec.id)
+        try:
+            leaf, was = popuppage.open_leaf(data)
+            body = popuppage.root_body(data, host, popuppage.gear_records(data, gx, gy, leaf))
+            out, edits = relocate.replace_object_records(data, host, body)
+            out, leaf_edits = navicon.retarget_action_leaf(out, leaf, was, handle["screen_id"])
+        except (popuppage.PopupPageError, relocate.RelocationError, ValueError) as e:
+            raise RecipeError("NO_OPENER", str(e), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.edits.extend(relocate.Edit(off, old, new, "recipe", note)
+                         for off, old, new, note in leaf_edits)
+        out, _ = patch.reseal(out)
+        handle.update(host=host, host_screen=host_screen, gear_leaf=leaf, gear_at=(gx, gy))
         return out
 
     def capability_delta(self, ctx):

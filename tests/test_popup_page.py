@@ -85,3 +85,44 @@ def test_unknown_return_page_refused():
     res = recipe.compile_project(_project(dict(PARAMS, return_to="NO SUCH PAGE")), stock)
     assert not res.ok
     assert [e["code"] for e in res.errors] == ["NO_RETURN"], res.errors
+
+
+# ---- the opener: a gear on a host page that opens the popup ---------------------------------
+from fireflymcf import navmap  # noqa: E402
+
+GEAR_LEAF = 0x7D5
+AT = [600, 40]           # stock ELECTRICAL (root 5): clear of every touch region and readout
+
+
+@pytest.fixture(scope="module")
+def opened():
+    stock = open(STOCK, "rb").read()
+    res = recipe.compile_project(
+        _project(dict(PARAMS, opener={"page": "ELECTRICAL", "at": AT})), stock)
+    assert res.ok, res.errors
+    return res.data
+
+
+def test_gear_on_host_page(opened):
+    from fireflymcf import popuppage
+    data = opened
+    host = layout.screen_object_map(data)[1]
+    gs, _ = guidata.guidata_extent(data)
+    recs = records.object_records(data, gs + guidata.object_tables(data)[1][host])
+    tail = [bytes(data[r.offset:r.end]) for r in recs[-3:]]
+    assert tail == popuppage.gear_records(data, *AT, GEAR_LEAF)
+    assert [r.wtype for r in recs[-3:]] == [33, 11, 12]
+
+
+def test_leaf_retargeted(opened):
+    hits = [r for r in navmap.routes(opened) if r.touch_id == GEAR_LEAF]
+    assert [h.screen for h in hits] == [35]
+
+
+def test_opener_overlap_refused():
+    stock = open(STOCK, "rb").read()
+    # on the nav rail's ELECTRICAL icon: its touch region
+    res = recipe.compile_project(
+        _project(dict(PARAMS, opener={"page": "ELECTRICAL", "at": [8, 70]})), stock)
+    assert not res.ok
+    assert [e["code"] for e in res.errors] == ["OPENER_OVERLAP"], res.errors

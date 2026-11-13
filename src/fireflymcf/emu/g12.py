@@ -224,7 +224,7 @@ class G12(Peer):
     # states last two ticks, enough for the blob to see the change.
     BUTTON_STATE = {PRESS: 1, TAP_RELEASE: 2, HELD: 3, HOLD_RELEASE: 4}
 
-    def __init__(self, mcf_data, path=None, inputs=None, cells=None, clock=time.localtime,
+    def __init__(self, mcf_data, path=None, inputs=None, cells=None, clock=None,
                  cold_start=True, output_phase=0.0):
         self.rules = {r.index: r for r in g12rules.all_rules(mcf_data, tags=(0x62,))}
         self.status = [r for r in g12rules.status_rules(mcf_data)]
@@ -242,7 +242,8 @@ class G12(Peer):
         self.inputs = {"tanks": {}, "house": None, "chassis": None, "ambient": None, "lpg": None,
                        "pins": {}}
         self.inputs.update(inputs or {})
-        self.clock = clock
+        # Looked up at each call, not bound at import, so a frozen `time.localtime` reaches it.
+        self.clock = clock if clock is not None else (lambda: time.localtime())
         self.cold_start = cold_start   # False: joining a running coach (capture replays)
         # The output driver's 1 s tick (16F84, statuses 0.5 s later) runs on its own
         # phase: 2026-10-22 run 2 has it 0.46 s after the sweep and the blob's 1 s timer
