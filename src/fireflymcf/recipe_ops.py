@@ -12649,6 +12649,83 @@ class AddScreen(Op):
                    "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
 
 
+@op("add_popup_page")
+class AddPopupPage(Op):
+    """Draw a LEVEL-SETUP-style dialog on a screen `add_screen` added: the white-bordered body
+    box LEVEL SETUP draws with Wheelbase and Track (x 150..730, y 46..464), `title` centred at
+    its top, and a Close button bottom right whose touch carries the nav rail's leaf for the
+    `return_to` page, so Close navigates exactly as that rail icon does (`popuppage`).
+
+    Every colour is a theme role or `levelpage.BODY`; put this op before `set_theme`. Nothing on
+    the panel opens the page yet. The handle gives `screen_id`, `root`, `dialog`
+    `(x, y, w, h)` and `content_y` (the first row's top) for later content.
+
+    Error codes:
+      BAD_REF   -- `screen` names no earlier `add_screen`.
+      NO_RETURN -- no single nav-rail leaf reaches a page headed `return_to`.
+      NO_DIALOG -- the title is wider than the dialog, or the root could not be rewritten.
+    """
+
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "screen": {"type": "object", "description": "{\"ref\": id of an add_screen op}"},
+            "title": {"type": "string", "description": "the dialog's title"},
+            "return_to": {"type": "string", "description": "the header of the page Close returns "
+                                                           "to, reached from the nav rail "
+                                                           "(e.g. \"ELECTRICAL\")"},
+        },
+        "required": ["screen", "title", "return_to"],
+    }
+
+    def validate(self):
+        self.screen = self._param("screen", kind=dict)
+        if set(self.screen) != {"ref"}:
+            raise RecipeError("BAD_PARAMS", "add_popup_page: screen must be {'ref': op_id}",
+                              op_id=self.spec.id)
+        self.title = self._param("title", kind=str)
+        self.return_to = self._param("return_to", kind=str)
+
+    def apply(self, data, ctx):
+        from fireflymcf import popuppage
+        h = ctx.handles.get(self.screen["ref"])
+        if not h or "screen_id" not in h:
+            raise RecipeError("BAD_REF", "no earlier add_screen op with id %r"
+                              % self.screen["ref"], op_id=self.spec.id)
+        try:
+            ret_screen, leaf = popuppage.return_leaf(data, self.return_to)
+        except popuppage.PopupPageError as e:
+            raise RecipeError("NO_RETURN", str(e), op_id=self.spec.id)
+        try:
+            extra = popuppage.shell_records(data, self.title) + [popuppage.close_region(data, leaf)]
+            body = popuppage.root_body(data, h["root"], extra)
+            out, edits = relocate.replace_object_records(data, h["root"], body)
+        except (popuppage.PopupPageError, relocate.RelocationError) as e:
+            raise RecipeError("NO_DIALOG", str(e), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        x, y, w, hh, _r = popuppage.DIALOG
+        ctx.handles[self.spec.id] = {"screen_id": h["screen_id"], "root": h["root"],
+                                     "dialog": (x, y, w, hh), "content_y": popuppage.CONTENT_Y,
+                                     "return_screen": ret_screen, "close_id": leaf}
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()          # draws; Close navigates like an existing rail icon
+
+    def verify(self, data, ctx):
+        from fireflymcf import popuppage
+        h = ctx.handles[self.spec.id]
+        gs, _ = guidata.guidata_extent(data)
+        recs = records.object_records(data, gs + guidata.object_tables(data)[1][h["root"]])
+        last = recs[-1]
+        assert last.wtype == 12 and bytes(data[last.offset:last.end]) == \
+            popuppage.close_region(data, h["close_id"]), "Close's touch region is not last"
+        return ("add_popup_page: %r dialog on screen %d (root %d); Close -> screen %d via leaf "
+                "%#x (%s)" % (self.title, h["screen_id"], h["root"], h["return_screen"],
+                              h["close_id"], "VERIFIED" if self.hardware_verified
+                              else "UNVERIFIED"))
+
+
 @op("set_theme")
 class SetTheme(Op):
     """Replace the panel's colour scheme (`themeswap.py`): the six chrome colours GuiCode's
