@@ -77,7 +77,9 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`add_glyph_button`](#add_glyph_button) | structural | Clone a donor control into a bare button shell on a page, sized w x h, unwired. | Flashed (the Starlink button). Must be followed by `wire_button`. On 14.7, emulated 2026-11-08 (with `wire_button`, donor 214): the clone draws at its place, changing no pixel outside its records, and a tap sends only the wired output's toggle. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`add_level_page`](#add_level_page) | structural | Redraw screen 29 (the SLIDES/AWNINGS page the nav rail's slide icon reaches) as a LEVEL page: a top-down van with a tile per wheel, pitch and roll, a LEVEL banner and blocks needed/carried. Live, it appends 14 record-gated `0x0FFB0` subscriptions, 20 fresh display cells and one per-tick routine; `preview` draws the example state statically. `levelpage.recipe_ops` emits it with its title rename and arrow glyph. | Flashed 2026-09-27: live page, orientation, blocks stepper and NO SENSOR verified; on DGN `0x1EFBF` since 2026-09-28. Zero Level is unverified. | **no** | 13.6 (unverified) |
 | [`add_low_volts_control`](#add_low_volts_control) | structural | Copy the AGS Low Volts arm (title + button, touch id 129) onto any page's object. Recolour and direction come from `add_aes_low_volts_trigger`'s bridge. | Flashed 2026-10-19 on the AES settings page body (screen 28): arms, disarms and recolours with that bridge. | yes | 13.6 |
+| [`add_popup_page`](#add_popup_page) | structural | Draw a LEVEL-SETUP-style dialog on a screen `add_screen` added: the taller LEVEL SETUP box, a centred title, and Close, which carries the nav rail's leaf for the `return_to` page. With `opener`, a 44x38 gear button on that page opens it, through a free ACTION leaf retargeted to the new screen. | **Unverified.** Emulated 2026-11-13: Close returns to ELECTRICAL; the gear opens the dialog. | **no** | 13.6 (unverified) |
 | [`add_rvc_button`](#add_rvc_button) | structural | Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change. | UNVERIFIED. Bench check: each button sends exactly its frame(s) from 9F at priority 6, once per press; a toggle sends on while its status reads off and off while it reads on; a cycle sends the state after the reported one (candump at each reported state, photo). On 14.7, emulated 2026-11-08: a 3 s hold on the first hold-safe group sends one frame after the threshold and a short tap none; a tap button sends once per press; the same hold forced onto GuiCode-driven group 136 is refused by the finish gate, and with the gate stubbed neither a tap nor a hold on it sends. A driven group is excluded as a conservative superset, not because every hold on one is dead: a hold on driven group 129 works on the coach (2026-10-19). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
+| [`add_screen`](#add_screen) | structural | Add a new screen: a screen id stock 13.6 does not use (35) and a root drawn like screen 12's (background, header bar and title, header widgets, nav rail) over an empty navy page area. The screen switch's band is rebuilt at the top of the object table with one trampoline per stock screen, so no existing object moves. | **Unverified.** Emulated 2026-11-13: every 13.6 screen and an unknown id draw pixel for pixel as before; the new screen draws empty. | **no** | 13.6 (unverified) |
 | [`add_text_label`](#add_text_label) | structural | Draw static text on any page: one boxed wtype-11 label (latin-1, a '\n' for more lines at the font's cell pitch), optionally on a fill and inside a 1 px section frame, absolute at x, y in a new object attached under `parent`, ended by a restore record that hands back the font, align and colours the page walk carried in; refused if anything else on the page would change. | UNVERIFIED. Bench check: the text draws in its box, font and colour on the page, a two-line label spaces its lines by the font's cell, and every other control on the page draws as before, its text in its own font, and a `frame` draws as the stock section frames do, its edge masked behind a title's fill (photo against stock). On 14.7, emulated 2026-11-08: every glyph drawn in its box, full-coverage ink white, no pixel outside the box changed on any rail page. | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`aes_card_layout`](#aes_card_layout) | structural | Lay the compact AES ELECTRICAL page out as HOME's 2x2 card grid -- Batteries, Inverter, Auto Engine Start, Water Pump -- with the controls at their stock sizes; pinned to the compact frame's shape (object 829) and the private AES cluster. | Flashed 2026-10-15; its three draw defects were fixed and verified the same day. | yes | 13.6 |
 | [`append_filter`](#append_filter) | structural | Subscribe to a DGN by appending a NEW receive entry (not retargeting one): table grown in the padding arena, count bumped in the descriptor and GuiCode header +0x20. `refresh` defaults to 3, which never expires: the slot keeps its last value when the publisher goes silent. Pass 1 (10 s) or 2 (30 s, stock's thermostat class) for a live status. | Flashed 2026-09-22: var 298 appended for 0x1FEA0, the HOME readout followed injected values 42 then 7. | yes | 13.6, 14.7 (unverified, emulated) |
@@ -975,6 +977,34 @@ Error codes:
 - `NO_LOW_VOLTS_CHILD` — the donor has no wtype-5 record whose child draws the 'Low\nVolts' button face.
 - `INSERT_REFUSED` — `insert.insert_object` refused (bad parent, no attach template, or a correctness gate failed).
 
+### add_popup_page
+
+Draw a LEVEL-SETUP-style dialog on a screen `add_screen` added: the taller LEVEL SETUP box, a centred title, and Close, which carries the nav rail's leaf for the `return_to` page. With `opener`, a 44x38 gear button on that page opens it, through a free ACTION leaf retargeted to the new screen.
+
+- **Hardware status:** **Unverified.** Emulated 2026-11-13: Close returns to ELECTRICAL; the gear opens the dialog.
+- **Proof:** `src/fireflymcf/popuppage.py`; the leaf retarget is `navicon.retarget_action_leaf`, as the LEVEL SETUP popup's Setup button uses; `GUICODE.md` Finding 93 lists the free leaves
+- **Implementation:** `recipe_ops.AddPopupPage`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `screen` | object | yes |  | {"ref": id of an add_screen op} |
+| `title` | string | yes |  | the dialog's title |
+| `return_to` | string | yes |  | the header of the page Close returns to, reached from the nav rail (e.g. "ELECTRICAL") |
+| `opener` | object |  |  | {"page": header of a rail page, "at": [x, y]}: a 44x38 gear button there opens the popup |
+
+Error codes:
+
+- `BAD_REF` — `screen` names no earlier `add_screen`.
+- `NO_RETURN` — no single nav-rail leaf reaches a page headed `return_to`.
+- `NO_DIALOG` — the title is wider than the dialog, or the root could not be rewritten.
+- `NO_OPENER_PAGE` — `opener.page` is not one rail-reached page.
+- `OPENER_OVERLAP` — the gear would overlap a touch region or a readout's fill band there.
+- `OPENER_SHARED` — the object painting the background under the gear is drawn on another page too, which would carry the gear.
+- `NO_OPENER` — no free ACTION leaf, or the host page or leaf could not be rewritten.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's, so the drawing templates (`donors.template`) are not usable.
+- `NO_TEMPLATE` — a drawing template is not proven on this image.
+- `MODE7_INDEX` — a template's colour cell is not below the image's mode-7 index limit.
+
 ### add_rvc_button
 
 Add a button that sends fixed RV-C frames on one DGN, on any page: a tap (mask 0x06, prefix `10 00 00 00`), a hold of 1-15 s (0x04, the alt-reboot shape) or both (Batt Heat's group-17 clone), or a toggle (prefix `11 80 00 00`, variant 0 on and 1 off, driven by a later add_button_status), or a cycle of 2-16 payloads (prefix `1N 80 00 00`, N = states - 1, variant k sends payload k, driven by a later add_button_states), or a display tile (no group, no touch region: sends nothing), its Batt Heat body (box, capsule, caption, optional glyph, touch on a fresh group) pasted as a new object attached under `parent`, refused if a touch region would overlap or anything else on the page would change.
@@ -1023,6 +1053,25 @@ Error codes:
 - `TYPE_TABLE_CANDIDATES`, `CELL_TABLE_ADJACENCY`, `TYPE_TABLE_DISAGREES` — the display-cell table's type table does not locate on this image (`celltables.locate`)
 - `VARIANT_SETTER_UNKNOWN` — which groups GuiCode drives by number is not known on this image (`newbutton.guicode_selected_groups`)
 - `RESERVED_GROUP_UNKNOWN` — the group holding a stock inverter/charger template (DGN 1FFD3h, 1FFC5h) does not locate on this image: none or several (`newbutton.reserved_groups`)
+
+### add_screen
+
+Add a new screen: a screen id stock 13.6 does not use (35) and a root drawn like screen 12's (background, header bar and title, header widgets, nav rail) over an empty navy page area. The screen switch's band is rebuilt at the top of the object table with one trampoline per stock screen, so no existing object moves.
+
+- **Hardware status:** **Unverified.** Emulated 2026-11-13: every 13.6 screen and an unknown id draw pixel for pixel as before; the new screen draws empty.
+- **Proof:** `src/fireflymcf/screenadd.py`; `GUICODE.md` Finding 93 (no GuiCode reader indexes by screen id; one more nesting level costs 272 bytes of an 8 KB stack with 3 KB free)
+- **Implementation:** `recipe_ops.AddScreen`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `title` | string |  | "" | the header title, up to 14 characters (indented three spaces like the stock headers) |
+
+Error codes:
+
+- `NO_SCREEN` — the band could not be rebuilt (no free screen id, an unexpected switch or root shape, a relocation gate refused), or the title does not fit the 17-character header field.
+- `GRAMMAR` — the image's record grammar is not proven 13.6's, so the drawing templates (`donors.template`) are not usable.
+- `NO_TEMPLATE` — a drawing template is not proven on this image.
+- `MODE7_INDEX` — a template's colour cell is not below the image's mode-7 index limit.
 
 ### add_text_label
 

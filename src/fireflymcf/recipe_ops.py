@@ -12589,6 +12589,237 @@ class AddLevelPage(Op):
                    len(h["cells"]), h["routine_addr"], len(switches), controls))
 
 
+@op("add_screen")
+class AddScreen(Op):
+    """Add a NEW screen: a screen id stock 13.6 does not use (the lowest free, 35) and a root
+    object drawn like screen 12's -- its background, header bar and `title`, the header widgets
+    and nav rail -- over the LEVEL page's navy page area, with nothing else on it.
+
+    The screen switch's candidate band is rebuilt at the top of object table 1: one wt-5
+    trampoline per stock screen, referencing that screen's unchanged root, in the same order and
+    with the same match values, then the new root (`screenadd.add_screen`, GUICODE Finding 93).
+    No existing object index changes; `layout.screen_object_map` follows the trampolines.
+
+    Nothing navigates to the new screen; a later op (`add_popup_page`) wires a control to it.
+    The handle gives `screen_id` and `root`.
+
+    Error codes:
+      NO_SCREEN -- the band could not be rebuilt (no free screen id, an unexpected switch or
+                   root shape, a relocation gate refused), or the title does not fit the
+                   17-character header field.
+      GRAMMAR -- the image's record grammar is not proven 13.6's, so the drawing templates
+        (`donors.template`) are not usable.
+      NO_TEMPLATE -- a drawing template is not proven on this image.
+      MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
+    """
+
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "title": {"type": "string", "default": "",
+                      "description": "the header title, up to 14 characters (indented three spaces "
+                                     "like the stock headers)"},
+        },
+        "required": [],
+    }
+
+    def validate(self):
+        self.title = self._param("title", "", kind=str)
+
+    def apply(self, data, ctx):
+        from fireflymcf import screenadd
+        try:
+            out, sid, root = screenadd.add_screen(data, screenadd.blank_root(data, self.title))
+        except screenadd.ScreenAddError as e:
+            raise RecipeError("NO_SCREEN", str(e), op_id=self.spec.id)
+        ctx.handles[self.spec.id] = {"screen_id": sid, "root": root}
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()          # draws a page; sends nothing
+
+    def verify(self, data, ctx):
+        from fireflymcf import screenadd
+        h = ctx.handles[self.spec.id]
+        m = layout.screen_object_map(data)
+        assert m.get(h["screen_id"]) == h["root"], \
+            "screen %d does not map to root %d" % (h["screen_id"], h["root"])
+        gs, _ = guidata.guidata_extent(data)
+        sw = layout._screen_switch_record(data, guidata.find_match_table(data), gs)
+        band = guidata.switch_candidates(data, sw)
+        assert band[0][0] == layout.MATCH_DEFAULT, "the band's first entry is not the default"
+        return ("add_screen: screen %d, root object %d, %d-entry band at object %d (%s)"
+                % (h["screen_id"], h["root"], len(band), sw.child_index,
+                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+
+
+@op("add_popup_page")
+class AddPopupPage(Op):
+    """Draw a LEVEL-SETUP-style dialog on a screen `add_screen` added: the white-bordered body
+    box LEVEL SETUP draws with Wheelbase and Track (x 150..730, y 46..464), `title` centred at
+    its top, and a Close button bottom right whose touch carries the nav rail's leaf for the
+    `return_to` page, so Close navigates exactly as that rail icon does (`popuppage`).
+
+    Every colour is a theme role or `levelpage.BODY`; put this op before `set_theme`. Nothing on
+    the panel opens the page yet. The handle gives `screen_id`, `root`, `dialog`
+    `(x, y, w, h)` and `content_y` (the first row's top) for later content.
+
+    Error codes:
+      BAD_REF   -- `screen` names no earlier `add_screen`.
+      NO_RETURN -- no single nav-rail leaf reaches a page headed `return_to`.
+      NO_DIALOG -- the title is wider than the dialog, or the root could not be rewritten.
+      NO_OPENER_PAGE -- `opener.page` is not one rail-reached page.
+      OPENER_OVERLAP -- the gear would overlap a touch region or a readout's fill band there.
+      OPENER_SHARED -- the object painting the background under the gear is drawn on another
+                       page too, which would carry the gear.
+      NO_OPENER -- no free ACTION leaf, or the host page or leaf could not be rewritten.
+      GRAMMAR -- the image's record grammar is not proven 13.6's, so the drawing templates
+        (`donors.template`) are not usable.
+      NO_TEMPLATE -- a drawing template is not proven on this image.
+      MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
+
+    With `opener`, a 44x38 gear button (the LEVEL Setup button's capsule and gear, no caption) is
+    appended last to the object that paints the background under it (so a switch repainting that
+    arm repaints the gear too; when that object is a switch arm, the gear draws only while the
+    switch selects it, and the compile report says which slot gates it); its touch takes the lowest free ACTION leaf
+    (`screenadd.free_action_leaves`) and the leaf is retargeted to the new screen
+    (`navicon.retarget_action_leaf`).
+    """
+
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "screen": {"type": "object", "description": "{\"ref\": id of an add_screen op}"},
+            "title": {"type": "string", "description": "the dialog's title"},
+            "return_to": {"type": "string", "description": "the header of the page Close returns "
+                                                           "to, reached from the nav rail "
+                                                           "(e.g. \"ELECTRICAL\")"},
+            "opener": {"type": "object",
+                       "description": "{\"page\": header of a rail page, \"at\": [x, y]}: a "
+                                      "44x38 gear button there opens the popup"},
+        },
+        "required": ["screen", "title", "return_to"],
+    }
+
+    def validate(self):
+        self.screen = self._param("screen", kind=dict)
+        if set(self.screen) != {"ref"}:
+            raise RecipeError("BAD_PARAMS", "add_popup_page: screen must be {'ref': op_id}",
+                              op_id=self.spec.id)
+        self.title = self._param("title", kind=str)
+        self.return_to = self._param("return_to", kind=str)
+        self.opener = self._param("opener", None)
+        if self.opener is not None:
+            at = self.opener.get("at") if isinstance(self.opener, dict) else None
+            if (set(self.opener) != {"page", "at"} or not isinstance(self.opener["page"], str)
+                    or not (isinstance(at, list) and len(at) == 2
+                            and all(isinstance(v, int) for v in at))):
+                raise RecipeError("BAD_PARAMS", "add_popup_page: opener must be "
+                                  "{'page': str, 'at': [x, y]}", op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        from fireflymcf import popuppage
+        h = ctx.handles.get(self.screen["ref"])
+        if not h or "screen_id" not in h:
+            raise RecipeError("BAD_REF", "no earlier add_screen op with id %r"
+                              % self.screen["ref"], op_id=self.spec.id)
+        try:
+            ret_screen, leaf = popuppage.return_leaf(data, self.return_to)
+        except popuppage.PopupPageError as e:
+            raise RecipeError("NO_RETURN", str(e), op_id=self.spec.id)
+        try:
+            extra = popuppage.shell_records(data, self.title) + [popuppage.close_region(data, leaf)]
+            body = popuppage.root_body(data, h["root"], extra)
+            out, edits = relocate.replace_object_records(data, h["root"], body)
+        except (popuppage.PopupPageError, relocate.RelocationError) as e:
+            raise RecipeError("NO_DIALOG", str(e), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        x, y, w, hh, _r = popuppage.DIALOG
+        handle = {"screen_id": h["screen_id"], "root": h["root"], "dialog": (x, y, w, hh),
+                  "content_y": popuppage.CONTENT_Y, "return_screen": ret_screen, "close_id": leaf}
+        if self.opener is not None:
+            out = self._add_opener(out, ctx, handle)
+        ctx.handles[self.spec.id] = handle
+        return out
+
+    def _add_opener(self, data, ctx, handle):
+        from fireflymcf import popuppage
+        gx, gy = self.opener["at"]
+        try:
+            host_screen, _rail = popuppage.return_leaf(data, self.opener["page"])
+        except popuppage.PopupPageError as e:
+            raise RecipeError("NO_OPENER_PAGE", str(e), op_id=self.spec.id)
+        host = layout.screen_object_map(data)[host_screen]
+        clash = popuppage.opener_conflicts(data, host, gx, gy)
+        if clash:
+            raise RecipeError("OPENER_OVERLAP", "gear at %s collides with: %s"
+                              % ((gx, gy), "; ".join(clash)), op_id=self.spec.id)
+        # The gear is drawn by the object that paints the background under it, last in that
+        # object, so a repaint of a switch arm (ELECTRICAL's slot-7 switch) repaints it too.
+        root = host
+        host = popuppage.background_host(data, root, gx, gy)
+        pages = popuppage.pages_drawing(data, host)
+        want = popuppage._norm(self.opener["page"])
+        if pages - {want}:
+            raise RecipeError("OPENER_SHARED", "the background under the gear is object %d, "
+                              "which pages %s draw too" % (host, sorted(pages - {want})),
+                              op_id=self.spec.id)
+        try:
+            leaf, was = popuppage.open_leaf(data)
+            out, edits = self._place_gear(data, root, host, gx, gy, leaf)
+            out, leaf_edits = navicon.retarget_action_leaf(out, leaf, was, handle["screen_id"])
+        except (popuppage.PopupPageError, relocate.RelocationError, ValueError) as e:
+            raise RecipeError("NO_OPENER", str(e), op_id=self.spec.id)
+        ctx.edits.extend(edits)
+        ctx.edits.extend(relocate.Edit(off, old, new, "recipe", note)
+                         for off, old, new, note in leaf_edits)
+        out, _ = patch.reseal(out)
+        handle.update(host=host, host_screen=host_screen, gear_leaf=leaf, gear_at=(gx, gy),
+                      gate=popuppage.switch_gate(out, root, host))
+        return out
+
+    @staticmethod
+    def _place_gear(data, root, host, gx, gy, leaf):
+        """Append the gear to `host` so the page `root` draws it at `(gx, gy)`: a host object's
+        records can sit under a container offset, so the drawn position is measured and the
+        records rebuilt once with the difference taken out."""
+        from fireflymcf import popuppage
+        x, y = gx, gy
+        for _ in range(2):
+            body = popuppage.root_body(data, host, popuppage.gear_records(data, x, y, leaf))
+            out, edits = relocate.replace_object_records(data, host, body)
+            at = popuppage.placed_touch(out, root, leaf)
+            if at == (gx, gy):
+                return out, edits
+            if at is None:
+                break
+            x, y = x - (at[0] - gx), y - (at[1] - gy)
+        raise popuppage.PopupPageError("the gear does not draw at %s in object %d (drawn at %s)"
+                                       % ((gx, gy), host, at))
+
+    def capability_delta(self, ctx):
+        return set(), set()          # draws; Close navigates like an existing rail icon
+
+    def verify(self, data, ctx):
+        from fireflymcf import popuppage
+        h = ctx.handles[self.spec.id]
+        gs, _ = guidata.guidata_extent(data)
+        recs = records.object_records(data, gs + guidata.object_tables(data)[1][h["root"]])
+        last = recs[-1]
+        assert last.wtype == 12 and bytes(data[last.offset:last.end]) == \
+            popuppage.close_region(data, h["close_id"]), "Close's touch region is not last"
+        gear = ""
+        if "gear_leaf" in h:
+            gear = "; gear at %s in object %d, leaf %#x" % (h["gear_at"], h["host"], h["gear_leaf"])
+            if h.get("gate"):
+                gear += (" -- drawn only while slot %d's switch (object %d) selects object %d"
+                         % (h["gate"][0], h["gate"][1], h["host"]))
+        return ("add_popup_page: %r dialog on screen %d (root %d); Close -> screen %d via leaf "
+                "%#x%s (%s)" % (self.title, h["screen_id"], h["root"], h["return_screen"],
+                                h["close_id"], gear, "VERIFIED" if self.hardware_verified
+                                else "UNVERIFIED"))
+
+
 @op("set_theme")
 class SetTheme(Op):
     """Replace the panel's colour scheme (`themeswap.py`): the six chrome colours GuiCode's

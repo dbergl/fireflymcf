@@ -316,8 +316,30 @@ def screen_object_map(data: bytes, match_table_off: int | None = None) -> dict:
     sw = _screen_switch_record(data, off, gs)
     # The switch's candidate list is `guidata.switch_candidates`; a screen map is just that
     # list minus the 0xFFFF no-match default (which is the fallback screen, not an id).
-    return {value: obj for value, obj in guidata.switch_candidates(data, sw, off)
-            if value != MATCH_DEFAULT}
+    return {value: trampoline_target(data, obj)
+            for value, obj in guidata.switch_candidates(data, sw, off) if value != MATCH_DEFAULT}
+
+
+def trampoline_target(data: bytes, obj: int) -> int:
+    """The root object a screen-band trampoline references, or `obj` itself.
+
+    `screenadd.add_screen` rebuilds the screen band at the top of object table 1 with one
+    trampoline per screen: an object holding exactly one wtype-5 record that references the
+    screen's original root at the flow origin (GUICODE Finding 93). A trampoline is appended
+    after its root, so it references a LOWER index. No stock band entry in 11.23, 13.6 or 14.7
+    is a lone wtype-5 record referencing a lower index (13.6's `0xFFFF` default, object 3, is a
+    lone wtype-5 reference to object 4, forward, and is not followed), so the shape is
+    unambiguous. Following it keeps every page addressed by its real root."""
+    gs, _ge = guidata.guidata_extent(data)
+    tab = guidata.object_tables(data)[1]
+    try:
+        recs = records.object_records(data, gs + tab[obj])
+    except Exception:                       # not decodable: not a trampoline
+        return obj
+    if len(recs) == 1 and recs[0].wtype == 5 and recs[0].child_index is not None \
+            and recs[0].child_index < obj:
+        return recs[0].child_index
+    return obj
 
 
 def _screen_switch_record(data: bytes, match_off: int, gs: int):

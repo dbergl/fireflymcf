@@ -677,3 +677,13 @@ def test_thermostat_rests_120_s_after_a_run():
     h.advance(120.0)
     starts = [round(t, 3) for t, c, lv, cmd, dur in ac(h, t0) if c == 0x0A and lv == 200]
     assert starts[0] == 3.0 and [t for t in starts if t > 130][0] == 243.0
+
+def test_default_clock_reads_time_at_call(monkeypatch):
+    """A G12 built without `clock` reads `time.localtime` when it runs, so a test that freezes
+    the host clock (as the screen-diff tests do) freezes the G12's DATE_TIME_STATUS too."""
+    import time
+
+    g = G12(open(MCF, "rb").read())
+    frozen = time.localtime(1_800_000_000)
+    monkeypatch.setattr(time, "localtime", lambda *_a: frozen)
+    assert g.clock() == frozen
