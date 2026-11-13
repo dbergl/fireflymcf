@@ -697,15 +697,65 @@ class Scenario:
                 and (sa is None or f.sa == sa)]
 
     # -- the display and memory -----------------------------------------------------------------
-    def screenshot(self, path: Path) -> np.ndarray:
-        """Save the display as a PNG at `path`; returns the (480, 800, 3) RGB array."""
+    def show_screen(self, screen_id: int, settle_s: float = 2.0) -> None:
+        """Show screen `screen_id` by writing GuiCode's screen id (`state+0x20A`) directly, as a
+        navigation store does, then run `settle_s` while the panel redraws. Reaches screens no
+        control navigates to (GUICODE Finding 93)."""
+        if not 0 <= screen_id <= 0xFF:
+            raise ScenarioError(f"screen id {screen_id} is not a u8")
+        base = self._state_base()
+        self._m.uc.mem_write(base + 0x20A, bytes([screen_id]))
+        self.run(settle_s)
+
+    def _state_base(self) -> int:
+        """GuiCode's state pointer, read from the base register of a `ldrb.w Rt,[Rn,#0x20A]`
+        the first time one executes (`screenadd.screen_id_readers`)."""
+        if getattr(self, "_state", None) is not None:
+            return self._state
+        import struct as _struct
+
+        from unicorn import UC_HOOK_CODE
+        from unicorn import arm_const
+
+        from .. import screenadd, theme
+
+        sec = theme.guicode_section(self.image)
+        gbase = theme.guicode_base(sec)
+        got: dict = {}
+        hooks = []
+
+        def hit(uc, addr, _size, _user):
+            if "base" in got:
+                return
+            h1 = _struct.unpack_from("<H", self.image, sec.offset + addr - gbase)[0]
+            rn = h1 & 0xF
+            got["base"] = uc.reg_read(getattr(arm_const, f"UC_ARM_REG_R{rn}"))
+
+        for a in screenadd.screen_id_readers(self.image):
+            hooks.append(self._m.uc.hook_add(UC_HOOK_CODE, hit, begin=a, end=a + 1))
+        try:
+            for _ in range(50):
+                if "base" in got:
+                    break
+                self.run(0.1)
+        finally:
+            for h in hooks:
+                self._m.uc.hook_del(h)
+        if "base" not in got:
+            raise ScenarioError("no GuiCode load of the screen id ran in 5 s")
+        self._state = got["base"]
+        return self._state
+
+    def screenshot(self, path: Path | None = None) -> np.ndarray:
+        """The display as a (480, 800, 3) RGB array, also saved as a PNG at `path` if given."""
         from PIL import Image
 
         img = self._m.periph["LTDC"].render()
         if img is None:
             raise ScenarioError("the display is not configured yet")
         img = np.array(img, copy=True)
-        Image.fromarray(img).save(path)
+        if path is not None:
+            Image.fromarray(img).save(path)
         return img
 
     def read_mem(self, addr: int, size: int) -> bytes:

@@ -19,7 +19,14 @@ from __future__ import annotations
 
 import struct
 
-from . import guidata, layout, memo, navmap, options, theme
+from . import guidata, insert, layout, memo, navmap, options, patch, records, relocate, theme
+from . import levelpage as lp
+from . import levelsetup as ls
+from . import pagedraw as pd
+
+class ScreenAddError(ValueError):
+    """A screen could not be added (no free id, an unexpected band or root, a gate refused)."""
+
 
 SCREEN_OFFSET = 0x20A               # state+0x20A: the screen id (u8)
 _LOADS = (0xF89, 0xF99)             # ldrb.w / ldrsb.w Rt,[Rn,#imm12] first halfword >> 4
@@ -112,3 +119,114 @@ def free_action_leaves(data: bytes) -> tuple[int, ...]:
         stores.setdefault(r.store_at, set()).add(r.touch_id)
     return tuple(sorted(t for t, hs in by_id.items()
                         if len(hs) == 1 and t not in carried and stores[hs[0].store_at] == {t}))
+
+
+# The blank root is built from screen 12's root (object 15, `levelsetup.POPUP_ROOT`): its
+# full-screen background, header bar and title (records 0-2), and its wt-5 references to the
+# header widgets and the nav rail (records 3-4), then the LEVEL page's page-area fill. The title
+# record is retitled in place, so the new title has the old one's length (17 characters).
+TITLE_INDENT = "   "
+
+
+def blank_root(data: bytes, title: str) -> bytes:
+    """An empty screen's root object (`<count><records>`, padded to 4): screen 12's background,
+    header bar and `title`, the header widgets and nav rail, and the navy page area."""
+    gs, _ = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    recs = records.object_records(data, gs + table[ls.POPUP_ROOT])
+    refs = [recs[i] for i in ls.KEPT_ROOT_RECORDS]
+    if [r.child_index for r in refs] != list(ls.ROOT_REFS) or any(r.wtype != 5 for r in refs):
+        raise ScreenAddError(f"object {ls.POPUP_ROOT} records {ls.KEPT_ROOT_RECORDS} are not the "
+                             f"wt-5 references to {ls.ROOT_REFS}")
+    tr = recs[ls.TITLE_RECORD]
+    width = len(tr.label or "")
+    text = TITLE_INDENT + title
+    if width != len(ls.TITLE_STOCK) or len(text) > width:
+        raise ScreenAddError(f"title {title!r} does not fit the {width}-character header field")
+    parts = []
+    for i in ls.BACKGROUND_RECORDS:
+        r = recs[i]
+        raw = bytearray(data[r.offset:r.end])
+        if i == ls.TITLE_RECORD:
+            at = r.label_offset - r.offset
+            raw[at:at + width] = text.ljust(width).encode("ascii")
+        parts.append(bytes(raw))
+    parts += [bytes(data[r.offset:r.end]) for r in refs]
+    parts.append(pd.fill(data, *lp.LAYOUT["page"], lp.NAVY))
+    body = bytes([len(parts)]) + b"".join(parts)
+    return body + b"\0" * (-len(body) % 4)
+
+
+def original_root(data: bytes, obj: int) -> int:
+    """The root object a band entry draws: a trampoline's target, or the entry itself."""
+    return layout.trampoline_target(data, obj)
+
+
+def _trampoline(template: bytes, root: int) -> bytes:
+    raw = bytearray(template)
+    struct.pack_into("<H", raw, records.child_index_offset(template, records.decode_record(template, 0)),
+                     root)
+    body = bytes([1]) + bytes(raw)
+    return body + b"\0" * (-len(body) % 4)
+
+
+def _switch(data: bytes):
+    gs, _ = guidata.guidata_extent(data)
+    return layout._screen_switch_record(data, guidata.find_match_table(data), gs)
+
+
+def add_screen(data: bytes, root_bytes: bytes, screen_id: int | None = None
+               ) -> tuple[bytes, int, int]:
+    """Add a screen whose root is `root_bytes`. Returns `(image, screen_id, root_object)`.
+
+    The screen switch's band `[child_index, child_index+count)` is rebuilt at the top of object
+    table 1: one trampoline per entry (a lone wt-5 reference to the entry's ORIGINAL root, so a
+    second call never chains trampolines), in the same order with the same match values (the
+    `0xFFFF` default first), then the new root with `screen_id` (default `free_screen_id`). The
+    switch's `child_index` and `count` are then repointed. No existing object index changes.
+    """
+    sw = _switch(data)
+    band = guidata.switch_candidates(data, sw)
+    if not band or band[0][0] != layout.MATCH_DEFAULT:
+        raise ScreenAddError("the screen switch's band does not start with its 0xFFFF default")
+    sid = free_screen_id(data) if screen_id is None else screen_id
+    if not 0 <= sid <= 0xFF or sid in stored_screen_ids(data):
+        raise ScreenAddError(f"screen id {sid} is in use or not a u8")
+    if not root_bytes or len(root_bytes) % 4:
+        raise ScreenAddError("root object bytes must be non-empty and 4-aligned")
+
+    gs, _ = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    template, trec = insert._container_template(
+        data, records.object_records(data, gs + table[ls.POPUP_ROOT]), positioned=False)
+    if trec.geom[0] is not None or trec.geom[1] is not None:
+        raise ScreenAddError("the wt-5 template carries geometry; a trampoline must not offset")
+
+    values = [v for v, _ in band] + [sid]
+    padded = values + ([0xFFFF] if len(values) % 2 else [])
+    try:
+        # Two entries, then their two objects: `find_match_table` accepts a table at most two
+        # entries wider than the object count, so the whole band cannot be grown first.
+        objs = [_trampoline(template, original_root(data, o)) for _v, o in band]
+        objs.append(bytes(root_bytes))
+        out, idxs = data, []
+        for k in range(0, len(padded), 2):
+            out, _e = relocate.grow_match_table(out, padded[k:k + 2])
+            for obj in objs[k:k + 2]:
+                out, _e, i = insert._append_object(out, obj)
+                idxs.append(i)
+    except relocate.RelocationError as e:
+        raise ScreenAddError(f"growing the object table failed: {e}") from e
+    if idxs != list(range(idxs[0], idxs[0] + len(idxs))):
+        raise ScreenAddError(f"the new band did not land contiguously ({idxs})")
+
+    sw2 = _switch(out)
+    ci = records.child_index_offset(out, sw2)
+    buf = bytearray(out)
+    struct.pack_into("<H", buf, ci, idxs[0])
+    struct.pack_into("<H", buf, ci - 2, len(values))
+    out, _labels = patch.reseal(bytes(buf))
+    chk = _switch(out)
+    if (chk.child_index, chk.count) != (idxs[0], len(values)):
+        raise ScreenAddError("the screen switch did not take the new band")
+    return out, sid, idxs[-1]

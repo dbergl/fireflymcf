@@ -12589,6 +12589,66 @@ class AddLevelPage(Op):
                    len(h["cells"]), h["routine_addr"], len(switches), controls))
 
 
+@op("add_screen")
+class AddScreen(Op):
+    """Add a NEW screen: a screen id stock 13.6 does not use (the lowest free, 35) and a root
+    object drawn like screen 12's -- its background, header bar and `title`, the header widgets
+    and nav rail -- over the LEVEL page's navy page area, with nothing else on it.
+
+    The screen switch's candidate band is rebuilt at the top of object table 1: one wt-5
+    trampoline per stock screen, referencing that screen's unchanged root, in the same order and
+    with the same match values, then the new root (`screenadd.add_screen`, GUICODE Finding 93).
+    No existing object index changes; `layout.screen_object_map` follows the trampolines.
+
+    Nothing navigates to the new screen; a later op (`add_popup_page`) wires a control to it.
+    The handle gives `screen_id` and `root`.
+
+    Error codes:
+      NO_SCREEN -- the band could not be rebuilt (no free screen id, an unexpected switch or
+                   root shape, a relocation gate refused), or the title does not fit the
+                   17-character header field.
+    """
+
+    hardware_verified = False
+    PARAMS = {
+        "properties": {
+            "title": {"type": "string", "default": "",
+                      "description": "the header title, up to 14 characters (indented three spaces "
+                                     "like the stock headers)"},
+        },
+        "required": [],
+    }
+
+    def validate(self):
+        self.title = self._param("title", "", kind=str)
+
+    def apply(self, data, ctx):
+        from fireflymcf import screenadd
+        try:
+            out, sid, root = screenadd.add_screen(data, screenadd.blank_root(data, self.title))
+        except screenadd.ScreenAddError as e:
+            raise RecipeError("NO_SCREEN", str(e), op_id=self.spec.id)
+        ctx.handles[self.spec.id] = {"screen_id": sid, "root": root}
+        return out
+
+    def capability_delta(self, ctx):
+        return set(), set()          # draws a page; sends nothing
+
+    def verify(self, data, ctx):
+        from fireflymcf import screenadd
+        h = ctx.handles[self.spec.id]
+        m = layout.screen_object_map(data)
+        assert m.get(h["screen_id"]) == h["root"], \
+            "screen %d does not map to root %d" % (h["screen_id"], h["root"])
+        gs, _ = guidata.guidata_extent(data)
+        sw = layout._screen_switch_record(data, guidata.find_match_table(data), gs)
+        band = guidata.switch_candidates(data, sw)
+        assert band[0][0] == layout.MATCH_DEFAULT, "the band's first entry is not the default"
+        return ("add_screen: screen %d, root object %d, %d-entry band at object %d (%s)"
+                % (h["screen_id"], h["root"], len(band), sw.child_index,
+                   "VERIFIED" if self.hardware_verified else "UNVERIFIED"))
+
+
 @op("set_theme")
 class SetTheme(Op):
     """Replace the panel's colour scheme (`themeswap.py`): the six chrome colours GuiCode's
