@@ -152,3 +152,45 @@ def open_leaf(data: bytes) -> tuple[int, int]:
     leaf = free[0]
     route = next(r for r in navmap.routes(data) if r.touch_id == leaf)
     return leaf, route.screen
+
+
+BACKGROUND_WTYPES = (4, 32, 33)      # fills, frames, capsules: what paints under a control
+
+
+def background_host(data: bytes, root: int, x: int, y: int) -> int:
+    """The object whose record is the LAST background (wt 4/32/33) drawn under the gear box at
+    `(x, y)` on the page `root` draws. The gear must be drawn by that object, after it: a switch
+    repaints its selected arm on its own when its value changes (ELECTRICAL's slot-7 switch, root
+    5 record 5, does so after the page is entered), which paints over anything a later record
+    outside the arm drew (found 2026-11-13)."""
+    box = (x, y, x + GEAR_W, y + GEAR_H)
+    host = root
+    for q in layout.Screen(data).walk(root):
+        if (q.wtype in BACKGROUND_WTYPES and q.x0 is not None and q.x0 <= box[0]
+                and q.y0 <= box[1] and q.x1 >= box[2] and q.y1 >= box[3]):
+            host = q.obj_index
+    return host
+
+
+def pages_drawing(data: bytes, obj: int) -> set:
+    """The page headers of every screen whose root draws object `obj`."""
+    gs, ge = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    out = set()
+    for sid, root in layout.screen_object_map(data).items():
+        if any(q.obj_index == obj for q in layout.Screen(data).walk(root)):
+            try:
+                out.add(_norm(options._first_label(options._own_records(data, gs, ge, table, root))))
+            except Exception:                    # a root without a readable header
+                out.add(f"<screen {sid}>")
+    return out
+
+
+def placed_touch(data: bytes, root: int, touch_id: int) -> tuple | None:
+    """`(x0, y0)` where the page `root` draws the touch region carrying `touch_id`."""
+    for q in layout.Screen(data).walk(root):
+        if q.wtype == 12:
+            r = records.decode_record(data, q.record_offset)
+            if struct.unpack_from("<H", data, r.end - guidata.GROUP_REFERENCE_TAIL)[0] == touch_id:
+                return q.x0, q.y0
+    return None

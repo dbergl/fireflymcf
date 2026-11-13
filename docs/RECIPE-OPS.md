@@ -999,6 +999,7 @@ Error codes:
 - `NO_DIALOG` — the title is wider than the dialog, or the root could not be rewritten.
 - `NO_OPENER_PAGE` — `opener.page` is not one rail-reached page.
 - `OPENER_OVERLAP` — the gear would overlap a touch region or a readout's fill band there.
+- `OPENER_SHARED` — the object painting the background under the gear is drawn on another page too, which would carry the gear.
 - `NO_OPENER` — no free ACTION leaf, or the host page or leaf could not be rewritten.
 - `GRAMMAR` — the image's record grammar is not proven 13.6's, so the drawing templates (`donors.template`) are not usable.
 - `NO_TEMPLATE` — a drawing template is not proven on this image.

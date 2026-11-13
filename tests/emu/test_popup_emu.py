@@ -22,12 +22,18 @@ THEME = {"colours": {"bg": [32, 21, 27], "panel": [46, 31, 39], "button": [133, 
          "extra": [[list(BODY), list(THEMED_BODY)]]}
 
 
-def _build(mcf_136, theme=False):
+# Over a background object 829 paints, the arm ELECTRICAL's slot-7 switch (root 5 record 5)
+# selects. The switch repaints its arm on its own after the page is entered; a gear drawn after
+# the switch in the root is painted over then (found 2026-11-13 on the card layout).
+AT_ON_ARM = [110, 280]
+
+
+def _build(mcf_136, theme=False, at=AT):
     ops = [{"id": "screen", "type": "add_screen", "params": {"title": "BATTERY SETUP"},
             "enabled": True},
            {"id": "popup", "type": "add_popup_page", "enabled": True,
             "params": {"screen": {"ref": "screen"}, "title": "BATTERY SETUP",
-                       "return_to": "ELECTRICAL", "opener": {"page": "ELECTRICAL", "at": AT}}}]
+                       "return_to": "ELECTRICAL", "opener": {"page": "ELECTRICAL", "at": at}}}]
     if theme:
         ops.append({"id": "theme", "type": "set_theme", "params": THEME, "enabled": True})
     project = recipe.Project.from_json(json.dumps({
@@ -63,3 +69,13 @@ def test_dialog_takes_the_theme(mcf_136, theme, want):
     s.show_screen(NEW)
     x, y = DIALOG_INSIDE
     assert tuple(int(v) for v in s.screenshot()[y, x]) == want
+
+
+def test_gear_survives_the_arm_repaint(mcf_136):
+    s = Scenario(_build(mcf_136, at=AT_ON_ARM), timeout_s=600)
+    s.boot()
+    s.goto("ELECTRICAL")
+    x, y = AT_ON_ARM
+    s.run(3.0)                                         # past the slot-7 arm's repaint
+    gear = s.screenshot()[y:y + 38, x:x + 44]
+    assert int((gear == 255).all(axis=2).sum()) > 200  # the white gear is still drawn

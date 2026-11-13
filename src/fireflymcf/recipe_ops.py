@@ -12670,6 +12670,8 @@ class AddPopupPage(Op):
       NO_DIALOG -- the title is wider than the dialog, or the root could not be rewritten.
       NO_OPENER_PAGE -- `opener.page` is not one rail-reached page.
       OPENER_OVERLAP -- the gear would overlap a touch region or a readout's fill band there.
+      OPENER_SHARED -- the object painting the background under the gear is drawn on another
+                       page too, which would carry the gear.
       NO_OPENER -- no free ACTION leaf, or the host page or leaf could not be rewritten.
       GRAMMAR -- the image's record grammar is not proven 13.6's, so the drawing templates
         (`donors.template`) are not usable.
@@ -12677,7 +12679,8 @@ class AddPopupPage(Op):
       MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
 
     With `opener`, a 44x38 gear button (the LEVEL Setup button's capsule and gear, no caption) is
-    appended last to that page's root; its touch takes the lowest free ACTION leaf
+    appended last to the object that paints the background under it (so a switch repainting that
+    arm repaints the gear too); its touch takes the lowest free ACTION leaf
     (`screenadd.free_action_leaves`) and the leaf is retargeted to the new screen
     (`navicon.retarget_action_leaf`).
     """
@@ -12750,10 +12753,19 @@ class AddPopupPage(Op):
         if clash:
             raise RecipeError("OPENER_OVERLAP", "gear at %s collides with: %s"
                               % ((gx, gy), "; ".join(clash)), op_id=self.spec.id)
+        # The gear is drawn by the object that paints the background under it, last in that
+        # object, so a repaint of a switch arm (ELECTRICAL's slot-7 switch) repaints it too.
+        root = host
+        host = popuppage.background_host(data, root, gx, gy)
+        pages = popuppage.pages_drawing(data, host)
+        want = popuppage._norm(self.opener["page"])
+        if pages - {want}:
+            raise RecipeError("OPENER_SHARED", "the background under the gear is object %d, "
+                              "which pages %s draw too" % (host, sorted(pages - {want})),
+                              op_id=self.spec.id)
         try:
             leaf, was = popuppage.open_leaf(data)
-            body = popuppage.root_body(data, host, popuppage.gear_records(data, gx, gy, leaf))
-            out, edits = relocate.replace_object_records(data, host, body)
+            out, edits = self._place_gear(data, root, host, gx, gy, leaf)
             out, leaf_edits = navicon.retarget_action_leaf(out, leaf, was, handle["screen_id"])
         except (popuppage.PopupPageError, relocate.RelocationError, ValueError) as e:
             raise RecipeError("NO_OPENER", str(e), op_id=self.spec.id)
@@ -12763,6 +12775,25 @@ class AddPopupPage(Op):
         out, _ = patch.reseal(out)
         handle.update(host=host, host_screen=host_screen, gear_leaf=leaf, gear_at=(gx, gy))
         return out
+
+    @staticmethod
+    def _place_gear(data, root, host, gx, gy, leaf):
+        """Append the gear to `host` so the page `root` draws it at `(gx, gy)`: a host object's
+        records can sit under a container offset, so the drawn position is measured and the
+        records rebuilt once with the difference taken out."""
+        from fireflymcf import popuppage
+        x, y = gx, gy
+        for _ in range(2):
+            body = popuppage.root_body(data, host, popuppage.gear_records(data, x, y, leaf))
+            out, edits = relocate.replace_object_records(data, host, body)
+            at = popuppage.placed_touch(out, root, leaf)
+            if at == (gx, gy):
+                return out, edits
+            if at is None:
+                break
+            x, y = x - (at[0] - gx), y - (at[1] - gy)
+        raise popuppage.PopupPageError("the gear does not draw at %s in object %d (drawn at %s)"
+                                       % ((gx, gy), host, at))
 
     def capability_delta(self, ctx):
         return set(), set()          # draws; Close navigates like an existing rail icon
