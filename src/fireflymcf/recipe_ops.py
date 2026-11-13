@@ -12680,7 +12680,8 @@ class AddPopupPage(Op):
 
     With `opener`, a 44x38 gear button (the LEVEL Setup button's capsule and gear, no caption) is
     appended last to the object that paints the background under it (so a switch repainting that
-    arm repaints the gear too); its touch takes the lowest free ACTION leaf
+    arm repaints the gear too; when that object is a switch arm, the gear draws only while the
+    switch selects it, and the compile report says which slot gates it); its touch takes the lowest free ACTION leaf
     (`screenadd.free_action_leaves`) and the leaf is retargeted to the new screen
     (`navicon.retarget_action_leaf`).
     """
@@ -12773,7 +12774,8 @@ class AddPopupPage(Op):
         ctx.edits.extend(relocate.Edit(off, old, new, "recipe", note)
                          for off, old, new, note in leaf_edits)
         out, _ = patch.reseal(out)
-        handle.update(host=host, host_screen=host_screen, gear_leaf=leaf, gear_at=(gx, gy))
+        handle.update(host=host, host_screen=host_screen, gear_leaf=leaf, gear_at=(gx, gy),
+                      gate=popuppage.switch_gate(out, root, host))
         return out
 
     @staticmethod
@@ -12806,10 +12808,16 @@ class AddPopupPage(Op):
         last = recs[-1]
         assert last.wtype == 12 and bytes(data[last.offset:last.end]) == \
             popuppage.close_region(data, h["close_id"]), "Close's touch region is not last"
+        gear = ""
+        if "gear_leaf" in h:
+            gear = "; gear at %s in object %d, leaf %#x" % (h["gear_at"], h["host"], h["gear_leaf"])
+            if h.get("gate"):
+                gear += (" -- drawn only while slot %d's switch (object %d) selects object %d"
+                         % (h["gate"][0], h["gate"][1], h["host"]))
         return ("add_popup_page: %r dialog on screen %d (root %d); Close -> screen %d via leaf "
-                "%#x (%s)" % (self.title, h["screen_id"], h["root"], h["return_screen"],
-                              h["close_id"], "VERIFIED" if self.hardware_verified
-                              else "UNVERIFIED"))
+                "%#x%s (%s)" % (self.title, h["screen_id"], h["root"], h["return_screen"],
+                                h["close_id"], gear, "VERIFIED" if self.hardware_verified
+                                else "UNVERIFIED"))
 
 
 @op("set_theme")

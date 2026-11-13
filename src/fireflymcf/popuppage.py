@@ -118,6 +118,14 @@ def gear_records(data: bytes, x: int, y: int, touch_id: int) -> list[bytes]:
             pd.touch(data, x, y, GEAR_W, GEAR_H, touch_id)]
 
 
+BACKGROUND_WTYPES = (4, 32, 33)      # fills, frames, capsules: what paints under a control
+
+
+def _contains(q, box: tuple) -> bool:
+    return (q.wtype in BACKGROUND_WTYPES and q.x0 is not None and q.x0 <= box[0]
+            and q.y0 <= box[1] and q.x1 >= box[2] and q.y1 >= box[3])
+
+
 def _hit(a: tuple, b: tuple) -> bool:
     return a[0] <= b[2] and b[0] <= a[2] and a[1] <= b[3] and b[1] <= a[3]
 
@@ -128,7 +136,18 @@ def opener_conflicts(data: bytes, root: int, x: int, y: int) -> list[str]:
     rows the readout's font covers, from `FILL_REACH` left of its pen to its widest fill right)."""
     box = (x, y, x + GEAR_W, y + GEAR_H)
     out = []
-    for q in layout.Screen(data).walk(root):
+    placed = list(layout.Screen(data).walk(root))
+    # A background drawn after the one the gear sits on that covers only PART of the gear: the
+    # gear is drawn by the object owning the last containing background (`background_host`), so
+    # a later partial cover is a different object, and a repaint of it (a switch arm repainting
+    # on its own) would wipe that part of the gear (review 2026-11-13).
+    last = max((k for k, q in enumerate(placed) if _contains(q, box)), default=-1)
+    for q in placed[last + 1:]:
+        if (q.wtype in BACKGROUND_WTYPES and q.x0 is not None
+                and _hit(box, (q.x0, q.y0, q.x1, q.y1)) and not _contains(q, box)):
+            out.append(f"background {(q.x0, q.y0, q.x1, q.y1)} in object {q.obj_index} drawn "
+                       f"over part of it")
+    for q in placed:
         if q.x0 is None or q.y0 is None:
             continue
         if q.wtype == 12 and _hit(box, (q.x0, q.y0, q.x1, q.y1)):
@@ -154,7 +173,6 @@ def open_leaf(data: bytes) -> tuple[int, int]:
     return leaf, route.screen
 
 
-BACKGROUND_WTYPES = (4, 32, 33)      # fills, frames, capsules: what paints under a control
 
 
 def background_host(data: bytes, root: int, x: int, y: int) -> int:
@@ -166,8 +184,7 @@ def background_host(data: bytes, root: int, x: int, y: int) -> int:
     box = (x, y, x + GEAR_W, y + GEAR_H)
     host = root
     for q in layout.Screen(data).walk(root):
-        if (q.wtype in BACKGROUND_WTYPES and q.x0 is not None and q.x0 <= box[0]
-                and q.y0 <= box[1] and q.x1 >= box[2] and q.y1 >= box[3]):
+        if _contains(q, box):
             host = q.obj_index
     return host
 
@@ -193,4 +210,22 @@ def placed_touch(data: bytes, root: int, touch_id: int) -> tuple | None:
             r = records.decode_record(data, q.record_offset)
             if struct.unpack_from("<H", data, r.end - guidata.GROUP_REFERENCE_TAIL)[0] == touch_id:
                 return q.x0, q.y0
+    return None
+
+
+def switch_gate(data: bytes, root: int, host: int) -> tuple | None:
+    """`(slot, switch_object)` when `host` is a candidate arm of a wt-6 switch the page `root`
+    draws: the gear then draws only while that switch's slot selects `host` (ELECTRICAL's
+    Batteries card is slot 7's AES arm, object 829). The placement checks walk each switch's
+    default arm, so a gear in another arm is not checked against it."""
+    gs, ge = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[1]
+    seen = set()
+    for q in layout.Screen(data).walk(root):
+        if q.obj_index in seen:
+            continue
+        seen.add(q.obj_index)
+        for rec in options._own_records(data, gs, ge, table, q.obj_index):
+            if rec.wtype in (6, 0x2E) and host in {o for _v, o in guidata.switch_candidates(data, rec)}:
+                return rec.value_slot, q.obj_index
     return None

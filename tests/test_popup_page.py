@@ -126,3 +126,14 @@ def test_opener_overlap_refused():
         _project(dict(PARAMS, opener={"page": "ELECTRICAL", "at": [8, 70]})), stock)
     assert not res.ok
     assert [e["code"] for e in res.errors] == ["OPENER_OVERLAP"], res.errors
+
+
+def test_opener_partly_over_a_later_background_refused():
+    """(240, 262) on stock ELECTRICAL: the root's background contains the gear, but object 829's
+    frame (81,272)-(301,352), the slot-7 switch's arm, is drawn later and covers part of it: the
+    arm's repaint would wipe that part (review 2026-11-13)."""
+    stock = open(STOCK, "rb").read()
+    res = recipe.compile_project(
+        _project(dict(PARAMS, opener={"page": "ELECTRICAL", "at": [240, 262]})), stock)
+    assert not res.ok
+    assert [e["code"] for e in res.errors] == ["OPENER_OVERLAP"], res.errors

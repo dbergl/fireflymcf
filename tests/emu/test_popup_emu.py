@@ -64,11 +64,19 @@ def test_gear_opens_popup_and_close_returns(booted, tmp_path):
 
 @pytest.mark.parametrize("theme, want", [(False, BODY), (True, THEMED_BODY)])
 def test_dialog_takes_the_theme(mcf_136, theme, want):
+    from fireflymcf import themeswap
+
     s = Scenario(_build(mcf_136, theme=theme), timeout_s=600)
     s.boot()
     s.show_screen(NEW)
+    img = s.screenshot()
     x, y = DIALOG_INSIDE
-    assert tuple(int(v) for v in s.screenshot()[y, x]) == want
+    assert tuple(int(v) for v in img[y, x]) == want
+    if theme:      # no stock theme colour, and not the stock body, anywhere on the popup screen
+        stock = {((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF) for v in themeswap.STOCK.values()}
+        stock.add(BODY)
+        colours = {tuple(int(c) for c in p) for p in img.reshape(-1, 3)}
+        assert not colours & stock, sorted(colours & stock)
 
 
 def test_gear_survives_the_arm_repaint(mcf_136):
