@@ -29,6 +29,16 @@ all three places or stock shows through. Stand-alone colours (`extra`) also reac
 only ever stored straight into SRAM: the battery green and black. HOME's tank fills
 (`tank_fills`) and wells (`tank_wells`) are scoped.
 
+**Settable BMS durations in a new popup** (`add_screen`, `add_popup_page`, `add_bms_duration`;
+`screenadd.py`, `popuppage.py`, `battdur.py`; verified on the coach 2026-11-14, owner,
+`BUS-BASELINE.md` PC.71): a new screen 35 with a LEVEL-SETUP-style dialog opened by a gear on the
+ELECTRICAL Batteries card, holding two 5-60 minute steppers stored in G12 cell `0x72`. One G12
+boot-list byte (`+0x888`, record #43 → #85) makes the G12 sweep `0x72` in place of a duplicate
+`0xE8`. A hold sends the chosen minutes once, a tap stops, a change mid-run sends nothing, and the
+setting survives a G12 section load and a power cycle. **The image's G12 section has to be loaded
+as well** (the loader's G12 row): with the LCD row alone `0x72` is never swept and the panel falls
+back to the defaults.
+
 **Temperature readout in the panel's units** (`add_temperature_readout`, `tempreadout.py`; verified
 on the coach 2026-11-12, owner): an RV-C temperature (`1FE94` BATTERY_STATUS_2 bytes 2-3, appended
 with `append_filter`) drawn on the ELECTRICAL Batteries card. A per-tick routine converts the word

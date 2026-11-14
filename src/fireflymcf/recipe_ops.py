@@ -12628,7 +12628,7 @@ class AddScreen(Op):
       MODE7_INDEX -- a template's colour cell is not below the image's mode-7 index limit.
     """
 
-    hardware_verified = False
+    hardware_verified = True        # coach-verified 2026-11-14 (owner)
     PARAMS = {
         "properties": {
             "title": {"type": "string", "default": "",
@@ -12701,7 +12701,7 @@ class AddPopupPage(Op):
     (`navicon.retarget_action_leaf`).
     """
 
-    hardware_verified = False
+    hardware_verified = True        # coach-verified 2026-11-14 (owner)
     PARAMS = {
         "properties": {
             "screen": {"type": "object", "description": "{\"ref\": id of an add_screen op}"},
@@ -12882,7 +12882,7 @@ class AddBmsDuration(Op):
         SRAM cell area does not prove out on this image (`sramreach`)
     """
 
-    hardware_verified = False
+    hardware_verified = True        # coach-verified 2026-11-14 (owner)
     firmwares = frozenset({"13.6"})
 
     PARAMS = {

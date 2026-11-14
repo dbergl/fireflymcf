@@ -46,8 +46,10 @@ def test_op_refuses_without_popup():
     assert not res.ok and res.errors[0]["code"] == "BAD_REF"
 
 
-def test_unverified(built):
-    assert "dur" in built[2].unverified
+def test_coach_verified(built):
+    """Coach-verified 2026-11-14 (BUS-BASELINE PC.71): the op no longer needs
+    --allow-unverified."""
+    assert "dur" not in built[2].unverified
 
 
 def _ef70(data):

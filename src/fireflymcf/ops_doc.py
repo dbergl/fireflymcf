@@ -298,8 +298,9 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "12's (background, header bar and title, header widgets, nav rail) over an empty navy "
         "page area. The screen switch's band is rebuilt at the top of the object table with one "
         "trampoline per stock screen, so no existing object moves.",
-        "**Unverified.** Emulated 2026-11-13: every 13.6 screen and an unknown id draw pixel for "
-        "pixel as before; the new screen draws empty.",
+        "Coach-verified 2026-11-14 (owner): screen 35 carried a working popup and every stock "
+        "page still drew. Emulated 2026-11-13: every 13.6 screen and an unknown id draw pixel "
+        "for pixel as before.",
         "`src/fireflymcf/screenadd.py`; `GUICODE.md` Finding 93 (no GuiCode reader indexes by "
         "screen id; one more nesting level costs 272 bytes of an 8 KB stack with 3 KB free)"),
     "add_popup_page": ("structural",
@@ -307,8 +308,8 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "box, a centred title, and Close, which carries the nav rail's leaf for the `return_to` "
         "page. With `opener`, a 44x38 gear button on that page opens it, through a free ACTION "
         "leaf retargeted to the new screen.",
-        "**Unverified.** Emulated 2026-11-13: Close returns to ELECTRICAL; the gear opens the "
-        "dialog.",
+        "Coach-verified 2026-11-14 (owner): the gear on the ELECTRICAL Batteries card opens the "
+        "dialog and Close returns to ELECTRICAL.",
         "`src/fireflymcf/popuppage.py`; the leaf retarget is `navicon.retarget_action_leaf`, as "
         "the LEVEL SETUP popup's Setup button uses; `GUICODE.md` Finding 93 lists the free leaves"),
     "add_bms_duration": ("structural",
@@ -318,9 +319,11 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "duplicate `0xE8` record. A per-tick routine clamps the cell, feeds the readouts and "
         "sends each button's start frame with the chosen minutes on the tick its hold "
         "registers. The buttons' fixed held-phase bindings are switched off; their tap stops stay.",
-        "**Unverified.** Emulated 2026-11-13: the steppers step and clamp, the G12 sweeps `0x72` "
-        "and `0xE8` once each, a hold sends the shown minutes once, a tap sends one stop. Cell "
-        "`0x72` was found inert on a coach (`BUS-BASELINE.md` PC.70).",
+        "Coach-verified 2026-11-14 (owner, `BUS-BASELINE.md` PC.71): the G12 sweeps `0x72` and "
+        "`0xE8` once each, a hold sends the shown minutes once, a tap sends one stop, a change "
+        "mid-run sends nothing, and the setting survives a G12 load and a power cycle. The "
+        "image's G12 section must be loaded too (the loader's G12 row), or `0x72` is never "
+        "swept.",
         "`src/fireflymcf/battdur.py`; `G12-CODE.md` (the boot list's duplicate `0xE8`); "
         "`CONTROL-BEHAVIOR.md` section 2 (the gesture phase the routine watches)"),
     "add_alt_reboot": ("structural",

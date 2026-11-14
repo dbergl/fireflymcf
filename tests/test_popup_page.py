@@ -77,7 +77,7 @@ def test_colours_themeable(built):
 def test_handle(built):
     stock = open(STOCK, "rb").read()
     res = recipe.compile_project(_project(PARAMS), stock)
-    assert "popup" in res.unverified
+    assert "popup" not in res.unverified            # coach-verified 2026-11-14
 
 
 def test_unknown_return_page_refused():

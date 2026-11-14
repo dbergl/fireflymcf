@@ -4950,6 +4950,24 @@ says outright when the device it asked did not reply, so a reader is not left in
 an absence. *The first fix was right about the symptom and wrong about the rule.*
 
 
+## PC.71 — the durations on cell `0x72`: swept, sent and kept — observed-on-hardware, 2026-11-14
+
+An image carrying `add_bms_duration` (and `add_screen` / `add_popup_page`), with the G12 sweep
+retarget, run on the coach (owner). Captures filtered to `195FCE9C` and `18EF709F` (research
+repository).
+
+1. *LCD row loaded, G12 row not:* every stepper press was echoed (`72 00 13 11`), but the 5 s
+   sweep still sent `E8` twice and `72` never. Some time later the panel drew the defaults again;
+   it only had the value from the echoes. *Why the panel dropped it is not traced.*
+2. *G12 row loaded from the same stick:* the first sweep sent `E8` once, then `72 00 13 11`, the
+   value stored before the load. **A G12 section load keeps the config store.**
+3. *Holds and taps:* heater 25 min sent one `18EF709F#AA55000000003A98` per hold (two holds);
+   Ignore Alarms 20 min sent one `18EF709F#4D53000000002EE0`; each tap sent one zero-ticks stop.
+4. *A change mid-run:* with the heater on, 25 → 30 min (`72 00 16 14`). No `18EF709F` frame was
+   sent; the running timer was left alone.
+5. *Power cycle:* the owner saw 30 / 20 come back; the last sweep before power-off read
+   `72 00 16 14`.
+
 ## PC.70 — cell `0x72` is writable, echoed and inert — observed-on-hardware, 2026-11-13
 
 **Why.** The settable BMS durations (`battdur.py`) need a G12 config cell that the G12 stores,
