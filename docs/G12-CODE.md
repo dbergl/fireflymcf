@@ -1818,6 +1818,23 @@ stores *at the next mode switch*. Not edited here.
 
 ---
 
+## The boot list sweeps `0xE8` twice: one record is free to retarget — `proven-from-code` / `observed-on-hardware`, 2026-11-13
+
+The init routine activates 46 records with `movs r0,#N; ldr r3,[r4,#8]; blx r3`
+(`+0x07C8`–`+0x08E0`, plus record 9 at `+0x07C6`, whose `movs r0,#9` is at `+0x0796`). Two of
+them, **#43** (`+0x0888`) and **#79** (`+0x083A`), are byte-identical `0x15FCE` templates for
+`0xE8` (`ce5fc10c e8e800e8 00000000`). Both are swept, so a coach sends `0xE8` twice per cycle:
+303 `0xE8` frames against 160 for `0xEF` in `pc12-defaults-2026-08-13.log`. This supports the
+inferred rule that the sweep is every record activated since power-up, keyed by record, not by
+selector.
+
+#43 is activated nowhere else, and nothing deactivates it. All 113 engine calls resolve.
+Changing its `movs` immediate (one byte) to another record's index sweeps that record in the
+duplicate's place, with `0xE8` still swept once by #79. The never-swept records are #25 (`0x36`),
+#26 (`0xAE`), #51 (`0x26`), #60 (`0x93`) and #83–85 (`0x70`–`0x72`). `battdur.py` uses #85
+(`0x72`), with BUS-BASELINE PC.70 as the bus evidence.
+
+
 ## Executing the blob — `observed-in-emulation` / `observed-on-hardware`, 2026-10-21
 
 The blob has now been **run**, not only read. `firefly-emulator` (`firefly_emu/g12.py`) loads table
