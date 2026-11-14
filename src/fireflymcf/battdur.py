@@ -152,20 +152,20 @@ def _enable_binding(data: bytes, group: int):
     return found[0]
 
 
-def resolve(data: bytes, *, groups: dict, config_slot: int) -> BattDurPlan:
+def resolve(data: bytes, *, groups: dict, config_slot: int, cells: dict) -> BattDurPlan:
     """The plan for `groups` (`{"heater": g, "alarms": g}`), each an `add_aes_batt_heat`
-    group whose held-phase binding carries the command's fixed bytes 0-5. Reads only."""
-    if set(groups) != set(BUTTONS):
-        raise BattDurError("BAD_PARAMS", f"groups must name {BUTTONS}, got {sorted(groups)}")
+    group whose held-phase binding carries the command's fixed bytes 0-5, and `cells`
+    (`{"heater": DisplayCell, ...}`, width 1, from `readout.allocate_fresh_cells`): the minutes
+    each row's readout shows. Reads only."""
+    if set(groups) != set(BUTTONS) or set(cells) != set(BUTTONS):
+        raise BattDurError("BAD_PARAMS", f"groups and cells must name {BUTTONS}")
+    if any(c.width != 1 for c in cells.values()):
+        raise BattDurError("BAD_PARAMS", "the minute cells are one byte (strb)")
     prefixes = {k: newbutton.binding_payload(_enable_binding(data, g).raw)[:6]
                 for k, g in groups.items()}
-    cells, taken = {}, ()
-    for k in BUTTONS:
-        cells[k] = followchannel.scan_display_cell(data, exclude=taken)
-        taken += (cells[k][0],)
-    avoid = {a + i for _c, a in cells.values() for i in range(2)}
-    _d, scratch = routinekit.fresh_sram(data, 8, taken=avoid)
-    return BattDurPlan(config_slot, dict(groups), prefixes, cells, scratch)
+    display = {k: (c.slot, c.addr) for k, c in cells.items()}
+    _d, scratch = routinekit.fresh_sram(data, 8)
+    return BattDurPlan(config_slot, dict(groups), prefixes, display, scratch)
 
 
 def _clamp(r, src: int, default_min: int, tag: str) -> None:

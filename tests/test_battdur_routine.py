@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from fireflymcf import battdur, guidata, newbutton, patch, recipe, register, routinekit, thumb
+from fireflymcf import battdur, guidata, newbutton, patch, readout, recipe, register, routinekit
 
 STOCK = "firefly-13.6/mcf.bin"
 STOCK_SHA = "d66b41ffafaae4f5ec47cf90714f14bb1954fc3a5ae38defa98a94cd9643d382"
@@ -43,7 +43,9 @@ def install(data):
     groups = held_groups(data)
     assert set(groups) == {"heater", "alarms"}, groups
     slot = register.resolve_register(data, dgn="DGN_CONFIG", selector=battdur.SELECTOR).slot_addr
-    plan = battdur.resolve(data, groups=groups, config_slot=slot)
+    data, cells, _e = readout.allocate_fresh_cells(data, [(1, 1), (1, 1)])
+    plan = battdur.resolve(data, groups=groups, config_slot=slot,
+                           cells=dict(zip(battdur.BUTTONS, cells)))
     _d, tp = routinekit.tick_install_plan(data)
     blob, entry = battdur.build(plan, tp.code_load_addr, tp.tail_target, tp.sender_addr)
     data, _ = routinekit.install_tick_routine(data, blob, entry, "battdur", 
