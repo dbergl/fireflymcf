@@ -31,8 +31,8 @@ def test_encode_grid():
 
 
 def test_decode_byte_table():
-    cases = {0x10: 5, 0x1D: 60, 0x00: 60, 0xFF: 60, 0x0F: 60, 0x1E: 60, 0x11: 5, 0x1C: 60,
-             0x17: 35}
+    cases = {0x10: 5, 0x1D: 60, 0x00: 60, 0xFF: 60, 0x80: 60, 0xFE: 60, 0x01: 5, 0x0F: 5,
+             0x1E: 60, 0x7F: 60, 0x11: 5, 0x1C: 60, 0x17: 35}
     for code, want in cases.items():
         assert decode_byte(code, 60) == want, hex(code)
     assert decode_byte(0x00, 10) == 10 and decode_byte(0x10, 10) == 5
@@ -62,6 +62,8 @@ def test_canonical_word():
     assert canonical_word(0x1011) == 0x1111               # alarms - past 5
     assert canonical_word(0x0000) == 0x121C               # a wrap from unset: both defaults
     assert canonical_word(0x1210) == 0x1211               # heater - past 5
+    assert canonical_word(0x1E1C) == 0x1C1C               # alarms held + two past 60
+    assert canonical_word(0x0001) == 0x1211               # first-press wrap, then one repeat
 
 
 def test_steps_never_borrow_across_bytes():

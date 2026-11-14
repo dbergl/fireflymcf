@@ -37,9 +37,10 @@ PHASE_HELD = 3
 # heater in the low byte, Ignore Alarms in the high. The steppers write deltas (+-1 low,
 # +-0x100 high) and the G12 stores the raw u16 with no clamp (PC.42, PC.70). The base keeps
 # every legal byte >= 0x10, so a step never borrows across the byte boundary, and it keeps a
-# wrap from the unset 0xFFFF (0x0000, 0xFFFE, 0x00FF, 0xFEFF) out of the legal range. A code one
-# step past either end (0x10, 0x1D) clamps back to that end; every other code is that byte's
-# default. Raw minutes could not do this: 0xFFFF + 5 leaves 0x00 in the high byte, which a
+# wrap from the unset 0xFFFF (0x0000, 0xFFFE, 0x00FF, 0xFEFF) out of the legal range. The arrows
+# repeat while held, so an overrun can be more than one step before the routine corrects it: a
+# code below the grid (0x01..0x10) clamps to 5 and one above it (0x1D..0x7F) to 60. 0x00 and
+# 0x80..0xFF -- where every wrap from 0xFFFF lands -- are that byte's default. Raw minutes could not do this: 0xFFFF + 5 leaves 0x00 in the high byte, which a
 # minute count cannot tell from "Ignore Alarms stepped below 5".
 
 MINUTES_MIN = 5
@@ -48,6 +49,8 @@ MINUTES_STEP = 5
 CODE_BASE = 0x10
 DEFAULTS = {"heater": 60, "alarms": 10}
 UNSET = 0xFFFF
+UNDER_LOW = 0x01             # lowest code read as "stepped below the grid"
+OVER_HIGH = 0x7F             # highest code read as "stepped above the grid"
 TICKS_PER_MINUTE = 600       # the BMS duration field counts 100 ms
 
 
@@ -65,13 +68,13 @@ def encode(minutes: int) -> int:
 
 
 def decode_byte(code: int, default_min: int) -> int:
-    """The minutes a stored byte means: on the grid as stored; one step past an end, that end;
-    anything else, `default_min`."""
+    """The minutes a stored byte means: on the grid as stored; below it (0x01..0x10) 5; above
+    it (0x1D..0x7F) 60; 0x00 and 0x80..0xFF, `default_min`."""
     if encode(MINUTES_MIN) <= code <= encode(MINUTES_MAX):
         return (code - CODE_BASE) * MINUTES_STEP
-    if code == encode(MINUTES_MIN) - 1:
+    if UNDER_LOW <= code < encode(MINUTES_MIN):
         return MINUTES_MIN
-    if code == encode(MINUTES_MAX) + 1:
+    if encode(MINUTES_MAX) < code <= OVER_HIGH:
         return MINUTES_MAX
     return default_min
 
