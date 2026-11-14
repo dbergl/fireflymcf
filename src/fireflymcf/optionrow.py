@@ -758,7 +758,8 @@ def _clone_group_entry(donor_raw: bytes, start: int, count: int) -> bytes:
             + donor_raw[guidata.GROUP_COUNT_FIELD + 1:guidata.GROUP_ENTRY_SIZE])
 
 
-def build_config_stepper(data: bytes, selector: int, step: int) -> ConfigStepper:
+def build_config_stepper(data: bytes, selector: int, step: int, *,
+                         shift: int = 0) -> ConfigStepper:
     """Clone the stock `0x0E` +/- arrow groups onto `selector` with a `+/-step` delta.
 
     The arrows are pure binding data: a repeating press delta, a release zero-delta, and
@@ -767,12 +768,17 @@ def build_config_stepper(data: bytes, selector: int, step: int) -> ConfigStepper
 
     `step` must be a byte-safe magnitude (1..255): the packed 0xEE register keeps the
     minutes in the LOW byte, and a step that carries out of it would corrupt the flag
-    (PC.47's borrow, in the other direction).
+    (PC.47's borrow, in the other direction). `shift=8` steps the HIGH byte of a packed
+    register instead (delta `step << 8`, step 1..127): `battdur`'s Ignore Alarms minutes.
     """
     if not isinstance(step, int) or isinstance(step, bool) or not 1 <= step <= 0xFF:
         raise OptionRowError(
             f"step {step!r} must be a positive byte-safe magnitude (1..255); a larger "
             f"step would carry out of the minute byte and disturb the flag")
+    if shift not in (0, 8) or (shift and step > 0x7F):
+        raise OptionRowError(
+            f"shift {shift!r} with step {step!r}: the delta steps the low byte (shift 0) or the "
+            f"high byte (shift 8, step 1..127, so the signed 16-bit delta holds it)")
     if not isinstance(selector, int) or isinstance(selector, bool) \
             or not 0 <= selector <= 0xFF:
         raise OptionRowError(f"selector {selector!r} is not a byte (0..255)")
@@ -781,10 +787,10 @@ def build_config_stepper(data: bytes, selector: int, step: int) -> ConfigStepper
     minus_donor = _arrow_donor(data, ARROW_DONOR_MINUS, -300)
 
     bindings = [
-        _retarget_arrow(plus_donor[0], selector, step),
+        _retarget_arrow(plus_donor[0], selector, step << shift),
         _retarget_arrow(plus_donor[1], selector, None),
         _retarget_arrow(plus_donor[2], selector, None),
-        _retarget_arrow(minus_donor[0], selector, -step),
+        _retarget_arrow(minus_donor[0], selector, -(step << shift)),
         _retarget_arrow(minus_donor[1], selector, None),
         _retarget_arrow(minus_donor[2], selector, None),
     ]

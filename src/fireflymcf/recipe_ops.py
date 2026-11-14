@@ -27,6 +27,7 @@ from fireflymcf import (aescompact, celltables, cli, container, followchannel, g
 from fireflymcf import absrecord
 from fireflymcf import donors
 from fireflymcf import altreboot
+from fireflymcf import battdur
 from fireflymcf import appendfilter
 from fireflymcf import battglyph
 from fireflymcf import bitcombine
@@ -7815,7 +7816,10 @@ class AddAesBattHeat(Op):
             "enable binding emits %08X#%s" % (enable_id, enable_p.hex())
         assert (off_id, off_p) == (aescompact.BATT_HEAT_OFF_ID, h["off_wire"]), \
             "off binding emits %08X#%s" % (off_id, off_p.hex())
-        assert bt[g.start].raw[3] == aescompact.BATT_HEAT_ENABLE_MASK, "enable is not held-gated"
+        # A later add_bms_duration hands the hold to its routine: it clears the phase bit in
+        # place and records that here, so the entry is still ours, just never sent.
+        want_mask = 0 if h.get("hold_by") else aescompact.BATT_HEAT_ENABLE_MASK
+        assert bt[g.start].raw[3] == want_mask, "enable is not held-gated"
         assert bt[g.start + 1].raw[3] == aescompact.BATT_HEAT_OFF_MASK, "off is not tap-gated"
 
         heater = (h["enable_wire"], h["off_wire"]) == (aescompact.BATT_HEAT_ENABLE_WIRE,
@@ -12818,6 +12822,215 @@ class AddPopupPage(Op):
                 "%#x%s (%s)" % (self.title, h["screen_id"], h["root"], h["return_screen"],
                                 h["close_id"], gear, "VERIFIED" if self.hardware_verified
                                 else "UNVERIFIED"))
+
+
+@op("add_bms_duration")
+class AddBmsDuration(Op):
+    """Settable Battery Heater and Ignore Alarms durations (`battdur`): two minute steppers in a
+    popup (`add_popup_page`), 5..60 in steps of 5, stored in G12 config cell `0x72` (heater in the
+    low byte, Ignore Alarms in the high, each a step code `minutes / 5 + 0x10`), and the two
+    `add_aes_batt_heat` buttons' holds sending the chosen minutes instead of their fixed ones.
+
+    Steps:
+      1. `battdur.activate_sweep`: one byte in the G12 program's boot list retargets a duplicate
+         `0xE8` sweep record (#43) to `0x72`'s never-activated one (#85), so the G12 sweeps the
+         cell and the panel's existing var 280 receives it (`G12-CODE.md`, PC.70).
+      2. Two config steppers on `0x72` (`optionrow.build_config_stepper`: +-1 for the heater,
+         +-0x100 for Ignore Alarms), and two fresh one-byte display cells.
+      3. The rows (`battdur.row_records`, LEVEL SETUP's stepper look) and their touch regions,
+         inserted in the popup's root before Close's region, which stays last.
+      4. The per-tick routine (`battdur.build`): clamps and corrects the cell, feeds the cells, and
+         sends each button's start frame on the tick its gesture phase becomes held.
+      5. Each button's held-phase binding loses its phase bit (`battdur.disable_enable_binding`),
+         so the routine's frame is the only start; the tap's stop binding is untouched.
+
+    Error codes:
+      BAD_REF         -- `popup`, `heater` or `alarms` is not an earlier op of the right type.
+      SWEEP_REFUSED   -- the G12 boot list does not have the shape step 1 needs.
+      STEPPER_REFUSED -- no room for a stepper's two groups or its bindings.
+      ROWS_REFUSED    -- a row does not fit, or the popup's root cannot take the records.
+      READOUT_REFUSED -- the register, a display cell or the routine could not be resolved.
+      GROW_REFUSED / DETOUR_REFUSED -- GuiCode could not be grown or the hook was not as planned.
+      GRAMMAR -- the image's record grammar is not proven 13.6's (`grammar.prove`), or a
+        template's wtype is not drawn by a proven renderer arm (`donors`).
+      NO_TEMPLATE -- a frozen record template cannot be used on this image (`donors`).
+      NO_DONOR -- a row's drawing donor is not on this image (`donors`).
+      MODE7_INDEX -- a mode-7 colour index at or above the image's decoder bound
+        (`donors.mode7_index_limit`: 664 on 13.6, 504 on 14.7).
+      VARIANT_SETTER_UNKNOWN — which groups GuiCode drives by number is not known on this image
+        (`newbutton.guicode_selected_groups`)
+      RESERVED_GROUP_UNKNOWN — the group holding a stock inverter/charger template does not
+        locate on this image (`newbutton.reserved_groups`)
+      CELL_TABLE_NO_BOUND, CELL_TABLE_CANDIDATES, CELL_TABLE_BOUND_AMBIGUOUS — the display-cell
+        table does not locate on this image (`celltables.locate`)
+      TYPE_TABLE_CANDIDATES, CELL_TABLE_ADJACENCY, TYPE_TABLE_DISAGREES — the display-cell table's
+        type table does not locate on this image (`celltables.locate`)
+      CELL_TABLE_BOUND_FORM, CELL_TABLE_BOUND_SITES — the display-cell table cannot be grown on this
+        image (`tablegrow.cell_table_bound_sites`)
+      RENDER_STATE_BASES, CELL_AREA_NO_CEILING, CELL_OUTSIDE_AREA — the render state or the free
+        SRAM cell area does not prove out on this image (`sramreach`)
+    """
+
+    hardware_verified = False
+    firmwares = frozenset({"13.6"})
+
+    PARAMS = {
+        "properties": {
+            "popup": {"type": "object", "description": "{ref: add_popup_page op id}"},
+            "heater": {"type": "object", "description": "{ref: the heater's add_aes_batt_heat}"},
+            "alarms": {"type": "object",
+                       "description": "{ref: Ignore Alarms' add_aes_batt_heat}"},
+            "captions": {"type": "object", "default": dict(battdur.CAPTIONS),
+                         "description": "{heater, alarms}: the rows' captions"},
+            "row_y": {"type": "object", "default": dict(battdur.ROW_Y),
+                      "description": "{heater, alarms}: each row's button top"},
+        },
+        "required": ["popup", "heater", "alarms"],
+    }
+
+    def validate(self):
+        self.refs = {}
+        for key in ("popup", "heater", "alarms"):
+            v = self._param(key, kind=dict)
+            if set(v) != {"ref"}:
+                raise RecipeError("BAD_PARAMS", "%s must be {'ref': op_id}" % key,
+                                  op_id=self.spec.id)
+            self.refs[key] = v["ref"]
+        self.captions = dict(battdur.CAPTIONS, **self._param("captions", {}, kind=dict))
+        self.row_y = dict(battdur.ROW_Y, **self._param("row_y", {}, kind=dict))
+        if set(self.captions) != set(battdur.BUTTONS) or set(self.row_y) != set(battdur.BUTTONS):
+            raise RecipeError("BAD_PARAMS", "captions and row_y take only heater and alarms",
+                              op_id=self.spec.id)
+
+    def apply(self, data, ctx):
+        from fireflymcf import battdur as bd, popuppage
+        popup = ctx.handles.get(self.refs["popup"])
+        if not popup or "close_id" not in popup:
+            raise RecipeError("BAD_REF", "no earlier add_popup_page op with id %r"
+                              % self.refs["popup"], op_id=self.spec.id)
+        groups = {}
+        for k in bd.BUTTONS:
+            h = ctx.handles.get(self.refs[k])
+            if not h or "group" not in h:
+                raise RecipeError("BAD_REF", "no earlier add_aes_batt_heat op with id %r"
+                                  % self.refs[k], op_id=self.spec.id)
+            groups[k] = h["group"]
+
+        # 1. the G12 sweeps cell 0x72
+        try:
+            out, g12_edits = bd.activate_sweep(data)
+        except bd.BattDurError as e:
+            raise RecipeError("SWEEP_REFUSED", str(e), op_id=self.spec.id)
+        ctx.edits.extend(relocate.Edit(o, a, b, "G12", n) for o, a, b, n in g12_edits)
+
+        # 2. cells, then each row: its stepper groups, then its records in the popup's root
+        # before Close. A group counts as taken once a touch region names it, so each row is
+        # placed before the next stepper picks its two groups.
+        try:
+            reg = register.resolve_register(out, dgn="DGN_CONFIG", selector=bd.SELECTOR)
+            out, cells, cell_edits = readout.allocate_fresh_cells(out, [(1, 1), (1, 1)])
+        except (register.RegisterError, readout.ReadoutError) as e:
+            raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
+        ctx.edits.extend(cell_edits)
+        cells = dict(zip(bd.BUTTONS, cells))
+        touch = {}
+        for k, shift in (("heater", 0), ("alarms", 8)):
+            try:
+                st = optionrow.build_config_stepper(out, bd.SELECTOR, 1, shift=shift)
+            except optionrow.OptionRowError as e:
+                raise RecipeError("STEPPER_REFUSED", str(e), op_id=self.spec.id)
+            ctx.edits.extend(st.edits)
+            out = st.grown
+            touch[k] = (st.minus_touch_id, st.plus_touch_id)
+            try:
+                gs, _ = guidata.guidata_extent(out)
+                start = gs + guidata.object_tables(out)[1][popup["root"]]
+                recs = records.object_records(out, start)
+                close = bytes(out[recs[-1].offset:recs[-1].end])
+                if close != popuppage.close_region(out, popup["close_id"]):
+                    raise bd.BattDurError("ROWS_REFUSED",
+                                          "the popup root's last record is not Close")
+                extra = (bd.row_records(out, k, cells[k].slot, caption=self.captions[k],
+                                        row_y=self.row_y)
+                         + bd.row_touches(out, k, *touch[k], row_y=self.row_y))
+                body = (bytes([len(recs) + len(extra)])
+                        + bytes(out[start + 1:recs[-1].offset]) + b"".join(extra) + close)
+                out, edits = relocate.replace_object_records(out, popup["root"], body)
+            except (bd.BattDurError, relocate.RelocationError, ValueError) as e:
+                raise RecipeError("ROWS_REFUSED", str(e), op_id=self.spec.id)
+            ctx.edits.extend(edits)
+
+        # 4. the routine
+        try:
+            plan = bd.resolve(out, groups=groups, config_slot=reg.slot_addr, cells=cells)
+            hook_at, hook_old, tail = followchannel.hook_site(out, stock=ctx.stock)
+            sender = followchannel.host_sender_addr(out)
+        except (bd.BattDurError, followchannel.FollowChannelError) as e:
+            raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
+        gc = theme.guicode_section(out)
+        code_load_addr = theme.GUICODE_BASE_DEFAULT + (gc.length - 4)
+        _check_append_point(code_load_addr, self.spec.id, ctx.stock)
+        try:
+            blob, entry_off = bd.build(plan, code_load_addr, tail, sender)
+        except bd.BattDurError as e:
+            raise RecipeError("READOUT_REFUSED", str(e), op_id=self.spec.id)
+        try:
+            grown, load_off, _ = growsection.grow_section(out, "GuiCode", blob)
+        except growsection.GrowSectionError as e:
+            raise RecipeError("GROW_REFUSED", str(e), op_id=self.spec.id)
+        gcs = next(s for s in container.parse_container(grown).sections if "GuiCode" in s.name)
+        ctx.edits.append(relocate.Edit(gcs.offset + load_off, b"", blob, "GuiCode",
+                         "add_bms_duration: %d-byte routine (cell 0x72 var %d)"
+                         % (len(blob), reg.var_index)))
+        file_off = gcs.offset + hook_at
+        pre = grown[file_off:file_off + 4]
+        if pre != hook_old:
+            raise RecipeError("DETOUR_REFUSED", "GuiCode+%#x holds %s, not %s"
+                              % (hook_at, pre.hex(), hook_old.hex()), op_id=self.spec.id)
+        entry = code_load_addr + entry_off
+        hook_new = thumb.bl(theme.GUICODE_BASE_DEFAULT + hook_at, entry)
+        buf = bytearray(grown)
+        buf[file_off:file_off + 4] = hook_new
+        ctx.edits.append(relocate.Edit(file_off, pre, hook_new, "GuiCode",
+                                       "add_bms_duration: detour bl -> %#x" % entry))
+        out = bytes(buf)
+
+        # 5. the holds now belong to the routine
+        for k in bd.BUTTONS:
+            ctx.handles[self.refs[k]]["hold_by"] = self.spec.id
+            try:
+                out, b_edits = bd.disable_enable_binding(out, groups[k])
+            except bd.BattDurError as e:
+                raise RecipeError("BAD_REF", str(e), op_id=self.spec.id)
+            ctx.edits.extend(relocate.Edit(o, a, b, "GuiData", n) for o, a, b, n in b_edits)
+        sealed, _ = patch.reseal(out)
+        ctx.handles[self.spec.id] = {
+            "root": popup["root"], "groups": groups, "touch": touch,
+            "cells": {k: (c.slot, c.addr) for k, c in cells.items()},
+            "var_index": reg.var_index, "entry": entry, "scratch": plan.scratch,
+        }
+        return sealed
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        from fireflymcf import battdur as bd, popuppage
+        h = ctx.handles[self.spec.id]
+        gs, _ = guidata.guidata_extent(data)
+        recs = records.object_records(data, gs + guidata.object_tables(data)[1][h["root"]])
+        assert recs[-1].wtype == 12, "Close's touch region is not last"
+        slots = {r.value_slot for r in recs if r.wtype == 8}
+        assert {c[0] for c in h["cells"].values()} <= slots, "a duration readout is missing"
+        for k in bd.BUTTONS:
+            try:
+                bd._enable_binding(data, h["groups"][k])
+            except bd.BattDurError:
+                continue
+            raise AssertionError("%s still has a held-phase start binding" % k)
+        return ("add_bms_duration: cell 0x72 (var %d) swept; heater/alarms rows in root %d, "
+                "cells %s; routine at %#x (UNVERIFIED)"
+                % (h["var_index"], h["root"], h["cells"], h["entry"]))
 
 
 @op("set_theme")

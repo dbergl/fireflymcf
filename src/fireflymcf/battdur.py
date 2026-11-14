@@ -118,17 +118,33 @@ def start_wire(prefix6: bytes, minutes: int) -> bytes:
 import struct
 from dataclasses import dataclass
 
-from . import followchannel, guidata, newbutton, routinekit, thumb
+from . import followchannel, guidata, newbutton, thumb
 
 BUTTONS = ("heater", "alarms")       # low byte, high byte of the cell
 EF70 = 0xEF70
 START_FRAME_ID = bytes.fromhex("0070ef18")   # 0x18EF70xx LE: priority 6, DGN 0EF70 to SA 0x70;
                                              # the host sender ORs in the panel's own SA
-LATCH_NONE = UNSET                   # the correction latch's "nothing corrected" value
+COOLDOWN = 30                        # ticks between corrections (~0.5 s); the G12's echo of a
+                                     # write arrives in ~1 ms (PC.43), so one write suffices. A
+                                     # counter, not a latch on the last word: SRAM above
+                                     # 0x2000AD98 powers up as garbage, and a garbage latch can
+                                     # equal a real bad word (0x0000) and skip it forever, where a
+                                     # garbage count only delays the first correction <= 255 ticks
+COOLDOWN_AT = 4                      # its scratch byte
 
 
-class BattDurError(routinekit.RoutineKitError):
-    pass
+def _rk():
+    from . import routinekit         # lazily: routinekit imports recipe, which imports recipe_ops
+    return routinekit
+
+
+class BattDurError(ValueError):
+    """A refusal, with a code (`NO_BUTTON`, `BAD_PARAMS`, `BAD_ROUTINE`, `NO_SWEEP_RECORD`,
+    `ALREADY_SWEPT`, `NO_DUPLICATE`, `NO_ROOM`, `ROWS_REFUSED`)."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(f"{code}: {message}")
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -138,7 +154,7 @@ class BattDurPlan:
     prefixes: dict                   # {"heater": wire bytes 0-5, "alarms": ...}
     display: dict                    # {"heater": (cell_index, addr), "alarms": (...)}
     scratch: int                     # 8 bytes: h code, a code, h prev phase, a prev phase,
-                                     # pad[2], correction latch (u16)
+                                     # correction cooldown, pad[3]
     selector: int = SELECTOR
 
 
@@ -164,7 +180,7 @@ def resolve(data: bytes, *, groups: dict, config_slot: int, cells: dict) -> Batt
     prefixes = {k: newbutton.binding_payload(_enable_binding(data, g).raw)[:6]
                 for k, g in groups.items()}
     display = {k: (c.slot, c.addr) for k, c in cells.items()}
-    _d, scratch = routinekit.fresh_sram(data, 8)
+    _d, scratch = _rk().fresh_sram(data, 8)
     return BattDurPlan(config_slot, dict(groups), prefixes, display, scratch)
 
 
@@ -193,7 +209,7 @@ def _clamp(r, src: int, default_min: int, tag: str) -> None:
 
 def _emit_start_send(r, template: str, sender: str) -> None:
     """Copy the 12-byte start template to the stack, put r3 (100 ms ticks) big-endian at
-    payload bytes 6-7 (frame offsets 10, 11), and send: `routinekit.emit_send_frame`'s
+    payload bytes 6-7 (frame offsets 10, 11), and send: `_rk().emit_send_frame`'s
     sequence with the two byte stores in place of its halfword store."""
     e = r.emit
     e(2, lambda h, s: (thumb.sub_sp_imm(20), "sub sp, #0x14"))
@@ -219,8 +235,8 @@ def templates(plan: BattDurPlan) -> bytes:
     out = b""
     for k in BUTTONS:
         out += START_FRAME_ID + plan.prefixes[k] + b"\x00\x00"
-    out += routinekit.config_frame(plan.selector, 0, routinekit.FUNCTION_WRITE)
-    out += routinekit.config_frame(plan.selector, UNSET, routinekit.FUNCTION_READBACK)
+    out += _rk().config_frame(plan.selector, 0, _rk().FUNCTION_WRITE)
+    out += _rk().config_frame(plan.selector, UNSET, _rk().FUNCTION_READBACK)
     return out
 
 
@@ -230,9 +246,8 @@ def build(plan: BattDurPlan, code_load_addr: int, tail_target: int,
 
     1. Clamp each byte of the cell to its canonical code (`clamp_code`), keep the codes in
        scratch, and write each button's minutes to its display cell.
-    2. If the word is not `UNSET`, not canonical, and not the word last corrected, write the
-       canonical word (D1) and request a read-back (D3); remember the word. A canonical word
-       clears that latch.
+    2. If the word is not `UNSET` and not canonical, and no correction went out in the last
+       `COOLDOWN` ticks, write the canonical word (D1) and request a read-back (D3).
     3. For each button: on the tick its gesture phase becomes `PHASE_HELD`, send its start
        frame with `minutes * 600` in payload bytes 6-7, big-endian.
     """
@@ -247,7 +262,7 @@ def build(plan: BattDurPlan, code_load_addr: int, tail_target: int,
             "_sender": sender_addr}
     r = thumb.Routine(pool, error=lambda m: BattDurError("BAD_ROUTINE", m))
     e = r.emit
-    routinekit.emit_prologue(r)
+    _rk().emit_prologue(r)
     # 1. clamp both bytes
     for i, k in enumerate(BUTTONS):
         r.ldr_lit(1, "slot")
@@ -265,8 +280,14 @@ def build(plan: BattDurPlan, code_load_addr: int, tail_target: int,
         e(2, lambda h, s: (thumb.muls(0, 2), "muls r0, r2, r0"))
         r.ldr_lit(2, f"cell_{k}")
         e(2, lambda h, s: (thumb.strb_imm(0, 2, 0), "strb r0, [r2]"))
-    # 2. correct a non-canonical stored word
+    # 2. correct a non-canonical stored word, at most once per COOLDOWN ticks
     r.ldr_lit(2, "scratch")
+    e(2, lambda h, s: (thumb.ldrb_imm(0, 2, COOLDOWN_AT), f"ldrb r0, [r2, #{COOLDOWN_AT}]"))
+    e(2, lambda h, s: (thumb.cmp_imm8(0, 0), "cmp r0, #0"))
+    r.bcc("eq", "cooled")
+    e(2, lambda h, s: (thumb.subs_imm8(0, 1), "subs r0, #1"))
+    e(2, lambda h, s: (thumb.strb_imm(0, 2, COOLDOWN_AT), f"strb r0, [r2, #{COOLDOWN_AT}]"))
+    r.label("cooled")
     e(2, lambda h, s: (thumb.ldrb_imm(3, 2, 1), "ldrb r3, [r2, #1]"))
     e(2, lambda h, s: (thumb.lsls_imm(3, 3, 8), "lsls r3, r3, #8"))
     e(2, lambda h, s: (thumb.ldrb_imm(0, 2, 0), "ldrb r0, [r2]"))
@@ -274,20 +295,17 @@ def build(plan: BattDurPlan, code_load_addr: int, tail_target: int,
     r.ldr_lit(1, "slot")
     e(2, lambda h, s: (thumb.ldrh_imm(1, 1, 0), "ldrh r1, [r1]"))         # r1 = stored word
     e(2, lambda h, s: (thumb.cmp_reg(1, 3), "cmp r1, r3"))
-    r.bcc("eq", "canonical")
+    r.bcc("eq", "holds")
     e(4, lambda h, s: (thumb.movw(0, UNSET), f"movw r0, #{UNSET:#x}"))
     e(2, lambda h, s: (thumb.cmp_reg(1, 0), "cmp r1, r0"))
     r.bcc("eq", "holds")
-    e(2, lambda h, s: (thumb.ldrh_imm(0, 2, 6), "ldrh r0, [r2, #6]"))
-    e(2, lambda h, s: (thumb.cmp_reg(1, 0), "cmp r1, r0"))
-    r.bcc("eq", "holds")
-    e(2, lambda h, s: (thumb.strh_imm(1, 2, 6), "strh r1, [r2, #6]"))
-    routinekit.emit_send_frame(r, tpl["write"], value_in_r3=True, sender_addr=sender_addr)
-    routinekit.emit_send_frame(r, tpl["readback"], sender_addr=sender_addr)
-    r.b("holds")
-    r.label("canonical")
-    e(4, lambda h, s: (thumb.movw(0, LATCH_NONE), f"movw r0, #{LATCH_NONE:#x}"))
-    e(2, lambda h, s: (thumb.strh_imm(0, 2, 6), "strh r0, [r2, #6]"))
+    e(2, lambda h, s: (thumb.ldrb_imm(0, 2, COOLDOWN_AT), f"ldrb r0, [r2, #{COOLDOWN_AT}]"))
+    e(2, lambda h, s: (thumb.cmp_imm8(0, 0), "cmp r0, #0"))
+    r.bcc("ne", "holds")
+    e(2, lambda h, s: (thumb.movs_imm(0, COOLDOWN), f"movs r0, {thumb.imm_text(COOLDOWN)}"))
+    e(2, lambda h, s: (thumb.strb_imm(0, 2, COOLDOWN_AT), f"strb r0, [r2, #{COOLDOWN_AT}]"))
+    _rk().emit_send_frame(r, tpl["write"], value_in_r3=True, sender_addr=sender_addr)
+    _rk().emit_send_frame(r, tpl["readback"], sender_addr=sender_addr)
     # 3. the hold edges
     r.label("holds")
     for i, k in enumerate(BUTTONS):
@@ -307,8 +325,8 @@ def build(plan: BattDurPlan, code_load_addr: int, tail_target: int,
         e(2, lambda h, s: (thumb.muls(3, 2), "muls r3, r2, r3"))
         _emit_start_send(r, f"t_{k}", "_sender")
         r.label(f"next_{k}")
-    routinekit.emit_tail(r, tail_target)
-    return routinekit.assemble_tick(r, code_load_addr, prefix=prefix)
+    _rk().emit_tail(r, tail_target)
+    return _rk().assemble_tick(r, code_load_addr, prefix=prefix)
 
 
 # --- the G12 sweep: activate a selector's sweep record in a duplicate's place -----------------
@@ -386,3 +404,57 @@ def disable_enable_binding(data: bytes, group: int) -> tuple[bytes, list]:
     return bytes(out), [(off, bytes([old]), bytes([out[off]]),
                          f"binding {b.index} (group {group}): drop the held phase; the battdur "
                          "routine sends the start frame")]
+
+
+# --- the BATTERY SETUP rows -------------------------------------------------------------------
+# LEVEL SETUP's stepper (`levelsetup._stepper`): maroon - and + squares with their bars, a centre
+# panel, the value right-justified in it with its unit, the caption at the dialog's label column.
+# The columns sit 54 px right of LEVEL SETUP's so "Ignore Alarms Time" (220 px in the caption
+# font) clears the - button.
+
+CAPTIONS = {"heater": "Heater Time", "alarms": "Ignore Alarms Time"}
+ROW_Y = {"heater": 104, "alarms": 170}
+LABEL_X = 172
+BTN = 46
+MINUS_X, PANEL_X, PANEL_W, PLUS_X = 410, 462, 150, 618
+UNIT = "Min"
+UNIT_GAP = 10               # "60 Min", as Pump Auto Off reads; LEVEL SETUP's 4 runs them together
+VALUE_DIGITS = 2
+
+
+def row_rects(row_y: dict = ROW_Y) -> dict:
+    """`{"heater": (minus rect, plus rect), ...}`, inclusive like every pagedraw box."""
+    return {k: ((MINUS_X, y, BTN, BTN), (PLUS_X, y, BTN, BTN)) for k, y in row_y.items()}
+
+
+def row_records(data: bytes, key: str, cell_slot: int, *, caption: str | None = None,
+                row_y: dict = ROW_Y) -> list[bytes]:
+    from . import levelpage as lp, metrics, pagedraw as pd
+    y = row_y[key]
+    text = CAPTIONS[key] if caption is None else caption
+    if LABEL_X + lp._width(data, lp.F_CAPTION, text) >= MINUS_X:
+        raise BattDurError("NO_ROOM", f"caption {text!r} runs into the - button")
+    recs = [pd.fill(data, MINUS_X, y, BTN, BTN, lp.MAROON), lp._bar(data, MINUS_X, y, BTN, BTN),
+            pd.fill(data, PLUS_X, y, BTN, BTN, lp.MAROON), lp._bar(data, PLUS_X, y, BTN, BTN),
+            lp._bar(data, PLUS_X, y, BTN, BTN, upright=True),
+            pd.fill(data, PANEL_X, y, PANEL_W, BTN, lp.CENTRE)]
+    vh = lp._cell_h(data, lp.F_VALUE)
+    uw = lp._width(data, lp.F_CAPTION, UNIT) + 2
+    field = VALUE_DIGITS * metrics.font_metrics(data, lp.F_VALUE).spacing
+    right = PANEL_X + PANEL_W - 8 - (uw + UNIT_GAP)
+    recs += pd.readout(data, right - field, y + (BTN - vh) // 2, field, vh, value_slot=cell_slot,
+                       width=VALUE_DIGITS, places=0, font=lp.F_VALUE, rgb=lp.WHITE,
+                       bg=lp.CENTRE, align=3)
+    ch = lp._cell_h(data, lp.F_CAPTION)
+    recs.append(lp._left(data, UNIT, right + UNIT_GAP, y + (BTN - ch) // 2, font=lp.F_CAPTION,
+                         rgb=lp.WHITE))
+    recs.append(lp._left(data, text, LABEL_X, y + (BTN - ch) // 2, font=lp.F_CAPTION,
+                         rgb=lp.WHITE))
+    return recs
+
+
+def row_touches(data: bytes, key: str, minus_id: int, plus_id: int,
+                row_y: dict = ROW_Y) -> list[bytes]:
+    from . import pagedraw as pd
+    minus, plus = row_rects(row_y)[key]
+    return [pd.touch(data, *minus, minus_id), pd.touch(data, *plus, plus_id)]

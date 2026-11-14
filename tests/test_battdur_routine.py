@@ -153,3 +153,11 @@ def test_chain_preserved(image):
     from fireflymcf import followchannel
     chain = followchannel.chain_from_hook(data)
     assert len(chain) >= 2
+
+
+def test_zero_word_is_corrected(image):
+    """0x0000 is what the first + from unset leaves (0xFFFF + 1). A latch on the last corrected
+    word, zero in power-on SRAM, skipped exactly this word; the cooldown does not."""
+    data, plan, _ = image
+    s = _scenario(data, 0x0000)
+    assert s.g12_selector(battdur.SELECTOR) == battdur.pack(60, 10)

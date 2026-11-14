@@ -311,6 +311,18 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "dialog.",
         "`src/fireflymcf/popuppage.py`; the leaf retarget is `navicon.retarget_action_leaf`, as "
         "the LEVEL SETUP popup's Setup button uses; `GUICODE.md` Finding 93 lists the free leaves"),
+    "add_bms_duration": ("structural",
+        "Settable BMS durations: two minute steppers (5-60, step 5) in an `add_popup_page` "
+        "dialog set how long the Battery Heater and Ignore Alarms holds run. Both live in G12 "
+        "config cell `0x72`, which one byte of the G12 boot list now sweeps in place of a "
+        "duplicate `0xE8` record. A per-tick routine clamps the cell, feeds the readouts and "
+        "sends each button's start frame with the chosen minutes on the tick its hold "
+        "registers. The buttons' fixed held-phase bindings are switched off; their tap stops stay.",
+        "**Unverified.** Emulated 2026-11-13: the steppers step and clamp, the G12 sweeps `0x72` "
+        "and `0xE8` once each, a hold sends the shown minutes once, a tap sends one stop. Cell "
+        "`0x72` was found inert on a coach (`BUS-BASELINE.md` PC.70).",
+        "`src/fireflymcf/battdur.py`; `G12-CODE.md` (the boot list's duplicate `0xE8`); "
+        "`CONTROL-BEHAVIOR.md` section 2 (the gesture phase the routine watches)"),
     "add_alt_reboot": ("structural",
         "Add a \"REBOOT APS-500\" button beside CLEAR EEPROM on the ALTERNATOR SYSTEM page: a "
         "3-second hold sends the RV-C `GENERAL_RESET` reboot (`0x17F80`) to the APS-500 at SA "
