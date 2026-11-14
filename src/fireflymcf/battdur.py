@@ -519,3 +519,25 @@ def timed_arm(data: bytes, arm: int, *, caption: str, cell_slot: int, box: tuple
     # placed from the pen the caption leaves. The absolute time records come last.
     parts = [bytes(data[recs[0].offset:recs[0].end]), bytes(head)] + rest + [rd, rr, unit]
     return cornermark._object(parts)
+
+
+def check_installed(data: bytes, handle: dict) -> None:
+    """Assert every part `add_bms_duration` installs is in `data`: the G12 boot list activates
+    `0x72`'s sweep record, the routine at `handle["entry"]` is on the hook chain, and each row's
+    `(minus, plus)` touch ids (`handle["touch"]`) carry a stepper on `SELECTOR` with the row's
+    signed delta. The op's `verify` calls it on the final image."""
+    from . import followchannel
+    assert SWEEP_RECORD in [rule for _a, rule in _activation_sites(data)], \
+        f"the G12 boot list no longer activates sweep record #{SWEEP_RECORD} (0x72)"
+    assert handle["entry"] in followchannel.chain_from_hook(data), \
+        f"routine {handle['entry']:#x} is not on the per-tick hook chain"
+    groups, bindings = guidata.group_table(data), guidata.binding_table(data)
+    for key, step in (("heater", 1), ("alarms", 0x100)):
+        for tid, sign in zip(handle["touch"][key], (-1, 1)):
+            raws = [b.raw for b in guidata.group_bindings(groups, bindings, tid)] \
+                if tid < len(groups) else []
+            press = [r for r in raws if r[:2] == b"\xd9\xfe" and r[5] == SELECTOR
+                     and r[9] == 0xD2 and int.from_bytes(r[10:12], "big", signed=True)]
+            assert len(press) == 1 and \
+                int.from_bytes(press[0][10:12], "big", signed=True) == sign * step, \
+                f"{key} stepper (touch {tid}) does not step 0x{SELECTOR:02x} by {sign * step}"

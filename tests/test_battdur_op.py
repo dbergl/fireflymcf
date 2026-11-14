@@ -200,3 +200,29 @@ def test_button_time_follows_setting(timed):
     s.run(7.0)
     shown = sorted(q.label for q in s._placed(s._page_root(None)) if q.label == "Min")
     assert len(shown) == 2
+
+
+def test_check_installed_catches_a_dropped_part(built):
+    """verify's check: the G12 sweep byte, the routine on the hook chain, and the steppers on
+    0x72. Reverting any one must fail it."""
+    from fireflymcf import tankbroadcast
+    from fireflymcf import followchannel, layout, records
+    _b, after, _ = built
+    root = layout.screen_object_map(after)[35]
+    gs, _ = guidata.guidata_extent(after)
+    recs = records.object_records(after, gs + guidata.object_tables(after)[1][root])
+    ids = [int.from_bytes(after[r.end - guidata.GROUP_REFERENCE_TAIL:
+                                r.end - guidata.GROUP_REFERENCE_TAIL + 2], "little")
+           for r in recs if r.wtype == 12][-5:-1]
+    handle = {"entry": followchannel.chain_from_hook(after)[0],
+              "touch": {"heater": tuple(ids[0:2]), "alarms": tuple(ids[2:4])}}
+    battdur.check_installed(after, handle)
+    off = tankbroadcast.blob_file_offset(after) + battdur.G12_PATCH_SITE
+    reverted = after[:off] + bytes([43]) + after[off + 1:]
+    with pytest.raises(AssertionError, match="sweep"):
+        battdur.check_installed(reverted, handle)
+    with pytest.raises(AssertionError, match="chain"):
+        battdur.check_installed(after, dict(handle, entry=handle["entry"] + 2))
+    with pytest.raises(AssertionError, match="stepper"):
+        battdur.check_installed(after, dict(handle, touch={"heater": (1, 2),
+                                                           "alarms": handle["touch"]["alarms"]}))

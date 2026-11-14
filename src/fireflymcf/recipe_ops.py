@@ -13080,6 +13080,11 @@ class AddBmsDuration(Op):
             except bd.BattDurError:
                 continue
             raise AssertionError("%s still has a held-phase start binding" % k)
+        bd.check_installed(data, h)
+        for arm in h["timed_arms"]:
+            arm_recs = records.object_records(data, gs + guidata.object_tables(data)[1][arm])
+            assert [r.value_slot for r in arm_recs if r.wtype == 8] in \
+                ([c[0]] for c in h["cells"].values()), "timed arm %d lost its minutes" % arm
         return ("add_bms_duration: cell 0x72 (var %d) swept; heater/alarms rows in root %d, "
                 "cells %s; routine at %#x (UNVERIFIED)"
                 % (h["var_index"], h["root"], h["cells"], h["entry"]))
