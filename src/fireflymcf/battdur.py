@@ -30,3 +30,81 @@ GESTURE_BASE = 0x20006E6C    # LCD per-group gesture records
 GESTURE_STRIDE = 16
 GESTURE_PHASE = 0x09
 PHASE_HELD = 3
+
+# --- the step code, its clamp, and the start frame ------------------------------------------
+#
+# Each byte of cell 0x72 is a STEP CODE, `minutes / 5 + CODE_BASE` (0x11 .. 0x1C for 5 .. 60):
+# heater in the low byte, Ignore Alarms in the high. The steppers write deltas (+-1 low,
+# +-0x100 high) and the G12 stores the raw u16 with no clamp (PC.42, PC.70). The base keeps
+# every legal byte >= 0x10, so a step never borrows across the byte boundary, and it keeps a
+# wrap from the unset 0xFFFF (0x0000, 0xFFFE, 0x00FF, 0xFEFF) out of the legal range. A code one
+# step past either end (0x10, 0x1D) clamps back to that end; every other code is that byte's
+# default. Raw minutes could not do this: 0xFFFF + 5 leaves 0x00 in the high byte, which a
+# minute count cannot tell from "Ignore Alarms stepped below 5".
+
+MINUTES_MIN = 5
+MINUTES_MAX = 60
+MINUTES_STEP = 5
+CODE_BASE = 0x10
+DEFAULTS = {"heater": 60, "alarms": 10}
+UNSET = 0xFFFF
+TICKS_PER_MINUTE = 600       # the BMS duration field counts 100 ms
+
+
+def _check(minutes: int) -> None:
+    if (not isinstance(minutes, int) or isinstance(minutes, bool)
+            or not MINUTES_MIN <= minutes <= MINUTES_MAX or minutes % MINUTES_STEP):
+        raise ValueError(f"minutes {minutes!r} is not on the grid {MINUTES_MIN}..{MINUTES_MAX} "
+                         f"step {MINUTES_STEP}")
+
+
+def encode(minutes: int) -> int:
+    """The step code for a grid minute count."""
+    _check(minutes)
+    return minutes // MINUTES_STEP + CODE_BASE
+
+
+def decode_byte(code: int, default_min: int) -> int:
+    """The minutes a stored byte means: on the grid as stored; one step past an end, that end;
+    anything else, `default_min`."""
+    if encode(MINUTES_MIN) <= code <= encode(MINUTES_MAX):
+        return (code - CODE_BASE) * MINUTES_STEP
+    if code == encode(MINUTES_MIN) - 1:
+        return MINUTES_MIN
+    if code == encode(MINUTES_MAX) + 1:
+        return MINUTES_MAX
+    return default_min
+
+
+def clamp_code(code: int, default_min: int) -> int:
+    """The canonical code for a stored byte."""
+    return encode(decode_byte(code, default_min))
+
+
+def pack(heater_min: int, alarms_min: int) -> int:
+    return encode(alarms_min) << 8 | encode(heater_min)
+
+
+def decode_word(word: int) -> tuple[int, int]:
+    """`(heater minutes, alarms minutes)` for the cell's u16."""
+    return (decode_byte(word & 0xFF, DEFAULTS["heater"]),
+            decode_byte(word >> 8 & 0xFF, DEFAULTS["alarms"]))
+
+
+def canonical_word(word: int) -> int | None:
+    """The word the routine writes back, or None when there is nothing to write: the word is
+    already canonical, or it is `UNSET` -- which also reads before the first sweep is heard, so
+    writing then could overwrite a stored setting with the defaults."""
+    if word == UNSET:
+        return None
+    want = pack(*decode_word(word))
+    return None if want == word else want
+
+
+def start_wire(prefix6: bytes, minutes: int) -> bytes:
+    """The 8 wire bytes of a start frame: the command's fixed bytes 0-5, then the duration in
+    100 ms ticks, big-endian (60 min -> 8CA0, as the heater's binding has always sent)."""
+    _check(minutes)
+    if len(prefix6) != 6:
+        raise ValueError(f"prefix must be 6 bytes, got {len(prefix6)}")
+    return bytes(prefix6) + (minutes * TICKS_PER_MINUTE).to_bytes(2, "big")
