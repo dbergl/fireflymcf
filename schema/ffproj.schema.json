@@ -1303,6 +1303,11 @@
                       "alarms": 170
                     },
                     "description": "{heater, alarms}: each row's button top"
+                  },
+                  "button_time": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "also show each duration on its ELECTRICAL button, under a one-line caption, in every status arm"
                   }
                 },
                 "required": [

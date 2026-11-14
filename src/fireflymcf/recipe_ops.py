@@ -7802,7 +7802,7 @@ class AddAesBattHeat(Op):
                 if child < len(tab):
                     arm_labels += [r.label for r in records.object_records(data, gs + tab[child])
                                    if r.wtype == 11 and r.label]
-        assert h["text"] in labels + arm_labels, \
+        assert h.get("shown_text", h["text"]) in labels + arm_labels, \
             ("'%s' heading missing from the compact frame and from every switch arm on it "
              "(frame has %s)" % (h["text"], labels))
 
@@ -8180,6 +8180,15 @@ class AddAesBattHeatStatus(Op):
         # capability gate does not track.)
         return set(), set()
 
+    @staticmethod
+    def _shown_text(ctx, h, button=None):
+        """The caption the button's arms draw: its text, or the one-line caption a later
+        `add_bms_duration` `button_time` put over its minutes (`shown_text` on the button's
+        handle)."""
+        if button is None:
+            return h["text"]
+        return ctx.handles.get(button["ref"], {}).get("shown_text", h["text"])
+
     def verify(self, data, ctx):
         h = ctx.handles[self.spec.id]
         vt = guidata.variable_table(data)
@@ -8263,9 +8272,10 @@ class AddAesBattHeatStatus(Op):
             assert len(caps) == 1, \
                 "arm %d (match %#x) has %d full-size capsules in fill %d, expected 1" % (
                     obj, match, len(caps), want_fill)
-            assert any(r.wtype == 11 and r.label == h["text"] for r in arm), \
+            shown = self._shown_text(ctx, h, self.button)
+            assert any(r.wtype == 11 and r.label == shown for r in arm), \
                 "arm %d (match %#x) does not draw the %r caption, so selecting it would wipe it" % (
-                    obj, match, h["text"])
+                    obj, match, shown)
             glyphs = [r for r in arm if r.wtype == 11
                       and r.label == aescompact.CONTACTOR_GLYPH_CHAR
                       and r.font == aescompact.CONTACTOR_GLYPH_FONT_SLOT]
@@ -8844,8 +8854,9 @@ class AddAesBmsButtonStatus(Op):
             fill = h["on_index"] if on else h["off_index"]
             assert arm[0].wtype == 33 and arm[0].colors[0] == ("fillA", 7, fill) \
                 and arm[0].geom[2:4] == want, "arm %d does not draw the full button" % obj
-            assert any(r.wtype == 11 and r.label == h["text"] for r in arm), \
-                "arm %d lacks the %r caption" % (obj, h["text"])
+            shown = AddAesBattHeatStatus._shown_text(ctx, h, getattr(self, "button", None))
+            assert any(r.wtype == 11 and r.label == shown for r in arm), \
+                "arm %d lacks the %r caption" % (obj, shown)
         gc = theme.guicode_section(data)
         code = data[gc.offset:gc.offset + gc.length]
         assert struct.pack("<II", register.status_slot_addr(h["var"]), h["cell_addr"]) in code, \
@@ -12884,6 +12895,9 @@ class AddBmsDuration(Op):
                          "description": "{heater, alarms}: the rows' captions"},
             "row_y": {"type": "object", "default": dict(battdur.ROW_Y),
                       "description": "{heater, alarms}: each row's button top"},
+            "button_time": {"type": "boolean", "default": False,
+                            "description": "also show each duration on its ELECTRICAL button, "
+                                           "under a one-line caption, in every status arm"},
         },
         "required": ["popup", "heater", "alarms"],
     }
@@ -12898,6 +12912,7 @@ class AddBmsDuration(Op):
             self.refs[key] = v["ref"]
         self.captions = dict(battdur.CAPTIONS, **self._param("captions", {}, kind=dict))
         self.row_y = dict(battdur.ROW_Y, **self._param("row_y", {}, kind=dict))
+        self.button_time = self._param("button_time", False, kind=bool)
         if set(self.captions) != set(battdur.BUTTONS) or set(self.row_y) != set(battdur.BUTTONS):
             raise RecipeError("BAD_PARAMS", "captions and row_y take only heater and alarms",
                               op_id=self.spec.id)
@@ -13003,13 +13018,50 @@ class AddBmsDuration(Op):
             except bd.BattDurError as e:
                 raise RecipeError("BAD_REF", str(e), op_id=self.spec.id)
             ctx.edits.extend(relocate.Edit(o, a, b, "GuiData", n) for o, a, b, n in b_edits)
+        timed = []
+        if self.button_time:
+            for k in bd.BUTTONS:
+                bh = ctx.handles[self.refs[k]]
+                try:
+                    arms = self._status_arms(out, bh["text"])
+                    for arm in arms:
+                        bh["shown_text"] = " ".join(bh["text"].split())
+                        payload = bd.timed_arm(out, arm, caption=bh["shown_text"],
+                                               cell_slot=cells[k].slot,
+                                               box=(bh["x"], bh["y"], bh["w"], bh["h"]))
+                        out, edits = relocate.replace_object_records(out, arm, payload)
+                        ctx.edits.extend(edits)
+                        timed.append(arm)
+                except (bd.BattDurError, relocate.RelocationError, ValueError) as e:
+                    raise RecipeError("ROWS_REFUSED", "%s button time: %s" % (k, e),
+                                      op_id=self.spec.id)
         sealed, _ = patch.reseal(out)
         ctx.handles[self.spec.id] = {
+            "timed_arms": timed,
             "root": popup["root"], "groups": groups, "touch": touch,
             "cells": {k: (c.slot, c.addr) for k, c in cells.items()},
             "var_index": reg.var_index, "entry": entry, "scratch": plan.scratch,
         }
         return sealed
+
+    @staticmethod
+    def _status_arms(data, text):
+        """The arm objects of the one switch on 829 whose arms carry caption `text`: the
+        button's status switch (`add_aes_batt_heat_status` / `add_aes_bms_button_status`)."""
+        from fireflymcf import battdur as bd
+        gs, tab = _gs_tab(data)
+        found = []
+        for r in records.object_records(data, gs + tab[aescompact.ELECTRICAL_AES_BODY]):
+            if r.wtype != 6 or not r.count:
+                continue
+            arms = list(range(r.child_index, r.child_index + r.count))
+            if all(any(x.wtype == 11 and x.label == text
+                       for x in records.object_records(data, gs + tab[c])) for c in arms):
+                found.append(arms)
+        if len(found) != 1:
+            raise bd.BattDurError("NO_BUTTON", "%d status switches carry %r, not one; "
+                                  "button_time needs the button's status op" % (len(found), text))
+        return found[0]
 
     def capability_delta(self, ctx):
         return set(), set()

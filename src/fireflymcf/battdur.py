@@ -458,3 +458,64 @@ def row_touches(data: bytes, key: str, minus_id: int, plus_id: int,
     from . import pagedraw as pd
     minus, plus = row_rects(row_y)[key]
     return [pd.touch(data, *minus, minus_id), pd.touch(data, *plus, plus_id)]
+
+
+# --- the chosen minutes on the ELECTRICAL buttons ----------------------------------------------
+# Each button's status switch draws the whole button per arm (capsule, caption[, contactor
+# glyph]). With `button_time` every arm keeps its capsule and glyph; its caption becomes one line
+# in the top half, and an absolute readout of the minutes cell plus a "Min" label fill the bottom
+# half. The readout's opaque background is the arm's own capsule colour (the same mode-7 index),
+# so a change of the value repaints on the colour the arm shows.
+
+BUTTON_INSET = 2              # aescompact.PUMP_OUTLINE_INSET: the capsule inside the button box
+BUTTON_TIME_GAP = 6
+
+
+def timed_arm(data: bytes, arm: int, *, caption: str, cell_slot: int, box: tuple) -> bytes:
+    """`arm`'s payload with the time line. `box` is the button's `(x, y, w, h)` as its
+    `add_aes_batt_heat` op placed it (absolute, base-mode 0)."""
+    from . import aescompact, cornermark, levelpage as lp, metrics, pagedraw as pd, records
+    gs, _ = guidata.guidata_extent(data)
+    recs = records.object_records(data, gs + guidata.object_tables(data)[1][arm])
+    labels = [j for j, r in enumerate(recs) if r.wtype == 11 and r.label and r.font != 
+              aescompact.CONTACTOR_GLYPH_FONT_SLOT]
+    if recs[0].wtype != 33 or len(labels) != 1 or labels[0] != 1:
+        raise BattDurError("NO_BUTTON", f"object {arm} is not a status arm (capsule, caption)")
+    fill = [c for c in recs[0].colors if c[0] == "fillA"]
+    if len(fill) != 1 or fill[0][1] != 7:
+        raise BattDurError("NO_BUTTON", f"object {arm}'s capsule fill is not a mode-7 index")
+    index = fill[0][2]
+    cap = recs[1]
+    font = cap.font
+    x, y, w, h = box
+    iw, ih = w - 2 * BUTTON_INSET, h - 2 * BUTTON_INSET
+    top_h = ih // 2
+    head = aescompact._clone_with_geom(data, arm, 1, {2: iw, 3: top_h})
+    head = aescompact._relabel(data, arm, 1, caption, head)
+    fm = metrics.font_metrics(data, font)
+    field = VALUE_DIGITS * fm.spacing
+    uw = lp._width(data, font, UNIT) + 2
+    total = field + BUTTON_TIME_GAP + uw
+    lx = x + BUTTON_INSET + (iw - total) // 2
+    ly = y + BUTTON_INSET + top_h
+    lh = ih - top_h
+    rd, rr = pd.readout(data, lx, ly, field, lh, value_slot=cell_slot, width=VALUE_DIGITS,
+                        places=0, font=font, rgb=(0xFF, 0xFF, 0xFF), bg=(0, 0, 0), align=3)
+    rr = pd._set_mode(rr, "fillB", 7, struct.pack("<H", index))
+    unit = pd.label(data, UNIT, lx + field + BUTTON_TIME_GAP, ly, uw, lh, font=font,
+                    rgb=(0xFF, 0xFF, 0xFF))
+    rest = [bytes(data[r.offset:r.end]) for r in recs[2:]]
+    if any(r.wtype == 11 and r.font == aescompact.CONTACTOR_GLYPH_FONT_SLOT for r in recs[2:]):
+        # The contactor glyph sits top-right, where the one-line caption now runs: move it to the
+        # bottom-right, beside the minutes (the same glyph and cancel, statelights' pair).
+        if len(recs) != 4:
+            raise BattDurError("NO_BUTTON", f"object {arm}: a glyph arm is not capsule, "
+                               "caption, glyph, cancel")
+        dx, dy = aescompact.contactor_glyph_dx(w), ih - aescompact.CONTACTOR_GLYPH_H
+        rest = [aescompact._red_glyph_record(dx, dy, aescompact.CONTACTOR_GLYPH_W,
+                                             aescompact.CONTACTOR_GLYPH_H),
+                cornermark.build_empty_record(-dx, -dy)]
+    # The contactor glyph and its cancelling record stay right after the caption: the glyph is
+    # placed from the pen the caption leaves. The absolute time records come last.
+    parts = [bytes(data[recs[0].offset:recs[0].end]), bytes(head)] + rest + [rd, rr, unit]
+    return cornermark._object(parts)

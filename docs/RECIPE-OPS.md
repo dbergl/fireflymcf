@@ -691,6 +691,7 @@ Settable BMS durations: two minute steppers (5-60, step 5) in an `add_popup_page
 | `alarms` | object | yes |  | {ref: Ignore Alarms' add_aes_batt_heat} |
 | `captions` | object |  | {"heater": "Heater Time", "alarms": "Ignore Alarms Time"} | {heater, alarms}: the rows' captions |
 | `row_y` | object |  | {"heater": 104, "alarms": 170} | {heater, alarms}: each row's button top |
+| `button_time` | boolean |  | false | also show each duration on its ELECTRICAL button, under a one-line caption, in every status arm |
 
 Error codes:
 

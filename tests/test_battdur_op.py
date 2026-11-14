@@ -133,3 +133,70 @@ def test_steppers_independent(built):
     assert minutes() == (50, 5)
     tap("alarms", "+")
     assert minutes() == (50, 10)
+
+
+# --- button_time: the chosen minutes on the ELECTRICAL buttons ---------------------------------
+
+STATUS_OPS = [
+    {"id": "status", "type": "add_aes_batt_heat_status", "params": {"button": {"ref": "heat"}},
+     "enabled": True},
+    {"id": "alarms-status", "type": "add_aes_bms_button_status",
+     "params": {"button": {"ref": "alarms"}, "status": {"ref": "status"}, "mask": 2},
+     "enabled": True},
+]
+
+
+@pytest.fixture(scope="module")
+def timed():
+    ops = BASE_OPS[:3] + STATUS_OPS + BASE_OPS[3:]
+    dur = dict(DUR, params=dict(DUR["params"], button_time=True))
+    before, after = _compile(ops + [DUR]), _compile(ops + [dur])
+    assert before.ok, before.errors
+    assert after.ok, after.errors
+    return before.data, after.data
+
+
+def _switch_arms(data, text):
+    from fireflymcf import records
+    gs, _ = guidata.guidata_extent(data)
+    tab = guidata.object_tables(data)[1]
+    out = []
+    for r in records.object_records(data, gs + tab[829]):
+        if r.wtype != 6:
+            continue
+        arms = [records.object_records(data, gs + tab[c])
+                for c in range(r.child_index, r.child_index + r.count)]
+        if any(x.wtype == 11 and x.label == text for a in arms for x in a):
+            out.append(arms)
+    return out
+
+
+def test_button_time_in_every_arm(timed):
+    _b, after = timed
+    for text, cell_key in (("Batt Heat", "heater"), ("Alarms", "alarms")):
+        (arms,) = _switch_arms(after, text)
+        for arm in arms:
+            assert [x.label for x in arm if x.wtype == 11 and x.label
+                    and x.font != 23] == [text, "Min"]
+            readouts = [x for x in arm if x.wtype == 8]
+            assert len(readouts) == 1
+            cap = arm[0]
+            assert cap.wtype == 33
+            fill = [c for c in cap.colors if c[0] == "fillA"][0]
+            assert ("fillB", 7, fill[2]) in readouts[0].colors
+            glyph = [j for j, x in enumerate(arm) if x.wtype == 11 and x.font == 23]
+            if glyph:                        # placed from the caption's pen: right after it
+                assert glyph == [2] and arm[3].wtype == 11 and not arm[3].label
+
+
+@pytest.mark.slow
+def test_button_time_follows_setting(timed):
+    from fireflymcf.emu.scenario import Scenario
+    _b, after = timed
+    s = Scenario(after, timeout_s=900)
+    s.set_g12_selector(battdur.SELECTOR, battdur.pack(25, 45))
+    s.boot()
+    s.goto("ELECTRICAL")
+    s.run(7.0)
+    shown = sorted(q.label for q in s._placed(s._page_root(None)) if q.label == "Min")
+    assert len(shown) == 2
