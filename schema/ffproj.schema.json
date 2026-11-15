@@ -102,6 +102,7 @@
                 "add_aes_bms_button_status",
                 "add_alt_reboot",
                 "add_batt_heat_battery_glyph",
+                "add_bms_duration",
                 "add_button",
                 "add_button_states",
                 "add_button_status",
@@ -1256,6 +1257,63 @@
                 },
                 "required": [
                   "batteries"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "add_bms_duration"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "popup": {
+                    "type": "object",
+                    "description": "{ref: add_popup_page op id}"
+                  },
+                  "heater": {
+                    "type": "object",
+                    "description": "{ref: the heater's add_aes_batt_heat}"
+                  },
+                  "alarms": {
+                    "type": "object",
+                    "description": "{ref: Ignore Alarms' add_aes_batt_heat}"
+                  },
+                  "captions": {
+                    "type": "object",
+                    "default": {
+                      "heater": "Heater Time",
+                      "alarms": "Ignore Alarms Time"
+                    },
+                    "description": "{heater, alarms}: the rows' captions"
+                  },
+                  "row_y": {
+                    "type": "object",
+                    "default": {
+                      "heater": 104,
+                      "alarms": 170
+                    },
+                    "description": "{heater, alarms}: each row's button top"
+                  },
+                  "button_time": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "also show each duration on its ELECTRICAL button, under a one-line caption, in every status arm"
+                  }
+                },
+                "required": [
+                  "popup",
+                  "heater",
+                  "alarms"
                 ]
               }
             }

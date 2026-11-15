@@ -4950,6 +4950,48 @@ says outright when the device it asked did not reply, so a reader is not left in
 an absence. *The first fix was right about the symptom and wrong about the rule.*
 
 
+## PC.71 — the durations on cell `0x72`: swept, sent and kept — observed-on-hardware, 2026-11-14
+
+An image carrying `add_bms_duration` (and `add_screen` / `add_popup_page`), with the G12 sweep
+retarget, run on the coach (owner). Captures filtered to `195FCE9C` and `18EF709F` (research
+repository).
+
+1. *LCD row loaded, G12 row not:* every stepper press was echoed (`72 00 13 11`), but the 5 s
+   sweep still sent `E8` twice and `72` never. Some time later the panel drew the defaults again;
+   it only had the value from the echoes. *Why the panel dropped it is not traced.*
+2. *G12 row loaded from the same stick:* the first sweep sent `E8` once, then `72 00 13 11`, the
+   value stored before the load. **A G12 section load keeps the config store.**
+3. *Holds and taps:* heater 25 min sent one `18EF709F#AA55000000003A98` per hold (two holds);
+   Ignore Alarms 20 min sent one `18EF709F#4D53000000002EE0`; each tap sent one zero-ticks stop.
+4. *A change mid-run:* with the heater on, 25 → 30 min (`72 00 16 14`). No `18EF709F` frame was
+   sent; the running timer was left alone.
+5. *Power cycle:* the owner saw 30 / 20 come back; the last sweep before power-off read
+   `72 00 16 14`.
+
+## PC.70 — cell `0x72` is writable, echoed and inert — observed-on-hardware, 2026-11-13
+
+**Why.** The settable BMS durations (`battdur.py`) need a G12 config cell that the G12 stores,
+nothing uses, and the panel can see. No swept, unseeded selector qualifies: `0x03` is the AES
+cell, `0x0A` the house voltage, `0x11` a charge clamp, `0xE7` Lithionics and `0xEE` Pump Link.
+`0x72` has a sweep record (#85) that the G12 program never activates. It has no default, no
+command rule and no direct read in the G12 program, and the panel's var 280 subscribes to it with
+no GuiCode reader. It read `0xFFFF` in PC.49.
+
+**The test** (from SA `0xC0` on `can1`; the whole capture is in the research repository):
+
+1. *Read-back:* `19FED9C0#FF96720FFFFFD3FF` was answered `195FCE9C#7200FFFF00000000` in 0.8 ms.
+2. *Write:* `19FED9C0#FF96720F1C12D1EA` (`0x72 := 0x121C`). A read-back 2 s later answered
+   `7200 1C12`, so the G12 stores the raw u16.
+3. *Quiet, 60 s:* no CAN id appeared that the 30 s baseline lacked. No `1FEDA` output state was
+   sent. The only `9C` payloads not in the baseline were the clock (`1FFFF`) and the `18BFC1`
+   measurement stream, whose rate of change matches the baseline (46 distinct in 31 s, 72 in
+   62 s).
+4. *Restore:* `19FED9C0#FF96720FFFFFD1EA`. The read-back answered `7200FFFF`.
+
+`0x72` was not swept during the test, as the boot list predicts. Persistence across a G12 power
+cycle is inferred from the shared config store, as for `0xEE` (PC.42).
+
+
 ## PC.69 — the loader demands `mcf.bin`: the QUADSPI store is unreachable without it, and the loophole is CLOSED — observed-on-hardware, 2026-09-08
 
 The refined test of PC.68, run with the bus host's USB gadget carrying **`SpyderConfig/cli.bin` and no

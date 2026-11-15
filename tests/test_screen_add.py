@@ -108,8 +108,8 @@ def _project(params):
     }))
 
 
-def test_op_compiles_unverified(stock):
+def test_op_compiles_coach_verified(stock):
     res = recipe.compile_project(_project({"title": "BATTERY SETUP"}), stock)
     assert res.ok, res.errors
-    assert "screen" in res.unverified                      # the op id: not hardware-verified
+    assert "screen" not in res.unverified                  # coach-verified 2026-11-14
     assert layout.screen_object_map(res.data)[35] == len(guidata.object_tables(res.data)[1]) - 1
