@@ -378,9 +378,31 @@ def cell_table_bound_sites(data: bytes, located) -> list[int]:
         (`celltables._compares`), is outside the surface; or a surface site does not decode as
         `cmp.w rX, #rows-1`.
     On 13.6 and 14.7 both directions hold: 14 compares at the bound, 8 gate and 6 clamp
-    sites, none at `rows` (measured 2026-11-08)."""
-    from . import celltables
+    sites, none at `rows` (measured 2026-11-08).
+
+    A grown image (`data` is not the stock `stockscope.stock_image` names) is judged against
+    the stock instead: the scan for uncredited compares runs on the stock at the stock bound,
+    and every stock surface site must still be in `located.bound_sites`. Only the surface is
+    ever rebumped, so a gate the locator missed holds the stock bound in every later image; a
+    scan of a grown image at its current bound cannot find one and finds only coincidences.
+    13.6 has three: its 800-px screen checks `cmp.w rX,#0x320` at 0x24F358, 0x24F618 and
+    0x258B78, which a table of 801 rows (bound 0x320) collided with (reported 2026-11-17,
+    `tests/test_grow_past_800.py`)."""
+    from . import celltables, stockscope
     bound = located.rows - 1
+    surface = set(located.bound_sites)
+    stock = stockscope.stock_image(data)
+    grown = stock != bytes(data)
+    if grown:
+        with stockscope.stock_scope(None):
+            stock_surface = cell_table_bound_sites(stock, celltables.locate(stock))
+        lost = sorted(set(stock_surface) - surface)
+        if lost:
+            raise celltables.CellTableError(
+                "CELL_TABLE_BOUND_SITES",
+                "the display-cell table's rebump surface (%d sites at bound %#x) lacks the stock "
+                "surface sites %s; refusing rather than leave a gate at the old bound"
+                % (len(surface), bound, ", ".join("%#x" % a for a in lost)))
     code, base = _guicode_slice(data)
     code = bytes(code)
     forms = {base + off: form for off, _after, _ri, _imm, form in celltables._compares(code, base)}
@@ -391,10 +413,9 @@ def cell_table_bound_sites(data: bytes, located) -> list[int]:
             "the display-cell table's bound %#x is compared in the %s form, which the grow does "
             "not rebump (only cmp.w rX,#imm); this build's table cannot be grown"
             % (bound, " and ".join(odd)))
-    surface = set(located.bound_sites)
-    outside = sorted(base + off for off, _after, _ri, imm, _form
-                     in celltables._compares(code, base)
-                     if imm in (bound, bound + 1) and base + off not in surface)
+    outside = [] if grown else sorted(
+        base + off for off, _after, _ri, imm, _form in celltables._compares(code, base)
+        if imm in (bound, bound + 1) and base + off not in surface)
     undecoded = []
     for site in sorted(surface):
         try:
