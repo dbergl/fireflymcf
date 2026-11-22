@@ -87,6 +87,7 @@ A project file (`*.ffproj.json`) is an ordered list of ops. `fireflymcf compile`
 | [`fill_to_capsule`](#fill_to_capsule) | structural | Turn a plain rectangle fill into a rounded capsule of the same colour and box, adding the radius slot. | UNVERIFIED on a coach. Emulator: HOME's header draws as a capsule (2026-11-02). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`install_glyph`](#install_glyph) | structural | Write new artwork into an icon font as a glyph and point one character at it. Pixels travel in the project as hex rows. | Flashed (the Starlink logo, the timer mark). | yes | 13.6, 14.7 (unverified, emulated) |
 | [`move_control`](#move_control) | structural | Move a control (its draw, touch and box records) from one object to another: remove it, put back what the removal moved on the source page, paste it at an absolute position (a new object under a clone of the destination's first attach), and assert nothing else moved on either page. | Flashed 2026-10-20: Low Volts moved from the compact AES ELECTRICAL card to the AES settings page, the gear's compensation found by the op. Not yet flashed: a move whose pasted labels arrive with a transparent background where the source page never wrote one (the paste check accepts it, `_paste_restyled`). | yes | 13.6 |
+| [`reattach_control`](#reattach_control) | structural | Move the attach record that places a control into one or more other objects (every arm of a switched card, by default), keeping the control's object and its drawn position, so the card's live redraw re-draws the control instead of painting over it. Asserts every walk draws every record as before, with the same stacking and no new repaint overlap (`repaintcheck`). | UNVERIFIED. Emulated 2026-11-22 on 13.6: HOME's two root-attached buttons, wiped by the battery card's re-draw, stay drawn after re-attaching into the card's four arms; every page renders as before. | **no** | 13.6 (unverified) |
 | [`remove_records`](#remove_records) | structural | Delete chosen records from one object (shrinking it), so a control is gone from the page, its touch region included. Bindings stay. The build reports what else it changed on the page (its manifest line ends `; moved N record(s), restyled N, gone N, new N on roots ...`, and the sidecar has `shifts`); for a recipe that should refuse instead, bracket it with `assert_layout` (`snapshot`, then `unchanged_since`). | Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card. | yes | 13.6, 14.7 (unverified, emulated) |
 | [`set_record_color`](#set_record_color) | structural | Set one colour field of a record to any mode: dark or white ink on a label (`fillA`), a coloured box behind it (`fillB`), an inline RGB, a colour-table or palette index. Same-size between valueless modes; adding a value grows the object. | UNVERIFIED on a coach. Emulator: dark captions and the coloured nav-rail segments draw (2026-11-02). | **no** | 13.6 (unverified), 14.7 (unverified, emulated) |
 | [`split_hold_region`](#split_hold_region) | structural | Split a control's touch region into a tap strip and a hold strip, the hold routed to a screen. | Flashed. PC.22. | yes | 13.6 |
@@ -1266,6 +1267,34 @@ Error codes:
 - `ARM_DISAGREES` — the walks disagree on the record the removal moved first, or its shift.
 - `LAYOUT_MOVED` — after the paste, a record other than the moved control moved, appeared or went, or a pasted record is not at its translated box.
 - `INSERT_REFUSED` — `insert.insert_object` refused (no wtype-5 template on `to`, or a gate).
+
+### reattach_control
+
+Move the attach record that places a control into one or more other objects (every arm of a switched card, by default), keeping the control's object and its drawn position, so the card's live redraw re-draws the control instead of painting over it. Asserts every walk draws every record as before, with the same stacking and no new repaint overlap (`repaintcheck`).
+
+- **Hardware status:** UNVERIFIED. Emulated 2026-11-22 on 13.6: HOME's two root-attached buttons, wiped by the battery card's re-draw, stay drawn after re-attaching into the card's four arms; every page renders as before.
+- **Proof:** `repaintcheck.py`, `pagewalk.py`, `insert.append_record`
+- **Implementation:** `recipe_ops.ReattachControl`
+
+| parameter | type | required | default | meaning |
+|---|---|---|---|---|
+| `controls` | array | yes |  | object index or {"ref": op_id} of each control |
+| `from` | integer\|object\|null |  | null | optional: the object that attaches them now |
+| `into` | array\|object | yes |  | destination objects, or {switch: {object, record, slot?}, arms?: 'all' \| [match values]} |
+| `drop_where_absent` | boolean |  | false | accept walks that draw no destination |
+| `source_root` | integer |  |  | optional: measure only this page root |
+| `switch_values` | object |  |  | optional {switch child base: value} |
+| `slot_values` | object |  |  | optional {slot: value} |
+
+Error codes:
+
+- `BAD_PARAMS`, `NO_SUCH_OBJECT` — malformed params, an object out of range, a destination equal to `from` or inside a moved control.
+- `NOT_ATTACHED`, `AMBIGUOUS_ATTACH` — a control is attached by no record, or by more than one (in `from`, or in all objects when `from` is omitted).
+- `NOT_A_SWITCH` — `into.switch` does not name a type-6 record with arms, or its slot differs.
+- `NO_ROOT` — no page root reaches `from`.
+- `NO_POSITION` — a copied attach has no x/y geometry field to correct, or the correction did not converge. CONTROL_CHANGED, CONTROL_DROPPED, CONTROL_ADDED, LAYOUT_MOVED, STATE_CHANGED,
+- `REPAINT_OVERLAP` — the assertions above.
+- `INSERT_REFUSED`, `RELOCATE_REFUSED`, `POINTER_INSIDE` — the relocation gates refused.
 
 ### remove_records
 

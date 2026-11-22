@@ -121,6 +121,7 @@
                 "fill_to_capsule",
                 "install_glyph",
                 "move_control",
+                "reattach_control",
                 "remove_records",
                 "set_record_color",
                 "split_hold_region",
@@ -2471,6 +2472,66 @@
                   "to",
                   "records",
                   "at"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "reattach_control"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "controls": {
+                    "type": "array",
+                    "description": "object index or {\"ref\": op_id} of each control"
+                  },
+                  "from": {
+                    "type": [
+                      "integer",
+                      "object",
+                      "null"
+                    ],
+                    "default": null,
+                    "description": "optional: the object that attaches them now"
+                  },
+                  "into": {
+                    "type": [
+                      "array",
+                      "object"
+                    ],
+                    "description": "destination objects, or {switch: {object, record, slot?}, arms?: 'all' | [match values]}"
+                  },
+                  "drop_where_absent": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "accept walks that draw no destination"
+                  },
+                  "source_root": {
+                    "type": "integer",
+                    "description": "optional: measure only this page root"
+                  },
+                  "switch_values": {
+                    "type": "object",
+                    "description": "optional {switch child base: value}"
+                  },
+                  "slot_values": {
+                    "type": "object",
+                    "description": "optional {slot: value}"
+                  }
+                },
+                "required": [
+                  "controls",
+                  "into"
                 ]
               }
             }

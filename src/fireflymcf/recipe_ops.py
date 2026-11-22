@@ -40,6 +40,7 @@ from fireflymcf import levelcontrols, levelfeed, levelpage, levelsetup, navmap, 
 from fireflymcf import pagedraw as pd
 from fireflymcf import pagewalk
 from fireflymcf import recordedit
+from fireflymcf import repaintcheck
 from fireflymcf import rvcbutton
 from fireflymcf import statelights
 from fireflymcf import statusfold
@@ -794,6 +795,15 @@ class MoveAttach(Op):
         h = ctx.handles[self.spec.id]
         root_idx, child = h["root"], h["child"]
         gs, tab = _gs_tab(data)
+        moved_to = ctx.reattached.get((root_idx, child))
+        if moved_to:
+            # a later reattach_control moved this attach (and asserted where it draws)
+            for d in moved_to:
+                assert any(r.wtype == 5 and r.child_index == child
+                           for r in records.object_records(data, gs + tab[d])), \
+                    "verify: object %d does not attach object %d" % (d, child)
+            return "attach: object %d on page %d -> (%s, %s), since reattached into %s" % (
+                child, root_idx, self.written["x"], self.written["y"], moved_to)
         hit = 0
         for rec in records.object_records(data, gs + tab[root_idx]):
             if rec.wtype == 5 and rec.child_index == child:
@@ -4901,6 +4911,482 @@ class MoveControl(Op):
         return ("move_control: %d record(s) from object %d to object %d at (%d, %d); source "
                 "compensated by %d edit(s)"
                 % (h["moved"], h["from"], h["to"], h["at"][0], h["at"][1], h["compensated"]))
+
+
+@op("reattach_control")
+class ReattachControl(MoveControl):
+    """Move the attach record that places a control from one object into one or more others
+    -- typically into every arm of a switched card the control is drawn over -- keeping the
+    control's object, records and on-screen position exactly as they were.
+
+    **Why.** The panel's live redraw (`FUN_002588A8`) re-draws a switch by walking only the arm
+    it selects, and a value-watching wtype-5 container by walking only its child
+    (`repaintcheck`). A control attached to a page and drawn on top of such a unit is painted
+    over when the unit re-draws, and is not drawn again until the page is composed. Attached
+    inside the unit instead, it is one of the records the re-draw walks.
+    `observed-in-emulation` 2026-11-22: two buttons attached to the HOME root over the battery
+    card (the arm of HOME's type-6 switch on `value_slot` 6) were wiped by the card's re-draw;
+    attached inside every arm of that switch they are re-drawn with it.
+
+    **What it does.** For each control (its object index; `{'ref': op_id}` of the op that made
+    it resolves to that object), the single wtype-5 record that attaches it is found in `from`
+    (every object is searched when `from` is omitted; NOT_ATTACHED or AMBIGUOUS_ATTACH unless
+    exactly one object attaches it, once). That record is removed from `from` (the
+    `remove_records` path; what the removal moved on the source is put back as `move_control`
+    does), and a byte copy of it -- same child, same flags, same value slot -- is appended as
+    the last record of each destination, so the control draws after everything already in the
+    destination (on top, as it was). Each copy's x/y geometry is then corrected by the shift
+    the walk measures, so the control lands where it was drawn before. The control's own
+    object is not touched: no record is re-encoded, and its touch regions keep their ids
+    (touch ids map to groups globally, `FUN_00256B84`).
+
+    **What it asserts** (walking every page root that reaches `from` or a destination, under
+    every switch-arm set, `pagewalk.switch_arm_sets`, or only the `switch_values`/
+    `slot_values` given):
+      * every record that is not the control is unchanged (LAYOUT_MOVED, STATE_CHANGED);
+      * in every walk that drew the control before, it is drawn again with the same boxes,
+        fonts, alignment, effective colours and value slots (CONTROL_CHANGED), unless no
+        destination is drawn in that walk: then CONTROL_DROPPED, which `drop_where_absent`
+        accepts (the handle lists those walks);
+      * no walk draws the control that did not before (CONTROL_ADDED: a destination reached
+        from another page or arm);
+      * the control is not drawn over any repaint unit, outside it, that it was not drawn over
+        before (REPAINT_OVERLAP; `repaintcheck.overlaps`, compared before/after per walk). The
+        overlaps that remain, which the move did not add, are listed in the handle.
+
+    Params:
+      controls: list of object index | {'ref': op_id} -- the attached objects to move.
+      from: optional object index | {'ref': op_id} -- the object that attaches them now.
+      into: list of object index | {'ref': op_id} -- the destinations; or
+            {switch: {object, record, slot?}, arms?: 'all' | [match values]} -- every
+            distinct arm object of the type-6 switch at `object`'s record `record` (whose
+            `value_slot` must equal `slot` when given), or only the arms selected by the
+            listed match values.
+      drop_where_absent: bool (default false) -- accept walks that drew the control before
+            and draw no destination now (the control is no longer drawn there).
+      source_root, switch_values, slot_values: as `move_control` (measurement scope).
+
+    Error codes:
+      BAD_PARAMS, NO_SUCH_OBJECT -- malformed params, an object out of range, a destination
+                    equal to `from` or inside a moved control.
+      NOT_ATTACHED, AMBIGUOUS_ATTACH -- a control is attached by no record, or by more than
+                    one (in `from`, or in all objects when `from` is omitted).
+      NOT_A_SWITCH -- `into.switch` does not name a type-6 record with arms, or its slot differs.
+      NO_ROOT -- no page root reaches `from`.
+      NO_POSITION -- a copied attach has no x/y geometry field to correct, or the correction
+                    did not converge.
+      CONTROL_CHANGED, CONTROL_DROPPED, CONTROL_ADDED, LAYOUT_MOVED, STATE_CHANGED,
+      REPAINT_OVERLAP -- the assertions above.
+      INSERT_REFUSED, RELOCATE_REFUSED, POINTER_INSIDE -- the relocation gates refused.
+
+    UNVERIFIED: emulated only (13.6).
+    """
+    hardware_verified = False
+    firmwares = frozenset({"13.6"})
+
+    PARAMS = {
+        "properties": {
+            "controls": {"type": "array",
+                         "description": "object index or {\"ref\": op_id} of each control"},
+            "from": {"type": ["integer", "object", "null"], "default": None,
+                     "description": "optional: the object that attaches them now"},
+            "into": {"type": ["array", "object"],
+                     "description": "destination objects, or {switch: {object, record, "
+                                    "slot?}, arms?: 'all' | [match values]}"},
+            "drop_where_absent": {"type": "boolean", "default": False,
+                                  "description": "accept walks that draw no destination"},
+            "source_root": {"type": "integer",
+                            "description": "optional: measure only this page root"},
+            "switch_values": {"type": "object",
+                              "description": "optional {switch child base: value}"},
+            "slot_values": {"type": "object", "description": "optional {slot: value}"},
+        },
+        "required": ["controls", "into"],
+    }
+
+    def validate(self):
+        oid = self.spec.id
+        self.controls = self._param("controls", kind=list)
+        if not self.controls:
+            raise RecipeError("BAD_PARAMS", "controls is empty", op_id=oid)
+        for c in self.controls:
+            if not isinstance(c, (int, dict)) or isinstance(c, bool):
+                raise RecipeError("BAD_PARAMS", "a control must be an object index or "
+                                  "{'ref': op_id}, got %r" % (c,), op_id=oid)
+        self.frm = self._param("from", None)
+        self.into = self._param("into")
+        if isinstance(self.into, list):
+            if not self.into:
+                raise RecipeError("BAD_PARAMS", "into is empty", op_id=oid)
+        elif isinstance(self.into, dict):
+            sw = self.into.get("switch")
+            if not isinstance(sw, dict) or "object" not in sw or "record" not in sw:
+                raise RecipeError("BAD_PARAMS", "into.switch needs {object, record}", op_id=oid)
+            arms = self.into.get("arms", "all")
+            if arms != "all" and not (isinstance(arms, list) and arms
+                                      and all(isinstance(a, int) for a in arms)):
+                raise RecipeError("BAD_PARAMS", "into.arms is 'all' or a list of match values",
+                                  op_id=oid)
+        else:
+            raise RecipeError("BAD_PARAMS", "into is a list of objects or {switch, arms}",
+                              op_id=oid)
+        self.drop_ok = bool(self._param("drop_where_absent", False))
+        self.source_root = self._param("source_root", None)
+        self.dest_root = None
+        self.switch_values = _int_keys(self._param("switch_values", None), "switch_values", oid)
+        self.slot_values = _int_keys(self._param("slot_values", None), "slot_values", oid)
+
+    # -- resolution ------------------------------------------------------------------------
+
+    def _destinations(self, data, ctx):
+        gs, tab = _gs_tab(data)
+        if isinstance(self.into, list):
+            out = [resolve_target(ctx, d) for d in self.into]
+        else:
+            sw = self.into["switch"]
+            obj = resolve_target(ctx, sw["object"])
+            _require_object(data, obj, self.spec.id)
+            recs = records.object_records(data, gs + tab[obj])
+            ri = sw["record"]
+            if not isinstance(ri, int) or not 0 <= ri < len(recs) or recs[ri].wtype != 6 \
+                    or recs[ri].child_index is None:
+                raise RecipeError("NOT_A_SWITCH", "object %d record %r is not a type-6 switch"
+                                  % (obj, ri))
+            rec = recs[ri]
+            if "slot" in sw and rec.value_slot != sw["slot"]:
+                raise RecipeError("NOT_A_SWITCH", "object %d record %d reads value_slot %r, "
+                                  "not %r" % (obj, ri, rec.value_slot, sw["slot"]))
+            cands = guidata.switch_candidates(data, rec, guidata.find_match_table(data))
+            arms = self.into.get("arms", "all")
+            out = []
+            for value, arm in [(None, rec.child_index)] + list(cands):
+                if arms != "all" and value not in arms:
+                    continue
+                if arm not in out:
+                    out.append(arm)
+            if arms != "all":
+                missing = set(arms) - {v for v, _ in cands}
+                if missing:
+                    raise RecipeError("NOT_A_SWITCH", "switch object %d record %d has no arm "
+                                      "for match value(s) %s" % (obj, ri, sorted(missing)))
+            if not out:
+                raise RecipeError("NOT_A_SWITCH", "switch object %d record %d selects no arm"
+                                  % (obj, ri))
+        for d in out:
+            _require_object(data, d, self.spec.id)
+        if len(set(out)) != len(out):
+            raise RecipeError("BAD_PARAMS", "a destination is named twice: %s" % out)
+        return out
+
+    def _attaches(self, data, ctx, controls):
+        """{control: (holding object, record index)} for the one attach of each control."""
+        gs, tab = _gs_tab(data)
+        frm = None if self.frm is None else resolve_target(ctx, self.frm)
+        objs = range(len(tab)) if frm is None else [frm]
+        found = {c: [] for c in controls}
+        for o in objs:
+            try:
+                recs = records.object_records(data, gs + tab[o])
+            except (IndexError, ValueError):
+                continue
+            for i, r in enumerate(recs):
+                if r.wtype == 5 and r.child_index in found:
+                    found[r.child_index].append((o, i))
+        out = {}
+        for c, hits in found.items():
+            if not hits:
+                raise RecipeError("NOT_ATTACHED", "no wtype-5 record %sattaches object %d"
+                                  % ("" if frm is None else "of object %d " % frm, c))
+            if len(hits) > 1:
+                raise RecipeError("AMBIGUOUS_ATTACH", "object %d is attached %d times (%s); "
+                                  "this op moves a control attached once"
+                                  % (c, len(hits), ", ".join("%d:%d" % h for h in hits)))
+            out[c] = hits[0]
+        holders = {h[0] for h in out.values()}
+        if len(holders) != 1:
+            raise RecipeError("BAD_PARAMS", "the controls are attached by different objects "
+                              "%s; move them with one op each" % sorted(holders))
+        return out
+
+    # -- walks -----------------------------------------------------------------------------
+
+    @staticmethod
+    def _split(walk, steps):
+        """(control records {(control, rel): WalkRec}, the rest) of `walk`, the control being
+        whatever the walk draws below one of the attach `steps` {(obj, index): control}."""
+        ctrl, rest = {}, []
+        for r in walk:
+            hit = next((n for n, s in enumerate(r.key) if s in steps), None)
+            if hit is None:
+                rest.append(r)
+            elif len(r.key) > hit + 1:
+                ctrl[(steps[r.key[hit]],) + tuple(r.key[hit + 1:])] = r
+        return ctrl, rest
+
+    @staticmethod
+    def _sig(r, by_key):
+        """What must not change about a control record: a drawing record's box and every
+        input to how it draws; a record that draws nothing (a container step, a touch region)
+        only its box and effective value slot (its inherited font and colours reach no pixel,
+        as `_paste_restyled` rules for `move_control`)."""
+        if r.wtype in repaintcheck._NO_PAINT:
+            return (r.wtype, r.box, _effective_slot(by_key, r), r.in_regs, r.out_regs)
+        return (r.wtype, r.label, r.box, r.font, r.align, r.colors,
+                _effective_slot(by_key, r), r.in_regs, r.out_regs)
+
+    # -- apply -----------------------------------------------------------------------------
+
+    def apply(self, data, ctx):
+        oid = self.spec.id
+        controls = [resolve_target(ctx, c) for c in self.controls]
+        for c in controls:
+            _require_object(data, c, oid)
+        if len(set(controls)) != len(controls):
+            raise RecipeError("BAD_PARAMS", "a control is named twice: %s" % controls)
+        att = self._attaches(data, ctx, controls)
+        frm = next(iter(att.values()))[0]
+        dests = self._destinations(data, ctx)
+        if frm in dests:
+            raise RecipeError("BAD_PARAMS", "object %d attaches the controls already" % frm)
+        graph = insert.object_child_graph(data)
+
+        def below(o, seen=None):
+            seen = set() if seen is None else seen
+            for ch in graph.get(o, ()):
+                if ch not in seen:
+                    seen.add(ch)
+                    below(ch, seen)
+            return seen
+        inside = set(controls).union(*(below(c) for c in controls))
+        bad = [d for d in dests if d in inside]
+        if bad:
+            raise RecipeError("BAD_PARAMS", "destination(s) %s are inside a moved control" % bad)
+
+        gs, tab = _gs_tab(data)
+        frm_recs = records.object_records(data, gs + tab[frm])
+        moved_idx = sorted(i for _, i in att.values())
+        removed = set(moved_idx)
+        if len(removed) == len(frm_recs):
+            raise RecipeError("BAD_PARAMS", "removing every record would leave object %d "
+                              "empty" % frm)
+        rec_bytes = {c: bytes(data[frm_recs[i].offset:frm_recs[i].offset + frm_recs[i].size])
+                     for c, (_, i) in att.items()}
+        for c, (_, i) in att.items():
+            r = frm_recs[i]
+            if records.geom_offset(data, r, 0) is None or records.geom_offset(data, r, 1) is None:
+                raise RecipeError("NO_POSITION", "the attach of object %d (object %d record %d) "
+                                  "has no x/y geometry field to place its copies with"
+                                  % (c, frm, i))
+
+        # 1. measure before
+        roots = self._roots(data, frm, self.source_root, "source")
+        for d in dests:
+            for r in pagewalk.reaching_roots(data, d):
+                if r not in roots and self.source_root is None:
+                    roots.append(r)
+        pairs = self._pairs(data, roots)
+        before = {self._pair_id(p): self._walk(data, p) for p in pairs}
+        old_steps = {(frm, i): c for c, (_, i) in att.items()}
+        if not any(self._split(w, old_steps)[0] for w in before.values()):
+            raise RecipeError("NO_ROOT", "no walk of roots %s draws the controls" % roots)
+
+        # 2. remove from `from`, put back what the removal moved there
+        entries = [{"selector": {"wtype": 5, "nth": sum(1 for r in frm_recs[:i] if r.wtype == 5)},
+                    "child": c} for c, (_, i) in sorted(att.items(), key=lambda kv: kv[1][1])]
+        cur, _ = _remove_records(data, ctx, frm, entries, oid)
+        remaps = {pid: {r.key: pagewalk.remap_after_removal(r.key, frm, removed) for r in walk}
+                  for pid, walk in before.items()}
+        src_pairs = [p for p in pairs if any(s[0] == frm for r in before[self._pair_id(p)]
+                                             for s in r.key)]
+        cur, compensated = self._compensate(cur, ctx, frm, src_pairs, before, remaps,
+                                            len(frm_recs) - len(removed))
+
+        # 3. append a byte copy of each attach to each destination
+        new_steps = {}
+        for d in dests:
+            gs, tab = _gs_tab(cur)
+            n = len(records.object_records(cur, gs + tab[d]))
+            for k, c in enumerate(controls):
+                try:
+                    cur, edits = insert.append_record(cur, d, rec_bytes[c])
+                except (insert.InsertError, relocate.RelocationError) as e:
+                    raise RecipeError("INSERT_REFUSED", "object %d: %s" % (d, e))
+                ctx.edits.extend(edits)
+                new_steps[(d, n + k)] = c
+            cur, _ = patch.reseal(cur)
+
+        # 4. place each copy where the control was drawn
+        for (d, j), c in new_steps.items():
+            for _ in range(3):
+                shift = None
+                for p in pairs:
+                    pid = self._pair_id(p)
+                    was = [r for rel, r in self._split(before[pid], old_steps)[0].items()
+                           if rel[0] == c and paints_or_box(r)]
+                    now = [r for rel, r in self._split(self._walk(cur, p), {(d, j): c})[0].items()
+                           if rel[0] == c and paints_or_box(r)]
+                    if was and now:
+                        shift = (min(r.box[0] for r in now) - min(r.box[0] for r in was),
+                                 min(r.box[1] for r in now) - min(r.box[1] for r in was))
+                        break
+                if shift is None or shift == (0, 0):
+                    break
+                gs, tab = _gs_tab(cur)
+                rec = records.object_records(cur, gs + tab[d])[j]
+                buf = bytearray(cur)
+                for gi, s in ((0, shift[0]), (1, shift[1])):
+                    if s:
+                        off = records.geom_offset(cur, rec, gi)
+                        old = struct.unpack_from("<H", cur, off)[0]
+                        _put16(buf, off, (old - s) & 0xFFFF, ctx,
+                               "reattach_control place obj %d rec %d %s -= %d"
+                               % (d, j, "xy"[gi], s))
+                cur, _ = patch.reseal(bytes(buf))
+            else:
+                raise RecipeError("NO_POSITION", "object %d record %d: placing the copy of "
+                                  "object %d's attach did not converge" % (d, j, c))
+
+        # 5. assert
+        dropped, remaining = self._assert_after(cur, pairs, before, remaps, old_steps,
+                                                new_steps)
+        for c in controls:
+            ctx.reattached[(frm, c)] = list(dests)
+        ctx.handles[oid] = {"from": frm, "into": dests, "controls": controls,
+                            "attaches": {str(c): [list(s) for s, cc in new_steps.items()
+                                                  if cc == c] for c in controls},
+                            "compensated": compensated, "dropped": dropped,
+                            "repaint_overlaps": remaining}
+        return cur
+
+    def _assert_after(self, out, pairs, before, remaps, old_steps, new_steps):
+        dropped, remaining = [], []
+        for p in pairs:
+            pid = self._pair_id(p)
+            was_walk, now_walk = before[pid], self._walk(out, p)
+            was_ctrl, was_rest = self._split(was_walk, old_steps)
+            now_ctrl, now_rest = self._split(now_walk, new_steps)
+            now_rest = [r for r in now_rest if r.key[-1] not in new_steps]
+            deltas = pagewalk.diff(was_rest, now_rest, remaps[pid])
+            if deltas:
+                states = [d for d in deltas if d.kind == "state"]
+                raise RecipeError("STATE_CHANGED" if states and len(states) == len(deltas)
+                                  else "LAYOUT_MOVED",
+                                  "root %d %s: %d record(s) other than the control changed:\n%s"
+                                  % (p[0], dict(p[1] or {}), len(deltas),
+                                     pagewalk.describe(deltas)))
+            if was_ctrl and not now_ctrl:
+                if not self.drop_ok:
+                    raise RecipeError("CONTROL_DROPPED", "root %d %s drew the control and now "
+                                      "draws no destination; set drop_where_absent to accept"
+                                      % (p[0], dict(p[1] or {})))
+                dropped.append([p[0], dict(p[1] or {})])
+                continue
+            if now_ctrl and not was_ctrl:
+                raise RecipeError("CONTROL_ADDED", "root %d %s now draws the control and did "
+                                  "not before (a destination is reached there)"
+                                  % (p[0], dict(p[1] or {})))
+            if not was_ctrl:
+                continue
+            was_keys = {r.key: r for r in was_walk}
+            now_keys = {r.key: r for r in now_walk}
+            # compare each drawn copy (one attach path) with the control as drawn before
+            now_by = {}
+            for r in now_walk:
+                hit = next((n for n, s in enumerate(r.key) if s in new_steps), None)
+                if hit is not None and len(r.key) > hit + 1:
+                    now_by.setdefault(r.key[:hit + 1], {})[
+                        (new_steps[r.key[hit]],) + tuple(r.key[hit + 1:])] = r
+            want = {rel: self._sig(r, was_keys) for rel, r in was_ctrl.items()}
+            for path, got in now_by.items():
+                have = {}
+                for rel, r in got.items():
+                    have[rel] = self._sig(r, now_keys)
+                # the copies attached in this path's object are one control each
+                sub = {rel: s for rel, s in want.items() if rel[0] in {k[0] for k in have}}
+                if have != sub:
+                    lines = []
+                    for rel in sorted(set(sub) | set(have), key=str):
+                        if sub.get(rel) != have.get(rel):
+                            lines.append("  %s: %s -> %s" % (rel, sub.get(rel), have.get(rel)))
+                    raise RecipeError("CONTROL_CHANGED", "root %d %s: the control under %s does "
+                                      "not draw as before (before -> after):\n%s"
+                                      % (p[0], dict(p[1] or {}), _fmt_walk_key(path),
+                                         "\n".join(lines[:12])))
+            # stacking: what is drawn ON TOP of each control record must not change (a walk
+            # diff compares boxes, not order; a destination walked earlier would bury it)
+            zb, za = self._covers(was_walk, was_ctrl), self._covers(now_walk, now_ctrl)
+            if zb != za:
+                lines = ["  %s: %s -> %s" % (rel, sorted(zb.get(rel, ())), sorted(za.get(rel, ())))
+                         for rel in sorted(set(zb) | set(za), key=str)
+                         if zb.get(rel) != za.get(rel)]
+                raise RecipeError("Z_ORDER_CHANGED", "root %d %s: the records drawn over the "
+                                  "control change (before -> after, as wtype/label/box):\n%s"
+                                  % (p[0], dict(p[1] or {}), "\n".join(lines[:12])))
+            ctl_was = {r.key for r in was_ctrl.values()}
+            ctl_now = {r.key for r in now_ctrl.values()}
+            pre = {(_fmt_walk_key(o.unit.key), o.victim.wtype, o.victim.box)
+                   for o in repaintcheck.overlaps(was_walk, lambda v: v.key in ctl_was)}
+            post = repaintcheck.overlaps(now_walk, lambda v: v.key in ctl_now)
+            added = []
+            for o in post:
+                u = o.unit.key
+                ukey = _fmt_walk_key(remap_back(u, remaps[pid]))
+                if (ukey, o.victim.wtype, o.victim.box) not in pre:
+                    added.append(o)
+                else:
+                    remaining.append([p[0], _fmt_walk_key(u), o.victim.wtype, list(o.victim.box)])
+            if added:
+                raise RecipeError("REPAINT_OVERLAP", "root %d %s: the moved control is drawn "
+                                  "over repaint unit(s) it was not drawn over before:\n%s"
+                                  % (p[0], dict(p[1] or {}), repaintcheck.describe(added)))
+        return dropped, remaining
+
+    @staticmethod
+    def _covers(walk, ctrl):
+        """{control rel: {(wtype, label, box) of each drawing record outside the control walked
+        after it whose box meets its box}}, for the control's drawing records."""
+        mine = {r.key for r in ctrl.values()}
+        order = {r.key: i for i, r in enumerate(walk)}
+        out = {}
+        for rel, c in ctrl.items():
+            if not repaintcheck.paints(c):
+                continue
+            i = order[c.key]
+            out[(rel[0],) + tuple(rel[1:])] = frozenset(
+                (r.wtype, r.label, r.box) for r in walk[i + 1:]
+                if r.key not in mine and repaintcheck.paints(r)
+                and repaintcheck._meets(r.box, c.box))
+        # keyed by the control and its record path below the attach, comparable across walks
+        return {(k[0],) + tuple(s for s in k[1:]): v for k, v in out.items()}
+
+    def capability_delta(self, ctx):
+        return set(), set()
+
+    def verify(self, data, ctx):
+        h = ctx.handles[self.spec.id]
+        gs, tab = _gs_tab(data)
+        frm_recs = records.object_records(data, gs + tab[h["from"]])
+        for c in h["controls"]:
+            assert not any(r.wtype == 5 and r.child_index == c for r in frm_recs), \
+                "object %d still attaches object %d" % (h["from"], c)
+            for d in h["into"]:
+                assert any(r.wtype == 5 and r.child_index == c
+                           for r in records.object_records(data, gs + tab[d])), \
+                    "object %d does not attach object %d" % (d, c)
+        return "reattached object(s) %s from object %d into %s%s" % (
+            h["controls"], h["from"], h["into"],
+            "; no longer drawn in %d walk(s)" % len(h["dropped"]) if h["dropped"] else "")
+
+
+def paints_or_box(r):
+    """A record whose box places the control: anything but a container step."""
+    return r.wtype not in _CONTAINERS
+
+
+def remap_back(key, remap):
+    """`key` as it was before the removal, for a key of a record that was not removed."""
+    inv = {v: k for k, v in remap.items() if v is not None}
+    return inv.get(key, key)
 
 
 @op("pin_filter_instance")
