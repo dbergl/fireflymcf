@@ -188,6 +188,16 @@ OP_NOTES: dict[str, tuple[str, str, str, str]] = {
         "page, its touch region included. Bindings stay. " + _SHIFT_NOTE,
         "Flashed 2026-10-19: Low Volts removed from the compact AES ELECTRICAL card.",
         "`relocate.replace_object_records`"),
+    "reattach_control": ("structural",
+        "Move the attach record that places a control into one or more other objects (every "
+        "arm of a switched card, by default), keeping the control's object and its drawn "
+        "position, so the card's live redraw re-draws the control instead of painting over "
+        "it. Asserts every walk draws every record as before, with the same stacking and no new "
+        "repaint overlap (`repaintcheck`).",
+        "UNVERIFIED. Emulated 2026-11-22 on 13.6: HOME's two root-attached buttons, wiped by the "
+        "battery card's re-draw, stay drawn after re-attaching into the card's four arms; every "
+        "page renders as before.",
+        "`repaintcheck.py`, `pagewalk.py`, `insert.append_record`"),
     "move_control": ("structural",
         "Move a control (its draw, touch and box records) from one object to another: remove "
         "it, put back what the removal moved on the source page, paste it at an absolute "

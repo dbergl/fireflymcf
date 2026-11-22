@@ -231,6 +231,11 @@ class Ctx:
     # The coach's settings (`resolve_coach`): the recipe's `coach` block or the `--config`
     # override, resolved and validated; None when there are none
     coach: "options.CoachSlots | None" = None
+    # Attach records a later op moved (`reattach_control`): {(object, child): [destination
+    # objects]}. An earlier op's `verify` that asserts the attach is still on `object` reads it,
+    # since the move is the recipe's intent, not a regression; the moving op asserts the drawn
+    # position itself.
+    reattached: dict = dataclasses.field(default_factory=dict)
 
 
 REGISTRY: dict[str, type] = {}

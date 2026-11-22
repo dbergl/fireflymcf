@@ -6418,6 +6418,43 @@ Tests: `tests/test_indirectwrites.py` (15) — four synthetic tests prove each s
 rest pin the 13.6 enumeration above exactly and run every scan on all three builds. The heap and its
 one 540-byte allocation are identical on 11.23 and 14.7.
 
+## Finding 94 — the live redraw re-draws a switch's arm and nothing outside it, so a control attached over a switched card is painted over and stays blank until the next compose — `proven-from-code` (the path), `observed-in-emulation`, 2026-11-22
+
+**The question.** The owner saw two buttons a build added to HOME (attached to the HOME root and
+placed over the battery card) flash white and flicker as the panel wakes from hibernation; no
+stock control does. What draws over them?
+
+**The path.** After a compose, `GuiCode_entry1` runs the live redraw (`0x24EEB8 bl 0x2588A8`,
+Finding 87). On HOME, entered from LIGHTS in the emulator, the first redraw passes after the
+reveal re-draw both right-hand cards: the DMA2D fills of the card background (356 px wide,
+colour `0x2E1F27`, y 263-468) carry the return addresses `0x24EEBD` -> `0x258907` (the redraw's
+`bl 0x256C54`) -> `0x257ACD` (the wt-5 case recursing into the child, `0x257AC8 bl 0x258330`) ->
+`0x2583CF` -> `0x2580A7` -> the box fill. The card is the arm the type-6 switch at HOME record 9
+(`value_slot` 6) selects; the re-draw walks that arm: its background box, then the arm's own
+records (House, Chassis). The two buttons are HOME's records 10 and 11, attached to the root
+after the switch: they are not in the arm, so the card's background lands on them and nothing
+draws them again. The stock Water Pump button is a record of the TANK card's arm and is
+re-drawn with it.
+
+**What the panel shows.** In the emulator the buttons stay blank (card colour) after LIGHTS ->
+HOME for as long as the page is left (40 s checked), and are blank on HOME right after boot on
+a build that adds them; whether the re-draw lands before or after the buttons' compose is a
+matter of timing, which is why the coach shows it only as a brief flash on wake (the owner,
+2026-11-22: not on page changes). A wake from hibernation itself (10 min idle: backlight PWM
+`TIM1 CCR1` `0x960` -> 0 and the framebuffer cleared; a touch restores both) composes HOME behind
+layer alpha 0 (`HAL_LTDC_SetAlpha` `0x213000`, driven per frame from the line interrupt at
+`0x21CB36` by the "composing" byte `0x200081D4` GuiCode sets at `0x24EE70` and clears at
+`0x24EEBE`), so the compose is never seen; what can be seen is anything painted after the
+reveal.
+
+**The rule.** A record drawn on top of a repaint unit (a switch, or a value-watching wt-5
+container) from OUTSIDE it is painted over whenever the unit re-draws (`repaintcheck`). The fix
+is to attach such a control inside the unit: `reattach_control` moves the control's attach
+record into every arm of the switch, keeping the control's object and drawn position; the
+arm's re-draw then walks it (emulated: the buttons are drawn through boot and every page
+change; every page renders as before). Auditing the reference coach's builds (every page,
+every arm, against stock) found no other control in this shape.
+
 ## Finding 93 — a new screen is feasible: nothing in GuiCode indexes by screen id, the screen band can move, and one more nesting level costs 272 bytes of an 8 KB stack with 3.3 KB free — `proven-from-code`, stack use `observed-in-emulation`, 2026-11-13
 
 The question: can a build add a screen id and root object stock 13.6 does not have, without a

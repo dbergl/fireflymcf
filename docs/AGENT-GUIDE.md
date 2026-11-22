@@ -64,6 +64,7 @@ the same caption (switch arms), the hit map names the one the walk placed under 
 | a different button colour | `recolor` | a palette colour from `--list-colors`; no other colour is possible |
 | a button to drive a different output | `remap_channel` | the channel number from the pin sheet; crossing dim/latch needs `allow_capability_change` and costs the pin its switching. The default retargets the indicator (unverified); `move_display_list` is the coach-proven path |
 | a new button on a page | `add_button` (HOME, boxed, captioned) or `add_glyph_button` + `wire_button` (icon button, any page) | the channel, the off colour, the page root. Build on the target pin |
+| a control added over a card stays drawn when the card redraws | `reattach_control` (into every arm of the card's switch) | the control's object (`{"ref"}` of the op that made it), the switch's object and record. A control attached to a page on top of a switched card is painted over by the card's live redraw (GUICODE Finding 94); `add_button`'s default HOME spot is one |
 | a hold instead of a tap, or both | `set_gesture`, `split_hold_region` | the control's group (`gestures`) |
 | their own artwork as an icon | `install_glyph` | the font slot and a free character; pixels as hex rows: `glyph-import MCF ART --slot N --as-op --preview P.png` makes them from a PNG, JPEG, SVG or other picture |
 | a logo or QR image replaced | not an op: `fireflymcf swap-image` (same-size, in place) | the image index from `image-export` |

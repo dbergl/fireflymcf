@@ -338,10 +338,36 @@ def insert_object(data: bytes, object_bytes: bytes, parent_index: int,
         x, y = position
         struct.pack_into("<H", clone, _geom_field_offset(grown, template, 0), x)
         struct.pack_into("<H", clone, _geom_field_offset(grown, template, 1), y)
-    newrec = bytes(clone)
-    rl = len(newrec)
+    result, edits2, at_ins, delta = _append_record(grown, parent_index, bytes(clone))
 
-    # Padding-correct insertion (see docstring): net delta absorbs the parent's old trailing pad.
+    # --- accumulate edits in FINAL (result) coordinates -----------------------------
+    # the attach inserted delta bytes at `at_ins`; remap the append-step edits past it.
+    def remap(e: Edit) -> Edit:
+        if e.file_offset >= at_ins:
+            return Edit(e.file_offset + delta, e.old, e.new, e.structure, e.note)
+        return e
+
+    edits = [remap(e) for e in edits1] + list(edits2)
+    edits.sort(key=lambda e: e.file_offset)
+    return result, edits
+
+
+def _append_record(data: bytes, parent_index: int,
+                   record_bytes: bytes) -> tuple[bytes, list[Edit], int, int]:
+    """Insert `record_bytes` as the last record of object `parent_index` and bump its count.
+
+    Returns `(new_data, edits, insertion_offset, delta)`: `edits` in `new_data` coordinates,
+    `insertion_offset` the file offset (in `data`) where `delta` bytes went in. Padding as
+    `insert_object`'s docstring describes: the net insertion is a multiple of 4 and absorbs the
+    parent's old trailing pad."""
+    gs1, _ = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[OBJECT_TABLE_INDEX]
+    parent_off = gs1 + table[parent_index]
+    recs = records.object_records(data, parent_off)
+    if data[parent_off] >= 0xFF:
+        raise InsertError("parent record count is already at its single-byte maximum")
+    rl = len(record_bytes)
+
     def round4(n: int) -> int:
         return (n + 3) & ~3
 
@@ -349,14 +375,14 @@ def insert_object(data: bytes, object_bytes: bytes, parent_index: int,
     c_old = recs[-1].end - parent_off               # parent content length (count byte + records)
     oldpad = (-c_old) % 4
     newpad = (-(c_old + rl)) % 4
-    target = newrec + b"\x00" * newpad              # the exact bytes the object must end with
+    target = record_bytes + b"\x00" * newpad       # the exact bytes the object must end with
     delta = round4(c_old + rl) - round4(c_old)      # net bytes inserted (a multiple of 4)
 
     # Prepare `tmp`: bump the parent's record count and overwrite the parent's old pad region
     # with the head of `target`; `relocate` then inserts the remaining `target[oldpad:]` (delta
     # bytes) at the object boundary. Both pre-edits sit before the insertion point and are
     # resealed by `relocate` along with everything else.
-    tmp = bytearray(grown)
+    tmp = bytearray(data)
     old_count = tmp[parent_off]
     tmp[parent_off] = old_count + 1
     pre_edits = [Edit(parent_off, bytes([old_count]), bytes([old_count + 1]), "record-count",
@@ -369,10 +395,6 @@ def insert_object(data: bytes, object_bytes: bytes, parent_index: int,
                               f"parent {parent_index} attach-record head into old pad"))
 
     result, edits2 = relocate.relocate(bytes(tmp), at + oldpad, target[oldpad:])
-
-    # --- accumulate edits in FINAL (result) coordinates -----------------------------
-    # relocate inserted delta bytes at `attach_ins`; remap the append-step edits and the
-    # pre-edits that sit at or past it. edits2 are already in result coordinates.
     attach_ins = gs1 + at + oldpad
 
     def remap(e: Edit) -> Edit:
@@ -380,8 +402,23 @@ def insert_object(data: bytes, object_bytes: bytes, parent_index: int,
             return Edit(e.file_offset + delta, e.old, e.new, e.structure, e.note)
         return e
 
-    edits = [remap(e) for e in edits1] + [remap(e) for e in pre_edits] + list(edits2)
+    edits = [remap(e) for e in pre_edits] + list(edits2)
     edits.sort(key=lambda e: e.file_offset)
+    return result, edits, attach_ins, delta
+
+
+def append_record(data: bytes, parent_index: int,
+                  record_bytes: bytes) -> tuple[bytes, list[Edit]]:
+    """Insert `record_bytes` (one whole record, e.g. a byte copy of an existing wtype-5 attach)
+    as the last record of object `parent_index`, through the guarded `relocate`. Returns
+    `(new_data, edits)`. The record is not decoded or checked here beyond what `relocate`'s
+    gates and the boundary oracle check; the caller asserts what the walk draws."""
+    gs, _ = guidata.guidata_extent(data)
+    table = guidata.object_tables(data)[OBJECT_TABLE_INDEX]
+    if not 0 <= parent_index < len(table):
+        raise InsertError(f"parent index {parent_index} out of range [0, {len(table)})")
+    records.object_records(data, gs + table[parent_index])     # decodable, or it raises
+    result, edits, _, _ = _append_record(data, parent_index, record_bytes)
     return result, edits
 
 
