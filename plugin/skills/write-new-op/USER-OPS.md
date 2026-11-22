@@ -169,7 +169,8 @@ class MyOp(UserOp):
 image, not yet booted. `s.boot()`, `s.goto(page)`, `s.tap(control, hold_s=, page=)`,
 `s.run(seconds)`, `s.set_tank_raw(sensor, raw)`, `s.g12_selector(selector)`,
 `s.set_g12_selector(selector, value)`, `s.set_g12_output(instance, level)`,
-`s.frames(dgn=, sa=, since=)`, `s.read_mem(addr, n)`,
+`s.frames(dgn=, sa=, since=)`, `s.add_peer(peer)` (a simulated device such as
+`fireflymcf.emu.peers.Timberline()`, after `boot()`), `s.read_mem(addr, n)`,
 `s.screen`, `s.page`, `s.control_box(control)`, `s.screenshot(path)` and `s.image` are its
 surface (a name starting with `_` is not); its docstrings are the reference. `set_g12_output`
 forces an output as a test stimulus, not as a wall switch would: it sends no command, solicits no

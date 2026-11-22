@@ -604,6 +604,14 @@ class Scenario:
         self._press(x, y, hold_s)
 
     # -- the bus and the G12 -------------------------------------------------------------------
+    def add_peer(self, peer):
+        """Put a simulated device on the bus beside the demo network, after `boot()`: a
+        `fireflymcf.emu.peers` class such as `Timberline()`, or your own `canbus.Peer`. Returns
+        it, so a test can read its state (`Timberline.log`, `.mode`)."""
+        if not self._booted:
+            raise ScenarioError("boot() the scenario before adding a peer")
+        return self._m.canbus.add_peer(peer)
+
     def _g12(self):
         from .g12 import G12
         from .peers import ProtocolG12
