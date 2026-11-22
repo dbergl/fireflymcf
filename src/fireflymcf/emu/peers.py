@@ -377,6 +377,224 @@ class APS500(Peer):
                    phase=0.5)
 
 
+class Timberline(Peer):
+    """Elwell Timberline 1.5 hydronic heater controller: water heater, thermostat, circulation
+    pump and Elwell's proprietary 1EF65 messages, all instance 1, from source 0x65.
+
+    **What it sends** is a coach's own unit, from a 90 s receive-only capture of source 0x65
+    (2026-11-18, heater idle) and rvc2mqtt's `entity/timberline.py` for the byte meanings:
+
+    - one 4.992 s cycle of 12 slots 416 ms apart: 1FFF7 WATERHEATER_STATUS, 1FE99
+      WATERHEATER_STATUS_2, 1FFE2 THERMOSTAT_STATUS_1, 1FEFA THERMOSTAT_STATUS_2, two empty
+      slots, 1FE97 CIRCULATION_PUMP_STATUS, 1FF9C THERMOSTAT_AMBIENT_STATUS, 1EF65 0x84, 1EF65
+      0x8A, 1FECA DM_RV, 1FFE4 FURNACE_STATUS (the capture lacks DM_RV in 3 of 18 cycles and
+      1FFE4 in 1; why is not known, and the model always sends them);
+    - 1EF65 0x85 (timers) every 1.000 s, on its own clock;
+    - 1EF65 0x87, 0x88, 0x86 (panel, HCU and heater info) in turn every 20.0 s, on a third
+      clock, so each once a minute.
+
+    Idle, every frame is the captured one byte for byte.
+
+    **What it obeys** (rvc2mqtt's command builders): 1FFF6 WATERHEATER_COMMAND byte 1 = 0 off,
+    1 combustion, 2 electric, 3 both; 1FEF9 THERMOSTAT_COMMAND_1 byte 1 = schedule << 6 |
+    fan << 4 | mode (all-ones fields mean no change), bytes 3-4 the heat setpoint (clamped
+    10..32 C as rvc2mqtt clamps it); 1EF65 0x83 byte 1 bits 0-1 hot water priority (00 heating,
+    01 domestic water: the inverse of 1FE99's encoding) and bits 2-3 the temperature sensor;
+    1FE96 CIRCULATION_PUMP_COMMAND byte 1 = output status.
+
+    **On change** (two captures of can1, receive only, 2026-11-18, the element switched each way):
+    a 1FFF6 command from another node (`19FFF682#0102FF..`, `#0100FF..`) was answered by ONE
+    1FFF7 carrying the new mode 1 ms and 10 ms later, with no ACK; a change on the unit's own
+    panel (no RV-C command) by TWO, 85-90 ms apart. Either way the frames sit outside the cycle,
+    whose phase does not move, and byte 6's burner/element bits in them are the last slot's; the
+    new bits follow at the next periodic slot. Nothing else left its slot. The model does both:
+    a 1FFF6 command reports once `apply_s` (default 5 ms) after it, `panel_set_mode` twice.
+    `report_on_change` False reports a change only at the next slot.
+
+    **Not measured, so modelled:** whether thermostat, hot water or pump commands report on change
+    (here they do not); combustion and "both" (only the element was switched on the coach).
+    - `ignition_s` / `element_s`: from a mode that includes combustion / electric to 1FFF7
+      byte 6's burner (bits 2-3) / AC element (bits 4-5) reading 1. The model always has demand,
+      so a selected source runs; the real unit cycles it on its own thermostat.
+
+    `log` lists every command applied, `(seconds, name, payload hex)`.
+    """
+
+    sa = 0x65
+    WH_STATUS, WH_STATUS_2, WH_COMMAND = 0x1FFF7, 0x1FE99, 0x1FFF6
+    TH_STATUS_1, TH_STATUS_2, TH_COMMAND = 0x1FFE2, 0x1FEFA, 0x1FEF9
+    PUMP_STATUS, PUMP_COMMAND = 0x1FE97, 0x1FE96
+    AMBIENT, FURNACE_STATUS, PROPRIETARY = 0x1FF9C, 0x1FFE4, 0x1EF65
+    CYCLE_S, SLOTS, TIMER_S, INFO_S = 4.992, 12, 1.000, 20.0
+    REPEAT_S = 0.086                 # a panel change's second 1FFF7 copy (85-90 ms captured)
+    INSTANCE = 1
+    SETPOINT_MIN_C, SETPOINT_MAX_C = 10.0, 32.0
+
+    def __init__(self, *, mode=0, report_on_change=True, apply_s=0.005, ignition_s=15.0,
+                 element_s=2.0):
+        self.mode = mode                 # 1FFF7 byte 1
+        self.th_mode, self.th_schedule = 2, 0        # 1FFE2 byte 1: heat, schedule disabled
+        self.setpoint = 0x24A0           # 20.0 C
+        self.ambient = 0x22C6
+        self.wh_setpoint, self.water = 0x2D60, 0x2353
+        self.tank, self.heater = 0x2416, 0x2320
+        self.priority = 1                # 1FE99 encoding: 01 heating priority (the capture's)
+        self.sensor = 0                  # 0x84 bits 2-3: external
+        self.circ_pump = 0     # not `pump`: CanBus calls a peer's `pump(now)`
+        self.minutes = 0x001616          # 0x87 bytes 1-3
+        self.report_on_change = report_on_change
+        self.apply_s, self.ignition_s, self.element_s = apply_s, ignition_s, element_s
+        self._since = {1: None, 2: None}  # when combustion / electric was last selected
+        self._info_k = 0
+        self._byte6 = 0xC3               # 1FFF7 byte 6 as the last periodic slot sent it
+        self.log = []
+
+    # -- time -----------------------------------------------------------------------------
+    def _now(self):
+        return self.bus.m.cycles / self.bus.m.cpu_hz
+
+    def _later(self, seconds, fn):
+        """Run `fn()` once, `seconds` from now (a one-shot `every`); it may return a frame."""
+        done = []
+
+        def once():
+            if done:
+                return None
+            done.append(1)
+            return fn()
+        self.every(1e6, once, phase=seconds)
+
+    def attach(self, bus):
+        super().attach(bus)
+        if self.mode:
+            for bit in (1, 2):
+                if self.mode & bit:
+                    self._since[bit] = -1e9   # running since before boot
+        slot = self.CYCLE_S / self.SLOTS
+        sched = [self._wh_status, self._wh_status_2, self._th_status_1, self._th_status_2,
+                 None, None, self._pump_status, self._ambient,
+                 self._ext_status, self._timer_setup, self._dm_rv, self._furnace]
+        for k, fn in enumerate(sched):
+            if fn is not None:
+                self.every(self.CYCLE_S, fn, phase=k * slot)
+        self.every(self.TIMER_S, lambda: (self.PROPRIETARY, [0x85] + [0] * 7), phase=0.66)
+        self.every(self.INFO_S, self._info, phase=11.56)    # the capture's offset from 1FFF7
+
+    # -- status ---------------------------------------------------------------------------
+    def _running(self, bit, delay):
+        t = self._since[bit]
+        return self.mode & bit and t is not None and self._now() - t >= delay
+
+    def _wh_status(self):
+        burner = 1 if self._running(1, self.ignition_s) else 0
+        element = 1 if self._running(2, self.element_s) else 0
+        self._byte6 = 0xC3 | burner << 2 | element << 4
+        return self._wh_frame()
+
+    def _wh_frame(self):
+        """1FFF7 now, with byte 6 as the last periodic slot left it (the on-change copies)."""
+        return self.WH_STATUS, [self.INSTANCE, self.mode, *self._u16(self.wh_setpoint),
+                                *self._u16(self.water), self._byte6, 0x00]
+
+    def _wh_status_2(self):
+        return self.WH_STATUS_2, [self.INSTANCE, 0xFF, 0x3F | self.priority << 6] + [0xFF] * 5
+
+    def _th_status_1(self):
+        return self.TH_STATUS_1, [self.INSTANCE, self.th_schedule << 6 | 0x30 | self.th_mode,
+                                  0xFF, *self._u16(self.setpoint), 0xFF, 0xFF, 0xFF]
+
+    def _th_status_2(self):
+        return self.TH_STATUS_2, [self.INSTANCE, 0x00, 0x02] + [0xFF] * 5
+
+    def _info(self):
+        k, self._info_k = self._info_k, (self._info_k + 1) % 3
+        if k == 0:
+            self.minutes += 1
+            return self.PROPRIETARY, [0x87, *self.minutes.to_bytes(3, "little"),
+                                      0x09, 0x00, 0x64, 0x22]
+        if k == 1:
+            return self.PROPRIETARY, [0x88, 0xFF, 0xFF, 0xFF, 0x1A, 0x00, 0x01, 0x16]
+        return self.PROPRIETARY, [0x86, 0x91, 0x0D, 0x00, 0x1B, 0x01, 0x02, 0x09]
+
+    def _pump_status(self):
+        return self.PUMP_STATUS, [self.INSTANCE, 0xF0 | self.circ_pump] + [0xFF] * 6
+
+    def _ambient(self):
+        return self.AMBIENT, [self.INSTANCE, *self._u16(self.ambient)] + [0xFF] * 5
+
+    def _ext_status(self):
+        solenoid = 1 if self._running(1, 0.0) else 0
+        return self.PROPRIETARY, [0x84, 0xF0 | self.sensor << 2 | solenoid, *self._u16(self.tank),
+                                  *self._u16(self.heater), 0xBA, 0xFF]
+
+    def _timer_setup(self):
+        return self.PROPRIETARY, [0x8A, 0x20, 0x1C, 0x1E, 0xFF, 0xFF, 0xFF, 0xFF]
+
+    def _dm_rv(self):
+        return rvc.DM_RV, [0x01, 0x65] + [0xFF] * 6
+
+    def _furnace(self):
+        return self.FURNACE_STATUS, [self.INSTANCE, 0xFC, 0x00] + [0xFF] * 5
+
+    @staticmethod
+    def _u16(v):
+        return [v & 0xFF, v >> 8 & 0xFF]
+
+    # -- commands -------------------------------------------------------------------------
+    def on_frame(self, frame):
+        _, dgn, _ = rvc.split_id(frame.can_id)
+        d = bytes(frame.data)
+        if len(d) < 2:
+            return
+        if dgn == self.WH_COMMAND and d[0] == self.INSTANCE and d[1] <= 3:
+            self._command("1FFF6", d, lambda: self._set_mode(d[1], copies=1))
+        elif dgn == self.TH_COMMAND and d[0] == self.INSTANCE and len(d) >= 5:
+            self._command("1FEF9", d, lambda: self._thermostat(d))
+        elif dgn == self.PROPRIETARY and d[0] == 0x83:
+            self._command("1EF65", d, lambda: self._extension(d[1]))
+        elif dgn == self.PUMP_COMMAND and d[0] == self.INSTANCE and d[1] in (0, 1, 5):
+            self._command("1FE96", d, lambda: setattr(self, "circ_pump", d[1]))
+
+    def _command(self, name, d, apply):
+        self.log.append((round(self._now(), 3), name, d.hex()))
+        log.info("timberline %s %s", name, d.hex())
+        if self.apply_s <= 0:
+            apply()
+        else:
+            self._later(self.apply_s, lambda: apply() and None)
+
+    def panel_set_mode(self, mode):
+        """The mode changed on the unit's own panel: no RV-C command, two on-change reports."""
+        self._set_mode(mode, copies=2)
+
+    def _set_mode(self, mode, copies):
+        if mode != self.mode and self.report_on_change:
+            for k in range(copies):
+                self._later(k * self.REPEAT_S, self._wh_frame)
+        for bit in (1, 2):
+            if mode & bit and not self.mode & bit:
+                self._since[bit] = self._now()
+            elif not mode & bit:
+                self._since[bit] = None
+        self.mode = mode
+
+    def _thermostat(self, d):
+        if d[1] & 0x0F != 0x0F:
+            self.th_mode = d[1] & 0x0F
+        if d[1] >> 6 != 3:
+            self.th_schedule = d[1] >> 6
+        sp = d[3] | d[4] << 8
+        if sp != 0xFFFF:
+            lo, hi = rvc.kelvin_u16(self.SETPOINT_MIN_C), rvc.kelvin_u16(self.SETPOINT_MAX_C)
+            self.setpoint = max(lo, min(hi, sp))
+
+    def _extension(self, b):
+        if b & 3 != 3:
+            self.priority = 0 if b & 3 == 1 else 1   # 0x83's 01 (domestic) is 1FE99's 00
+        if b >> 2 & 3 != 3:
+            self.sensor = b >> 2 & 3
+
+
 # Illustrative AES/AGS parameters for the demo G12 (0.05 V units for volts). Only
 # 0D = 54.40 V is a value quoted from the coach (rvc-spec.yml); the rest are
 # placeholders inside the ranges rvc2mqtt treats as sane.

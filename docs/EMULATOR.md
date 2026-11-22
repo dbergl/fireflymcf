@@ -116,7 +116,7 @@ Everything is under `src/fireflymcf/emu/`.
 | `periph/` | STM32F7 peripherals: RCC, PWR, FLASH, GPIO, EXTI, TIMx, USART, I2C, bxCAN (with acceptance filters), LTDC, DMA2D, CRC, QSPI, FMC, SYSCFG, USB OTG stub; board devices GT911 touch + EEPROM |
 | `fastreg.py` | Direct libunicorn register access, MMIO and interrupt-hook callbacks (skipping the binding's wrappers) |
 | `native/` | Optional C block hook bounding each slice (compiled on first use into `~/.cache/fireflymcf-emu`; `FIREFLY_NO_NATIVE=1` disables it) |
-| `canbus.py`, `rvc.py`, `peers.py` | CAN bus with simulated RV-C devices and optional python-can bridge |
+| `canbus.py`, `rvc.py`, `peers.py` | CAN bus with simulated RV-C devices and optional python-can bridge. Not in the demo network, added by a test (`Scenario.add_peer`): `Timberline`, an Elwell Timberline 1.5 heater at 0x65 sending what a coach's unit sent (slots, rates, payloads) and obeying its commands |
 | `g12.py`, `g12out.py`, `g12thermo.py` | G12 node running the MCF's G12 code blob and rule tables; its output driver and thermostat |
 | `guidata.py` | GuiData decoder: the data-point table mapping RV-C frames to GUI values (`python -m fireflymcf.emu.guidata <GuiData.bin>`) |
 | `symbols/lcd-13.6.sym` | Names for identified functions (fed into the exported ELF for Ghidra) |
